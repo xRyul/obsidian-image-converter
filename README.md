@@ -1,5 +1,5 @@
 # Image Converter for ObsidianMD
-<video src="Examples/main_01.mp4" controls title="Title"></video>
+https://github.com/xRyul/obsidian-image-converter/assets/47340038/63a0646b-29ec-4055-abfc-55d31e07b2f7
 
 - Automatically convert dropped/pasted image into WEBP, JPG or PNG. 
 - Reduce file size of an image by specifying desired Quality value between 1-100
@@ -19,25 +19,21 @@ The recommended export setting is WEBP set to Quality 75. This is the optimal se
 
 ### Example 1  
 
-<figure>
-  <video src="Examples/Example%202%20-%20JPG%20to%20X/Example2_video.mp4" controls title="Example 1"></video>
-  <figcaption>Comparison of Original converted to WEBP and JPG with Quality 1 </figcaption>
-</figure>
+Comparison of Original converted to WEBP and JPG with Quality 1
+
+https://github.com/xRyul/obsidian-image-converter/assets/47340038/52ffd607-e92c-4b08-bde4-8a389fd992fc
 
 ### Example 2 
 
-<figure>
-    <video src="Examples/Example%203%20-%20PNG%20to%20X/Example3_video.mp4" controls title="Title"></video>
-    <figcaption>Comparison of Original converted to WEBP and JPG with Quality 1 </figcaption>
-</figure>
+Comparison of Original converted to WEBP and JPG with Quality 1
+
+https://github.com/xRyul/obsidian-image-converter/assets/47340038/6978be85-6f83-47ba-a9df-1f5864c6fbcb
 
 ### Example 3 
 
-<figure>
-    <video src="Examples/Example%201%20-%20Text/Example1_video.mp4" controls title="Title"></video>
-    <figcaption>Comparison of Original converted to WEBP and JPG with Quality 1 </figcaption>
-</figure>
+Comparison between WEBB 100 vs JPG 100 >  WEBB 1 vs JPG 1
 
+https://github.com/xRyul/obsidian-image-converter/assets/47340038/aa62380e-b977-42c5-8a2f-71cb09a811b7
 
 
 ## Comparison
