@@ -103,3 +103,5 @@ Below is the table which shows how much quality we lose with each conversion. Th
 3. Move downloaded files into `/obsidian-image-converter` folder. 
 4. Enable the plugin in ObsidianMD. 
 
+# Credits
+- This repo is heavily inspired by https://github.com/musug/obsidian-paste-png-to-jpeg musug has created an amazing ground work for the project, but sadly who has gone AWOL leaving the project behind without fixing some major issues. Hence, this is an attempt to rejuvenate the project.
