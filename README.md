@@ -35,6 +35,10 @@ Comparison between WEBB 100 vs JPG 100 >  WEBB 1 vs JPG 1
 
 https://github.com/xRyul/obsidian-image-converter/assets/47340038/aa62380e-b977-42c5-8a2f-71cb09a811b7
 
+### Example 4 - Image resize by the Longest Side
+
+https://github.com/xRyul/obsidian-image-converter/assets/47340038/6c287f86-08b8-4483-800d-040dd5207341
+
 
 ## Comparison
 ### File size of converting one image format to another:
