@@ -1,10 +1,11 @@
 {
-	"id": "image-converter",
-	"name": "Image Converter",
+	"id": "sample-plugin",
+	"name": "Sample Plugin",
 	"version": "1.0.0",
-	"minAppVersion": "0.14.0",
-	"description": "Convert and compress images from one format to another by dragging and dropping or pasting.",
-	"author": "xryul",
-	"authorUrl": "https://github.com/xryul",
+	"minAppVersion": "0.15.0",
+	"description": "This is a sample plugin for Obsidian. This plugin demonstrates some of the capabilities of the Obsidian API.",
+	"author": "Obsidian",
+	"authorUrl": "https://obsidian.md",
+	"fundingUrl": "https://obsidian.md/pricing",
 	"isDesktopOnly": false
 }
