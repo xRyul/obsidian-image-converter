@@ -1,7 +1,10 @@
-import { App, MarkdownView, Notice, Plugin, TFile, PluginSettingTab, Setting, Editor, Modal, TextComponent, ButtonComponent } from 'obsidian';
-import * as path from 'path';
+import { App, MarkdownView, Notice, Plugin, TFile, PluginSettingTab, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem } from 'obsidian';
 
-interface MyPluginSettings {
+interface Listener {
+    (this: Document, ev: Event): any;
+}
+
+interface ImageConvertSettings {
 	autoRename: boolean;
 	convertToWEBP: boolean;
 	convertToJPG: boolean;
@@ -15,7 +18,7 @@ interface MyPluginSettings {
 	desiredLength: number;
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
+const DEFAULT_SETTINGS: ImageConvertSettings = {
 	autoRename: true,
 	convertToWEBP: true,
 	convertToJPG: false,
@@ -29,8 +32,8 @@ const DEFAULT_SETTINGS: MyPluginSettings = {
 	desiredLength: 800
 }
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+export default class ImageConvertPLugin extends Plugin {
+	settings: ImageConvertSettings;
 
 	async onload() {
 		await this.loadSettings();
@@ -40,15 +43,75 @@ export default class MyPlugin extends Plugin {
 				const timeGapMs = Date.now() - file.stat.ctime;
 				if (timeGapMs > 1e3) return; // 1s
 				if (isImage(file)) {
-					console.log('pasted image created', file);
 					this.renameFile(file);
 				}
 			})
 		);
 
-		this.addSettingTab(new SampleSettingTab(this.app, this));
+		// Add event listener for contextmenu event on image elements
+		this.register(
+            this.onElement(
+                document,
+                'contextmenu',
+                'img',
+                this.onContextMenu.bind(this)
+            )
+        );
+
+		this.addSettingTab(new ImageConvertTab(this.app, this));
 	}
 
+	async onunload() {
+        // Remove event listener for contextmenu event on image elements
+        // document.removeEventListener('contextmenu', this.onContextMenu);
+    }
+
+	onContextMenu(event: MouseEvent) {
+		// Prevent default context menu from being displayed
+		event.preventDefault();
+        const target = (event.target as Element);
+        if (target.tagName === 'IMG') {
+            // Create new Menu object
+            const menu = new Menu();
+
+            // Add option to copy image to clipboard
+            menu.addItem((item: MenuItem) =>
+                item
+                    .setTitle('Copy Image')
+                    .setIcon('copy')
+                    .onClick(async () => {
+                        // Copy original image data to clipboard
+                        const img = target as HTMLImageElement;
+                        const canvas = document.createElement('canvas');
+                        canvas.width = img.naturalWidth;
+                        canvas.height = img.naturalHeight;
+                        const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+                        ctx.drawImage(img, 0, 0);
+                        const dataURL = canvas.toDataURL();
+                        const response = await fetch(dataURL);
+                        const blob = await response.blob();
+                        const item = new ClipboardItem({ [blob.type]: blob });
+                        navigator.clipboard.write([item]);
+                        new Notice('Image copied to clipboard');
+                    })
+            );
+
+            // Show menu at mouse event location
+			menu.showAtPosition({ x: event.pageX, y: event.pageY });
+        }  
+    }
+
+	onElement(
+		el: Document,
+		event: keyof HTMLElementEventMap,
+		selector: string,
+		listener: Listener,
+		options?: { capture?: boolean; }
+	) {
+		el.on(event, selector, listener, options);
+		return () => el.off(event, selector, listener, options);
+	}
+	
 	async renameFile(file: TFile) {
 		const activeFile = this.getActiveFile();
 		if (!activeFile) {
@@ -62,7 +125,6 @@ export default class MyPlugin extends Plugin {
 		const sourcePath = activeFile.path;
 		let newPath = '';
 		newPath = this.settings.dirpath;
-		console.log('newPath is set to:', newPath);
 		const originName = file.name;
 
 		const binary = await this.app.vault.readBinary(file);
@@ -104,7 +166,7 @@ export default class MyPlugin extends Plugin {
 		}
 
 		const linkText = this.makeLinkText(file, sourcePath);
-		newPath = path.join(newPath, newName);
+		newPath = `${newPath}/${newName}`;
 		try {
 			await this.app.vault.rename(file, newPath);
 		} catch (err) {
@@ -112,7 +174,6 @@ export default class MyPlugin extends Plugin {
 			throw err;
 		}
 		const newLinkText = this.makeLinkText(file, sourcePath);
-		console.log('replace text', linkText, newLinkText);
 		const editor = this.getActiveEditor(sourcePath);
 		if (!editor) {
 			new Notice(`Failed to rename ${newName}: no active editor`);
@@ -120,7 +181,6 @@ export default class MyPlugin extends Plugin {
 		}
 		const cursor = editor.getCursor();
 		const line = editor.getLine(cursor.line);
-		console.log('current line', line);
 
 		editor.transaction({
 			changes: [
@@ -159,7 +219,6 @@ export default class MyPlugin extends Plugin {
 	getActiveFile(): TFile | undefined {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		const file = view?.file;
-		console.log('active file', file?.path);
 		if (file) {
 			return file;
 		}
@@ -173,8 +232,6 @@ export default class MyPlugin extends Plugin {
 		}
 		return null;
 	}
-
-	onunload() { }
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -545,10 +602,10 @@ function base64ToArrayBuffer(code: string): ArrayBuffer {
 	return uInt8Array.buffer;
 }
 
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
+class ImageConvertTab extends PluginSettingTab {
+	plugin: ImageConvertPLugin;
 
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: ImageConvertPLugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
@@ -588,7 +645,7 @@ class SampleSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName('Image Resize Mode')
+			.setName('Image resize mode')
 			.setDesc('The mode to use when resizing the image')
 			.addDropdown(dropdown =>
 				dropdown
@@ -607,7 +664,7 @@ class SampleSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName('Auto Rename')
+			.setName('Auto rename')
 			.setDesc(
 				`Automatically rename dropped image into current notes name + todays date (YYYYMMDDHHMMSS). For instance, image "testImage.jpg" dropped into note "Howtotakenotes.md" becomes "Howtotakenotes-20230927164411.webp"`
 			)
@@ -621,7 +678,7 @@ class SampleSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName('Image Directory')
+			.setName('Image directory')
 			.setDesc('Directory to move processed images to')
 			.addText(text =>
 				text
@@ -637,9 +694,9 @@ class SampleSettingTab extends PluginSettingTab {
 }
 
 class ResizeModal extends Modal {
-	plugin: MyPlugin;
+	plugin: ImageConvertPLugin;
 
-	constructor(plugin: MyPlugin) {
+	constructor(plugin: ImageConvertPLugin) {
 		super(plugin.app);
 		this.plugin = plugin;
 	}
