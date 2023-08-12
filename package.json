@@ -1,5 +1,5 @@
 {
-	"name": "obsidian-image-converter",
+	"name": "image-converter",
 	"version": "1.1.1",
 	"description": "Convert, compress and resize images from one format to another by dragging and dropping or pasting.",
 	"main": "main.js",
