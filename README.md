@@ -5,6 +5,7 @@ https://github.com/xRyul/obsidian-image-converter/assets/47340038/63a0646b-29ec-
 - Reduce file size of an image by specifying desired Quality value between 1-100
 - Auto-rename converted image 
 - Auto-resize image based on 6 modes: Fit, Fill, Longest Side, Shortest Side, Height, Width
+- Ability to copy an image into clipboard via right click context menu
 
 Supported image formats: WEBP, JPG, PNG
 
