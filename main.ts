@@ -16,6 +16,8 @@ interface ImageConvertSettings {
 	desiredWidth: number;
 	desiredHeight: number;
 	desiredLength: number;
+	resizeByDragging: boolean;
+	resizeWithShiftScrollwheel: boolean;
 }
 
 const DEFAULT_SETTINGS: ImageConvertSettings = {
@@ -29,7 +31,9 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	resizeMode: 'None',
 	desiredWidth: 600,
 	desiredHeight: 800,
-	desiredLength: 800
+	desiredLength: 800,
+	resizeByDragging: true,
+	resizeWithShiftScrollwheel: true
 }
 
 export default class ImageConvertPLugin extends Plugin {
@@ -58,48 +62,375 @@ export default class ImageConvertPLugin extends Plugin {
             )
         );
 
+		// Check if edge of an image was clicked upon
+		this.register(
+			this.onElement(
+				document,
+				"mousedown",
+				"img",
+				(event: MouseEvent) => {
+					if (!this.settings.resizeByDragging) return;
+					// Fix the behaviour, where image gets duplicated because of the move on drag,
+					// disabling the defaults which locks the image (alhtough, links are still movable)
+					event.preventDefault(); 
+					const img = event.target as HTMLImageElement;
+					const rect = img.getBoundingClientRect();
+					const x = event.clientX - rect.left;
+					const y = event.clientY - rect.top;
+					const edgeSize = 30; // size of the edge in pixels
+					if ((x >= rect.width - edgeSize || x <= edgeSize) || (y >= rect.height - edgeSize || y <= edgeSize)) {
+						// user clicked on any of the edges of the image
+						// Cursor must be active only on the image or the img markdown link
+						// Otherwise resized image will get copied to the active line 
+						const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+						if (activeView) {
+							const editor = activeView.editor;
+							const doc = editor.getDoc();
+							const lineCount = doc.lineCount();
+							// read the image filename and its extension
+							let imageName = img.getAttribute('src');
+							if (imageName) {
+								const parts = imageName.split('/');
+								const lastPart = parts.pop();
+								if (lastPart) {
+									imageName = lastPart.split('?')[0];
+									// replace %20 with space character
+									imageName = imageName.replace(/%20/g, ' ');
+									
+								}
+							}
+
+							// find the line containing the image's markdown link
+							let lineIndex: number | undefined;
+							for (let i = 0; i < lineCount; i++) {
+								const line = doc.getLine(i);
+								if (line.includes(`![[${imageName}`)) {
+									lineIndex = i;
+									break;
+								}
+							}
+							if (lineIndex !== undefined) {
+								// move cursor to the line containing the image's markdown link
+								editor.setCursor({ line: lineIndex, ch: 0 });
+							}
+						}
+						const startX = event.clientX;
+						const startY = event.clientY;
+						const startWidth = img.clientWidth;
+						const startHeight = img.clientHeight;
+						const aspectRatio = startWidth / startHeight;
+
+						const onMouseMove = (event: MouseEvent) => {
+							const currentX = event.clientX;
+							const currentY = event.clientY;
+							// let newWidth, newHeight;
+							let newWidth = 0;
+							let newHeight = 0;
+							if (x >= rect.width - edgeSize && y >= rect.height - edgeSize) {
+								newWidth = startWidth + (currentX - startX);
+								newHeight = newWidth / aspectRatio;
+							} else if (x <= edgeSize && y <= edgeSize) {
+								newWidth = startWidth - (currentX - startX);
+								newHeight = newWidth / aspectRatio;
+							} else if (x >= rect.width - edgeSize && y <= edgeSize) {
+								newWidth = startWidth + (currentX - startX);
+								newHeight = newWidth / aspectRatio;
+							} else if (x <= edgeSize && y >= rect.height - edgeSize) {
+								newWidth = startWidth - (currentX - startX);
+								newHeight = newWidth / aspectRatio;
+							} else if (x >= rect.width - edgeSize || x <= edgeSize) {
+								if (x >= rect.width - edgeSize) {
+									newWidth = startWidth + (currentX - startX);
+								} else {
+									newWidth = startWidth - (currentX - startX);
+								}
+								newHeight = newWidth / aspectRatio;
+							} else if (y >= rect.height - edgeSize || y <= edgeSize) {
+								if (y >= rect.height - edgeSize) {
+									newHeight = startHeight + (currentY - startY);
+								} else {
+									newHeight = startHeight - (currentY - startY);
+								}
+								newWidth = newHeight * aspectRatio;
+							}
+							img.style.width = `${newWidth}px`;
+							img.style.height = `${newHeight}px`;
+
+							// update the size value in the image's markdown link
+							const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+							if (activeView) {
+							const editor = activeView.editor;
+							const cursor = editor.getCursor();
+							const line = editor.getLine(cursor.line);
+							// calculate the longest side of the image
+							const longestSide = Math.round(Math.max(newWidth, newHeight));
+							// read the image filename and its extension
+							let imageName = img.getAttribute('src');
+							if (imageName) {
+								const parts = imageName.split('/');
+								const lastPart = parts.pop();
+								if (lastPart) {
+								imageName = lastPart.split('?')[0];
+								// replace %20 with space character
+								imageName = imageName.replace(/%20/g, ' ');
+								}
+							}
+
+							// update the size value in the image's markdown link
+							editor.replaceRange(`![[${imageName}|${longestSide}]]`, { line: cursor.line, ch: 0 }, { line: cursor.line, ch: line.length });
+							}
+
+						};
+
+						const onMouseUp = () => {
+							document.removeEventListener('mousemove', onMouseMove);
+							document.removeEventListener('mouseup', onMouseUp);
+						};
+
+						document.addEventListener('mousemove', onMouseMove);
+						document.addEventListener('mouseup', onMouseUp);
+					}
+				}
+			)
+		);
+
+		// Create handle to resize image by dragging the edge of an image
+		this.register(
+			this.onElement(
+				document,
+				"mouseover",
+				"img",
+				(event: MouseEvent) => {
+					if (!this.settings.resizeByDragging) return;
+					const img = event.target as HTMLImageElement;
+					const rect = img.getBoundingClientRect();
+					const x = event.clientX - rect.left;
+					const y = event.clientY - rect.top;
+					const edgeSize = 30; // size of the edge in pixels
+					if ((x >= rect.width - edgeSize || x <= edgeSize) || (y >= rect.height - edgeSize || y <= edgeSize)) {
+						// user is hovering over any of the edges of the image
+						img.style.cursor = 'nwse-resize'; // change cursor to resize cursor
+						img.style.outline = 'solid'; // add dashed outline around image
+						img.style.outlineWidth = '10px';
+						img.style.outlineColor = '#dfb0f283';
+					} else {
+						// user is not hovering over any of the sedges of the image
+						img.style.cursor = 'default'; // change cursor back to default
+						img.style.outline = 'none'; // remove outline from image
+					}
+				}
+			)
+		);
+
+		// Reset border/outline when finished resizing
+		this.register(
+			this.onElement(
+				document,
+				"mouseout",
+				"img",
+				(event: MouseEvent) => {
+					if (!this.settings.resizeByDragging) return;
+					const img = event.target as HTMLImageElement;
+					img.style.borderStyle = 'none';
+					img.style.outline = 'none';
+				}
+			)
+		);
+
+		// Allow resizing with SHIFT + Scrollwheel
+		this.register(
+			this.onElement(
+				document,
+				"wheel",
+				"img",
+				(event: WheelEvent) => {
+					if (!this.settings.resizeWithShiftScrollwheel) return;
+					if (event.shiftKey) { // check if the Alt key is pressed
+						// event.preventDefault(); // prevent default behavior of wheel event on images
+						const img = event.target as HTMLImageElement;
+						const delta = Math.sign(event.deltaY); // get the direction of the scroll
+						const scaleFactor = 1.1; // set the scale factor for resizing
+						let newWidth, newHeight;
+
+						if (delta < 0) {
+							// user scrolled up, increase the size of the image
+							newWidth = img.clientWidth * scaleFactor;
+							newHeight = img.clientHeight * scaleFactor;
+						} else {
+							// user scrolled down, decrease the size of the image
+							newWidth = img.clientWidth / scaleFactor;
+							newHeight = img.clientHeight / scaleFactor;
+						}
+						img.style.width = `${newWidth}px`;
+						img.style.height = `${newHeight}px`;
+
+						// update the size value in the image's markdown link
+						const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+						if (activeView) {
+							const editor = activeView.editor;
+							const doc = editor.getDoc();
+							const lineCount = doc.lineCount();
+							// read the image filename and its extension
+							let imageName = img.getAttribute('src');
+							if (imageName) {
+								const parts = imageName.split('/');
+								const lastPart = parts.pop();
+								if (lastPart) {
+									imageName = lastPart.split('?')[0];
+									// replace %20 with space character
+									imageName = imageName.replace(/%20/g, ' ');
+								}
+							}
+							// find the line containing the image's markdown link
+							let lineIndex: number | undefined;
+							for (let i = 0; i < lineCount; i++) {
+								const line = doc.getLine(i);
+								if (line.includes(`![[${imageName}`)) {
+									lineIndex = i;
+									break;
+								}
+							}
+							if (lineIndex !== undefined) {
+								// move cursor to the line containing the image's markdown link
+								editor.setCursor({ line: lineIndex, ch: 0 });
+								const cursor = editor.getCursor();
+								const line = editor.getLine(cursor.line);
+								// calculate the longest side of the image
+								const longestSide = Math.round(Math.max(newWidth, newHeight));
+								// update the size value in the image's markdown link
+								editor.replaceRange(`![[${imageName}|${longestSide}]]`, { line: cursor.line, ch: 0 }, { line: cursor.line, ch: line.length });
+							}
+						}
+					}
+				}
+			)
+		);
+
 		this.addSettingTab(new ImageConvertTab(this.app, this));
 	}
 
 	async onunload() {
         // Remove event listener for contextmenu event on image elements
-        // document.removeEventListener('contextmenu', this.onContextMenu);
+
     }
 
 	onContextMenu(event: MouseEvent) {
 		// Prevent default context menu from being displayed
 		event.preventDefault();
-        const target = (event.target as Element);
-        if (target.tagName === 'IMG') {
-            // Create new Menu object
-            const menu = new Menu();
+		const target = (event.target as Element);
+		if (target.tagName === 'IMG') {
+			// Create new Menu object
+			const menu = new Menu();
 
-            // Add option to copy image to clipboard
-            menu.addItem((item: MenuItem) =>
-                item
-                    .setTitle('Copy Image')
-                    .setIcon('copy')
-                    .onClick(async () => {
-                        // Copy original image data to clipboard
-                        const img = target as HTMLImageElement;
-                        const canvas = document.createElement('canvas');
-                        canvas.width = img.naturalWidth;
-                        canvas.height = img.naturalHeight;
-                        const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
-                        ctx.drawImage(img, 0, 0);
-                        const dataURL = canvas.toDataURL();
-                        const response = await fetch(dataURL);
-                        const blob = await response.blob();
-                        const item = new ClipboardItem({ [blob.type]: blob });
-                        navigator.clipboard.write([item]);
-                        new Notice('Image copied to clipboard');
-                    })
-            );
+			// Add option to copy image to clipboard
+			menu.addItem((item: MenuItem) =>
+				item
+					.setTitle('Copy Image')
+					.setIcon('copy')
+					.onClick(async () => {
+						// Copy original image data to clipboard
+						const img = target as HTMLImageElement;
+						const canvas = document.createElement('canvas');
+						canvas.width = img.naturalWidth;
+						canvas.height = img.naturalHeight;
+						const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+						ctx.drawImage(img, 0, 0);
+						const dataURL = canvas.toDataURL();
+						const response = await fetch(dataURL);
+						const blob = await response.blob();
+						const item = new ClipboardItem({ [blob.type]: blob });
+						navigator.clipboard.write([item]);
+						new Notice('Image copied to clipboard');
+					})
+			);
 
-            // Show menu at mouse event location
+			// Add option to resize image
+			menu.addItem((item: MenuItem) =>
+				item
+					.setTitle('Resize Image')
+					.setIcon('image-file')
+					.onClick(async () => {
+						// Show resize image modal
+						const modal = new ResizeImageModal(this.app, async (width, height) => {
+							if (width || height) {
+								// Resize image data
+								const img = target as HTMLImageElement;
+								const canvas = document.createElement('canvas');
+								const aspectRatio = img.naturalWidth / img.naturalHeight;
+								if (width && !height) {
+									canvas.width = parseInt(width);
+									canvas.height = canvas.width / aspectRatio;
+								} else if (!width && height) {
+									canvas.height = parseInt(height);
+									canvas.width = canvas.height * aspectRatio;
+								} else {
+									const newWidth = parseInt(width);
+									const newHeight = parseInt(height);
+									const newAspectRatio = newWidth / newHeight;
+									if (newAspectRatio > aspectRatio) {
+										canvas.width = newHeight * aspectRatio;
+										canvas.height = newHeight;
+									} else {
+										canvas.width = newWidth;
+										canvas.height = newWidth / aspectRatio;
+									}
+								}
+								const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+								ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+								const dataURL = canvas.toDataURL();
+
+								// Replace original image file with resized image data
+								const response = await fetch(dataURL);
+								const blob = await response.blob();
+								const buffer = await blob.arrayBuffer();
+
+								// Get file path from src attribute
+								let fileName: string | undefined;
+								const imageName = img.getAttribute('src');
+								if (imageName) {
+									fileName = imageName.replace(/^app:\/\/[^/]+\//, '');
+									fileName = decodeURI(fileName);
+									const parts = fileName.split('/');
+									fileName = parts.pop();
+									if (fileName) {
+										fileName = fileName.split('?')[0];
+									}
+								}
+
+								// Get TFile object for image file
+								if (fileName) {
+									const file = this.app.vault.getAbstractFileByPath(fileName);
+									if (file instanceof TFile) {
+										await this.app.vault.modifyBinary(file, buffer);
+									}
+								}
+							}
+						});
+						modal.open();
+					})
+			);
+
+			// // Add option to copy image path or Obsidian URL
+			// menu.addItem((item: MenuItem) =>
+			// item
+			// 	.setTitle('Copy Image Path')
+			// 	.setIcon('link')
+			// 	.onClick(() => {
+			// 		// Copy image path or Obsidian URL to clipboard
+			// 		const img = target as HTMLImageElement;
+			// 		const src = img.getAttribute('src');
+			// 		if (src) {
+			// 			navigator.clipboard.writeText(src);
+			// 			new Notice('Image path copied to clipboard');
+			// 		}
+			// 	})
+			// );
+
+			// Show menu at mouse event location
 			menu.showAtPosition({ x: event.pageX, y: event.pageY });
-        }  
-    }
+		}
+	}
+
 
 	onElement(
 		el: Document,
@@ -614,6 +945,9 @@ class ImageConvertTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
+		const heading = containerEl.createEl('h1');
+		heading.textContent = 'Convert, compress and resize';
+
 		new Setting(containerEl)
 			.setName('Select format to convert images to')
 			.setDesc(`Turn this on to allow image conversion and compression on drag'n'drop or paste.`)
@@ -645,23 +979,23 @@ class ImageConvertTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName('Image resize mode')
-			.setDesc('The mode to use when resizing the image')
-			.addDropdown(dropdown =>
-				dropdown
-					.addOptions({ None: 'None', Fit: 'Fit', Fill: 'Fill', LongestSide: 'Longest Side', ShortestSide: 'Shortest Side', Width: 'Width', Height: 'Height' })
-					.setValue(this.plugin.settings.resizeMode)
-					.onChange(async value => {
-						this.plugin.settings.resizeMode = value;
-						await this.plugin.saveSettings();
+		.setName('Image resize mode')
+		.setDesc('The mode to use when resizing the image')
+		.addDropdown(dropdown =>
+			dropdown
+				.addOptions({ None: 'None', Fit: 'Fit', Fill: 'Fill', LongestSide: 'Longest Side', ShortestSide: 'Shortest Side', Width: 'Width', Height: 'Height' })
+				.setValue(this.plugin.settings.resizeMode)
+				.onChange(async value => {
+					this.plugin.settings.resizeMode = value;
+					await this.plugin.saveSettings();
 
-						if (value !== 'None') {
-							// Open the ResizeModal when an option is selected
-							const modal = new ResizeModal(this.plugin);
-							modal.open();
-						}
-					})
-			);
+					if (value !== 'None') {
+						// Open the ResizeModal when an option is selected
+						const modal = new ResizeModal(this.plugin);
+						modal.open();
+					}
+				})
+		);
 
 		new Setting(containerEl)
 			.setName('Auto rename')
@@ -686,6 +1020,37 @@ class ImageConvertTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.dirpath)
 					.onChange(async value => {
 						this.plugin.settings.dirpath = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+
+		const heading2 = containerEl.createEl('h2');
+		heading2.textContent = 'Non-Destructive Image Resizing:';
+		const p = containerEl.createEl('p');
+		p.textContent = 'Below two settings allow you to adjust image dimensions using the standard ObsidianMD method by modifying image links. For instance, to change the width of ![[Engelbart.jpg]], we add "| 100" at the end, resulting in ![[Engelbart.jpg | 100]].';
+		p.style.fontSize = '12px'; // Adjust the font size as needed
+
+		new Setting(containerEl)
+			.setName('Resize by dragging edge of an image')
+			.setDesc('Turn this on to allow resizing images by dragging the edge of an image.')
+			.addToggle(toggle =>
+				toggle
+					.setValue(this.plugin.settings.resizeByDragging)
+					.onChange(async value => {
+						this.plugin.settings.resizeByDragging = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName('Resize with Shift + Scrollwheel')
+			.setDesc('Toggle this setting to allow resizing images using the Shift key combined with the scroll wheel.')
+			.addToggle(toggle =>
+				toggle
+					.setValue(this.plugin.settings.resizeWithShiftScrollwheel)
+					.onChange(async value => {
+						this.plugin.settings.resizeWithShiftScrollwheel = value;
 						await this.plugin.saveSettings();
 					})
 			);
@@ -794,6 +1159,71 @@ class ResizeModal extends Modal {
 		}
 	}
 }
+
+class ResizeImageModal extends Modal {
+	width: string;
+	height: string;
+	onSubmit: (width: string, height: string) => void;
+
+	constructor(app: App, onSubmit: (width: string, height: string) => void) {
+		super(app);
+		this.onSubmit = onSubmit;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+
+		contentEl.createEl('h2', { text: 'Enter new dimensions' });
+		contentEl.createEl('p', { text: 'Please backup you images, this will resize your original image.' });
+		contentEl.createEl('p', { text: 'Aspect ratio is always preserved.' });
+
+		const widthSetting = new Setting(contentEl)
+		.setName('Width')
+		.addText((text) =>
+			text.onChange((value) => {
+				this.width = value;
+			})
+		);
+		const messageEl = createEl('span', { text: 'To resize only width, you can leave Height input empty' });
+		messageEl.style.fontSize = '12px'
+		widthSetting.controlEl.insertBefore(messageEl, widthSetting.controlEl.firstChild);
+	
+
+		const heightSetting = new Setting(contentEl)
+		.setName('Height')
+		.addText((text) =>
+			text.onChange((value) => {
+				this.width = value;
+			})
+		);
+		const messageE3 = createEl('span', { text: 'To resize only Height, you can leave width input empty' });
+		messageE3.style.fontSize = '12px'
+		heightSetting.controlEl.insertBefore(messageE3, heightSetting.controlEl.firstChild);
+
+		
+		const submitBUtton = new Setting(contentEl)
+			.addButton((btn) =>
+				btn
+					.setButtonText('Submit')
+					.setCta()
+					.onClick(() => {
+						this.close();
+						this.onSubmit(this.width, this.height);
+					})
+			);
+
+		const messageE4 = createEl('p', { text: 'Please manually reload your note after clicking Submit.' });
+		messageE4.style.fontSize = '12px'
+		submitBUtton.controlEl.insertBefore(messageE4, submitBUtton.controlEl.firstChild);
+		
+	}
+
+	onClose() {
+		const { contentEl } = this;
+		contentEl.empty();
+	}
+}
+
 
 
 
