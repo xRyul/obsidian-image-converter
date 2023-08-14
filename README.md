@@ -6,6 +6,9 @@ https://github.com/xRyul/obsidian-image-converter/assets/47340038/63a0646b-29ec-
 - Auto-rename converted image 
 - Auto-resize image based on 6 modes: Fit, Fill, Longest Side, Shortest Side, Height, Width
 - Ability to copy an image into clipboard via right click context menu
+- Ability to resize original image via right click context menu
+- Ability to resize image by dragging edge of an image
+- Ability to resize image by holding shift + mouse scroll wheel
 
 Supported image formats: WEBP, JPG, PNG
 
