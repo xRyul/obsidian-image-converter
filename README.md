@@ -1,18 +1,26 @@
 # Image Converter for ObsidianMD
 https://github.com/xRyul/obsidian-image-converter/assets/47340038/63a0646b-29ec-4055-abfc-55d31e07b2f7
 
+## Features
 - Automatically convert dropped/pasted image into WEBP, JPG or PNG. 
 - Reduce file size of an image by specifying desired Quality value between 1-100
 - Auto-rename converted image 
 - Auto-resize image based on 6 modes: Fit, Fill, Longest Side, Shortest Side, Height, Width
+	- Image resize by the Longest Side
+
+  https://github.com/xRyul/obsidian-image-converter/assets/47340038/6c287f86-08b8-4483-800d-040dd5207341
+
 - Ability to copy an image into clipboard via right click context menu
+	- 	<img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/2034a444-cd49-4ce0-af98-745694ba4986" width="600px">
+
 - Ability to resize original image via right click context menu
 - Ability to resize image by dragging edge of an image
+	-  <img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/5724c6e9-19d4-4eaf-a559-1168f6557a14" width="600px"> 
 - Ability to resize image by holding shift + mouse scroll wheel
 
 Supported image formats: WEBP, JPG, PNG
 
-# Quick Summary 
+## Quick Summary for Image Compression
 
 The recommended export setting is WEBP set to Quality 75. This is the optimal setting for most types of images.
 
@@ -22,31 +30,20 @@ The recommended export setting is WEBP set to Quality 75. This is the optimal se
 - 4th place. PNG to JPG at 50 quality: PSNR = 28.62, % of compression = -92.4%, file size = 1,776 KB
 - 5th place. JPG to JPG at 50 quality: PSNR = 29.25, % of compression = -85.8%, file size = 5,926 KB
 
-### Example 1  
-
-Comparison of Original converted to WEBP and JPG with Quality 1
+### Example 1  - Comparison of Original converted to WEBP and JPG with Quality 1
 
 https://github.com/xRyul/obsidian-image-converter/assets/47340038/52ffd607-e92c-4b08-bde4-8a389fd992fc
 
-### Example 2 
-
-Comparison of Original converted to WEBP and JPG with Quality 1
+### Example 2 - Comparison of Original converted to WEBP and JPG with Quality 1
 
 https://github.com/xRyul/obsidian-image-converter/assets/47340038/6978be85-6f83-47ba-a9df-1f5864c6fbcb
 
-### Example 3 
-
-Comparison between WEBB 100 vs JPG 100 >  WEBB 1 vs JPG 1
+### Example 3 - Comparison between WEBB 100 vs JPG 100 >  WEBB 1 vs JPG 1
 
 https://github.com/xRyul/obsidian-image-converter/assets/47340038/aa62380e-b977-42c5-8a2f-71cb09a811b7
 
-### Example 4 - Image resize by the Longest Side
-
-https://github.com/xRyul/obsidian-image-converter/assets/47340038/6c287f86-08b8-4483-800d-040dd5207341
-
-
-## Comparison
-### File size of converting one image format to another:
+### Comparison
+#### File size of converting one image format to another:
 
 | From/To | WEBP | JPG | PNG |
 | --- | --- | --- | --- |
@@ -56,7 +53,7 @@ https://github.com/xRyul/obsidian-image-converter/assets/47340038/6c287f86-08b8-
 
 - The numbers in the parentheses indicate the quality of the conversion. 
 
-### File size difference after the conversion in %:
+#### File size difference after the conversion in %:
 
 The percentage change is calculated by comparing the file size after conversion to the original file size of the image being converted.  
 
@@ -67,7 +64,7 @@ The percentage change is calculated by comparing the file size after conversion 
 | WEBP |+8.8%(100)PSNR: 38.46<br>-95%(50)PSNR: 32.72<br>-98.8%(1)PSNR: 27.98|-32.4%(100)PSNR: 39.04<br>-93%(50)PSNR: 32.65<br>-99.3%(1)PSNR: 22.79|+51.8%(100)<br>-46.1%(50)<br>-93.6%(1)| 
 
 
-### PSNR and the loss of quality:  
+#### PSNR and the loss of quality:  
 
 Below is the table which shows how much quality we lose with each conversion. The lower the PSNR value the lower the quality of an image:  
 
@@ -83,7 +80,7 @@ Below is the table which shows how much quality we lose with each conversion. Th
 |         | 32.72 (50)  | 32.65 (50)  |     |
 |         | 27.98 (1)   | 22.79 (1)   |     |
 
-## Conclusion
+### Conclusion
 
 - Based on the tests above, using **WEBP as the target format for image compression can result in significant reductions in file size while maintaining high image quality**.
 - WEBP generally provides the best compression ratio, with the lowest file sizes for all quality levels (100, 50, and 1) when converting from JPG and PNG.
@@ -108,7 +105,7 @@ Below is the table which shows how much quality we lose with each conversion. Th
 - Improve notification to add clarity on what is happening .
 - Improve conversion speed for large files 100MB+ .
 
-# How to install
+## How to install
 
 1. Downlaod `main.js`, `styles.css`, `manifest.json` files from this repo.
 2. Creane new folder inside `VaultFolder/.obsidian/plugins/` named  `obsidian-image-converter` . If plugins folder doesn't exist, then create it manually. 
