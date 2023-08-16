@@ -14,6 +14,7 @@ https://github.com/xRyul/obsidian-image-converter/assets/47340038/63a0646b-29ec-
 	- 	<img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/2034a444-cd49-4ce0-af98-745694ba4986" width="600px">
 
 - Ability to resize original image via right click context menu
+	- <img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/3367b41c-63fa-4a1c-a616-8561e467eef7" width="600px">
 - Ability to resize image by dragging edge of an image
 	-  <img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/5724c6e9-19d4-4eaf-a559-1168f6557a14" width="600px"> 
 - Ability to resize image by holding shift + mouse scroll wheel
