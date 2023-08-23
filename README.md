@@ -3,8 +3,9 @@ https://github.com/xRyul/obsidian-image-converter/assets/47340038/63a0646b-29ec-
 
 ## Features
 - Automatically convert dropped/pasted image into WEBP, JPG or PNG. 
+- Automatically convert HEIC and TIF files into WEBP, JPG, or PNG. 
 - Reduce file size of an image by specifying desired Quality value between 1-100
-- Auto-rename converted image 
+- Auto-rename converted image.  
 - Auto-resize image based on 6 modes: Fit, Fill, Longest Side, Shortest Side, Height, Width
 	- Image resize by the Longest Side
 
@@ -19,7 +20,7 @@ https://github.com/xRyul/obsidian-image-converter/assets/47340038/63a0646b-29ec-
 	-  <img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/5724c6e9-19d4-4eaf-a559-1168f6557a14" width="600px"> 
 - Ability to resize image by holding shift + mouse scroll wheel
 
-Supported image formats: WEBP, JPG, PNG
+Supported image formats: WEBP, JPG, PNG, HEIC, TIF
 
 ## Quick Summary for Image Compression
 
