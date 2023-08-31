@@ -1,7 +1,14 @@
 import { App, MarkdownView, Notice, Plugin, TFile, PluginSettingTab, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem } from 'obsidian';
-import heic from 'heic-convert';
-import UTIF from 'utif';
+import { Platform } from 'obsidian';
+import UTIF from './UTIF.js';
 
+// Import heic-convert only on Desktop
+let heic:any;
+if (!Platform.isMobile) {
+  import('heic-convert').then(module => {
+    heic = module.default;
+  });
+}
 
 interface Listener {
     (this: Document, ev: Event): any;

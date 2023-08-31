@@ -16,9 +16,15 @@
       "ES5",
       "ES6",
       "ES7"
-    ]
+    ],
+    "allowSyntheticDefaultImports": true,
+    "outDir": "./dist"  // Add this line
   },
   "include": [
-    "**/*.ts"
+    "**/*.ts",
+    "**/*.js"
+  ],
+  "exclude": [  // Add this section
+    "./dist"
   ]
 }
