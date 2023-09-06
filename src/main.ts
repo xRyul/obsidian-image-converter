@@ -2,6 +2,7 @@ import { App, MarkdownView, Notice, Plugin, TFile, PluginSettingTab, Setting, Ed
 import { Platform } from 'obsidian';
 import UTIF from './UTIF.js';
 
+
 // Import heic-convert only on Desktop
 let heic:any;
 if (!Platform.isMobile) {
@@ -22,6 +23,7 @@ interface ImageConvertSettings {
 	convertTo: string;
 	quality: number;
 	dirpath: string;
+	saveInNoteFolder: boolean;
 	resizeMode: string;
 	desiredWidth: number;
 	desiredHeight: number;
@@ -38,6 +40,7 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	convertTo: '',
 	quality: 0.75,
 	dirpath: '',
+	saveInNoteFolder: false,
 	resizeMode: 'None',
 	desiredWidth: 600,
 	desiredHeight: 800,
@@ -104,9 +107,11 @@ export default class ImageConvertPLugin extends Plugin {
 								const lastPart = parts.pop();
 								if (lastPart) {
 									imageName = lastPart.split('?')[0];
+									// decode percent-encoded characters
+									imageName = decodeURIComponent(imageName);
 									// replace %20 with space character
 									imageName = imageName.replace(/%20/g, ' ');
-									
+
 								}
 							}
 
@@ -181,6 +186,8 @@ export default class ImageConvertPLugin extends Plugin {
 									const lastPart = parts.pop();
 									if (lastPart) {
 										imageName = lastPart.split('?')[0];
+										// decode percent-encoded characters
+										imageName = decodeURIComponent(imageName);
 										// replace %20 with space character
 										imageName = imageName.replace(/%20/g, ' ');
 									}
@@ -463,8 +470,26 @@ export default class ImageConvertPLugin extends Plugin {
 			newName = await this.generateNewName(file, activeFile);
 		}
 		const sourcePath = activeFile.path;
+		// let newPath = '';
+		// newPath = this.settings.dirpath;
+
 		let newPath = '';
-		newPath = this.settings.dirpath;
+		if (this.settings.saveInNoteFolder) {
+			// Get path of current note
+			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (activeView) {
+				const activeFile = activeView.file;
+				if (activeFile) {
+					const activeFilePath = activeFile.path;
+					// Construct new path using path of current note
+					newPath = activeFilePath.substring(0, activeFilePath.lastIndexOf('/'));
+				}
+			}
+		} else {
+			// Use default or custom image directory specified by user
+			newPath = this.settings.dirpath;
+		}
+
 		const originName = file.name;
 
 		// Start the conversion and show the status indicator
@@ -561,7 +586,8 @@ export default class ImageConvertPLugin extends Plugin {
 		const linkText = this.makeLinkText(file, sourcePath);
 		newPath = `${newPath}/${newName}`;
 		try {
-			await this.app.vault.rename(file, newPath);
+			const decodedNewPath = decodeURIComponent(newPath);
+			await this.app.vault.rename(file, decodedNewPath);
 		} catch (err) {
 			new Notice(`Failed to rename ${newName}: ${err}`);
 			throw err;
@@ -601,11 +627,15 @@ export default class ImageConvertPLugin extends Plugin {
 	}
 
 	async keepOrgName(file: TFile, activeFile: TFile): Promise<string> {
-		const newName = file.basename;
+		let newName = file.basename;
 		let extension = file.extension;
 		if (this.settings.convertTo) {
 			extension = this.settings.convertTo;
 		}
+
+		// Encode or decode special characters in the file name
+		newName = encodeURIComponent(newName);
+
 		return `${newName}.${extension}`;
 	}
 
@@ -636,7 +666,7 @@ export default class ImageConvertPLugin extends Plugin {
 }
 
 function isImage(file: TFile): boolean {
-	const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'tif', 'tiff'];
+	const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'tif', 'tiff', 'gif'];
 	return IMAGE_EXTS.includes(file.extension.toLowerCase());
 }
 
@@ -847,8 +877,6 @@ function convertToJPG(imgBlob: Blob, quality: number, resizeMode: string, desire
 		reader.readAsDataURL(imgBlob);
 	});
 }
-
-
 
 function convertToPNG(imgBlob: Blob, colorDepth: number, resizeMode: string, desiredWidth: number, desiredHeight: number, desiredLength: number): Promise<ArrayBuffer> {
 	return new Promise((resolve, reject) => {
@@ -1088,6 +1116,17 @@ class ImageConvertTab extends PluginSettingTab {
 					})
 			);
 
+		new Setting(containerEl)
+			.setName('Save images in note folder')
+			.setDesc('Automatically save processed images in the same folder as the current note')
+			.addToggle(toggle =>
+				toggle
+					.setValue(this.plugin.settings.saveInNoteFolder)
+					.onChange(async value => {
+						this.plugin.settings.saveInNoteFolder = value;
+						await this.plugin.saveSettings();
+					})
+			);
 
 		const heading2 = containerEl.createEl('h2');
 		heading2.textContent = 'Non-Destructive Image Resizing:';
@@ -1287,8 +1326,3 @@ class ResizeImageModal extends Modal {
 		contentEl.empty();
 	}
 }
-
-
-
-
-
