@@ -22,8 +22,9 @@ interface ImageConvertSettings {
 	convertToPNG: boolean;
 	convertTo: string;
 	quality: number;
-	dirpath: string;
-	saveInNoteFolder: boolean;
+	attachmentLocation: string;
+	attachmentSpecifiedFolder: string;
+	attachmentSubfolderName: string;
 	resizeMode: string;
 	desiredWidth: number;
 	desiredHeight: number;
@@ -39,8 +40,9 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	convertToPNG: false,
 	convertTo: '',
 	quality: 0.75,
-	dirpath: '',
-	saveInNoteFolder: false,
+	attachmentLocation: 'disable',
+	attachmentSpecifiedFolder: '',
+	attachmentSubfolderName: '',
 	resizeMode: 'None',
 	desiredWidth: 600,
 	desiredHeight: 800,
@@ -461,37 +463,12 @@ export default class ImageConvertPLugin extends Plugin {
 	
 	async renameFile(file: TFile) {
 		const activeFile = this.getActiveFile();
+		
 		if (!activeFile) {
 			new Notice('Error: No active file found.');
 			return;
 		}
-		let newName = await this.keepOrgName(file, activeFile);
-		if (this.settings.autoRename) {
-			newName = await this.generateNewName(file, activeFile);
-		}
-		const sourcePath = activeFile.path;
-		// let newPath = '';
-		// newPath = this.settings.dirpath;
-
-		let newPath = '';
-		if (this.settings.saveInNoteFolder) {
-			// Get path of current note
-			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-			if (activeView) {
-				const activeFile = activeView.file;
-				if (activeFile) {
-					const activeFilePath = activeFile.path;
-					// Construct new path using path of current note
-					newPath = activeFilePath.substring(0, activeFilePath.lastIndexOf('/'));
-				}
-			}
-		} else {
-			// Use default or custom image directory specified by user
-			newPath = this.settings.dirpath;
-		}
-
-		const originName = file.name;
-
+		
 		// Start the conversion and show the status indicator
 		const statusBarItemEl = this.addStatusBarItem();
 		statusBarItemEl.setText(`Converting image... ⏳`);
@@ -580,11 +557,52 @@ export default class ImageConvertPLugin extends Plugin {
 			return;
 		}
 
+		let newName = await this.keepOrgName(file, activeFile);
+		if (this.settings.autoRename) {
+			newName = await this.generateNewName(file, activeFile);
+		}
+		const sourcePath = activeFile.path;
+		
+		let newPath = '';
+		const getFilename = file.path;
+
+		switch (this.settings.attachmentLocation) {
+			case 'disable':
+				newPath = getFilename.substring(0, getFilename.lastIndexOf('/'));
+				break;
+			case 'root':
+				newPath = '/';
+				break;
+
+			case 'specified':
+				newPath = this.settings.attachmentSpecifiedFolder;
+				break;
+
+			case 'current':
+				newPath = activeFile.path.substring(0, activeFile.path.lastIndexOf('/'));
+				break;
+
+			case 'subfolder':
+				newPath = activeFile.path.substring(0, activeFile.path.lastIndexOf('/')) + '/' + this.settings.attachmentSubfolderName;
+				break;
+			default:
+				newPath = '/';
+				break;
+		}
+
+		// Check if the folder exists and create it if it doesn't
+		if (!(await this.app.vault.adapter.exists(newPath))) {
+			await this.app.vault.createFolder(newPath);
+		}
+
+		const originName = file.name;
+
 		statusBarItemEl.setText('Image converted ✅');
 		statusBarItemEl.setText('');
 
 		const linkText = this.makeLinkText(file, sourcePath);
 		newPath = `${newPath}/${newName}`;
+		console.log(newPath)
 		try {
 			const decodedNewPath = decodeURIComponent(newPath);
 			await this.app.vault.rename(file, decodedNewPath);
@@ -592,6 +610,7 @@ export default class ImageConvertPLugin extends Plugin {
 			new Notice(`Failed to rename ${newName}: ${err}`);
 			throw err;
 		}
+		
 		const newLinkText = this.makeLinkText(file, sourcePath);
 		const editor = this.getActiveEditor(sourcePath);
 		if (!editor) {
@@ -600,7 +619,7 @@ export default class ImageConvertPLugin extends Plugin {
 		}
 		const cursor = editor.getCursor();
 		const line = editor.getLine(cursor.line);
-
+		
 		editor.transaction({
 			changes: [
 				{
@@ -611,6 +630,8 @@ export default class ImageConvertPLugin extends Plugin {
 			],
 		});
 		new Notice(`Renamed ${originName} to ${newName}`);
+		
+
 	}
 
 	makeLinkText(file: TFile, sourcePath: string, subpath?: string): string {
@@ -666,7 +687,7 @@ export default class ImageConvertPLugin extends Plugin {
 }
 
 function isImage(file: TFile): boolean {
-	const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'tif', 'tiff', 'gif'];
+	const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'tif', 'tiff'];
 	return IMAGE_EXTS.includes(file.extension.toLowerCase());
 }
 
@@ -1103,30 +1124,27 @@ class ImageConvertTab extends PluginSettingTab {
 					})
 			);
 
-		new Setting(containerEl)
-			.setName('Image directory')
-			.setDesc('Directory to move processed images to')
-			.addText(text =>
-				text
-					.setPlaceholder('Enter directory path')
-					.setValue(this.plugin.settings.dirpath)
-					.onChange(async value => {
-						this.plugin.settings.dirpath = value;
-						await this.plugin.saveSettings();
-					})
-			);
 
-		new Setting(containerEl)
-			.setName('Save images in note folder')
-			.setDesc('Automatically save processed images in the same folder as the current note')
-			.addToggle(toggle =>
-				toggle
-					.setValue(this.plugin.settings.saveInNoteFolder)
-					.onChange(async value => {
-						this.plugin.settings.saveInNoteFolder = value;
+		// Define the dropdown setting for attachment location
+		new Setting(this.containerEl)
+			.setName("Output")
+			.setDesc("Select where to save converted images. Default - follow rules as defined by Obsidian in 'File & Links' > 'Default location for new attachments'")
+			.addDropdown((dropdown) => {
+				dropdown.addOption("disable", "Default")
+					.addOption("root", "Root folder")
+					.addOption("specified", "In the folder specified below [Beta]")
+					.addOption("current", "Same folder as current file [Beta]")
+					.addOption("subfolder", "In subfolder under current folder [Beta]")
+					.setValue(this.plugin.settings.attachmentLocation)
+					.onChange(async (value) => {
+						this.plugin.settings.attachmentLocation = value;
+						if (value === "specified" || value === "subfolder") {
+							const modal = new FolderInputModal(this.app, this.plugin, value);
+							modal.open();
+						}
 						await this.plugin.saveSettings();
-					})
-			);
+					});
+			});
 
 		const heading2 = containerEl.createEl('h2');
 		heading2.textContent = 'Non-Destructive Image Resizing:';
@@ -1324,5 +1342,42 @@ class ResizeImageModal extends Modal {
 	onClose() {
 		const { contentEl } = this;
 		contentEl.empty();
+	}
+}
+
+// Define the modal class
+class FolderInputModal extends Modal {
+	plugin: ImageConvertPLugin;
+	type: string;
+
+	constructor(app: App, plugin: ImageConvertPLugin, type: string) {
+		super(app);
+		this.plugin = plugin;
+		this.type = type;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+
+		const div = document.createElement('div');
+		div.textContent = `Enter ${this.type} name:  `;
+
+		const input = document.createElement('input');
+		input.type = 'text';
+		input.onchange = async (event) => {
+			const target = event.target as HTMLInputElement;
+			if (target) {
+				if (this.type === "specified") {
+					this.plugin.settings.attachmentSpecifiedFolder = target.value;
+				} else if (this.type === "subfolder") {
+					this.plugin.settings.attachmentSubfolderName = target.value;
+				}
+				await this.plugin.saveData(this.plugin.settings);
+				this.close();
+			}
+		};
+
+		div.appendChild(input);
+		contentEl.appendChild(div);
 	}
 }
