@@ -427,31 +427,31 @@ export default class ImageConvertPLugin extends Plugin {
 					})
 			);
 
-			// Add a menu item to delete the image from the Vault
-			menu.addItem((item) => {
-				item.setTitle('Delete Image from vault')
-					.setIcon('trash')
-					.onClick(async () => {
-						const files = this.app.vault.getFiles();
-						for (let i = 0; i < files.length; i++) {
-							if (files[i] instanceof TFile && isImage(files[i])) {
-								// Delete the image
-								await this.app.vault.delete(files[i]);
+			// // Add a menu item to delete the image from the Vault
+			// menu.addItem((item) => {
+			// 	item.setTitle('Delete Image from vault')
+			// 		.setIcon('trash')
+			// 		.onClick(async () => {
+			// 			const files = this.app.vault.getFiles();
+			// 			for (let i = 0; i < files.length; i++) {
+			// 				if (files[i] instanceof TFile && isImage(files[i])) {
+			// 					// Delete the image
+			// 					await this.app.vault.delete(files[i]);
 
-								// Delete the link
-								const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-								if (activeView) {
-									// Call the function to delete the markdown link
-									deleteMarkdownLink(activeView, files[i].basename);
-								}
+			// 					// Delete the link
+			// 					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+			// 					if (activeView) {
+			// 						// Call the function to delete the markdown link
+			// 						deleteMarkdownLink(activeView, files[i].basename);
+			// 					}
 
-								new Notice('Image deleted');
+			// 					new Notice('Image deleted');
 
-								break; // exit the loop after deleting the first image file
-							}
-						}
-					});
-			});
+			// 					break; // exit the loop after deleting the first image file
+			// 				}
+			// 			}
+			// 		});
+			// });
 
 			// Show menu at mouse event location
 			menu.showAtPosition({ x: event.pageX, y: event.pageY });
@@ -1115,37 +1115,37 @@ function updateMarkdownLink(activeView: MarkdownView, imageName: string | null, 
 	}
 }
 
-function deleteMarkdownLink(activeView: MarkdownView, imageName: string | null) {
-	const editor = activeView.editor;
-	const doc = editor.getDoc();
-	const lineCount = doc.lineCount();
+// function deleteMarkdownLink(activeView: MarkdownView, imageName: string | null) {
+// 	const editor = activeView.editor;
+// 	const doc = editor.getDoc();
+// 	const lineCount = doc.lineCount();
 
-	// find the line containing the image's markdown link
-	let lineIndex: number | undefined;
-	for (let i = 0; i < lineCount; i++) {
-		const line = doc.getLine(i);
-		if (line.includes(`![[${imageName}`)) {
-			lineIndex = i;
-			break;
-		}
-	}
+// 	// find the line containing the image's markdown link
+// 	let lineIndex: number | undefined;
+// 	for (let i = 0; i < lineCount; i++) {
+// 		const line = doc.getLine(i);
+// 		if (line.includes(`![[${imageName}`)) {
+// 			lineIndex = i;
+// 			break;
+// 		}
+// 	}
 
-	if (lineIndex !== undefined) {
-		// move cursor to the line containing the image's markdown link
-		editor.setCursor({ line: lineIndex, ch: 0 });
-		const cursor = editor.getCursor();
-		const line = editor.getLine(cursor.line);
+// 	if (lineIndex !== undefined) {
+// 		// move cursor to the line containing the image's markdown link
+// 		editor.setCursor({ line: lineIndex, ch: 0 });
+// 		const cursor = editor.getCursor();
+// 		const line = editor.getLine(cursor.line);
 		
-		// find the start and end position of the image link in the line
-		const startPos = line.indexOf(`![[${imageName}`);
-		const endPos = line.indexOf(']]', startPos) + 2;
+// 		// find the start and end position of the image link in the line
+// 		const startPos = line.indexOf(`![[${imageName}`);
+// 		const endPos = line.indexOf(']]', startPos) + 2;
 
-		// delete the image's markdown link
-		if (startPos !== -1 && endPos !== -1) {
-			editor.replaceRange('', { line: cursor.line, ch: startPos }, { line: cursor.line, ch: endPos });
-		}
-	}
-}
+// 		// delete the image's markdown link
+// 		if (startPos !== -1 && endPos !== -1) {
+// 			editor.replaceRange('', { line: cursor.line, ch: startPos }, { line: cursor.line, ch: endPos });
+// 		}
+// 	}
+// }
 
 
 
