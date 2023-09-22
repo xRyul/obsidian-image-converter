@@ -404,11 +404,13 @@ export default class ImageConvertPLugin extends Plugin {
 								// Get file path from src attribute
 								let fileName: string | undefined;
 								const imageName = img.getAttribute('src');
+								
 								if (imageName) {
 									fileName = imageName.replace(/^app:\/\/[^/]+\//, '');
 									fileName = decodeURI(fileName);
 									const parts = fileName.split('/');
 									fileName = parts.pop();
+									
 									if (fileName) {
 										fileName = fileName.split('?')[0];
 									}
@@ -417,6 +419,7 @@ export default class ImageConvertPLugin extends Plugin {
 								// Get TFile object for image file
 								if (fileName) {
 									const file = this.app.vault.getAbstractFileByPath(fileName);
+									console.log(file)
 									if (file instanceof TFile) {
 										await this.app.vault.modifyBinary(file, buffer);
 									}
@@ -427,31 +430,48 @@ export default class ImageConvertPLugin extends Plugin {
 					})
 			);
 
-			// // Add a menu item to delete the image from the Vault
-			// menu.addItem((item) => {
-			// 	item.setTitle('Delete Image from vault')
-			// 		.setIcon('trash')
-			// 		.onClick(async () => {
-			// 			const files = this.app.vault.getFiles();
-			// 			for (let i = 0; i < files.length; i++) {
-			// 				if (files[i] instanceof TFile && isImage(files[i])) {
-			// 					// Delete the image
-			// 					await this.app.vault.delete(files[i]);
+			// Add a menu item to delete the image from the Vault
+			menu.addItem((item) => {
+				item.setTitle('Delete Image from vault')
+					.setIcon('trash')
+					.onClick(async () => {
+						// Get Vault Name
+						const rootFolder = this.app.vault.getName();
+						const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+						if (activeView) {
+							// Grab full path of an src, it will return full path including Drive letter etc.
+							// thus we need to get rid of anything what is not part of the vault
+							let imagePath = img.getAttribute('src');
+							if (imagePath) {
+								// Find the position of the root folder in the path
+								const rootFolderIndex = imagePath.indexOf(rootFolder);
 
-			// 					// Delete the link
-			// 					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-			// 					if (activeView) {
-			// 						// Call the function to delete the markdown link
-			// 						deleteMarkdownLink(activeView, files[i].basename);
-			// 					}
+								// Remove everything before the root folder
+								if (rootFolderIndex !== -1) {
+									imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
+								}
 
-			// 					new Notice('Image deleted');
+								// Remove the query string
+								imagePath = imagePath.split('?')[0];
+								// Decode percent-encoded characters
+								const decodedPath = decodeURIComponent(imagePath);
 
-			// 					break; // exit the loop after deleting the first image file
-			// 				}
-			// 			}
-			// 		});
-			// });
+								const file = this.app.vault.getAbstractFileByPath(decodedPath);
+								if (file instanceof TFile && isImage(file)) {
+									// Delete the image
+									await this.app.vault.delete(file);
+									// Delete the link
+									deleteMarkdownLink(activeView, file.basename);
+									new Notice(`Image: ${file.basename} deleted from: ${file.path}`);
+								}
+							}
+						}
+					});
+			});
+			
+			
+
+
 
 			// Show menu at mouse event location
 			menu.showAtPosition({ x: event.pageX, y: event.pageY });
@@ -461,8 +481,6 @@ export default class ImageConvertPLugin extends Plugin {
 		}
 
 	}
-
-
 
 	async renameFile(file: TFile) {
 		const activeFile = this.getActiveFile();
@@ -1115,37 +1133,37 @@ function updateMarkdownLink(activeView: MarkdownView, imageName: string | null, 
 	}
 }
 
-// function deleteMarkdownLink(activeView: MarkdownView, imageName: string | null) {
-// 	const editor = activeView.editor;
-// 	const doc = editor.getDoc();
-// 	const lineCount = doc.lineCount();
+function deleteMarkdownLink(activeView: MarkdownView, imageName: string | null) {
+	const editor = activeView.editor;
+	const doc = editor.getDoc();
+	const lineCount = doc.lineCount();
 
-// 	// find the line containing the image's markdown link
-// 	let lineIndex: number | undefined;
-// 	for (let i = 0; i < lineCount; i++) {
-// 		const line = doc.getLine(i);
-// 		if (line.includes(`![[${imageName}`)) {
-// 			lineIndex = i;
-// 			break;
-// 		}
-// 	}
+	// find the line containing the image's markdown link
+	let lineIndex: number | undefined;
+	for (let i = 0; i < lineCount; i++) {
+		const line = doc.getLine(i);
+		if (line.includes(`![[${imageName}`)) {
+			lineIndex = i;
+			break;
+		}
+	}
 
-// 	if (lineIndex !== undefined) {
-// 		// move cursor to the line containing the image's markdown link
-// 		editor.setCursor({ line: lineIndex, ch: 0 });
-// 		const cursor = editor.getCursor();
-// 		const line = editor.getLine(cursor.line);
+	if (lineIndex !== undefined) {
+		// move cursor to the line containing the image's markdown link
+		editor.setCursor({ line: lineIndex, ch: 0 });
+		const cursor = editor.getCursor();
+		const line = editor.getLine(cursor.line);
 		
-// 		// find the start and end position of the image link in the line
-// 		const startPos = line.indexOf(`![[${imageName}`);
-// 		const endPos = line.indexOf(']]', startPos) + 2;
+		// find the start and end position of the image link in the line
+		const startPos = line.indexOf(`![[${imageName}`);
+		const endPos = line.indexOf(']]', startPos) + 2;
 
-// 		// delete the image's markdown link
-// 		if (startPos !== -1 && endPos !== -1) {
-// 			editor.replaceRange('', { line: cursor.line, ch: startPos }, { line: cursor.line, ch: endPos });
-// 		}
-// 	}
-// }
+		// delete the image's markdown link
+		if (startPos !== -1 && endPos !== -1) {
+			editor.replaceRange('', { line: cursor.line, ch: startPos }, { line: cursor.line, ch: endPos });
+		}
+	}
+}
 
 
 
