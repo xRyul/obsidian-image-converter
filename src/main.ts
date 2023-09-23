@@ -31,6 +31,7 @@ interface ImageConvertSettings {
 	desiredLength: number;
 	resizeByDragging: boolean;
 	resizeWithShiftScrollwheel: boolean;
+	rightClickContextMenu: boolean;
 }
 
 const DEFAULT_SETTINGS: ImageConvertSettings = {
@@ -48,7 +49,8 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	desiredHeight: 800,
 	desiredLength: 800,
 	resizeByDragging: true,
-	resizeWithShiftScrollwheel: true
+	resizeWithShiftScrollwheel: true,
+	rightClickContextMenu: true
 }
 
 export default class ImageConvertPLugin extends Plugin {
@@ -346,7 +348,10 @@ export default class ImageConvertPLugin extends Plugin {
 	onContextMenu(event: MouseEvent) {
 		// Prevent default context menu from being displayed
 		// event.preventDefault();
-
+		// If the 'Disable right-click context menu' setting is enabled, return immediately
+		if (this.settings.rightClickContextMenu) {
+			return;
+		}
 		const target = (event.target as Element);
 
 		const img = target as HTMLImageElement;
@@ -1334,6 +1339,17 @@ class ImageConvertTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					})
 			);
+
+		new Setting(containerEl)
+		.setName('Disable right-click context menu')
+		.addToggle(toggle =>
+			toggle
+				.setValue(this.plugin.settings.rightClickContextMenu)
+				.onChange(async value => {
+					this.plugin.settings.rightClickContextMenu = value;
+					await this.plugin.saveSettings();
+				})
+		);
 
 	}
 }
