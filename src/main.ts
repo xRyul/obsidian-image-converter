@@ -382,6 +382,26 @@ export default class ImageConvertPLugin extends Plugin {
 					})
 			);
 
+			// Add option to copy image to clipboard
+			menu.addItem((item: MenuItem) =>
+				item
+					.setTitle('Copy as Base64 encoded image')
+					.setIcon('copy')
+					.onClick(async () => {
+						// Copy original image data to clipboard
+						const img = target as HTMLImageElement;
+						const canvas = document.createElement('canvas');
+						canvas.width = img.naturalWidth;
+						canvas.height = img.naturalHeight;
+						const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+						ctx.drawImage(img, 0, 0);
+						const dataURL = canvas.toDataURL();
+						// Now dataURL can be used or copied to clipboard as needed
+						navigator.clipboard.writeText('<img src="' + dataURL + '"/>');
+						new Notice('Image copied to clipboard');
+					})
+			);
+
 			// Add option to resize image
 			menu.addItem((item: MenuItem) =>
 				item
