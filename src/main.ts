@@ -54,15 +54,34 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 export default class ImageConvertPLugin extends Plugin {
 	settings: ImageConvertSettings;
 
+	// Declare the properties
+	pasteListener: () => void;
+	dropListener: () => void;
+
 	async onload() {
 		await this.loadSettings();
+
+		// Add evenet listeners on paste and drop to prevent filerenaming during `sync` or `git pull`
+		// This allows us to check if  file was created as a result of a user action (like dropping 
+		// or pasting an image into a note) rather than a git pull action.
+		// true when a user action is detected and false otherwise. 
+		let userAction = false; 
+		const pasteListener = () => userAction = true;
+		const dropListener = () => userAction = true;
+		document.addEventListener('paste', pasteListener);
+		document.addEventListener('drop', dropListener);
+
 		this.registerEvent(
 			this.app.vault.on('create', (file: TFile) => {
 				if (!(file instanceof TFile)) return;
 				const timeGapMs = Date.now() - file.stat.ctime;
-				if (timeGapMs > 1e3) return; // 1s
+				if (timeGapMs > 1e3 || !userAction) {
+					userAction = false;
+					return; // 1s
+				}
 				if (isImage(file)) {
 					this.renameFile(file);
+					userAction = false;
 				}
 			})
 		);
@@ -308,7 +327,9 @@ export default class ImageConvertPLugin extends Plugin {
 
 	async onunload() {
 		// Remove event listener for contextmenu event on image elements
-
+		// Remove the event listeners when the plugin is unloaded
+		document.removeEventListener('paste', this.pasteListener);
+		document.removeEventListener('drop', this.dropListener);
 	}
 
 	onElement(
@@ -468,11 +489,7 @@ export default class ImageConvertPLugin extends Plugin {
 						}
 					});
 			});
-			
-			
-
-
-
+	
 			// Show menu at mouse event location
 			menu.showAtPosition({ x: event.pageX, y: event.pageY });
 
@@ -623,7 +640,7 @@ export default class ImageConvertPLugin extends Plugin {
 
 		const linkText = this.makeLinkText(file, sourcePath);
 		newPath = `${newPath}/${newName}`;
-		console.log(newPath)
+		
 		try {
 			const decodedNewPath = decodeURIComponent(newPath);
 			await this.app.vault.rename(file, decodedNewPath);
