@@ -603,7 +603,7 @@ export default class ImageConvertPLugin extends Plugin {
 			newName = await this.generateNewName(file, activeFile);
 		}
 		const sourcePath = activeFile.path;
-		console.log(sourcePath)
+	
 		let newPath = '';
 		const getFilename = file.path;
 
@@ -637,7 +637,7 @@ export default class ImageConvertPLugin extends Plugin {
 		}
 
 		const originName = file.name;
-
+		console.log(originName)
 		statusBarItemEl.setText('Image converted ✅');
 		statusBarItemEl.setText('');
 
@@ -648,7 +648,7 @@ export default class ImageConvertPLugin extends Plugin {
 			const decodedNewPath = decodeURIComponent(newPath);
 			await this.app.vault.rename(file, decodedNewPath);
 		} catch (err) {
-			new Notice(`Failed to rename ${newName}: ${err}`);
+			new Notice(`Failed to rename ${decodeURIComponent(newName)}: ${err}`);
 			throw err;
 		}
 
@@ -670,8 +670,8 @@ export default class ImageConvertPLugin extends Plugin {
 				},
 			],
 		});
-		new Notice(`Renamed ${originName} to ${newName}`);
 
+		new Notice(`Renamed ${decodeURIComponent(originName)} to ${decodeURIComponent(newName)}`);
 
 	}
 
@@ -727,87 +727,6 @@ export default class ImageConvertPLugin extends Plugin {
 	}
 }
 
-
-async function deleteImageFromVault(event: MouseEvent, app: any) {
-    // Get the image element and its src attribute
-    const img = event.target as HTMLImageElement;
-    const src = img.getAttribute('src');
-    if (src) {
-        // Check if the src is a Base64 encoded image
-        if (src.startsWith('data:image')) {
-            // Handle Base64 encoded image
-            // Delete the image element from the DOM
-            img.parentNode?.removeChild(img);
-            // Delete the link
-            const activeView = app.workspace.getActiveViewOfType(MarkdownView);
-            if (activeView) {
-                deleteMarkdownLink(activeView, src);
-            }
-            new Notice('Base64 encoded image deleted from the note');
-        } else {
-            // Delete image
-            // Get Vault Name
-            const rootFolder = app.vault.getName();
-            const activeView = app.workspace.getActiveViewOfType(MarkdownView);
-			
-            if (activeView) {
-                // Grab full path of an src, it will return full path including Drive letter etc.
-                // thus we need to get rid of anything what is not part of the vault
-                let imagePath = img.getAttribute('src');
-                if (imagePath) {
-                    // Find the position of the root folder in the path
-                    const rootFolderIndex = imagePath.indexOf(rootFolder);
-
-                    // Remove everything before the root folder
-                    if (rootFolderIndex !== -1) {
-                        imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
-                    }
-
-                    // Remove the query string
-                    imagePath = imagePath.split('?')[0];
-                    // Decode percent-encoded characters
-                    const decodedPath = decodeURIComponent(imagePath);
-					
-                    const file = app.vault.getAbstractFileByPath(decodedPath);
-                    if (file instanceof TFile && isImage(file)) {
-                        // Delete the image
-                        await app.vault.delete(file);
-                        // Delete the link
-                        deleteMarkdownLink(activeView, file.basename);
-                        new Notice(`Image: ${file.basename} deleted from: ${file.path}`);
-                    }
-                }
-            } else {
-				// ELSE image is not in the note.
-				// Grab full path of an src, it will return full path including Drive letter etc.
-                // thus we need to get rid of anything what is not part of the vault
-                let imagePath = img.getAttribute('src');
-                if (imagePath) {
-                    // Find the position of the root folder in the path
-                    const rootFolderIndex = imagePath.indexOf(rootFolder);
-
-                    // Remove everything before the root folder
-                    if (rootFolderIndex !== -1) {
-                        imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
-                    }
-
-                    // Remove the query string
-                    imagePath = imagePath.split('?')[0];
-                    // Decode percent-encoded characters
-                    const decodedPath = decodeURIComponent(imagePath);
-					
-                    const file = app.vault.getAbstractFileByPath(decodedPath);
-                    if (file instanceof TFile && isImage(file)) {
-                        // Delete the image
-                        await app.vault.delete(file);
-
-                        new Notice(`Image: ${file.basename} deleted from: ${file.path}`);
-                    }
-                }
-			}
-        }
-    }
-}
 
 
 function isImage(file: TFile): boolean {
@@ -891,8 +810,8 @@ function convertToWebP(file: Blob, quality: number, resizeMode: string, desiredW
 				let data = '';
 				canvas.width = resizeMode === 'Fill' ? desiredWidth : imageWidth;
 				canvas.height = resizeMode === 'Fill' ? desiredHeight : imageHeight;
-				context.fillStyle = '#fff';
-				context.fillRect(0, 0, canvas.width, canvas.height);
+				// context.fillStyle = '#fff';
+				// context.fillRect(0, 0, canvas.width, canvas.height);
 				context.save();
 				context.translate(canvas.width / 2, canvas.height / 2);
 
@@ -910,6 +829,7 @@ function convertToWebP(file: Blob, quality: number, resizeMode: string, desiredW
 				);
 				context.restore();
 				data = canvas.toDataURL('image/webp', quality);
+
 				const arrayBuffer = base64ToArrayBuffer(data);
 				resolve(arrayBuffer);
 			};
@@ -995,8 +915,8 @@ function convertToJPG(imgBlob: Blob, quality: number, resizeMode: string, desire
 				let data = '';
 				canvas.width = resizeMode === 'Fill' ? desiredWidth : imageWidth;
 				canvas.height = resizeMode === 'Fill' ? desiredHeight : imageHeight;
-				context.fillStyle = '#fff';
-				context.fillRect(0, 0, canvas.width, canvas.height);
+				// context.fillStyle = '#fff';
+				// context.fillRect(0, 0, canvas.width, canvas.height);
 				context.save();
 				context.translate(canvas.width / 2, canvas.height / 2);
 
@@ -1099,8 +1019,8 @@ function convertToPNG(imgBlob: Blob, colorDepth: number, resizeMode: string, des
 				let data = '';
 				canvas.width = resizeMode === 'Fill' ? desiredWidth : imageWidth;
 				canvas.height = resizeMode === 'Fill' ? desiredHeight : imageHeight;
-				context.fillStyle = '#fff';
-				context.fillRect(0, 0, canvas.width, canvas.height);
+				// context.fillStyle = '#fff';
+				// context.fillRect(0, 0, canvas.width, canvas.height);
 				context.save();
 				context.translate(canvas.width / 2, canvas.height / 2);
 
@@ -1272,6 +1192,87 @@ function deleteMarkdownLink(activeView: MarkdownView, imageName: string | null) 
 			editor.replaceRange('', { line: cursor.line, ch: startPos }, { line: cursor.line, ch: endPos });
 		}
 	}
+}
+
+async function deleteImageFromVault(event: MouseEvent, app: any) {
+    // Get the image element and its src attribute
+    const img = event.target as HTMLImageElement;
+    const src = img.getAttribute('src');
+    if (src) {
+        // Check if the src is a Base64 encoded image
+        if (src.startsWith('data:image')) {
+            // Handle Base64 encoded image
+            // Delete the image element from the DOM
+            img.parentNode?.removeChild(img);
+            // Delete the link
+            const activeView = app.workspace.getActiveViewOfType(MarkdownView);
+            if (activeView) {
+                deleteMarkdownLink(activeView, src);
+            }
+            new Notice('Base64 encoded image deleted from the note');
+        } else {
+            // Delete image
+            // Get Vault Name
+            const rootFolder = app.vault.getName();
+            const activeView = app.workspace.getActiveViewOfType(MarkdownView);
+			
+            if (activeView) {
+                // Grab full path of an src, it will return full path including Drive letter etc.
+                // thus we need to get rid of anything what is not part of the vault
+                let imagePath = img.getAttribute('src');
+                if (imagePath) {
+                    // Find the position of the root folder in the path
+                    const rootFolderIndex = imagePath.indexOf(rootFolder);
+
+                    // Remove everything before the root folder
+                    if (rootFolderIndex !== -1) {
+                        imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
+                    }
+
+                    // Remove the query string
+                    imagePath = imagePath.split('?')[0];
+                    // Decode percent-encoded characters
+                    const decodedPath = decodeURIComponent(imagePath);
+					
+                    const file = app.vault.getAbstractFileByPath(decodedPath);
+                    if (file instanceof TFile && isImage(file)) {
+                        // Delete the image
+                        await app.vault.delete(file);
+                        // Delete the link
+                        deleteMarkdownLink(activeView, file.basename);
+                        new Notice(`Image: ${file.basename} deleted from: ${file.path}`);
+                    }
+                }
+            } else {
+				// ELSE image is not in the note.
+				// Grab full path of an src, it will return full path including Drive letter etc.
+                // thus we need to get rid of anything what is not part of the vault
+                let imagePath = img.getAttribute('src');
+                if (imagePath) {
+                    // Find the position of the root folder in the path
+                    const rootFolderIndex = imagePath.indexOf(rootFolder);
+
+                    // Remove everything before the root folder
+                    if (rootFolderIndex !== -1) {
+                        imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
+                    }
+
+                    // Remove the query string
+                    imagePath = imagePath.split('?')[0];
+                    // Decode percent-encoded characters
+                    const decodedPath = decodeURIComponent(imagePath);
+					
+                    const file = app.vault.getAbstractFileByPath(decodedPath);
+                    if (file instanceof TFile && isImage(file)) {
+                        // Delete the image
+                        await app.vault.delete(file);
+
+                        new Notice(`Image: ${file.basename} deleted from: ${file.path}`);
+                    }
+                }
+			}
+        }
+    }
 }
 
 
