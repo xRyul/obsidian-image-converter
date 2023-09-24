@@ -383,7 +383,7 @@ export default class ImageConvertPLugin extends Plugin {
 					})
 			);
 
-			// Add option to copy image to clipboard
+			// Add option to copy Base64 encoded image into clipboard
 			menu.addItem((item: MenuItem) =>
 				item
 					.setTitle('Copy as Base64 encoded image')
@@ -444,26 +444,38 @@ export default class ImageConvertPLugin extends Plugin {
 								const buffer = await blob.arrayBuffer();
 
 								// Get file path from src attribute
-								let fileName: string | undefined;
-								const imageName = img.getAttribute('src');
+								// Get Vault Name
+								const rootFolder = this.app.vault.getName();
+								const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+								if (activeView) {
+									// Grab full path of an src, it will return full path including Drive letter etc.
+									// thus we need to get rid of anything what is not part of the vault
+									let imagePath = img.getAttribute('src');
+									if (imagePath) {
+										// Find the position of the root folder in the path
+										const rootFolderIndex = imagePath.indexOf(rootFolder);
 								
-								if (imageName) {
-									fileName = imageName.replace(/^app:\/\/[^/]+\//, '');
-									fileName = decodeURI(fileName);
-									const parts = fileName.split('/');
-									fileName = parts.pop();
-									
-									if (fileName) {
-										fileName = fileName.split('?')[0];
-									}
-								}
-
-								// Get TFile object for image file
-								if (fileName) {
-									const file = this.app.vault.getAbstractFileByPath(fileName);
-									console.log(file)
-									if (file instanceof TFile) {
-										await this.app.vault.modifyBinary(file, buffer);
+										// Remove everything before the root folder
+										if (rootFolderIndex !== -1) {
+											imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
+										}
+								
+										// Remove the query string
+										imagePath = imagePath.split('?')[0];
+										// Decode percent-encoded characters
+										const decodedPath = decodeURIComponent(imagePath);
+								
+										const file = this.app.vault.getAbstractFileByPath(decodedPath);
+										if (file instanceof TFile && isImage(file)) {
+											// Replace the image
+											// deleteImageFromVault(event, this.app);
+											await this.app.vault.modifyBinary(file, buffer);
+											// Refresh the image
+											if (img.src) {
+												const newSrc = img.src + (img.src.includes('?') ? '&' : '?') + new Date().getTime();
+												img.src = newSrc;
+											}
+										}
 									}
 								}
 							}
@@ -489,9 +501,6 @@ export default class ImageConvertPLugin extends Plugin {
 		}
 
 	}
-
-
-	
 
 	async renameFile(file: TFile) {
 		const activeFile = this.getActiveFile();
@@ -723,7 +732,6 @@ async function deleteImageFromVault(event: MouseEvent, app: any) {
     // Get the image element and its src attribute
     const img = event.target as HTMLImageElement;
     const src = img.getAttribute('src');
-
     if (src) {
         // Check if the src is a Base64 encoded image
         if (src.startsWith('data:image')) {
@@ -735,13 +743,13 @@ async function deleteImageFromVault(event: MouseEvent, app: any) {
             if (activeView) {
                 deleteMarkdownLink(activeView, src);
             }
-
             new Notice('Base64 encoded image deleted from the note');
         } else {
             // Delete image
             // Get Vault Name
             const rootFolder = app.vault.getName();
             const activeView = app.workspace.getActiveViewOfType(MarkdownView);
+			
             if (activeView) {
                 // Grab full path of an src, it will return full path including Drive letter etc.
                 // thus we need to get rid of anything what is not part of the vault
@@ -759,7 +767,7 @@ async function deleteImageFromVault(event: MouseEvent, app: any) {
                     imagePath = imagePath.split('?')[0];
                     // Decode percent-encoded characters
                     const decodedPath = decodeURIComponent(imagePath);
-
+					
                     const file = app.vault.getAbstractFileByPath(decodedPath);
                     if (file instanceof TFile && isImage(file)) {
                         // Delete the image
@@ -769,10 +777,38 @@ async function deleteImageFromVault(event: MouseEvent, app: any) {
                         new Notice(`Image: ${file.basename} deleted from: ${file.path}`);
                     }
                 }
-            }
+            } else {
+				// ELSE image is not in the note.
+				// Grab full path of an src, it will return full path including Drive letter etc.
+                // thus we need to get rid of anything what is not part of the vault
+                let imagePath = img.getAttribute('src');
+                if (imagePath) {
+                    // Find the position of the root folder in the path
+                    const rootFolderIndex = imagePath.indexOf(rootFolder);
+
+                    // Remove everything before the root folder
+                    if (rootFolderIndex !== -1) {
+                        imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
+                    }
+
+                    // Remove the query string
+                    imagePath = imagePath.split('?')[0];
+                    // Decode percent-encoded characters
+                    const decodedPath = decodeURIComponent(imagePath);
+					
+                    const file = app.vault.getAbstractFileByPath(decodedPath);
+                    if (file instanceof TFile && isImage(file)) {
+                        // Delete the image
+                        await app.vault.delete(file);
+
+                        new Notice(`Image: ${file.basename} deleted from: ${file.path}`);
+                    }
+                }
+			}
         }
     }
 }
+
 
 function isImage(file: TFile): boolean {
 	const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'tif', 'tiff'];
