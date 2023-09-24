@@ -50,7 +50,7 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	desiredLength: 800,
 	resizeByDragging: true,
 	resizeWithShiftScrollwheel: true,
-	rightClickContextMenu: true
+	rightClickContextMenu: false
 }
 
 export default class ImageConvertPLugin extends Plugin {
@@ -62,31 +62,27 @@ export default class ImageConvertPLugin extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
-
 		// Add evenet listeners on paste and drop to prevent filerenaming during `sync` or `git pull`
 		// This allows us to check if  file was created as a result of a user action (like dropping 
 		// or pasting an image into a note) rather than a git pull action.
 		// true when a user action is detected and false otherwise. 
-		let userAction = false; 
-		const pasteListener = () => userAction = true;
-		const dropListener = () => userAction = true;
-		document.addEventListener('paste', pasteListener);
-		document.addEventListener('drop', dropListener);
+        let userAction = false; 
+		// set to true, then reset back to `false` after 100ms. This way, 'create' event handler should
+		// get triggered only if its an image and if image was created within 100ms of a 'paste/drop' event
+        const pasteListener = () => { userAction = true; setTimeout(() => userAction = false, 100); }; 
+        const dropListener = () => { userAction = true; setTimeout(() => userAction = false, 100); };
+        document.addEventListener('paste', pasteListener);
+        document.addEventListener('drop', dropListener);
 
-		this.registerEvent(
-			this.app.vault.on('create', (file: TFile) => {
-				if (!(file instanceof TFile)) return;
-				const timeGapMs = Date.now() - file.stat.ctime;
-				if (timeGapMs > 1e3 || !userAction) {
-					userAction = false;
-					return; // 1s
-				}
-				if (isImage(file)) {
-					this.renameFile(file);
-					userAction = false;
-				}
-			})
-		);
+        this.registerEvent(
+            this.app.vault.on('create', (file: TFile) => {
+                if (!(file instanceof TFile)) return;
+                if (isImage(file) && userAction) {
+                    this.renameFile(file);
+                }
+                userAction = false;
+            })
+        );
 
 		// Check if edge of an image was clicked upon
 		this.register(
@@ -476,73 +472,15 @@ export default class ImageConvertPLugin extends Plugin {
 					})
 			);
 
-			// Handle physical image
-			// Existing code for deleting the image from the vault goes here...
-			// Add a menu item to delete the image from the Vault
+			// Delete (Image + md link)
 			menu.addItem((item) => {
 				item.setTitle('Delete Image from vault')
 					.setIcon('trash')
 					.onClick(async () => {
-						// Get the image element and its src attribute
-						const img = event.target as HTMLImageElement;
-						const src = img.getAttribute('src');
-
-						
-						if (src) {
-							// Check if the src is a Base64 encoded image
-							if (src.startsWith('data:image')) {
-								// Handle Base64 encoded image
-								// Delete the image element from the DOM
-								img.parentNode?.removeChild(img);
-								// Delete the link
-								const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-								if (activeView) {
-									deleteMarkdownLink(activeView, src);
-								}
-
-								new Notice('Base64 encoded image deleted from the note');
-							} else {
-								// Delete image
-								// Get Vault Name
-								const rootFolder = this.app.vault.getName();
-								const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-								if (activeView) {
-									// Grab full path of an src, it will return full path including Drive letter etc.
-									// thus we need to get rid of anything what is not part of the vault
-									let imagePath = img.getAttribute('src');
-									if (imagePath) {
-										// Find the position of the root folder in the path
-										const rootFolderIndex = imagePath.indexOf(rootFolder);
-
-										// Remove everything before the root folder
-										if (rootFolderIndex !== -1) {
-											imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
-										}
-
-										// Remove the query string
-										imagePath = imagePath.split('?')[0];
-										// Decode percent-encoded characters
-										const decodedPath = decodeURIComponent(imagePath);
-
-										const file = this.app.vault.getAbstractFileByPath(decodedPath);
-										if (file instanceof TFile && isImage(file)) {
-											// Delete the image
-											await this.app.vault.delete(file);
-											// Delete the link
-											deleteMarkdownLink(activeView, file.basename);
-											new Notice(`Image: ${file.basename} deleted from: ${file.path}`);
-										}
-									}
-								}
-							}
-						}
+						deleteImageFromVault(event, this.app);
 					});
 			});
 		
-		
-	
-
-
 			// Show menu at mouse event location
 			menu.showAtPosition({ x: event.pageX, y: event.pageY });
 
@@ -551,6 +489,9 @@ export default class ImageConvertPLugin extends Plugin {
 		}
 
 	}
+
+
+	
 
 	async renameFile(file: TFile) {
 		const activeFile = this.getActiveFile();
@@ -653,7 +594,7 @@ export default class ImageConvertPLugin extends Plugin {
 			newName = await this.generateNewName(file, activeFile);
 		}
 		const sourcePath = activeFile.path;
-
+		console.log(sourcePath)
 		let newPath = '';
 		const getFilename = file.path;
 
@@ -775,6 +716,62 @@ export default class ImageConvertPLugin extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
+}
+
+
+async function deleteImageFromVault(event: MouseEvent, app: any) {
+    // Get the image element and its src attribute
+    const img = event.target as HTMLImageElement;
+    const src = img.getAttribute('src');
+
+    if (src) {
+        // Check if the src is a Base64 encoded image
+        if (src.startsWith('data:image')) {
+            // Handle Base64 encoded image
+            // Delete the image element from the DOM
+            img.parentNode?.removeChild(img);
+            // Delete the link
+            const activeView = app.workspace.getActiveViewOfType(MarkdownView);
+            if (activeView) {
+                deleteMarkdownLink(activeView, src);
+            }
+
+            new Notice('Base64 encoded image deleted from the note');
+        } else {
+            // Delete image
+            // Get Vault Name
+            const rootFolder = app.vault.getName();
+            const activeView = app.workspace.getActiveViewOfType(MarkdownView);
+            if (activeView) {
+                // Grab full path of an src, it will return full path including Drive letter etc.
+                // thus we need to get rid of anything what is not part of the vault
+                let imagePath = img.getAttribute('src');
+                if (imagePath) {
+                    // Find the position of the root folder in the path
+                    const rootFolderIndex = imagePath.indexOf(rootFolder);
+
+                    // Remove everything before the root folder
+                    if (rootFolderIndex !== -1) {
+                        imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
+                    }
+
+                    // Remove the query string
+                    imagePath = imagePath.split('?')[0];
+                    // Decode percent-encoded characters
+                    const decodedPath = decodeURIComponent(imagePath);
+
+                    const file = app.vault.getAbstractFileByPath(decodedPath);
+                    if (file instanceof TFile && isImage(file)) {
+                        // Delete the image
+                        await app.vault.delete(file);
+                        // Delete the link
+                        deleteMarkdownLink(activeView, file.basename);
+                        new Notice(`Image: ${file.basename} deleted from: ${file.path}`);
+                    }
+                }
+            }
+        }
+    }
 }
 
 function isImage(file: TFile): boolean {
@@ -1231,7 +1228,7 @@ function deleteMarkdownLink(activeView: MarkdownView, imageName: string | null) 
 		// if it's not a wikilink, check if it's an HTML img tag e.g.: base64 encoded image
 		if (startPos === -1 || endPos === -1) {
 			startPos = line.indexOf(`<img src="${imageName}"`);
-			endPos = line.indexOf('/>', startPos) + 2;
+			endPos = line.indexOf('/>', startPos) + 2;	
 		}
 
 		// delete the image's markdown link
