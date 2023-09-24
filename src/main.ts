@@ -476,45 +476,73 @@ export default class ImageConvertPLugin extends Plugin {
 					})
 			);
 
+			// Handle physical image
+			// Existing code for deleting the image from the vault goes here...
 			// Add a menu item to delete the image from the Vault
 			menu.addItem((item) => {
 				item.setTitle('Delete Image from vault')
 					.setIcon('trash')
 					.onClick(async () => {
-						// Get Vault Name
-						const rootFolder = this.app.vault.getName();
-						const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-						if (activeView) {
-							// Grab full path of an src, it will return full path including Drive letter etc.
-							// thus we need to get rid of anything what is not part of the vault
-							let imagePath = img.getAttribute('src');
-							if (imagePath) {
-								// Find the position of the root folder in the path
-								const rootFolderIndex = imagePath.indexOf(rootFolder);
+						// Get the image element and its src attribute
+						const img = event.target as HTMLImageElement;
+						const src = img.getAttribute('src');
 
-								// Remove everything before the root folder
-								if (rootFolderIndex !== -1) {
-									imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
+						
+						if (src) {
+							// Check if the src is a Base64 encoded image
+							if (src.startsWith('data:image')) {
+								// Handle Base64 encoded image
+								// Delete the image element from the DOM
+								img.parentNode?.removeChild(img);
+								// Delete the link
+								const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+								if (activeView) {
+									deleteMarkdownLink(activeView, src);
 								}
 
-								// Remove the query string
-								imagePath = imagePath.split('?')[0];
-								// Decode percent-encoded characters
-								const decodedPath = decodeURIComponent(imagePath);
+								new Notice('Base64 encoded image deleted from the note');
+							} else {
+								// Delete image
+								// Get Vault Name
+								const rootFolder = this.app.vault.getName();
+								const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+								if (activeView) {
+									// Grab full path of an src, it will return full path including Drive letter etc.
+									// thus we need to get rid of anything what is not part of the vault
+									let imagePath = img.getAttribute('src');
+									if (imagePath) {
+										// Find the position of the root folder in the path
+										const rootFolderIndex = imagePath.indexOf(rootFolder);
 
-								const file = this.app.vault.getAbstractFileByPath(decodedPath);
-								if (file instanceof TFile && isImage(file)) {
-									// Delete the image
-									await this.app.vault.delete(file);
-									// Delete the link
-									deleteMarkdownLink(activeView, file.basename);
-									new Notice(`Image: ${file.basename} deleted from: ${file.path}`);
+										// Remove everything before the root folder
+										if (rootFolderIndex !== -1) {
+											imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
+										}
+
+										// Remove the query string
+										imagePath = imagePath.split('?')[0];
+										// Decode percent-encoded characters
+										const decodedPath = decodeURIComponent(imagePath);
+
+										const file = this.app.vault.getAbstractFileByPath(decodedPath);
+										if (file instanceof TFile && isImage(file)) {
+											// Delete the image
+											await this.app.vault.delete(file);
+											// Delete the link
+											deleteMarkdownLink(activeView, file.basename);
+											new Notice(`Image: ${file.basename} deleted from: ${file.path}`);
+										}
+									}
 								}
 							}
 						}
 					});
 			});
+		
+		
 	
+
+
 			// Show menu at mouse event location
 			menu.showAtPosition({ x: event.pageX, y: event.pageY });
 
@@ -1184,7 +1212,7 @@ function deleteMarkdownLink(activeView: MarkdownView, imageName: string | null) 
 	let lineIndex: number | undefined;
 	for (let i = 0; i < lineCount; i++) {
 		const line = doc.getLine(i);
-		if (line.includes(`![[${imageName}`)) {
+		if (line.includes(`![[${imageName}`) || line.includes(`<img src="${imageName}"`)) {
 			lineIndex = i;
 			break;
 		}
@@ -1197,8 +1225,14 @@ function deleteMarkdownLink(activeView: MarkdownView, imageName: string | null) 
 		const line = editor.getLine(cursor.line);
 		
 		// find the start and end position of the image link in the line
-		const startPos = line.indexOf(`![[${imageName}`);
-		const endPos = line.indexOf(']]', startPos) + 2;
+		let startPos = line.indexOf(`![[${imageName}`);
+		let endPos = line.indexOf(']]', startPos) + 2;
+
+		// if it's not a wikilink, check if it's an HTML img tag e.g.: base64 encoded image
+		if (startPos === -1 || endPos === -1) {
+			startPos = line.indexOf(`<img src="${imageName}"`);
+			endPos = line.indexOf('/>', startPos) + 2;
+		}
 
 		// delete the image's markdown link
 		if (startPos !== -1 && endPos !== -1) {
@@ -1206,7 +1240,6 @@ function deleteMarkdownLink(activeView: MarkdownView, imageName: string | null) 
 		}
 	}
 }
-
 
 
 class ImageConvertTab extends PluginSettingTab {
