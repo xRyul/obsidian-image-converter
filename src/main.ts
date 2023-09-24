@@ -1575,7 +1575,7 @@ class ResizeImageModal extends Modal {
 					})
 			);
 
-		const messageE4 = createEl('p', { text: 'Please manually reload your note after clicking Submit.' });
+		const messageE4 = createEl('p', { text: '' });
 		messageE4.style.fontSize = '12px'
 		submitBUtton.controlEl.insertBefore(messageE4, submitBUtton.controlEl.firstChild);
 
