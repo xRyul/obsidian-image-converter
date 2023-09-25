@@ -1221,6 +1221,8 @@ async function deleteImageFromVault(event: MouseEvent, app: any) {
                 // thus we need to get rid of anything what is not part of the vault
                 let imagePath = img.getAttribute('src');
                 if (imagePath) {
+					// Decode the URL for cases where vault name might have spaces
+					imagePath = decodeURIComponent(imagePath);
                     // Find the position of the root folder in the path
                     const rootFolderIndex = imagePath.indexOf(rootFolder);
 
@@ -1249,6 +1251,8 @@ async function deleteImageFromVault(event: MouseEvent, app: any) {
                 // thus we need to get rid of anything what is not part of the vault
                 let imagePath = img.getAttribute('src');
                 if (imagePath) {
+					// Decode the URL for cases where vault name might have spaces
+					imagePath = decodeURIComponent(imagePath);
                     // Find the position of the root folder in the path
                     const rootFolderIndex = imagePath.indexOf(rootFolder);
 
