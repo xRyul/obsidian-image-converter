@@ -59,6 +59,7 @@ export default class ImageConvertPLugin extends Plugin {
 	// Declare the properties
 	pasteListener: () => void;
 	dropListener: () => void;
+	mouseOverHandler: (event: MouseEvent) => void;
 
 	async onload() {
 		await this.loadSettings();
@@ -84,6 +85,7 @@ export default class ImageConvertPLugin extends Plugin {
             })
         );
 
+
 		// Check if edge of an image was clicked upon
 		this.register(
 			this.onElement(
@@ -108,122 +110,46 @@ export default class ImageConvertPLugin extends Plugin {
 						// user clicked on any of the edges of the image
 						// Cursor must be active only on the image or the img markdown link
 						// Otherwise resized image will get copied to the active line 
-						const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-						if (activeView) {
-							const editor = activeView.editor;
-							const doc = editor.getDoc();
-							const lineCount = doc.lineCount();
-							// read the image filename and its extension
-							let imageName = img.getAttribute('src');
-							if (imageName) {
-								const parts = imageName.split('/');
-								const lastPart = parts.pop();
-								if (lastPart) {
-									imageName = lastPart.split('?')[0];
-									// decode percent-encoded characters
-									imageName = decodeURIComponent(imageName);
-									// replace %20 with space character
-									imageName = imageName.replace(/%20/g, ' ');
-
-								}
-							}
-
-							// find the line containing the image's markdown link
-							let lineIndex: number | undefined;
-							for (let i = 0; i < lineCount; i++) {
-								const line = doc.getLine(i);
-								if (line.includes(`![[${imageName}`)) {
-									lineIndex = i;
-									break;
-								}
-							}
-							if (lineIndex !== undefined) {
-								// move cursor to the line containing the image's markdown link
-								editor.setCursor({ line: lineIndex, ch: 0 });
-							}
-						}
 						const startX = event.clientX;
 						const startY = event.clientY;
 						const startWidth = img.clientWidth;
 						const startHeight = img.clientHeight;
-						const aspectRatio = startWidth / startHeight;
+						let lastUpdateX = startX;
+						let lastUpdateY = startY;
+						const updateThreshold = 5; // The mouse must move at least 5 pixels before an update
 
-						const onMouseMove = (event: MouseEvent) => {
-							const currentX = event.clientX;
-							const currentY = event.clientY;
-							// let newWidth, newHeight;
-							let newWidth = 0;
-							let newHeight = 0;
-							if (x >= rect.width - edgeSize && y >= rect.height - edgeSize) {
-								newWidth = startWidth + (currentX - startX);
-								newHeight = newWidth / aspectRatio;
-							} else if (x <= edgeSize && y <= edgeSize) {
-								newWidth = startWidth - (currentX - startX);
-								newHeight = newWidth / aspectRatio;
-							} else if (x >= rect.width - edgeSize && y <= edgeSize) {
-								newWidth = startWidth + (currentX - startX);
-								newHeight = newWidth / aspectRatio;
-							} else if (x <= edgeSize && y >= rect.height - edgeSize) {
-								newWidth = startWidth - (currentX - startX);
-								newHeight = newWidth / aspectRatio;
-							} else if (x >= rect.width - edgeSize || x <= edgeSize) {
-								if (x >= rect.width - edgeSize) {
-									newWidth = startWidth + (currentX - startX);
-								} else {
-									newWidth = startWidth - (currentX - startX);
-								}
-								newHeight = newWidth / aspectRatio;
-							} else if (y >= rect.height - edgeSize || y <= edgeSize) {
-								if (y >= rect.height - edgeSize) {
-									newHeight = startHeight + (currentY - startY);
-								} else {
-									newHeight = startHeight - (currentY - startY);
-								}
-								newWidth = newHeight * aspectRatio;
-							}
+						const onMouseMove = (event:MouseEvent) => {
+							const { newWidth, newHeight } = resizeImageDrag(event, img, startX, startY, startWidth, startHeight);
+
 							img.style.width = `${newWidth}px`;
 							img.style.height = `${newHeight}px`;
 
-							// update the size value in the image's markdown link
-							const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-							if (activeView) {
-								const editor = activeView.editor;
-								const cursor = editor.getCursor();
-								const line = editor.getLine(cursor.line);
-								// calculate the longest side of the image
-								const longestSide = Math.round(Math.max(newWidth, newHeight));
-								// read the image filename and its extension
-								let imageName = img.getAttribute('src');
-								if (imageName) {
-									const parts = imageName.split('/');
-									const lastPart = parts.pop();
-									if (lastPart) {
-										imageName = lastPart.split('?')[0];
-										// decode percent-encoded characters
-										imageName = decodeURIComponent(imageName);
-										// replace %20 with space character
-										imageName = imageName.replace(/%20/g, ' ');
+							// Check if the mouse has moved more than the update threshold
+							if (Math.abs(event.clientX - lastUpdateX) > updateThreshold || Math.abs(event.clientY - lastUpdateY) > updateThreshold) {
+								const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+								if (activeView) {
+									const imageName = getImageName(img);
+									if (imageName) { // Check if imageName is not null
+										if (isExternalLink(imageName)) {
+											updateExternalLink(activeView, img, newWidth, newHeight);
+										} else {
+											updateMarkdownLink(activeView, imageName, newWidth, newHeight);
+										}
 									}
 								}
-								// find the start and end position of the image link in the line
-								const startPos = line.indexOf(`![[${imageName}`);
-								const endPos = line.indexOf(']]', startPos) + 2;
 
-								// update the size value in the image's markdown link
-								if (startPos !== -1 && endPos !== -1) {
-									editor.replaceRange(`![[${imageName}|${longestSide}]]`, { line: cursor.line, ch: startPos }, { line: cursor.line, ch: endPos });
-								}
+								// Update the last update coordinates
+								lastUpdateX = event.clientX;
+								lastUpdateY = event.clientY;
 							}
-
 						};
 
 						const onMouseUp = () => {
-							document.removeEventListener('mousemove', onMouseMove);
-							document.removeEventListener('mouseup', onMouseUp);
+							document.removeEventListener("mousemove", onMouseMove);
+							document.removeEventListener("mouseup", onMouseUp);
 						};
-
-						document.addEventListener('mousemove', onMouseMove);
-						document.addEventListener('mouseup', onMouseUp);
+						document.addEventListener("mousemove", onMouseMove);
+						document.addEventListener("mouseup", onMouseUp);
 					}
 				}
 			)
@@ -243,7 +169,7 @@ export default class ImageConvertPLugin extends Plugin {
 
 					// Throttle mousemove events
 					let lastMove = 0;
-					img.onmousemove = (event: MouseEvent) => {
+					const mouseOverHandler = (event: MouseEvent) => {
 						const now = Date.now();
 						if (now - lastMove < 100) return; // Only execute once every 100ms
 						lastMove = now;
@@ -261,6 +187,7 @@ export default class ImageConvertPLugin extends Plugin {
 							img.style.outline = 'none';
 						}
 					};
+					this.registerDomEvent(img, 'mousemove', mouseOverHandler);
 				}
 			)
 		);
@@ -280,7 +207,29 @@ export default class ImageConvertPLugin extends Plugin {
 			)
 		);
 
+
+
 		// Allow resizing with SHIFT + Scrollwheel
+		let lastImg: HTMLImageElement | null = null;
+		// Initiate a single-click when hover over more than 1 external image.
+		// This solves a small bug, which would replace image1 while hovering over image2
+		// Sometimes it would replace image1 with image2 because there is no way to find linenumber
+		// for external links. Linenumber gets shown only for internal images.
+		this.register(
+			this.onElement(
+				document,
+				"mouseover",
+				"img",
+				(event: MouseEvent) => {
+					const img = event.target as HTMLImageElement;
+					// If the mouse is over a new image and it's an external image, simulate a left click
+					if (img !== lastImg && isExternalLink(img.src)) {
+						img.click();
+						lastImg = img;
+					}
+				}
+			)
+		);
 		this.register(
 			this.onElement(
 				document,
@@ -288,9 +237,15 @@ export default class ImageConvertPLugin extends Plugin {
 				"img",
 				(event: WheelEvent) => {
 					if (!this.settings.resizeWithShiftScrollwheel) return;
-					if (event.shiftKey) { // check if the Alt key is pressed
+					if (event.shiftKey) { // check if the shift key is pressed
 						try {
 							const img = event.target as HTMLImageElement;
+
+							// get the image under the cursor
+							const imgUnderCursor = document.elementFromPoint(event.clientX, event.clientY) as HTMLImageElement;
+							// if the image under the cursor is not the same as the event target, return
+							if (img !== imgUnderCursor) return;
+
 							const { newWidth, newHeight } = resizeImageScrollWheel(event, img);
 							img.style.width = `${newWidth}px`;
 							img.style.height = `${newHeight}px`;
@@ -298,7 +253,13 @@ export default class ImageConvertPLugin extends Plugin {
 							const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 							if (activeView) {
 								const imageName = getImageName(img);
-								updateMarkdownLink(activeView, imageName, newWidth, newHeight);
+								if (imageName) { // Check if imageName is not null
+									if (isExternalLink(imageName)) {
+										updateExternalLink(activeView, img, newWidth, newHeight);
+									} else {
+										updateMarkdownLink(activeView, imageName, newWidth, newHeight);
+									}
+								}
 							}
 						} catch (error) {
 							console.error('An error occurred:', error);
@@ -307,6 +268,9 @@ export default class ImageConvertPLugin extends Plugin {
 				}
 			)
 		);
+
+
+
 
 		// Context Menu
 		// Add event listener for contextmenu event on image elements
@@ -319,6 +283,8 @@ export default class ImageConvertPLugin extends Plugin {
 			)
 		);
 
+
+
 		this.addSettingTab(new ImageConvertTab(this.app, this));
 
 	}
@@ -328,6 +294,10 @@ export default class ImageConvertPLugin extends Plugin {
 		// Remove the event listeners when the plugin is unloaded
 		document.removeEventListener('paste', this.pasteListener);
 		document.removeEventListener('drop', this.dropListener);
+		// Remove the mouseover event from the document
+		document.querySelectorAll('img').forEach((img) => {
+			img.removeEventListener('mousemove', this.mouseOverHandler);
+		});
 	}
 
 	onElement(
@@ -637,7 +607,7 @@ export default class ImageConvertPLugin extends Plugin {
 		}
 
 		const originName = file.name;
-		console.log(originName)
+
 		statusBarItemEl.setText('Image converted ✅');
 		statusBarItemEl.setText('');
 
@@ -1108,20 +1078,64 @@ function resizeImageScrollWheel(event: WheelEvent, img: HTMLImageElement) {
 	return { newWidth, newHeight };
 }
 
-function getImageName(img: HTMLImageElement) {
-	let imageName = img.getAttribute('src');
-	if (imageName) {
-		const parts = imageName.split('/');
+
+function getImageName(img: HTMLImageElement): string | null {
+	// Get the image name from an image element: `src`
+	let imageName = img.getAttribute("src");
+	// Check if the image name exists and if it's not an external link
+	if (imageName && !isExternalLink(imageName)) {
+		const parts = imageName.split("/");
 		const lastPart = parts.pop();
 		if (lastPart) {
-			imageName = lastPart.split('?')[0];
-			// decode percent-encoded characters
+			imageName = lastPart.split("?")[0];
 			imageName = decodeURIComponent(imageName);
 		}
 	}
-
 	return imageName;
 }
+function isExternalLink(imageName: string): boolean {
+	// This is a simple check that assumes any link starting with 'http' is an external link.
+	return imageName.startsWith('http');
+}
+function updateExternalLink(activeView: MarkdownView, img: HTMLImageElement, newWidth: number, newHeight: number): void {
+	// Get the current link and alt text
+	const currentLink = img.getAttribute("src");
+	const altText = img.getAttribute("alt");
+	const editor = activeView.editor;
+
+	// Round newWidth to the nearest whole number
+	const longestSide = Math.round(Math.max(newWidth, newHeight));
+
+	// Construct the new markdown with the updated width
+	const newMarkdown = `![${altText}|${longestSide}](${currentLink})`;
+
+	// Get the line number of the current cursor position
+	const lineNumber = editor.getCursor().line;
+
+	// Get the content of the current line
+	const lineContent = editor.getLine(lineNumber);
+
+	// Replace the old markdown with the new one in the current line
+	const updatedLineContent = lineContent.replace(/!\[.*\]\(.*\)/, newMarkdown);
+
+	// Update only the current line in the editor
+	editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
+}
+function resizeImageDrag(event: MouseEvent, img: HTMLImageElement, startX: number, startY: number, startWidth: number, startHeight: number) {
+	const currentX = event.clientX;
+	// const currentY = event.clientY;
+	const aspectRatio = startWidth / startHeight;
+
+	let newWidth = startWidth + (currentX - startX);
+	let newHeight = newWidth / aspectRatio;
+
+	// Ensure the image doesn't get too small
+	newWidth = Math.max(newWidth, 50);
+	newHeight = Math.max(newHeight, 50);
+
+	return { newWidth, newHeight };
+}
+  
 
 function updateMarkdownLink(activeView: MarkdownView, imageName: string | null, newWidth: number, newHeight: number) {
 	const editor = activeView.editor;
