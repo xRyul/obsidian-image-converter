@@ -1362,7 +1362,7 @@ function deleteMarkdownLink(activeView: MarkdownView, imageName: string | null) 
 	let lineIndex: number | undefined;
 	for (let i = 0; i < lineCount; i++) {
 		const line = doc.getLine(i);
-		if (line.includes(`![[${imageName}`) || line.includes(`<img src="${imageName}"`)) {
+		if (line.includes(`![[${imageName}`) || line.includes(`<img`) && line.includes(`src="${imageName}"`)) {
 			lineIndex = i;
 			break;
 		}
@@ -1380,8 +1380,12 @@ function deleteMarkdownLink(activeView: MarkdownView, imageName: string | null) 
 
 		// if it's not a wikilink, check if it's an HTML img tag e.g.: base64 encoded image
 		if (startPos === -1 || endPos === -1) {
-			startPos = line.indexOf(`<img src="${imageName}"`);
-			endPos = line.indexOf('/>', startPos) + 2;	
+			const imgTagRegex = /<img[^>]*src="[^"]*"[^>]*>/;
+			const match = imgTagRegex.exec(line);
+			if (match) {
+				startPos = match.index;
+				endPos = startPos + match[0].length;
+			}
 		}
 
 		// delete the image's markdown link
