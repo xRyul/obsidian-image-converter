@@ -26,6 +26,8 @@ interface ImageConvertSettings {
 	attachmentSpecifiedFolder: string;
 	attachmentSubfolderName: string;
 	resizeMode: string;
+	autoNonDestructiveResize: string,
+	customSize: string,
 	desiredWidth: number;
 	desiredHeight: number;
 	desiredLength: number;
@@ -39,12 +41,14 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	convertToWEBP: true,
 	convertToJPG: false,
 	convertToPNG: false,
-	convertTo: '',
+	convertTo: 'webp',
 	quality: 0.75,
 	attachmentLocation: 'disable',
 	attachmentSpecifiedFolder: '',
 	attachmentSubfolderName: '',
 	resizeMode: 'None',
+	autoNonDestructiveResize: "disabled",
+	customSize: "",
 	desiredWidth: 600,
 	desiredHeight: 800,
 	desiredLength: 800,
@@ -57,7 +61,7 @@ export default class ImageConvertPLugin extends Plugin {
 	settings: ImageConvertSettings;
 
 	// Declare the properties
-	pasteListener: () => void;
+	pasteListener: (event: ClipboardEvent) => void;
 	dropListener: () => void;
 	mouseOverHandler: (event: MouseEvent) => void;
 
@@ -70,11 +74,42 @@ export default class ImageConvertPLugin extends Plugin {
         let userAction = false; 
 		// set to true, then reset back to `false` after 100ms. This way, 'create' event handler should
 		// get triggered only if its an image and if image was created within 100ms of a 'paste/drop' event
-        const pasteListener = () => { userAction = true; setTimeout(() => userAction = false, 100); }; 
-        const dropListener = () => { userAction = true; setTimeout(() => userAction = false, 100); };
-        document.addEventListener('paste', pasteListener);
-        document.addEventListener('drop', dropListener);
+		// also if pasting, check if it is an External Link and wether to apply '| size' syntax to the link
+		this.pasteListener = (event: ClipboardEvent) => {
+			userAction = true;
+			setTimeout(() => userAction = false, 100);
+			// Get the clipboard data as text
+			const clipboardText = event.clipboardData?.getData('Text') || '';
 
+			// Apply custom size on external links: e.g.: | 100
+			// Check if the clipboard data is an external link
+			const linkPattern = /!\[(.*?)\]\((.*?)\)/;
+
+			if (linkPattern.test(clipboardText)) {
+				// Handle the external link
+				const match = clipboardText.match(linkPattern);
+
+				if (match) {
+					const altText = match[1];
+					const currentLink = match[2];
+					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+					if (activeView) {
+						const editor = activeView.editor;
+						const longestSide = this.settings.customSize;
+						const newMarkdown = `![${altText}|${longestSide}](${currentLink})`;
+						const lineNumber = editor.getCursor().line;
+						const lineContent = editor.getLine(lineNumber);
+
+						const updatedLineContent = lineContent.replace(/!\[(.*?)\]\((.*?)\)/, newMarkdown);
+						editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
+					}
+				}
+			}
+		};
+
+		this.dropListener = () => { userAction = true; setTimeout(() => userAction = false, 100); };
+		document.addEventListener("paste", this.pasteListener);
+		document.addEventListener('drop', this.dropListener);
         this.registerEvent(
             this.app.vault.on('create', (file: TFile) => {
                 if (!(file instanceof TFile)) return;
@@ -129,11 +164,19 @@ export default class ImageConvertPLugin extends Plugin {
 								const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 								if (activeView) {
 									const imageName = getImageName(img);
+				
 									if (imageName) { // Check if imageName is not null
+										
 										if (isExternalLink(imageName)) {
+											// console.log("editing external link")
 											updateExternalLink(activeView, img, newWidth, newHeight);
+										} else if (isBase64Image(imageName)) {
+											// console.log("editing base64 image")
+											resizeBase64Drag(activeView, imageName, newWidth)										
 										} else {
+											// console.log("editing internal link")
 											updateMarkdownLink(activeView, imageName, newWidth, newHeight);
+											
 										}
 									}
 								}
@@ -222,10 +265,20 @@ export default class ImageConvertPLugin extends Plugin {
 				"img",
 				(event: MouseEvent) => {
 					const img = event.target as HTMLImageElement;
-					// If the mouse is over a new image and it's an external image, simulate a left click
+					// If the mouse is over a new image and it's an external image, simulate a ==left click==
 					if (img !== lastImg && isExternalLink(img.src)) {
 						img.click();
 						lastImg = img;
+						// const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+						// if (activeView) {
+						// 	const editor = activeView.editor;
+						// 	const cursorPosition = editor.getCursor();
+
+						// 	// Set selection to none
+						// 	editor.setSelection({ line: cursorPosition.line, ch: 0 }, { line: cursorPosition.line, ch: 0 });
+						// 	editor.setCursor({ line: cursorPosition.line, ch: 0 });
+
+						// }
 					}
 				}
 			)
@@ -254,10 +307,17 @@ export default class ImageConvertPLugin extends Plugin {
 							if (activeView) {
 								const imageName = getImageName(img);
 								if (imageName) { // Check if imageName is not null
+										
 									if (isExternalLink(imageName)) {
+										// console.log("editing external link")
 										updateExternalLink(activeView, img, newWidth, newHeight);
+									} else if (isBase64Image(imageName)) {
+										// console.log("editing base64 image")
+										resizeBase64Drag(activeView, imageName, newWidth)										
 									} else {
+										// console.log("editing internal link")
 										updateMarkdownLink(activeView, imageName, newWidth, newHeight);
+										
 									}
 								}
 							}
@@ -268,8 +328,6 @@ export default class ImageConvertPLugin extends Plugin {
 				}
 			)
 		);
-
-
 
 
 		// Context Menu
@@ -283,8 +341,6 @@ export default class ImageConvertPLugin extends Plugin {
 			)
 		);
 
-
-
 		this.addSettingTab(new ImageConvertTab(this.app, this));
 
 	}
@@ -294,9 +350,12 @@ export default class ImageConvertPLugin extends Plugin {
 		// Remove the event listeners when the plugin is unloaded
 		document.removeEventListener('paste', this.pasteListener);
 		document.removeEventListener('drop', this.dropListener);
-		// Remove the mouseover event from the document
-		document.querySelectorAll('img').forEach((img) => {
-			img.removeEventListener('mousemove', this.mouseOverHandler);
+		// Unload border for resizing image
+		document.querySelectorAll("img").forEach((img) => {
+			img.removeEventListener("mousemove", this.mouseOverHandler);
+			// Reset the styles
+			img.style.cursor = "default";
+			img.style.outline = "none";
 		});
 	}
 
@@ -310,7 +369,8 @@ export default class ImageConvertPLugin extends Plugin {
 		el.on(event, selector, listener, options);
 		return () => el.off(event, selector, listener, options);
 	}
-
+	
+	
 	onContextMenu(event: MouseEvent) {
 		// Prevent default context menu from being displayed
 		// event.preventDefault();
@@ -320,7 +380,7 @@ export default class ImageConvertPLugin extends Plugin {
 		}
 		const target = (event.target as Element);
 
-		const img = target as HTMLImageElement;
+		const img = event.target as HTMLImageElement;
 		const rect = img.getBoundingClientRect();
 		const x = event.clientX - rect.left;
 		const y = event.clientY - rect.top;
@@ -336,20 +396,25 @@ export default class ImageConvertPLugin extends Plugin {
 				item
 					.setTitle('Copy Image')
 					.setIcon('copy')
-					.onClick(async () => {
+					.onClick(() => {
 						// Copy original image data to clipboard
-						const img = target as HTMLImageElement;
-						const canvas = document.createElement('canvas');
-						canvas.width = img.naturalWidth;
-						canvas.height = img.naturalHeight;
-						const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
-						ctx.drawImage(img, 0, 0);
-						const dataURL = canvas.toDataURL();
-						const response = await fetch(dataURL);
-						const blob = await response.blob();
-						const item = new ClipboardItem({ [blob.type]: blob });
-						navigator.clipboard.write([item]);
-						new Notice('Image copied to clipboard');
+						const img = new Image();
+						img.crossOrigin = 'anonymous'; // Set crossOrigin to 'anonymous' for copying external images
+						const targetImg = event.target as HTMLImageElement; // Cast target to HTMLImageElement
+						img.onload = async function () {
+							const canvas = document.createElement('canvas');
+							canvas.width = img.naturalWidth;
+							canvas.height = img.naturalHeight;
+							const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+							ctx.drawImage(img, 0, 0);
+							const dataURL = canvas.toDataURL();
+							const response = await fetch(dataURL);
+							const blob = await response.blob();
+							const item = new ClipboardItem({ [blob.type]: blob });
+							await navigator.clipboard.write([item]);
+							new Notice('Image copied to clipboard');
+						};
+						img.src = targetImg.src; // Set src after setting crossOrigin
 					})
 			);
 
@@ -358,20 +423,25 @@ export default class ImageConvertPLugin extends Plugin {
 				item
 					.setTitle('Copy as Base64 encoded image')
 					.setIcon('copy')
-					.onClick(async () => {
+					.onClick(() => {
 						// Copy original image data to clipboard
-						const img = target as HTMLImageElement;
-						const canvas = document.createElement('canvas');
-						canvas.width = img.naturalWidth;
-						canvas.height = img.naturalHeight;
-						const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
-						ctx.drawImage(img, 0, 0);
-						const dataURL = canvas.toDataURL();
-						// Now dataURL can be used or copied to clipboard as needed
-						navigator.clipboard.writeText('<img src="' + dataURL + '"/>');
-						new Notice('Image copied to clipboard');
+						const img = new Image();
+						img.crossOrigin = 'anonymous'; // Set crossOrigin to 'anonymous'
+						const targetImg = event.target as HTMLImageElement; // Cast target to HTMLImageElement
+						img.onload = async function () {
+							const canvas = document.createElement('canvas');
+							canvas.width = img.naturalWidth;
+							canvas.height = img.naturalHeight;
+							const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+							ctx.drawImage(img, 0, 0);
+							const dataURL = canvas.toDataURL();
+							await navigator.clipboard.writeText('<img src="' + dataURL + '"/>');
+							new Notice('Image copied to clipboard');
+						};
+						img.src = targetImg.src; // Set src after setting crossOrigin
 					})
 			);
+
 
 			// Add option to resize image
 			menu.addItem((item: MenuItem) =>
@@ -438,7 +508,6 @@ export default class ImageConvertPLugin extends Plugin {
 										const file = this.app.vault.getAbstractFileByPath(decodedPath);
 										if (file instanceof TFile && isImage(file)) {
 											// Replace the image
-											// deleteImageFromVault(event, this.app);
 											await this.app.vault.modifyBinary(file, buffer);
 											// Refresh the image
 											if (img.src) {
@@ -533,39 +602,80 @@ export default class ImageConvertPLugin extends Plugin {
 			imgBlob = new Blob([outputBuffer], { type: 'image/jpeg' });
 		}
 
-		if (this.settings.convertTo === 'webp') {
-			const arrayBufferWebP = await convertToWebP(
-				imgBlob,
-				Number(this.settings.quality),
-				this.settings.resizeMode,
-				this.settings.desiredWidth,
-				this.settings.desiredHeight,
-				this.settings.desiredLength
-			);
-			await this.app.vault.modifyBinary(file, arrayBufferWebP);
-		} else if (this.settings.convertTo === 'jpg') {
-			const arrayBufferJPG = await convertToJPG(
-				imgBlob,
-				Number(this.settings.quality),
-				this.settings.resizeMode,
-				this.settings.desiredWidth,
-				this.settings.desiredHeight,
-				this.settings.desiredLength
-			);
-			await this.app.vault.modifyBinary(file, arrayBufferJPG);
-		} else if (this.settings.convertTo === 'png') {
-			const arrayBufferPNG = await convertToPNG(
-				imgBlob,
-				Number(this.settings.quality),
-				this.settings.resizeMode,
-				this.settings.desiredWidth,
-				this.settings.desiredHeight,
-				this.settings.desiredLength
-			);
-			await this.app.vault.modifyBinary(file, arrayBufferPNG);
+		if (this.settings.quality !== 1) { // If quality is set to 100, then simply use original image without compression
+			if (this.settings.convertTo === 'webp') {
+				const arrayBufferWebP = await convertToWebP(
+					imgBlob,
+					Number(this.settings.quality),
+					this.settings.resizeMode,
+					this.settings.desiredWidth,
+					this.settings.desiredHeight,
+					this.settings.desiredLength
+				);
+				await this.app.vault.modifyBinary(file, arrayBufferWebP);
+			} else if (this.settings.convertTo === 'jpg') {
+				const arrayBufferJPG = await convertToJPG(
+					imgBlob,
+					Number(this.settings.quality),
+					this.settings.resizeMode,
+					this.settings.desiredWidth,
+					this.settings.desiredHeight,
+					this.settings.desiredLength
+				);
+				await this.app.vault.modifyBinary(file, arrayBufferJPG);
+			} else if (this.settings.convertTo === 'png') {
+				const arrayBufferPNG = await convertToPNG(
+					imgBlob,
+					Number(this.settings.quality),
+					this.settings.resizeMode,
+					this.settings.desiredWidth,
+					this.settings.desiredHeight,
+					this.settings.desiredLength
+				);
+				await this.app.vault.modifyBinary(file, arrayBufferPNG);
+			} else if (this.settings.convertTo === 'disabled') {
+				// Recognize the dropped image's extension and apply compression
+				let arrayBuffer;
+				if (file.extension === 'jpg' || file.extension === 'jpeg') {
+					arrayBuffer = await convertToJPG(
+						imgBlob,
+						Number(this.settings.quality),
+						this.settings.resizeMode,
+						this.settings.desiredWidth,
+						this.settings.desiredHeight,
+						this.settings.desiredLength
+					);
+				} else if (file.extension === 'png') {
+					arrayBuffer = await convertToPNG(
+						imgBlob,
+						Number(this.settings.quality),
+						this.settings.resizeMode,
+						this.settings.desiredWidth,
+						this.settings.desiredHeight,
+						this.settings.desiredLength
+					);
+				} else if (file.extension === 'webp') {
+					arrayBuffer = await convertToWebP(
+						imgBlob,
+						Number(this.settings.quality),
+						this.settings.resizeMode,
+						this.settings.desiredWidth,
+						this.settings.desiredHeight,
+						this.settings.desiredLength
+					);
+				}
+				if (arrayBuffer) {
+					await this.app.vault.modifyBinary(file, arrayBuffer);
+				} else {
+					new Notice('Error: Failed to compress image.');
+				}
+			} else {
+				new Notice('Error: No format selected for conversion.');
+				return;
+			}
 		} else {
-			new Notice('Error: No format selected for conversion.');
-			return;
+			// Bypass conversion and compression, keep original file
+			new Notice('Original file kept without any compression.');
 		}
 
 		let newName = await this.keepOrgName(file, activeFile);
@@ -576,7 +686,7 @@ export default class ImageConvertPLugin extends Plugin {
 	
 		let newPath = '';
 		const getFilename = file.path;
-
+		// console.log(this.app.vault.getConfig("attachmentFolderPath"))
 		switch (this.settings.attachmentLocation) {
 			case 'disable':
 				newPath = getFilename.substring(0, getFilename.lastIndexOf('/'));
@@ -609,6 +719,7 @@ export default class ImageConvertPLugin extends Plugin {
 		const originName = file.name;
 
 		statusBarItemEl.setText('Image converted ✅');
+		new Notice(`Image: ${decodeURIComponent(originName)} converted`);
 		statusBarItemEl.setText('');
 
 		const linkText = this.makeLinkText(file, sourcePath);
@@ -622,7 +733,22 @@ export default class ImageConvertPLugin extends Plugin {
 			throw err;
 		}
 
-		const newLinkText = this.makeLinkText(file, sourcePath);
+		let newLinkText = this.makeLinkText(file, sourcePath);
+
+		// Add the size to the markdown link
+		if (this.settings.autoNonDestructiveResize === "customSize") {
+			const size = this.settings.customSize;
+			if (newLinkText.startsWith('![[')) {
+			// This is an internal link
+			newLinkText = newLinkText.replace(']]', `|${size}]]`);
+			} 
+			// else if (newLinkText.startsWith('![')) {
+			//   // This is an external link
+			//   newLinkText = newLinkText.replace(']', `|${size}]`);
+			// }
+		}
+
+
 		const editor = this.getActiveEditor(sourcePath);
 		if (!editor) {
 			new Notice(`Failed to rename ${newName}: no active editor`);
@@ -641,8 +767,10 @@ export default class ImageConvertPLugin extends Plugin {
 			],
 		});
 
-		new Notice(`Renamed ${decodeURIComponent(originName)} to ${decodeURIComponent(newName)}`);
-
+		// Do not show renamed from -> to notice if auto-renaming is disabled 
+		if (this.settings.autoRename === true) {
+			new Notice(`Renamed ${decodeURIComponent(originName)} to ${decodeURIComponent(newName)}`);
+		}
 	}
 
 	makeLinkText(file: TFile, sourcePath: string, subpath?: string): string {
@@ -652,7 +780,7 @@ export default class ImageConvertPLugin extends Plugin {
 	async generateNewName(file: TFile, activeFile: TFile): Promise<string> {
 		const newName = activeFile.basename + '-' + new Date().toISOString().replace(/[-:T.Z]/g, '');
 		let extension = file.extension;
-		if (this.settings.convertTo) {
+		if (this.settings.convertTo && this.settings.convertTo !== 'disabled') {
 			extension = this.settings.convertTo;
 		}
 		return `${newName}.${extension}`;
@@ -661,13 +789,13 @@ export default class ImageConvertPLugin extends Plugin {
 	async keepOrgName(file: TFile, activeFile: TFile): Promise<string> {
 		let newName = file.basename;
 		let extension = file.extension;
-		if (this.settings.convertTo) {
+		if (this.settings.convertTo && this.settings.convertTo !== 'disabled') {
 			extension = this.settings.convertTo;
 		}
-
+	
 		// Encode or decode special characters in the file name
 		newName = encodeURIComponent(newName);
-
+	
 		return `${newName}.${extension}`;
 	}
 
@@ -749,7 +877,7 @@ function convertToWebP(file: Blob, quality: number, resizeMode: string, desiredW
 							imageHeight = imageWidth / aspectRatio;
 						}
 						break;
-					case 'LongestSide':
+					case 'LongestEdge':
 						if (image.naturalWidth > image.naturalHeight) {
 							imageWidth = desiredLength;
 							imageHeight = imageWidth / aspectRatio;
@@ -758,7 +886,7 @@ function convertToWebP(file: Blob, quality: number, resizeMode: string, desiredW
 							imageWidth = imageHeight * aspectRatio;
 						}
 						break;
-					case 'ShortestSide':
+					case 'ShortestEdge':
 						if (image.naturalWidth < image.naturalHeight) {
 							imageWidth = desiredLength;
 							imageHeight = imageWidth / aspectRatio;
@@ -854,7 +982,7 @@ function convertToJPG(imgBlob: Blob, quality: number, resizeMode: string, desire
 							imageHeight = imageWidth / aspectRatio;
 						}
 						break;
-					case 'LongestSide':
+					case 'LongestEdge':
 						if (image.naturalWidth > image.naturalHeight) {
 							imageWidth = desiredLength;
 							imageHeight = imageWidth / aspectRatio;
@@ -863,7 +991,7 @@ function convertToJPG(imgBlob: Blob, quality: number, resizeMode: string, desire
 							imageWidth = imageHeight * aspectRatio;
 						}
 						break;
-					case 'ShortestSide':
+					case 'ShortestEdge':
 						if (image.naturalWidth < image.naturalHeight) {
 							imageWidth = desiredLength;
 							imageHeight = imageWidth / aspectRatio;
@@ -958,7 +1086,7 @@ function convertToPNG(imgBlob: Blob, colorDepth: number, resizeMode: string, des
 							imageHeight = imageWidth / aspectRatio;
 						}
 						break;
-					case 'LongestSide':
+					case 'LongestEdge':
 						if (image.naturalWidth > image.naturalHeight) {
 							imageWidth = desiredLength;
 							imageHeight = imageWidth / aspectRatio;
@@ -967,7 +1095,7 @@ function convertToPNG(imgBlob: Blob, colorDepth: number, resizeMode: string, des
 							imageWidth = imageHeight * aspectRatio;
 						}
 						break;
-					case 'ShortestSide':
+					case 'ShortestEdge':
 						if (image.naturalWidth < image.naturalHeight) {
 							imageWidth = desiredLength;
 							imageHeight = imageWidth / aspectRatio;
@@ -1075,23 +1203,39 @@ function resizeImageScrollWheel(event: WheelEvent, img: HTMLImageElement) {
 		newHeight = img.clientHeight / scaleFactor;
 	}
 
+	// Round the values to the nearest whole number
+	newWidth = Math.round(newWidth);
+	newHeight = Math.round(newHeight);
+
 	return { newWidth, newHeight };
 }
 
+function isBase64Image(src:any) {
+    // Check if src starts with 'data:image'
+    return src.startsWith('data:image');
+}
 
 function getImageName(img: HTMLImageElement): string | null {
-	// Get the image name from an image element: `src`
-	let imageName = img.getAttribute("src");
-	// Check if the image name exists and if it's not an external link
-	if (imageName && !isExternalLink(imageName)) {
-		const parts = imageName.split("/");
-		const lastPart = parts.pop();
-		if (lastPart) {
-			imageName = lastPart.split("?")[0];
-			imageName = decodeURIComponent(imageName);
-		}
-	}
-	return imageName;
+    // Get the image name from an image element: `src`
+    let imageName = img.getAttribute("src");
+    
+    // Check if the image name exists
+    if (imageName) {
+        // Check if the image is a base64 image
+        if (isBase64Image(imageName)) {
+            // If it's a base64 image, return the entire `src` attribute
+            return imageName;
+        } else if (!isExternalLink(imageName)) {
+            // If it's not an external link, extract the file name
+            const parts = imageName.split("/");
+            const lastPart = parts.pop();
+            if (lastPart) {
+                imageName = lastPart.split("?")[0];
+                imageName = decodeURIComponent(imageName);
+            }
+        }
+    }
+    return imageName;
 }
 function isExternalLink(imageName: string): boolean {
 	// This is a simple check that assumes any link starting with 'http' is an external link.
@@ -1133,10 +1277,12 @@ function resizeImageDrag(event: MouseEvent, img: HTMLImageElement, startX: numbe
 	newWidth = Math.max(newWidth, 50);
 	newHeight = Math.max(newHeight, 50);
 
+	// Round the values to the nearest whole number
+	newWidth = Math.round(newWidth);
+	newHeight = Math.round(newHeight);
+
 	return { newWidth, newHeight };
 }
-  
-
 function updateMarkdownLink(activeView: MarkdownView, imageName: string | null, newWidth: number, newHeight: number) {
 	const editor = activeView.editor;
 	const doc = editor.getDoc();
@@ -1167,6 +1313,43 @@ function updateMarkdownLink(activeView: MarkdownView, imageName: string | null, 
 		if (startPos !== -1 && endPos !== -1) {
 			editor.replaceRange(`![[${imageName}|${longestSide}]]`, { line: cursor.line, ch: startPos }, { line: cursor.line, ch: endPos });
 		}
+	}
+}
+function resizeBase64Drag(activeView: MarkdownView, imageName: string | null, newWidth: number) {
+	// When the user starts resizing the image, find and store the line number of the image
+	// Get the current line content
+	
+	const editor = activeView.editor;
+	const doc = editor.getDoc();
+	const lineCount = doc.lineCount();
+	let imageLine: number | null = null; 
+
+	if (imageName !== null) {
+		for (let i = 0; i < lineCount; i++) {
+			const line = doc.getLine(i);
+			if (line.includes(imageName)) {
+				imageLine = i;
+				break;
+			}
+		}
+	}
+
+	const lineNumber = imageLine;
+	if (lineNumber !== null) {
+		const lineContent = editor.getLine(lineNumber);
+		// Construct a new width attribute
+		const newWidthAttribute = `width="${newWidth}"`;
+
+		// Replace the old img tag with the new one in the current line
+		let updatedLineContent = lineContent.replace(/width="[^"]*"/, newWidthAttribute);
+
+		// If there was no width attribute in the original tag, add it to the new tag
+		if (!updatedLineContent.includes(newWidthAttribute)) {
+			updatedLineContent = updatedLineContent.replace('<img ', `<img ${newWidthAttribute} `);
+		}
+
+		// Update only the current line in the editor
+		editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
 	}
 }
 
@@ -1209,88 +1392,98 @@ function deleteMarkdownLink(activeView: MarkdownView, imageName: string | null) 
 }
 
 async function deleteImageFromVault(event: MouseEvent, app: any) {
-    // Get the image element and its src attribute
-    const img = event.target as HTMLImageElement;
-    const src = img.getAttribute('src');
-    if (src) {
-        // Check if the src is a Base64 encoded image
-        if (src.startsWith('data:image')) {
-            // Handle Base64 encoded image
-            // Delete the image element from the DOM
-            img.parentNode?.removeChild(img);
-            // Delete the link
-            const activeView = app.workspace.getActiveViewOfType(MarkdownView);
-            if (activeView) {
-                deleteMarkdownLink(activeView, src);
-            }
-            new Notice('Base64 encoded image deleted from the note');
-        } else {
-            // Delete image
-            // Get Vault Name
-            const rootFolder = app.vault.getName();
-            const activeView = app.workspace.getActiveViewOfType(MarkdownView);
-			
-            if (activeView) {
-                // Grab full path of an src, it will return full path including Drive letter etc.
-                // thus we need to get rid of anything what is not part of the vault
-                let imagePath = img.getAttribute('src');
-                if (imagePath) {
+	// Get the image element and its src attribute
+	const img = event.target as HTMLImageElement;
+	const src = img.getAttribute('src');
+	if (src) {
+		// Check if the src is a Base64 encoded image
+		if (src.startsWith('data:image')) {
+			// Handle Base64 encoded image
+			// Delete the image element from the DOM
+			img.parentNode?.removeChild(img);
+			// Delete the link
+			const activeView = app.workspace.getActiveViewOfType(MarkdownView);
+			if (activeView) {
+				deleteMarkdownLink(activeView, src);
+			}
+			new Notice('Base64 encoded image deleted from the note');
+		} else if (src.startsWith('http') || src.startsWith('https')) {
+			// Handle external image link
+			// Delete the image element from the DOM
+			img.parentNode?.removeChild(img);
+			// Delete the link
+			const activeView = app.workspace.getActiveViewOfType(MarkdownView);
+			if (activeView) {
+				deleteMarkdownLink(activeView, src);
+			}
+			new Notice('External image link deleted from the note');
+		} else {
+			// Delete image
+			// Get Vault Name
+			const rootFolder = app.vault.getName();
+			const activeView = app.workspace.getActiveViewOfType(MarkdownView);
+
+			if (activeView) {
+				// Grab full path of an src, it will return full path including Drive letter etc.
+				// thus we need to get rid of anything what is not part of the vault
+				let imagePath = img.getAttribute('src');
+				if (imagePath) {
 					// Decode the URL for cases where vault name might have spaces
 					imagePath = decodeURIComponent(imagePath);
-                    // Find the position of the root folder in the path
-                    const rootFolderIndex = imagePath.indexOf(rootFolder);
+					// Find the position of the root folder in the path
+					const rootFolderIndex = imagePath.indexOf(rootFolder);
 
-                    // Remove everything before the root folder
-                    if (rootFolderIndex !== -1) {
-                        imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
-                    }
+					// Remove everything before the root folder
+					if (rootFolderIndex !== -1) {
+						imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
+					}
 
-                    // Remove the query string
-                    imagePath = imagePath.split('?')[0];
-                    // Decode percent-encoded characters
-                    const decodedPath = decodeURIComponent(imagePath);
-					
-                    const file = app.vault.getAbstractFileByPath(decodedPath);
-                    if (file instanceof TFile && isImage(file)) {
-                        // Delete the image
-                        await app.vault.delete(file);
-                        // Delete the link
-                        deleteMarkdownLink(activeView, file.basename);
-                        new Notice(`Image: ${file.basename} deleted from: ${file.path}`);
-                    }
-                }
-            } else {
+					// Remove the query string
+					imagePath = imagePath.split('?')[0];
+					// Decode percent-encoded characters
+					const decodedPath = decodeURIComponent(imagePath);
+
+					const file = app.vault.getAbstractFileByPath(decodedPath);
+					if (file instanceof TFile && isImage(file)) {
+						// Delete the image
+						await app.vault.delete(file);
+						// Delete the link
+						deleteMarkdownLink(activeView, file.basename);
+						new Notice(`Image: ${file.basename} deleted from: ${file.path}`);
+					}
+				}
+			} else {
 				// ELSE image is not in the note.
 				// Grab full path of an src, it will return full path including Drive letter etc.
-                // thus we need to get rid of anything what is not part of the vault
-                let imagePath = img.getAttribute('src');
-                if (imagePath) {
+				// thus we need to get rid of anything what is not part of the vault
+				let imagePath = img.getAttribute('src');
+				if (imagePath) {
 					// Decode the URL for cases where vault name might have spaces
 					imagePath = decodeURIComponent(imagePath);
-                    // Find the position of the root folder in the path
-                    const rootFolderIndex = imagePath.indexOf(rootFolder);
+					// Find the position of the root folder in the path
+					const rootFolderIndex = imagePath.indexOf(rootFolder);
 
-                    // Remove everything before the root folder
-                    if (rootFolderIndex !== -1) {
-                        imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
-                    }
+					// Remove everything before the root folder
+					if (rootFolderIndex !== -1) {
+						imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
+					}
 
-                    // Remove the query string
-                    imagePath = imagePath.split('?')[0];
-                    // Decode percent-encoded characters
-                    const decodedPath = decodeURIComponent(imagePath);
-					
-                    const file = app.vault.getAbstractFileByPath(decodedPath);
-                    if (file instanceof TFile && isImage(file)) {
-                        // Delete the image
-                        await app.vault.delete(file);
+					// Remove the query string
+					imagePath = imagePath.split('?')[0];
+					// Decode percent-encoded characters
+					const decodedPath = decodeURIComponent(imagePath);
 
-                        new Notice(`Image: ${file.basename} deleted from: ${file.path}`);
-                    }
-                }
+					const file = app.vault.getAbstractFileByPath(decodedPath);
+					if (file instanceof TFile && isImage(file)) {
+						// Delete the image
+						await app.vault.delete(file);
+
+						new Notice(`Image: ${file.basename} deleted from: ${file.path}`);
+					}
+				}
 			}
-        }
-    }
+		}
+	}
 }
 
 
@@ -1311,10 +1504,10 @@ class ImageConvertTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Select format to convert images to')
-			.setDesc(`Turn this on to allow image conversion and compression on drag'n'drop or paste.`)
+			.setDesc(`Turn this on to allow image conversion and compression on drag'n'drop or paste. "Same as original" - will keep original file format.`)
 			.addDropdown(dropdown =>
 				dropdown
-					.addOptions({ webp: 'WebP', jpg: 'JPG', png: 'PNG' })
+					.addOptions({ disabled: 'Same as original', webp: 'WebP', jpg: 'JPG', png: 'PNG' })
 					.setValue(this.plugin.settings.convertTo)
 					.onChange(async value => {
 						this.plugin.settings.convertTo = value;
@@ -1324,7 +1517,7 @@ class ImageConvertTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Quality')
-			.setDesc('0 - low quality, 100 - high quality, 75 - Recommended')
+			.setDesc('0 - low quality, 99 - high quality, 100 - no compression; 75 - Recommended')
 			.addText(text =>
 				text
 					.setPlaceholder('Enter quality (0-100)')
@@ -1344,7 +1537,7 @@ class ImageConvertTab extends PluginSettingTab {
 			.setDesc('The mode to use when resizing the image')
 			.addDropdown(dropdown =>
 				dropdown
-					.addOptions({ None: 'None', Fit: 'Fit', Fill: 'Fill', LongestSide: 'Longest Side', ShortestSide: 'Shortest Side', Width: 'Width', Height: 'Height' })
+					.addOptions({ None: 'None', Fit: 'Fit', Fill: 'Fill', LongestEdge: 'Longest Edge', ShortestEdge: 'Shortest Edge', Width: 'Width', Height: 'Height' })
 					.setValue(this.plugin.settings.resizeMode)
 					.onChange(async value => {
 						this.plugin.settings.resizeMode = value;
@@ -1374,32 +1567,118 @@ class ImageConvertTab extends PluginSettingTab {
 
 
 		// Define the dropdown setting for attachment location
+		// Update outputSetting name and description
+		const updateOutputSetting = (value:string) => {
+			if (value === "specified") {
+				outputSetting.setName("Path to specific folder:");
+				outputSetting.setDesc('If you specify folder path as "/attachments/images" then all processed images will be saved inside "/attachments/images/" folder. If any of the folders do not exist, they will be created.');
+			} else if (value === "subfolder") {
+				outputSetting.setName("Subfolder name:");
+				outputSetting.setDesc('Add processed images to a specified folder next to the note you added the image to.  If any of the folders do not exist, they will be created. For example, if your note is located in "00-HOME/Subfolder1/note.md", and I specify that i want to keep all images inside "images" subfolder, then the image will be saved in "00-HOME/Subfolder1/images/."');
+			}
+		};
+
+		// Create the dropdown
 		new Setting(this.containerEl)
 			.setName("Output")
 			.setDesc("Select where to save converted images. Default - follow rules as defined by Obsidian in 'File & Links' > 'Default location for new attachments'")
 			.addDropdown((dropdown) => {
 				dropdown.addOption("disable", "Default")
 					.addOption("root", "Root folder")
-					.addOption("specified", "In the folder specified below [Beta]")
-					.addOption("current", "Same folder as current file [Beta]")
+					.addOption("specified", "In the folder specified below")
+					.addOption("current", "Same folder as current file")
 					.addOption("subfolder", "In subfolder under current folder [Beta]")
 					.setValue(this.plugin.settings.attachmentLocation)
 					.onChange(async (value) => {
 						this.plugin.settings.attachmentLocation = value;
-						if (value === "specified" || value === "subfolder") {
-							const modal = new FolderInputModal(this.app, this.plugin, value);
-							modal.open();
-						}
+						updateOutputSetting(value);
+						outputSetting.settingEl.style.display = value === "specified" || value === "subfolder" ? 'flex' : 'none';
 						await this.plugin.saveSettings();
 					});
 			});
 
+		const outputSetting = new Setting(this.containerEl)
+			.addText((text) => {
+				let value = "/";
+				if (this.plugin.settings.attachmentLocation === "specified" && this.plugin.settings.attachmentSpecifiedFolder) {
+					value = this.plugin.settings.attachmentSpecifiedFolder.toString();
+				} else if (this.plugin.settings.attachmentLocation === "subfolder" && this.plugin.settings.attachmentSubfolderName) {
+					value = this.plugin.settings.attachmentSubfolderName.toString();
+				}
+				text.setValue(value);
+				text.onChange(async (value) => {
+					if (this.plugin.settings.attachmentLocation === "specified") {
+						this.plugin.settings.attachmentSpecifiedFolder = value;
+					} else if (this.plugin.settings.attachmentLocation === "subfolder") {
+						this.plugin.settings.attachmentSubfolderName = value;
+					}
+					await this.plugin.saveSettings();
+				});
+			});
 
-		const heading2 = containerEl.createEl('h2');
-		heading2.textContent = 'Non-Destructive Image Resizing:';
-		const p = containerEl.createEl('p');
-		p.textContent = 'Below two settings allow you to adjust image dimensions using the standard ObsidianMD method by modifying image links. For instance, to change the width of ![[Engelbart.jpg]], we add "| 100" at the end, resulting in ![[Engelbart.jpg | 100]].';
-		p.style.fontSize = '12px'; // Adjust the font size as needed
+		// Initially hide the output setting
+		outputSetting.settingEl.style.display = 'none';
+
+		// If the dropdown is already set to "specified" or "subfolder", show the output setting
+		if (this.plugin.settings.attachmentLocation === "specified" || this.plugin.settings.attachmentLocation === "subfolder") {
+			outputSetting.settingEl.style.display = 'flex';
+			updateOutputSetting(this.plugin.settings.attachmentLocation);
+		}
+
+
+
+
+		/////////////////////////////////////////////
+		new Setting(containerEl)
+			.setName("Non-destructive resize:")
+			.setDesc(`Automatically apply "|size" to dropped/pasted images.`)
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOptions({ disabled: "None", customSize: "Custom" })
+					.setValue(this.plugin.settings.autoNonDestructiveResize)
+					.onChange(async (value) => {
+						this.plugin.settings.autoNonDestructiveResize = value;
+						await this.plugin.saveSettings();
+						if (value === "customSize") {
+							// If "customSize" is selected, show the "Custom size" field
+							customSizeSetting.settingEl.style.display = 'flex';
+							label.style.display = 'flex';
+						} else {
+							// If "customSize" is not selected, hide the "Custom size" field
+							customSizeSetting.settingEl.style.display = 'none';
+							// hide the label
+							label.style.display = 'none'; 
+						}
+					})
+			);
+
+		const customSizeContainer = containerEl.createEl('div');
+		customSizeContainer.style.display = 'flex';
+		customSizeContainer.style.alignItems = 'center';
+		customSizeContainer.style.justifyContent = 'space-between';
+
+		const label = customSizeContainer.createEl('span');
+		label.textContent = 'Size:';
+		label.style.display = 'none';
+
+		const customSizeSetting = new Setting(customSizeContainer)
+			.addText((text) => {
+				text.setValue(this.plugin.settings.customSize.toString());
+				text.onChange(async (value) => {
+					this.plugin.settings.customSize = value;
+					await this.plugin.saveSettings();
+				});
+			});
+
+		// Initially hide the custom size setting
+		customSizeSetting.settingEl.style.display = 'none';
+		// customSizeSetting.settingEl.style.marginTop = '-10px';
+		// If the dropdown is already set to "custom size", show the custom size setting
+		if (this.plugin.settings.autoNonDestructiveResize === "customSize") {
+			customSizeSetting.settingEl.style.display = 'flex';
+			label.style.display = 'flex';
+		}
+		/////////////////////////////////////////////
 
 		new Setting(containerEl)
 			.setName('Resize by dragging edge of an image')
@@ -1460,11 +1739,11 @@ class ResizeModal extends Modal {
 			case 'Fill':
 				explanation = 'Fill mode resizes the image to fill the desired dimensions while maintaining the aspect ratio of the image. This may result in cropping of the image.';
 				break;
-			case 'LongestSide':
-				explanation = 'Longest Side mode resizes the longest side of the image to match the desired length while maintaining the aspect ratio of the image.';
+			case 'LongestEdge':
+				explanation = 'Longest Edge mode resizes the longest side of the image to match the desired length while maintaining the aspect ratio of the image.';
 				break;
-			case 'ShortestSide':
-				explanation = 'Shortest Side mode resizes the shortest side of the image to match the desired length while maintaining the aspect ratio of the image.';
+			case 'ShortestEdge':
+				explanation = 'Shortest Edge mode resizes the shortest side of the image to match the desired length while maintaining the aspect ratio of the image.';
 				break;
 			case 'Width':
 				explanation = 'Width mode resizes the width of the image to match the desired width while maintaining the aspect ratio of the image.';
@@ -1506,7 +1785,7 @@ class ResizeModal extends Modal {
 			const lengthInput = new TextComponent(contentEl)
 				.setPlaceholder('Enter desired length in pixels')
 				.setValue(
-					['LongestSide', 'ShortestSide', 'Width', 'Height'].includes(this.plugin.settings.resizeMode)
+					['LongestEdge', 'ShortestEdge', 'Width', 'Height'].includes(this.plugin.settings.resizeMode)
 						? this.plugin.settings.desiredWidth.toString()
 						: this.plugin.settings.desiredHeight.toString()
 				);
@@ -1517,11 +1796,11 @@ class ResizeModal extends Modal {
 				.onClick(async () => {
 					const length = parseInt(lengthInput.getValue());
 					if (/^\d+$/.test(lengthInput.getValue()) && length > 0) {
-						if (['LongestSide'].includes(this.plugin.settings.resizeMode)) {
+						if (['LongestEdge'].includes(this.plugin.settings.resizeMode)) {
 							this.plugin.settings.desiredLength = length;
 						}
 
-						if (['ShortestSide'].includes(this.plugin.settings.resizeMode)) {
+						if (['ShortestEdge'].includes(this.plugin.settings.resizeMode)) {
 							this.plugin.settings.desiredLength = length;
 						}
 
@@ -1602,48 +1881,5 @@ class ResizeImageModal extends Modal {
 	onClose() {
 		const { contentEl } = this;
 		contentEl.empty();
-	}
-}
-
-class FolderInputModal extends Modal {
-	plugin: ImageConvertPLugin;
-	type: string;
-
-	constructor(app: App, plugin: ImageConvertPLugin, type: string) {
-		super(app);
-		this.plugin = plugin;
-		this.type = type;
-	}
-
-	onOpen() {
-		const { contentEl } = this;
-
-		const div = document.createElement('div');
-		div.textContent = `Enter ${this.type} name:  `;
-
-		const input = document.createElement('input');
-		input.type = 'text';
-		// Set the input's value to the current setting
-		if (this.type === "specified") {
-			input.value = this.plugin.settings.attachmentSpecifiedFolder;
-		} else if (this.type === "subfolder") {
-			input.value = this.plugin.settings.attachmentSubfolderName;
-		}
-
-		input.onchange = async (event) => {
-			const target = event.target as HTMLInputElement;
-			if (target) {
-				if (this.type === "specified") {
-					this.plugin.settings.attachmentSpecifiedFolder = target.value;
-				} else if (this.type === "subfolder") {
-					this.plugin.settings.attachmentSubfolderName = target.value;
-				}
-				await this.plugin.saveData(this.plugin.settings);
-				this.close();
-			}
-		};
-
-		div.appendChild(input);
-		contentEl.appendChild(div);
 	}
 }
