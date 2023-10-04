@@ -54,7 +54,7 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	desiredLength: 800,
 	resizeByDragging: true,
 	resizeWithShiftScrollwheel: true,
-	rightClickContextMenu: false
+	rightClickContextMenu: true
 }
 
 export default class ImageConvertPLugin extends Plugin {
