@@ -375,7 +375,7 @@ export default class ImageConvertPLugin extends Plugin {
 		// Prevent default context menu from being displayed
 		// event.preventDefault();
 		// If the 'Disable right-click context menu' setting is enabled, return immediately
-		if (this.settings.rightClickContextMenu) {
+		if (!this.settings.rightClickContextMenu) {
 			return;
 		}
 		const target = (event.target as Element);
@@ -1521,7 +1521,7 @@ class ImageConvertTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Quality')
-			.setDesc('0 - low quality, 99 - high quality, 100 - no compression; 75 - Recommended')
+			.setDesc('0 - low quality, 99 - high quality, 100 - no compression; 75 - recommended')
 			.addText(text =>
 				text
 					.setPlaceholder('Enter quality (0-100)')
@@ -1538,7 +1538,7 @@ class ImageConvertTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Image resize mode')
-			.setDesc('The mode to use when resizing the image')
+			.setDesc('Select the mode to use when resizing the image. Resizing an image will further reduce file-size, but it will resize your actual file, which means that the original file will be modified, and the changes will be permanent.')
 			.addDropdown(dropdown =>
 				dropdown
 					.addOptions({ None: 'None', Fit: 'Fit', Fill: 'Fill', LongestEdge: 'Longest Edge', ShortestEdge: 'Shortest Edge', Width: 'Width', Height: 'Height' })
@@ -1569,8 +1569,7 @@ class ImageConvertTab extends PluginSettingTab {
 					})
 			);
 
-
-		// Define the dropdown setting for attachment location
+		// OUTPUT
 		// Update outputSetting name and description
 		const updateOutputSetting = (value:string) => {
 			if (value === "specified") {
@@ -1629,10 +1628,26 @@ class ImageConvertTab extends PluginSettingTab {
 			updateOutputSetting(this.plugin.settings.attachmentLocation);
 		}
 
-
-
+		/////////////////////////////////////////////
+		
+		const heading2 = containerEl.createEl("h2");
+		heading2.textContent = "Non-Destructive Image Resizing:";
+		const p = containerEl.createEl("p");
+		p.textContent = 'Below settings allow you to adjust image dimensions using the standard ObsidianMD method by modifying image links. For instance, to change the width of ![[Engelbart.jpg]], we add "| 100" at the end, resulting in ![[Engelbart.jpg | 100]].';
+		p.style.fontSize = "12px";
 
 		/////////////////////////////////////////////
+		// Create a function to update the custom size setting
+		const updateCustomSizeSetting = (value: string) => {
+			if (value === "customSize") {
+				// If "customSize" is selected, show the "Custom size" field
+				customSizeSetting.settingEl.style.display = 'flex';
+			} else {
+				// If "customSize" is not selected, hide the "Custom size" field
+				customSizeSetting.settingEl.style.display = 'none';
+			}
+		};
+
 		new Setting(containerEl)
 			.setName("Non-destructive resize:")
 			.setDesc(`Automatically apply "|size" to dropped/pasted images.`)
@@ -1643,29 +1658,13 @@ class ImageConvertTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.autoNonDestructiveResize = value;
 						await this.plugin.saveSettings();
-						if (value === "customSize") {
-							// If "customSize" is selected, show the "Custom size" field
-							customSizeSetting.settingEl.style.display = 'flex';
-							label.style.display = 'flex';
-						} else {
-							// If "customSize" is not selected, hide the "Custom size" field
-							customSizeSetting.settingEl.style.display = 'none';
-							// hide the label
-							label.style.display = 'none'; 
-						}
+						updateCustomSizeSetting(value);
 					})
 			);
 
-		const customSizeContainer = containerEl.createEl('div');
-		customSizeContainer.style.display = 'flex';
-		customSizeContainer.style.alignItems = 'center';
-		customSizeContainer.style.justifyContent = 'space-between';
-
-		const label = customSizeContainer.createEl('span');
-		label.textContent = 'Size:';
-		label.style.display = 'none';
-
-		const customSizeSetting = new Setting(customSizeContainer)
+		const customSizeSetting = new Setting(containerEl)
+			.setName('Custom Size:')
+			.setDesc(`Specify the default size which should be applied on all dropped/pasted images. For example, if you specify custom size as "250" then when you drop or paste an "image.jpg" it would become ![[image.jpg|250]]`)
 			.addText((text) => {
 				text.setValue(this.plugin.settings.customSize.toString());
 				text.onChange(async (value) => {
@@ -1675,13 +1674,8 @@ class ImageConvertTab extends PluginSettingTab {
 			});
 
 		// Initially hide the custom size setting
-		customSizeSetting.settingEl.style.display = 'none';
-		// customSizeSetting.settingEl.style.marginTop = '-10px';
-		// If the dropdown is already set to "custom size", show the custom size setting
-		if (this.plugin.settings.autoNonDestructiveResize === "customSize") {
-			customSizeSetting.settingEl.style.display = 'flex';
-			label.style.display = 'flex';
-		}
+		updateCustomSizeSetting(this.plugin.settings.autoNonDestructiveResize);
+
 		/////////////////////////////////////////////
 
 		new Setting(containerEl)
@@ -1709,15 +1703,16 @@ class ImageConvertTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-		.setName('Disable right-click context menu')
-		.addToggle(toggle =>
-			toggle
-				.setValue(this.plugin.settings.rightClickContextMenu)
-				.onChange(async value => {
-					this.plugin.settings.rightClickContextMenu = value;
-					await this.plugin.saveSettings();
-				})
-		);
+			.setName('Right-click context menu')
+			.setDesc('Toggle to enable or disable right-click context menu')
+			.addToggle(toggle =>
+				toggle
+					.setValue(this.plugin.settings.rightClickContextMenu)
+					.onChange(async value => {
+						this.plugin.settings.rightClickContextMenu = value;
+						await this.plugin.saveSettings();
+					})
+			);
 
 	}
 }
