@@ -22,6 +22,12 @@ interface ImageConvertSettings {
 	convertToPNG: boolean;
 	convertTo: string;
 	quality: number;
+	ProcessAllVaultconvertTo: string;
+	ProcessAllVaultquality: number;
+	ProcessAllVaultresizeMode: string;
+	ProcessCurrentNoteconvertTo: string;
+	ProcessCurrentNotequality: number;
+	ProcessCurrentNoteresizeMode: string;
 	attachmentLocation: string;
 	attachmentSpecifiedFolder: string;
 	attachmentSubfolderName: string;
@@ -43,6 +49,12 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	convertToPNG: false,
 	convertTo: 'webp',
 	quality: 0.75,
+	ProcessAllVaultconvertTo: 'webp',
+	ProcessAllVaultquality: 0.75,
+	ProcessAllVaultresizeMode: 'None',
+	ProcessCurrentNoteconvertTo: 'webp',
+	ProcessCurrentNotequality: 0.75,
+	ProcessCurrentNoteresizeMode: 'None',
 	attachmentLocation: 'disable',
 	attachmentSpecifiedFolder: '',
 	attachmentSubfolderName: '',
@@ -114,12 +126,11 @@ export default class ImageConvertPLugin extends Plugin {
             this.app.vault.on('create', (file: TFile) => {
                 if (!(file instanceof TFile)) return;
                 if (isImage(file) && userAction) {
-                    this.renameFile(file);
+                    this.renameFile1(file);
                 }
                 userAction = false;
             })
         );
-
 
 		// Check if edge of an image was clicked upon
 		this.register(
@@ -250,8 +261,6 @@ export default class ImageConvertPLugin extends Plugin {
 			)
 		);
 
-
-
 		// Allow resizing with SHIFT + Scrollwheel
 		let lastImg: HTMLImageElement | null = null;
 		// Initiate a single-click when hover over more than 1 external image.
@@ -343,6 +352,39 @@ export default class ImageConvertPLugin extends Plugin {
 
 		this.addSettingTab(new ImageConvertTab(this.app, this));
 
+		// Add a command to process all images in the vault
+		this.addCommand({
+			id: 'process-all-vault-images',
+			name: 'Process all vault images',
+			callback: () => {
+				const modal = new ProcessAllVault(this);
+				modal.open();
+			}
+		});
+
+		// Add a command to process all images in the current note
+		this.addCommand({
+			id: 'process-all-images-current-note',
+			name: 'Process all images in the current note',
+			callback: () => {
+				const modal = new ProcessCurrentNote(this);
+				modal.open();
+			}
+		});
+		this.registerEvent(
+			this.app.workspace.on("file-menu", (menu, file) => {
+				menu.addItem((item) => {
+					item
+						.setTitle("Process all images in the current note")
+						.setIcon("cog")
+						.onClick(async () => {
+							const modal = new ProcessCurrentNote(this);
+							modal.open();
+						});
+				});
+			})
+		);
+
 	}
 
 	async onunload() {
@@ -369,7 +411,6 @@ export default class ImageConvertPLugin extends Plugin {
 		el.on(event, selector, listener, options);
 		return () => el.off(event, selector, listener, options);
 	}
-	
 	
 	onContextMenu(event: MouseEvent) {
 		// Prevent default context menu from being displayed
@@ -541,7 +582,7 @@ export default class ImageConvertPLugin extends Plugin {
 
 	}
 
-	async renameFile(file: TFile) {
+	async renameFile1(file: TFile) { // 1 added to the naming to differentitate from defualt obsidian renameFile func
 		const activeFile = this.getActiveFile();
 
 		if (!activeFile) {
@@ -773,10 +814,380 @@ export default class ImageConvertPLugin extends Plugin {
 		}
 	}
 
+	//Process All Vault
+	async processAllVaultImages() {
+		const files = this.app.vault.getFiles();
+		let imageCount = 0;
+	
+		// Create a status bar item
+		const statusBarItemEl = this.addStatusBarItem();
+	
+		// Record the start time
+		const startTime = Date.now();
+	
+		for (const file of files) {
+			if (isImage(file)) {
+				imageCount++;
+				await this.convertAllVault(file);
+	
+				// Calculate the elapsed time
+				const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+	
+				// Update the status bar item
+				statusBarItemEl.setText(`Processing image ${imageCount} of ${files.length}, elapsed time: ${elapsedTime} seconds`);
+			}
+		}
+	
+		if (imageCount === 0) {
+			new Notice('No images found in the vault.');
+		} else {
+			new Notice(`${imageCount} images were converted.`);
+			// Update the status bar item to show that processing is complete
+			const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
+			statusBarItemEl.setText(`Finished processing ${imageCount} images, total time: ${totalTime} seconds`);
+			// Hide the status bar after 5 seconds
+			setTimeout(() => {
+				statusBarItemEl.setText('');
+			}, 5000); // 5000 milliseconds = 5 seconds
+		}
+	}
+	async convertAllVault(file: TFile) {
+		const activeFile = this.getActiveFile();
+
+		if (!activeFile) {
+			new Notice('Error: No active file found.');
+			return;
+		}
+		await this.updateAllVaultLinks(file, this.settings.ProcessAllVaultconvertTo);
+		const binary = await this.app.vault.readBinary(file);
+		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
+
+		if (file.extension === 'tif' || file.extension === 'tiff') {
+			const binaryUint8Array = new Uint8Array(binary);
+			const ifds = UTIF.decode(binaryUint8Array);
+			UTIF.decodeImage(binaryUint8Array, ifds[0]);
+			const rgba = UTIF.toRGBA8(ifds[0]);
+			const canvas = document.createElement('canvas');
+			canvas.width = ifds[0].width;
+			canvas.height = ifds[0].height;
+			const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+			const imageData = ctx.createImageData(canvas.width, canvas.height);
+			imageData.data.set(rgba);
+			ctx.putImageData(imageData, 0, 0);
+
+			imgBlob = await new Promise<Blob>((resolve, reject) => {
+				canvas.toBlob((blob) => {
+					if (blob) {
+						resolve(blob);
+					} else {
+						reject(new Error('Failed to convert canvas to Blob'));
+					}
+				});
+			});
+
+		}
+
+		if (file.extension === 'heic') {
+			const binaryBuffer = Buffer.from(binary);
+			const outputBuffer = await heic({
+				buffer: binaryBuffer,
+				format: 'JPEG',
+				quality: Number(this.settings.ProcessAllVaultquality)
+			});
+			imgBlob = new Blob([outputBuffer], { type: 'image/jpeg' });
+		}
+
+		if (this.settings.ProcessAllVaultquality !== 1) {
+			if (this.settings.ProcessAllVaultconvertTo === 'webp') {
+				const arrayBufferWebP = await convertToWebP(
+					imgBlob,
+					Number(this.settings.ProcessAllVaultquality),
+					this.settings.ProcessAllVaultresizeMode,
+					this.settings.desiredWidth,
+					this.settings.desiredHeight,
+					this.settings.desiredLength
+				);
+				await this.app.vault.modifyBinary(file, arrayBufferWebP);
+			} else if (this.settings.ProcessAllVaultconvertTo === 'jpg') {
+				const arrayBufferJPG = await convertToJPG(
+					imgBlob,
+					Number(this.settings.ProcessAllVaultquality),
+					this.settings.ProcessAllVaultresizeMode,
+					this.settings.desiredWidth,
+					this.settings.desiredHeight,
+					this.settings.desiredLength
+				);
+				await this.app.vault.modifyBinary(file, arrayBufferJPG);
+			} else if (this.settings.ProcessAllVaultconvertTo === 'png') {
+				const arrayBufferPNG = await convertToPNG(
+					imgBlob,
+					Number(this.settings.ProcessAllVaultquality),
+					this.settings.ProcessAllVaultresizeMode,
+					this.settings.desiredWidth,
+					this.settings.desiredHeight,
+					this.settings.desiredLength
+				);
+				await this.app.vault.modifyBinary(file, arrayBufferPNG);
+			} else if (this.settings.ProcessAllVaultconvertTo === 'disabled') {
+				let arrayBuffer;
+				if (file.extension === 'jpg' || file.extension === 'jpeg') {
+					arrayBuffer = await convertToJPG(
+						imgBlob,
+						Number(this.settings.ProcessAllVaultquality),
+						this.settings.ProcessAllVaultresizeMode,
+						this.settings.desiredWidth,
+						this.settings.desiredHeight,
+						this.settings.desiredLength
+					);
+				} else if (file.extension === 'png') {
+					arrayBuffer = await convertToPNG(
+						imgBlob,
+						Number(this.settings.ProcessAllVaultquality),
+						this.settings.ProcessAllVaultresizeMode,
+						this.settings.desiredWidth,
+						this.settings.desiredHeight,
+						this.settings.desiredLength
+					);
+				} else if (file.extension === 'webp') {
+					arrayBuffer = await convertToWebP(
+						imgBlob,
+						Number(this.settings.ProcessAllVaultquality),
+						this.settings.ProcessAllVaultresizeMode,
+						this.settings.desiredWidth,
+						this.settings.desiredHeight,
+						this.settings.desiredLength
+					);
+				}
+				if (arrayBuffer) {
+					await this.app.vault.modifyBinary(file, arrayBuffer);
+				} else {
+					new Notice('Error: Failed to compress image.');
+				}
+			} else {
+				new Notice('Error: No format selected for conversion.');
+				return;
+			}
+		} else {
+			new Notice('Original file kept without any compression.');
+		}
+
+		const newFilePath = file.path.replace(/\.[^/.]+$/, "." + this.settings.ProcessAllVaultconvertTo);
+		await this.app.vault.rename(file, newFilePath);
+	}
+	async updateAllVaultLinks(file: TFile, newExtension: string) { // https://forum.obsidian.md/t/vault-rename-file-path-doesnt-trigger-link-update/32317
+		// Get the new file path
+		const newFilePath = file.path.replace(/\.[^/.]+$/, "." + newExtension);
+	
+		// Rename the file and update all links to it
+		await this.app.fileManager.renameFile(file, newFilePath);
+	
+		// Get all markdown files in the vault
+		const markdownFiles = this.app.vault.getMarkdownFiles();
+	
+		// Iterate over each markdown file
+		for (const markdownFile of markdownFiles) {
+			// Read the content of the file
+			let content = await this.app.vault.read(markdownFile);
+	
+			// Generate a new markdown link for the renamed file
+			const newLink = this.app.fileManager.generateMarkdownLink(file, markdownFile.path);
+	
+			// Replace all old links with the new link
+			const oldLink = `![[${file.basename}]]`;
+			content = content.split(oldLink).join(newLink);
+	
+			// Write the updated content back to the file
+			await this.app.vault.modify(markdownFile, content);
+		}
+	}
+	
+	//Process Current Note
+	async processCurrentNoteImages(note: TFile) {
+		let imageCount = 0;
+		const statusBarItemEl = this.addStatusBarItem();
+		const startTime = Date.now();
+
+		// Get path from image link
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (activeView) {
+			const currentFile = activeView.file;
+			if (currentFile) {
+				const resolvedLinks = this.app.metadataCache.resolvedLinks;
+				const linksInCurrentNote = resolvedLinks[currentFile.path];
+				const totalLinks = Object.keys(linksInCurrentNote).length;
+				for (const link in linksInCurrentNote) {
+					const linkedFile = this.app.vault.getAbstractFileByPath(link);
+					if (linkedFile instanceof TFile && isImage(linkedFile)) {
+						imageCount++;
+						await this.convertCurrentNoteImages(linkedFile);
+						const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+						statusBarItemEl.setText(`Processing image ${imageCount} of ${totalLinks}, elapsed time: ${elapsedTime} seconds`);
+					}
+				}
+			}
+		}
+
+		if (imageCount === 0) {
+			new Notice('No images found in the vault.');
+		} else {
+			new Notice(`${imageCount} images were converted.`);
+			const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
+			statusBarItemEl.setText(`Finished processing ${imageCount} images, total time: ${totalTime} seconds`);
+			setTimeout(() => {
+				statusBarItemEl.setText('');
+			}, 5000);
+		}
+	}
+	
+	async convertCurrentNoteImages(file: TFile) {
+		const activeFile = this.getActiveFile();
+
+		if (!activeFile) {
+			new Notice('Error: No active file found.');
+			return;
+		}
+		await this.updateCurrentNoteLinks(activeFile, file, this.settings.ProcessCurrentNoteconvertTo);
+		const binary = await this.app.vault.readBinary(file);
+		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
+
+		if (file.extension === 'tif' || file.extension === 'tiff') {
+			const binaryUint8Array = new Uint8Array(binary);
+			const ifds = UTIF.decode(binaryUint8Array);
+			UTIF.decodeImage(binaryUint8Array, ifds[0]);
+			const rgba = UTIF.toRGBA8(ifds[0]);
+			const canvas = document.createElement('canvas');
+			canvas.width = ifds[0].width;
+			canvas.height = ifds[0].height;
+			const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+			const imageData = ctx.createImageData(canvas.width, canvas.height);
+			imageData.data.set(rgba);
+			ctx.putImageData(imageData, 0, 0);
+
+			imgBlob = await new Promise<Blob>((resolve, reject) => {
+				canvas.toBlob((blob) => {
+					if (blob) {
+						resolve(blob);
+					} else {
+						reject(new Error('Failed to convert canvas to Blob'));
+					}
+				});
+			});
+
+		}
+
+		if (file.extension === 'heic') {
+			const binaryBuffer = Buffer.from(binary);
+			const outputBuffer = await heic({
+				buffer: binaryBuffer,
+				format: 'JPEG',
+				quality: Number(this.settings.ProcessCurrentNotequality)
+			});
+			imgBlob = new Blob([outputBuffer], { type: 'image/jpeg' });
+		}
+
+		if (this.settings.ProcessCurrentNotequality !== 1) {
+			if (this.settings.ProcessCurrentNoteconvertTo === 'webp') {
+				const arrayBufferWebP = await convertToWebP(
+					imgBlob,
+					Number(this.settings.ProcessCurrentNotequality),
+					this.settings.ProcessCurrentNoteresizeMode,
+					this.settings.desiredWidth,
+					this.settings.desiredHeight,
+					this.settings.desiredLength
+				);
+				await this.app.vault.modifyBinary(file, arrayBufferWebP);
+			} else if (this.settings.ProcessCurrentNoteconvertTo === 'jpg') {
+				const arrayBufferJPG = await convertToJPG(
+					imgBlob,
+					Number(this.settings.ProcessCurrentNotequality),
+					this.settings.ProcessCurrentNoteresizeMode,
+					this.settings.desiredWidth,
+					this.settings.desiredHeight,
+					this.settings.desiredLength
+				);
+				await this.app.vault.modifyBinary(file, arrayBufferJPG);
+			} else if (this.settings.ProcessCurrentNoteconvertTo === 'png') {
+				const arrayBufferPNG = await convertToPNG(
+					imgBlob,
+					Number(this.settings.ProcessCurrentNotequality),
+					this.settings.ProcessCurrentNoteresizeMode,
+					this.settings.desiredWidth,
+					this.settings.desiredHeight,
+					this.settings.desiredLength
+				);
+				await this.app.vault.modifyBinary(file, arrayBufferPNG);
+			} else if (this.settings.ProcessCurrentNoteconvertTo === 'disabled') {
+				let arrayBuffer;
+				if (file.extension === 'jpg' || file.extension === 'jpeg') {
+					arrayBuffer = await convertToJPG(
+						imgBlob,
+						Number(this.settings.ProcessCurrentNotequality),
+						this.settings.ProcessCurrentNoteresizeMode,
+						this.settings.desiredWidth,
+						this.settings.desiredHeight,
+						this.settings.desiredLength
+					);
+				} else if (file.extension === 'png') {
+					arrayBuffer = await convertToPNG(
+						imgBlob,
+						Number(this.settings.ProcessCurrentNotequality),
+						this.settings.ProcessCurrentNoteresizeMode,
+						this.settings.desiredWidth,
+						this.settings.desiredHeight,
+						this.settings.desiredLength
+					);
+				} else if (file.extension === 'webp') {
+					arrayBuffer = await convertToWebP(
+						imgBlob,
+						Number(this.settings.ProcessCurrentNotequality),
+						this.settings.ProcessCurrentNoteresizeMode,
+						this.settings.desiredWidth,
+						this.settings.desiredHeight,
+						this.settings.desiredLength
+					);
+				}
+				if (arrayBuffer) {
+					await this.app.vault.modifyBinary(file, arrayBuffer);
+				} else {
+					new Notice('Error: Failed to compress image.');
+				}
+			} else {
+				new Notice('Error: No format selected for conversion.');
+				return;
+			}
+		} else {
+			new Notice('Original file kept without any compression.');
+		}
+
+		const newFilePath = file.path.replace(/\.[^/.]+$/, "." + this.settings.ProcessCurrentNoteconvertTo);
+		await this.app.vault.rename(file, newFilePath);
+	}
+	async updateCurrentNoteLinks(note: TFile, file: TFile, newExtension: string) {
+		// Get the new file path
+		const newFilePath = file.path.replace(/\.[^/.]+$/, "." + newExtension);
+
+		// Rename the file and update all links to it
+		await this.app.fileManager.renameFile(file, newFilePath);
+	
+		// Read the content of the note
+		let content = await this.app.vault.read(note);
+	
+		// Generate a new markdown link for the renamed file
+		const newLink = this.app.fileManager.generateMarkdownLink(file, note.path);
+	
+		// Replace all old links with the new link
+		const oldLink = `![[${file.basename}]]`;
+		content = content.split(oldLink).join(newLink);
+	
+		// Write the updated content back to the note
+		await this.app.vault.modify(note, content);
+	}
+	
+
+	
 	makeLinkText(file: TFile, sourcePath: string, subpath?: string): string {
 		return this.app.fileManager.generateMarkdownLink(file, sourcePath, subpath);
 	}
-
 	async generateNewName(file: TFile, activeFile: TFile): Promise<string> {
 		const newName = activeFile.basename + '-' + new Date().toISOString().replace(/[-:T.Z]/g, '');
 		let extension = file.extension;
@@ -785,7 +1196,6 @@ export default class ImageConvertPLugin extends Plugin {
 		}
 		return `${newName}.${extension}`;
 	}
-
 	async keepOrgName(file: TFile, activeFile: TFile): Promise<string> {
 		let newName = file.basename;
 		let extension = file.extension;
@@ -798,7 +1208,6 @@ export default class ImageConvertPLugin extends Plugin {
 	
 		return `${newName}.${extension}`;
 	}
-
 	getActiveFile(): TFile | undefined {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		const file = view?.file;
@@ -807,7 +1216,6 @@ export default class ImageConvertPLugin extends Plugin {
 		}
 		return undefined;
 	}
-
 	getActiveEditor(sourcePath: string): Editor | null {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (view && view.file && view.file.path === sourcePath) {
@@ -815,6 +1223,9 @@ export default class ImageConvertPLugin extends Plugin {
 		}
 		return null;
 	}
+
+
+
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -824,13 +1235,36 @@ export default class ImageConvertPLugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 }
-
-
-
 function isImage(file: TFile): boolean {
 	const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'tif', 'tiff'];
 	return IMAGE_EXTS.includes(file.extension.toLowerCase());
 }
+
+// function findImageLinks(content: string): string[] {
+//     // This regular expression matches the syntax for image links in Obsidian
+//     const regex = /!\[\[(.*?)\]\]/g;
+
+//     const imageLinks: string[] = [];
+//     let match;
+
+//     // Use regex.exec() in a loop to find all matches in the content
+//     while ((match = regex.exec(content)) !== null) {
+//         // The path of the image is in the first capturing group
+//         let path = match[1];
+
+//         // Remove the size specification from the path
+//         const pipeIndex = path.indexOf('|');
+//         if (pipeIndex !== -1) {
+//             path = path.substring(0, pipeIndex);
+//         }
+
+//         imageLinks.push(path);
+//     }
+
+//     return imageLinks;
+// }
+
+
 
 function convertToWebP(file: Blob, quality: number, resizeMode: string, desiredWidth: number, desiredHeight: number, desiredLength: number): Promise<ArrayBuffer> {
 	return new Promise((resolve, reject) => {
@@ -1352,7 +1786,6 @@ function resizeBase64Drag(activeView: MarkdownView, imageName: string | null, ne
 		editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
 	}
 }
-
 function deleteMarkdownLink(activeView: MarkdownView, imageName: string | null) {
 	const editor = activeView.editor;
 	const doc = editor.getDoc();
@@ -1880,5 +2313,171 @@ class ResizeImageModal extends Modal {
 	onClose() {
 		const { contentEl } = this;
 		contentEl.empty();
+	}
+}
+
+
+
+
+class ProcessAllVault extends Modal {
+	plugin: ImageConvertPLugin;
+
+    constructor(plugin: ImageConvertPLugin) {
+        super(plugin.app);
+        this.plugin = plugin;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        
+		const heading = contentEl.createEl('h1');
+		heading.textContent = 'Convert, compress and resize';
+		const desc = contentEl.createEl('p');
+		desc.textContent = 'Running this will modify all your internal images in the Vault. Please create backups. All internal image links will be automatically updated.';
+
+        // Add your settings here
+        new Setting(contentEl)
+            .setName('Select format to convert images to')
+            .setDesc(`"Same as original" - will keep original file format.`)
+            .addDropdown(dropdown =>
+                dropdown
+                    .addOptions({ disabled: 'Same as original', webp: 'WebP', jpg: 'JPG', png: 'PNG' })
+                    .setValue(this.plugin.settings.ProcessAllVaultconvertTo)
+                    .onChange(async value => {
+                        this.plugin.settings.ProcessAllVaultconvertTo = value;
+                        await this.plugin.saveSettings();
+                    })
+            );
+
+		new Setting(contentEl)
+			.setName('Quality')
+			.setDesc('0 - low quality, 99 - high quality, 100 - no compression; 75 - recommended')
+			.addText(text =>
+				text
+					.setPlaceholder('Enter quality (0-100)')
+					.setValue((this.plugin.settings.ProcessAllVaultquality * 100).toString())
+					.onChange(async value => {
+						const quality = parseInt(value);
+
+						if (/^\d+$/.test(value) && quality >= 0 && quality <= 100) {
+							this.plugin.settings.ProcessAllVaultquality = quality / 100;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		new Setting(contentEl)
+			.setName('Image resize mode')
+			.setDesc('Select the mode to use when resizing the image. Resizing an image will further reduce file-size, but it will resize your actual file, which means that the original file will be modified, and the changes will be permanent.')
+			.addDropdown(dropdown =>
+				dropdown
+					.addOptions({ None: 'None', Fit: 'Fit', Fill: 'Fill', LongestEdge: 'Longest Edge', ShortestEdge: 'Shortest Edge', Width: 'Width', Height: 'Height' })
+					.setValue(this.plugin.settings.ProcessAllVaultresizeMode)
+					.onChange(async value => {
+						this.plugin.settings.ProcessAllVaultresizeMode = value;
+						await this.plugin.saveSettings();
+
+						if (value !== 'None') {
+							// Open the ResizeModal when an option is selected
+							const modal = new ResizeModal(this.plugin);
+							modal.open();
+						}
+					})
+			);
+
+		// Add a submit button
+		new ButtonComponent(contentEl)
+			.setButtonText('Submit')
+			.onClick(() => {
+				// Close the modal when the button is clicked
+				this.close();
+				// Process all images in the vault
+				this.plugin.processAllVaultImages();
+			});
+	}
+}
+
+class ProcessCurrentNote extends Modal {
+	plugin: ImageConvertPLugin;
+
+    constructor(plugin: ImageConvertPLugin) {
+        super(plugin.app);
+        this.plugin = plugin;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        
+		const heading = contentEl.createEl('h1');
+		heading.textContent = 'Convert, compress and resize';
+		const desc = contentEl.createEl('p');
+		desc.textContent = 'Running this will modify all your internal images in the current note. Please create backups. All internal image links will be automatically updated.';
+
+        // Add your settings here
+        new Setting(contentEl)
+            .setName('Select format to convert images to')
+            .setDesc(`"Same as original" - will keep original file format.`)
+            .addDropdown(dropdown =>
+                dropdown
+                    .addOptions({ disabled: 'Same as original', webp: 'WebP', jpg: 'JPG', png: 'PNG' })
+                    .setValue(this.plugin.settings.ProcessCurrentNoteconvertTo)
+                    .onChange(async value => {
+                        this.plugin.settings.ProcessCurrentNoteconvertTo = value;
+                        await this.plugin.saveSettings();
+                    })
+            );
+
+		new Setting(contentEl)
+			.setName('Quality')
+			.setDesc('0 - low quality, 99 - high quality, 100 - no compression; 75 - recommended')
+			.addText(text =>
+				text
+					.setPlaceholder('Enter quality (0-100)')
+					.setValue((this.plugin.settings.ProcessCurrentNotequality * 100).toString())
+					.onChange(async value => {
+						const quality = parseInt(value);
+
+						if (/^\d+$/.test(value) && quality >= 0 && quality <= 100) {
+							this.plugin.settings.ProcessCurrentNotequality = quality / 100;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		new Setting(contentEl)
+			.setName('Image resize mode')
+			.setDesc('Select the mode to use when resizing the image. Resizing an image will further reduce file-size, but it will resize your actual file, which means that the original file will be modified, and the changes will be permanent.')
+			.addDropdown(dropdown =>
+				dropdown
+					.addOptions({ None: 'None', Fit: 'Fit', Fill: 'Fill', LongestEdge: 'Longest Edge', ShortestEdge: 'Shortest Edge', Width: 'Width', Height: 'Height' })
+					.setValue(this.plugin.settings.ProcessCurrentNoteresizeMode)
+					.onChange(async value => {
+						this.plugin.settings.ProcessCurrentNoteresizeMode = value;
+						await this.plugin.saveSettings();
+
+						if (value !== 'None') {
+							// Open the ResizeModal when an option is selected
+							const modal = new ResizeModal(this.plugin);
+							modal.open();
+						}
+					})
+			);
+
+		// Add a submit button
+		new ButtonComponent(contentEl)
+			.setButtonText('Submit')
+			.onClick(() => {
+				// Close the modal when the button is clicked
+				this.close();
+				const currentNote = this.app.workspace.getActiveFile();
+				// Check if currentNote is not null
+				if (currentNote) {
+					// Process all images in the current note
+					this.plugin.processCurrentNoteImages(currentNote);
+				} else {
+					new Notice('Error: No active note found.');
+				}
+			});
+	
 	}
 }
