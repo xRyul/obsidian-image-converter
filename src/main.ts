@@ -816,7 +816,8 @@ export default class ImageConvertPLugin extends Plugin {
 
 	//Process All Vault
 	async processAllVaultImages() {
-		const files = this.app.vault.getFiles();
+		const getallfiles = this.app.vault.getFiles();
+		const files = getallfiles.filter(file => file instanceof TFile && isImage(file));
 		let imageCount = 0;
 	
 		// Create a status bar item
@@ -835,6 +836,8 @@ export default class ImageConvertPLugin extends Plugin {
 	
 				// Update the status bar item
 				statusBarItemEl.setText(`Processing image ${imageCount} of ${files.length}, elapsed time: ${elapsedTime} seconds`);
+				// Log each file, if there is delay, at least log will show corrupt file
+				console.log(`${imageCount} of ${files.length} ${file.name} ${file.path}  ${elapsedTime} seconds elapsed`);
 			}
 		}
 	
@@ -852,12 +855,7 @@ export default class ImageConvertPLugin extends Plugin {
 		}
 	}
 	async convertAllVault(file: TFile) {
-		const activeFile = this.getActiveFile();
 
-		if (!activeFile) {
-			new Notice('Error: No active file found.');
-			return;
-		}
 		await this.updateAllVaultLinks(file, this.settings.ProcessAllVaultconvertTo);
 		const binary = await this.app.vault.readBinary(file);
 		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
@@ -1038,7 +1036,6 @@ export default class ImageConvertPLugin extends Plugin {
 			}, 5000);
 		}
 	}
-	
 	async convertCurrentNoteImages(file: TFile) {
 		const activeFile = this.getActiveFile();
 
