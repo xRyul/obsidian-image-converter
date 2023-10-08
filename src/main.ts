@@ -27,10 +27,10 @@ interface ImageConvertSettings {
 	ProcessAllVaultresizeMode: string;
 	ProcessCurrentNoteconvertTo: string;
 	ProcessCurrentNotequality: number;
-	ProcessCurrentNoteresizeMode: string;
-	ProcessCurrentNoteresizeModedesiredWidth: number;
-	ProcessCurrentNoteresizeModedesiredHeight: number;
-	ProcessCurrentNoteresizeModedesiredLength: number;
+	ProcessCurrentNoteResizeModalresizeMode: string;
+	ProcessCurrentNoteresizeModaldesiredWidth: number;
+	ProcessCurrentNoteresizeModaldesiredHeight: number;
+	ProcessCurrentNoteresizeModaldesiredLength: number;
 	attachmentLocation: string;
 	attachmentSpecifiedFolder: string;
 	attachmentSubfolderName: string;
@@ -57,10 +57,10 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	ProcessAllVaultresizeMode: 'None',
 	ProcessCurrentNoteconvertTo: 'webp',
 	ProcessCurrentNotequality: 0.75,
-	ProcessCurrentNoteresizeMode: 'None',
-	ProcessCurrentNoteresizeModedesiredWidth: 600,
-	ProcessCurrentNoteresizeModedesiredHeight: 800,
-	ProcessCurrentNoteresizeModedesiredLength: 800,
+	ProcessCurrentNoteResizeModalresizeMode: 'None',
+	ProcessCurrentNoteresizeModaldesiredWidth: 600,
+	ProcessCurrentNoteresizeModaldesiredHeight: 800,
+	ProcessCurrentNoteresizeModaldesiredLength: 800,
 	attachmentLocation: 'disable',
 	attachmentSpecifiedFolder: '',
 	attachmentSubfolderName: '',
@@ -1107,65 +1107,65 @@ export default class ImageConvertPLugin extends Plugin {
 			imgBlob = new Blob([outputBuffer], { type: 'image/jpeg' });
 		}
 
-		if (this.settings.ProcessCurrentNotequality !== 1) {
+		if (this.settings.ProcessCurrentNotequality !== 1) { // Compression only works between 0-99
 			if (this.settings.ProcessCurrentNoteconvertTo === 'webp') {
 				const arrayBufferWebP = await convertToWebP(
 					imgBlob,
 					Number(this.settings.ProcessCurrentNotequality),
-					this.settings.ProcessCurrentNoteresizeMode,
-					this.settings.ProcessCurrentNoteresizeModedesiredWidth,
-					this.settings.ProcessCurrentNoteresizeModedesiredHeight,
-					this.settings.ProcessCurrentNoteresizeModedesiredLength
+					this.settings.ProcessCurrentNoteResizeModalresizeMode,
+					this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
+					this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
+					this.settings.ProcessCurrentNoteresizeModaldesiredLength
 				);
 				await this.app.vault.modifyBinary(file, arrayBufferWebP);
 			} else if (this.settings.ProcessCurrentNoteconvertTo === 'jpg') {
 				const arrayBufferJPG = await convertToJPG(
 					imgBlob,
 					Number(this.settings.ProcessCurrentNotequality),
-					this.settings.ProcessCurrentNoteresizeMode,
-					this.settings.ProcessCurrentNoteresizeModedesiredWidth,
-					this.settings.ProcessCurrentNoteresizeModedesiredHeight,
-					this.settings.ProcessCurrentNoteresizeModedesiredLength
+					this.settings.ProcessCurrentNoteResizeModalresizeMode,
+					this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
+					this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
+					this.settings.ProcessCurrentNoteresizeModaldesiredLength
 				);
 				await this.app.vault.modifyBinary(file, arrayBufferJPG);
 			} else if (this.settings.ProcessCurrentNoteconvertTo === 'png') {
 				const arrayBufferPNG = await convertToPNG(
 					imgBlob,
 					Number(this.settings.ProcessCurrentNotequality),
-					this.settings.ProcessCurrentNoteresizeMode,
-					this.settings.ProcessCurrentNoteresizeModedesiredWidth,
-					this.settings.ProcessCurrentNoteresizeModedesiredHeight,
-					this.settings.ProcessCurrentNoteresizeModedesiredLength
+					this.settings.ProcessCurrentNoteResizeModalresizeMode,
+					this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
+					this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
+					this.settings.ProcessCurrentNoteresizeModaldesiredLength
 				);
 				await this.app.vault.modifyBinary(file, arrayBufferPNG);
-			} else if (this.settings.ProcessCurrentNoteconvertTo === 'disabled') {
+			} else if (this.settings.ProcessCurrentNoteconvertTo === 'disabled') { // Same as original is selected? 
 				let arrayBuffer;
 				if (file.extension === 'jpg' || file.extension === 'jpeg') {
 					arrayBuffer = await convertToJPG(
 						imgBlob,
 						Number(this.settings.ProcessCurrentNotequality),
-						this.settings.ProcessCurrentNoteresizeMode,
-						this.settings.ProcessCurrentNoteresizeModedesiredWidth,
-						this.settings.ProcessCurrentNoteresizeModedesiredHeight,
-						this.settings.ProcessCurrentNoteresizeModedesiredLength
+						this.settings.ProcessCurrentNoteResizeModalresizeMode,
+						this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
+						this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
+						this.settings.ProcessCurrentNoteresizeModaldesiredLength
 					);
 				} else if (file.extension === 'png') {
 					arrayBuffer = await convertToPNG(
 						imgBlob,
 						Number(this.settings.ProcessCurrentNotequality),
-						this.settings.ProcessCurrentNoteresizeMode,
-						this.settings.ProcessCurrentNoteresizeModedesiredWidth,
-						this.settings.ProcessCurrentNoteresizeModedesiredHeight,
-						this.settings.ProcessCurrentNoteresizeModedesiredLength
+						this.settings.ProcessCurrentNoteResizeModalresizeMode,
+						this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
+						this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
+						this.settings.ProcessCurrentNoteresizeModaldesiredLength
 					);
 				} else if (file.extension === 'webp') {
 					arrayBuffer = await convertToWebP(
 						imgBlob,
 						Number(this.settings.ProcessCurrentNotequality),
-						this.settings.ProcessCurrentNoteresizeMode,
-						this.settings.ProcessCurrentNoteresizeModedesiredWidth,
-						this.settings.ProcessCurrentNoteresizeModedesiredHeight,
-						this.settings.ProcessCurrentNoteresizeModedesiredLength
+						this.settings.ProcessCurrentNoteResizeModalresizeMode,
+						this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
+						this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
+						this.settings.ProcessCurrentNoteresizeModaldesiredLength
 					);
 				}
 				if (arrayBuffer) {
@@ -1177,34 +1177,34 @@ export default class ImageConvertPLugin extends Plugin {
 				new Notice('Error: No format selected for conversion.');
 				return;
 			}
-		} else if (this.settings.ProcessCurrentNotequality === 1 && this.settings.ProcessCurrentNoteresizeMode !== 'None') { // Do not compress, but allow resizing
+		} else if (this.settings.ProcessCurrentNotequality === 1 && this.settings.ProcessCurrentNoteResizeModalresizeMode !== 'None') { // Do not compress, but allow resizing
 			let arrayBuffer;
 			if (file.extension === 'jpg' || file.extension === 'jpeg') {
 				arrayBuffer = await convertToJPG(
 					imgBlob,
 					1,
-					this.settings.ProcessCurrentNoteresizeMode,
-					this.settings.ProcessCurrentNoteresizeModedesiredWidth,
-					this.settings.ProcessCurrentNoteresizeModedesiredHeight,
-					this.settings.ProcessCurrentNoteresizeModedesiredLength
+					this.settings.ProcessCurrentNoteResizeModalresizeMode,
+					this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
+					this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
+					this.settings.ProcessCurrentNoteresizeModaldesiredLength
 				);
 			} else if (file.extension === 'png') {
 				arrayBuffer = await convertToPNG(
 					imgBlob,
 					1,
-					this.settings.ProcessCurrentNoteresizeMode,
-					this.settings.ProcessCurrentNoteresizeModedesiredWidth,
-					this.settings.ProcessCurrentNoteresizeModedesiredHeight,
-					this.settings.ProcessCurrentNoteresizeModedesiredLength
+					this.settings.ProcessCurrentNoteResizeModalresizeMode,
+					this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
+					this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
+					this.settings.ProcessCurrentNoteresizeModaldesiredLength
 				);
 			} else if (file.extension === 'webp') {
 				arrayBuffer = await convertToWebP(
 					imgBlob,
 					1,
-					this.settings.ProcessCurrentNoteresizeMode,
-					this.settings.ProcessCurrentNoteresizeModedesiredWidth,
-					this.settings.ProcessCurrentNoteresizeModedesiredHeight,
-					this.settings.ProcessCurrentNoteresizeModedesiredLength
+					this.settings.ProcessCurrentNoteResizeModalresizeMode,
+					this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
+					this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
+					this.settings.ProcessCurrentNoteresizeModaldesiredLength
 				);
 			}
 			if (arrayBuffer) {
@@ -2437,7 +2437,7 @@ class ProcessAllVault extends Modal {
 
 						if (value !== 'None') {
 							// Open the ResizeModal when an option is selected
-							const modal = new ResizeModal(this.plugin);
+							const modal = new ProcessAllVaultResizeModal(this.plugin);
 							modal.open();
 						}
 					})
@@ -2452,6 +2452,108 @@ class ProcessAllVault extends Modal {
 				// Process all images in the vault
 				this.plugin.processAllVaultImages();
 			});
+	}
+}
+
+class ProcessAllVaultResizeModal extends Modal {
+	plugin: ImageConvertPLugin;
+
+	constructor(plugin: ImageConvertPLugin) {
+		super(plugin.app);
+		this.plugin = plugin;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.empty();
+
+		// Add an explanation of the selected resize mode
+		let explanation = '';
+		switch (this.plugin.settings.resizeMode) {
+			case 'Fit':
+				explanation = 'Fit mode resizes the image to fit within the desired dimensions while maintaining the aspect ratio of the image.';
+				break;
+			case 'Fill':
+				explanation = 'Fill mode resizes the image to fill the desired dimensions while maintaining the aspect ratio of the image. This may result in cropping of the image.';
+				break;
+			case 'LongestEdge':
+				explanation = 'Longest Edge mode resizes the longest side of the image to match the desired length while maintaining the aspect ratio of the image.';
+				break;
+			case 'ShortestEdge':
+				explanation = 'Shortest Edge mode resizes the shortest side of the image to match the desired length while maintaining the aspect ratio of the image.';
+				break;
+			case 'Width':
+				explanation = 'Width mode resizes the width of the image to match the desired width while maintaining the aspect ratio of the image.';
+				break;
+			case 'Height':
+				explanation = 'Height mode resizes the height of the image to match the desired height while maintaining the aspect ratio of the image.';
+				break;
+		}
+		contentEl.createEl('p', { text: explanation });
+
+		// Add input fields for the desired dimensions based on the selected resize mode
+		if (['Fit', 'Fill'].includes(this.plugin.settings.resizeMode)) {
+			const widthInput = new TextComponent(contentEl)
+				.setPlaceholder('Width')
+				.setValue(this.plugin.settings.desiredWidth.toString());
+
+			const heightInput = new TextComponent(contentEl)
+				.setPlaceholder('Height')
+				.setValue(this.plugin.settings.desiredHeight.toString());
+
+			// Add a button to save the settings and close the modal
+			new ButtonComponent(contentEl)
+				.setButtonText('Save')
+				.onClick(async () => {
+					const width = parseInt(widthInput.getValue());
+					if (/^\d+$/.test(widthInput.getValue()) && width > 0) {
+						this.plugin.settings.desiredWidth = width;
+					}
+
+					const height = parseInt(heightInput.getValue());
+					if (/^\d+$/.test(heightInput.getValue()) && height > 0) {
+						this.plugin.settings.desiredHeight = height;
+					}
+
+					await this.plugin.saveSettings();
+					this.close();
+				});
+		} else {
+			const lengthInput = new TextComponent(contentEl)
+				.setPlaceholder('Enter desired length in pixels')
+				.setValue(
+					['LongestEdge', 'ShortestEdge', 'Width', 'Height'].includes(this.plugin.settings.resizeMode)
+						? this.plugin.settings.desiredWidth.toString()
+						: this.plugin.settings.desiredHeight.toString()
+				);
+
+			// Add a button to save the settings and close the modal
+			new ButtonComponent(contentEl)
+				.setButtonText('Save')
+				.onClick(async () => {
+					const length = parseInt(lengthInput.getValue());
+					if (/^\d+$/.test(lengthInput.getValue()) && length > 0) {
+						if (['LongestEdge'].includes(this.plugin.settings.resizeMode)) {
+							this.plugin.settings.desiredLength = length;
+						}
+
+						if (['ShortestEdge'].includes(this.plugin.settings.resizeMode)) {
+							this.plugin.settings.desiredLength = length;
+						}
+
+						if (['Width'].includes(this.plugin.settings.resizeMode)) {
+							this.plugin.settings.desiredWidth = length;
+						}
+
+						if (['Height'].includes(this.plugin.settings.resizeMode)) {
+							this.plugin.settings.desiredHeight = length;
+						}
+					}
+
+					await this.plugin.saveSettings();
+					this.close();
+				});
+		}
 	}
 }
 
@@ -2508,9 +2610,9 @@ class ProcessCurrentNote extends Modal {
 			.addDropdown(dropdown =>
 				dropdown
 					.addOptions({ None: 'None', Fit: 'Fit', Fill: 'Fill', LongestEdge: 'Longest Edge', ShortestEdge: 'Shortest Edge', Width: 'Width', Height: 'Height' })
-					.setValue(this.plugin.settings.ProcessCurrentNoteresizeMode)
+					.setValue(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)
 					.onChange(async value => {
-						this.plugin.settings.ProcessCurrentNoteresizeMode = value;
+						this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode = value;
 						await this.plugin.saveSettings();
 
 						if (value !== 'None') {
@@ -2554,7 +2656,7 @@ class ProcessCurrentNoteResizeModal extends Modal {
 
 		// Add an explanation of the selected resize mode
 		let explanation = '';
-		switch (this.plugin.settings.ProcessCurrentNoteresizeMode) {
+		switch (this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode) {
 			case 'Fit':
 				explanation = 'Fit mode resizes the image to fit within the desired dimensions while maintaining the aspect ratio of the image.';
 				break;
@@ -2577,14 +2679,14 @@ class ProcessCurrentNoteResizeModal extends Modal {
 		contentEl.createEl('p', { text: explanation });
 
 		// Add input fields for the desired dimensions based on the selected resize mode
-		if (['Fit', 'Fill'].includes(this.plugin.settings.ProcessCurrentNoteresizeMode)) {
+		if (['Fit', 'Fill'].includes(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)) {
 			const widthInput = new TextComponent(contentEl)
 				.setPlaceholder('Width')
-				.setValue(this.plugin.settings.ProcessCurrentNoteresizeModedesiredWidth.toString());
+				.setValue(this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth.toString());
 
 			const heightInput = new TextComponent(contentEl)
 				.setPlaceholder('Height')
-				.setValue(this.plugin.settings.ProcessCurrentNoteresizeModedesiredHeight.toString());
+				.setValue(this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight.toString());
 
 			// Add a button to save the settings and close the modal
 			new ButtonComponent(contentEl)
@@ -2592,12 +2694,12 @@ class ProcessCurrentNoteResizeModal extends Modal {
 				.onClick(async () => {
 					const width = parseInt(widthInput.getValue());
 					if (/^\d+$/.test(widthInput.getValue()) && width > 0) {
-						this.plugin.settings.ProcessCurrentNoteresizeModedesiredWidth = width;
+						this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth = width;
 					}
 
 					const height = parseInt(heightInput.getValue());
 					if (/^\d+$/.test(heightInput.getValue()) && height > 0) {
-						this.plugin.settings.ProcessCurrentNoteresizeModedesiredHeight = height;
+						this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight = height;
 					}
 
 					await this.plugin.saveSettings();
@@ -2607,9 +2709,9 @@ class ProcessCurrentNoteResizeModal extends Modal {
 			const lengthInput = new TextComponent(contentEl)
 				.setPlaceholder('Enter desired length in pixels')
 				.setValue(
-					['LongestEdge', 'ShortestEdge', 'Width', 'Height'].includes(this.plugin.settings.ProcessCurrentNoteresizeMode)
-						? this.plugin.settings.ProcessCurrentNoteresizeModedesiredWidth.toString()
-						: this.plugin.settings.ProcessCurrentNoteresizeModedesiredHeight.toString()
+					['LongestEdge', 'ShortestEdge', 'Width', 'Height'].includes(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)
+						? this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth.toString()
+						: this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight.toString()
 				);
 
 			// Add a button to save the settings and close the modal
@@ -2618,20 +2720,20 @@ class ProcessCurrentNoteResizeModal extends Modal {
 				.onClick(async () => {
 					const length = parseInt(lengthInput.getValue());
 					if (/^\d+$/.test(lengthInput.getValue()) && length > 0) {
-						if (['LongestEdge'].includes(this.plugin.settings.ProcessCurrentNoteresizeMode)) {
-							this.plugin.settings.ProcessCurrentNoteresizeModedesiredLength = length;
+						if (['LongestEdge'].includes(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)) {
+							this.plugin.settings.ProcessCurrentNoteresizeModaldesiredLength = length;
 						}
 
-						if (['ShortestEdge'].includes(this.plugin.settings.ProcessCurrentNoteresizeMode)) {
-							this.plugin.settings.ProcessCurrentNoteresizeModedesiredLength = length;
+						if (['ShortestEdge'].includes(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)) {
+							this.plugin.settings.ProcessCurrentNoteresizeModaldesiredLength = length;
 						}
 
-						if (['Width'].includes(this.plugin.settings.ProcessCurrentNoteresizeMode)) {
-							this.plugin.settings.ProcessCurrentNoteresizeModedesiredWidth = length;
+						if (['Width'].includes(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)) {
+							this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth = length;
 						}
 
-						if (['Height'].includes(this.plugin.settings.ProcessCurrentNoteresizeMode)) {
-							this.plugin.settings.ProcessCurrentNoteresizeModedesiredHeight = length;
+						if (['Height'].includes(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)) {
+							this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight = length;
 						}
 					}
 
