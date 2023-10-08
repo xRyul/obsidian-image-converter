@@ -24,7 +24,10 @@ interface ImageConvertSettings {
 	quality: number;
 	ProcessAllVaultconvertTo: string;
 	ProcessAllVaultquality: number;
-	ProcessAllVaultresizeMode: string;
+	ProcessAllVaultResizeModalresizeMode: string;
+	ProcessAllVaultResizeModaldesiredWidth: number;
+	ProcessAllVaultResizeModaldesiredHeight: number;
+	ProcessAllVaultResizeModaldesiredLength: number;
 	ProcessCurrentNoteconvertTo: string;
 	ProcessCurrentNotequality: number;
 	ProcessCurrentNoteResizeModalresizeMode: string;
@@ -54,7 +57,10 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	quality: 0.75,
 	ProcessAllVaultconvertTo: 'webp',
 	ProcessAllVaultquality: 0.75,
-	ProcessAllVaultresizeMode: 'None',
+	ProcessAllVaultResizeModalresizeMode: 'None',
+	ProcessAllVaultResizeModaldesiredWidth: 600,
+	ProcessAllVaultResizeModaldesiredHeight: 800,
+	ProcessAllVaultResizeModaldesiredLength: 800,
 	ProcessCurrentNoteconvertTo: 'webp',
 	ProcessCurrentNotequality: 0.75,
 	ProcessCurrentNoteResizeModalresizeMode: 'None',
@@ -871,10 +877,10 @@ export default class ImageConvertPLugin extends Plugin {
 		} else {
 			await this.updateAllVaultLinks(file, extension);
 		}		
-
+	
 		const binary = await this.app.vault.readBinary(file);
 		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
-
+	
 		if (file.extension === 'tif' || file.extension === 'tiff') {
 			const binaryUint8Array = new Uint8Array(binary);
 			const ifds = UTIF.decode(binaryUint8Array);
@@ -887,7 +893,7 @@ export default class ImageConvertPLugin extends Plugin {
 			const imageData = ctx.createImageData(canvas.width, canvas.height);
 			imageData.data.set(rgba);
 			ctx.putImageData(imageData, 0, 0);
-
+	
 			imgBlob = await new Promise<Blob>((resolve, reject) => {
 				canvas.toBlob((blob) => {
 					if (blob) {
@@ -897,9 +903,9 @@ export default class ImageConvertPLugin extends Plugin {
 					}
 				});
 			});
-
+	
 		}
-
+	
 		if (file.extension === 'heic') {
 			const binaryBuffer = Buffer.from(binary);
 			const outputBuffer = await heic({
@@ -909,36 +915,36 @@ export default class ImageConvertPLugin extends Plugin {
 			});
 			imgBlob = new Blob([outputBuffer], { type: 'image/jpeg' });
 		}
-
+	
 		if (this.settings.ProcessAllVaultquality !== 1) {
 			if (this.settings.ProcessAllVaultconvertTo === 'webp') {
 				const arrayBufferWebP = await convertToWebP(
 					imgBlob,
 					Number(this.settings.ProcessAllVaultquality),
-					this.settings.ProcessAllVaultresizeMode,
-					this.settings.desiredWidth,
-					this.settings.desiredHeight,
-					this.settings.desiredLength
+					this.settings.ProcessAllVaultResizeModalresizeMode,
+					this.settings.ProcessAllVaultResizeModaldesiredWidth,
+					this.settings.ProcessAllVaultResizeModaldesiredHeight,
+					this.settings.ProcessAllVaultResizeModaldesiredLength
 				);
 				await this.app.vault.modifyBinary(file, arrayBufferWebP);
 			} else if (this.settings.ProcessAllVaultconvertTo === 'jpg') {
 				const arrayBufferJPG = await convertToJPG(
 					imgBlob,
 					Number(this.settings.ProcessAllVaultquality),
-					this.settings.ProcessAllVaultresizeMode,
-					this.settings.desiredWidth,
-					this.settings.desiredHeight,
-					this.settings.desiredLength
+					this.settings.ProcessAllVaultResizeModalresizeMode,
+					this.settings.ProcessAllVaultResizeModaldesiredWidth,
+					this.settings.ProcessAllVaultResizeModaldesiredHeight,
+					this.settings.ProcessAllVaultResizeModaldesiredLength
 				);
 				await this.app.vault.modifyBinary(file, arrayBufferJPG);
 			} else if (this.settings.ProcessAllVaultconvertTo === 'png') {
 				const arrayBufferPNG = await convertToPNG(
 					imgBlob,
 					Number(this.settings.ProcessAllVaultquality),
-					this.settings.ProcessAllVaultresizeMode,
-					this.settings.desiredWidth,
-					this.settings.desiredHeight,
-					this.settings.desiredLength
+					this.settings.ProcessAllVaultResizeModalresizeMode,
+					this.settings.ProcessAllVaultResizeModaldesiredWidth,
+					this.settings.ProcessAllVaultResizeModaldesiredHeight,
+					this.settings.ProcessAllVaultResizeModaldesiredLength
 				);
 				await this.app.vault.modifyBinary(file, arrayBufferPNG);
 			} else if (this.settings.ProcessAllVaultconvertTo === 'disabled') {
@@ -947,28 +953,28 @@ export default class ImageConvertPLugin extends Plugin {
 					arrayBuffer = await convertToJPG(
 						imgBlob,
 						Number(this.settings.ProcessAllVaultquality),
-						this.settings.ProcessAllVaultresizeMode,
-						this.settings.desiredWidth,
-						this.settings.desiredHeight,
-						this.settings.desiredLength
+						this.settings.ProcessAllVaultResizeModalresizeMode,
+						this.settings.ProcessAllVaultResizeModaldesiredWidth,
+						this.settings.ProcessAllVaultResizeModaldesiredHeight,
+						this.settings.ProcessAllVaultResizeModaldesiredLength
 					);
 				} else if (file.extension === 'png') {
 					arrayBuffer = await convertToPNG(
 						imgBlob,
 						Number(this.settings.ProcessAllVaultquality),
-						this.settings.ProcessAllVaultresizeMode,
-						this.settings.desiredWidth,
-						this.settings.desiredHeight,
-						this.settings.desiredLength
+						this.settings.ProcessAllVaultResizeModalresizeMode,
+						this.settings.ProcessAllVaultResizeModaldesiredWidth,
+						this.settings.ProcessAllVaultResizeModaldesiredHeight,
+						this.settings.ProcessAllVaultResizeModaldesiredLength
 					);
 				} else if (file.extension === 'webp') {
 					arrayBuffer = await convertToWebP(
 						imgBlob,
 						Number(this.settings.ProcessAllVaultquality),
-						this.settings.ProcessAllVaultresizeMode,
-						this.settings.desiredWidth,
-						this.settings.desiredHeight,
-						this.settings.desiredLength
+						this.settings.ProcessAllVaultResizeModalresizeMode,
+						this.settings.ProcessAllVaultResizeModaldesiredWidth,
+						this.settings.ProcessAllVaultResizeModaldesiredHeight,
+						this.settings.ProcessAllVaultResizeModaldesiredLength
 					);
 				}
 				if (arrayBuffer) {
@@ -980,10 +986,45 @@ export default class ImageConvertPLugin extends Plugin {
 				new Notice('Error: No format selected for conversion.');
 				return;
 			}
+		} else if (this.settings.ProcessAllVaultquality === 1 && this.settings.ProcessAllVaultResizeModalresizeMode !== 'None') { // Do not compress, but allow resizing
+			let arrayBuffer;
+			if (file.extension === 'jpg' || file.extension === 'jpeg') {
+				arrayBuffer = await convertToJPG(
+					imgBlob,
+					1,
+					this.settings.ProcessAllVaultResizeModalresizeMode,
+					this.settings.ProcessAllVaultResizeModaldesiredWidth,
+					this.settings.ProcessAllVaultResizeModaldesiredHeight,
+					this.settings.ProcessAllVaultResizeModaldesiredLength
+				);
+			} else if (file.extension === 'png') {
+				arrayBuffer = await convertToPNG(
+					imgBlob,
+					1,
+					this.settings.ProcessAllVaultResizeModalresizeMode,
+					this.settings.ProcessAllVaultResizeModaldesiredWidth,
+					this.settings.ProcessAllVaultResizeModaldesiredHeight,
+					this.settings.ProcessAllVaultResizeModaldesiredLength
+				);
+			} else if (file.extension === 'webp') {
+				arrayBuffer = await convertToWebP(
+					imgBlob,
+					1,
+					this.settings.ProcessAllVaultResizeModalresizeMode,
+					this.settings.ProcessAllVaultResizeModaldesiredWidth,
+					this.settings.ProcessAllVaultResizeModaldesiredHeight,
+					this.settings.ProcessAllVaultResizeModaldesiredLength
+				);
+			}
+			if (arrayBuffer) {
+				await this.app.vault.modifyBinary(file, arrayBuffer);
+			} else {
+				new Notice('Error: Failed to resize image.');
+			}
 		} else {
 			new Notice('Original file kept without any compression.');
 		}
-
+	
 		const newFilePath = file.path.replace(/\.[^/.]+$/, "." + extension);
 		await this.app.vault.rename(file, newFilePath);
 	}
@@ -2430,9 +2471,9 @@ class ProcessAllVault extends Modal {
 			.addDropdown(dropdown =>
 				dropdown
 					.addOptions({ None: 'None', Fit: 'Fit', Fill: 'Fill', LongestEdge: 'Longest Edge', ShortestEdge: 'Shortest Edge', Width: 'Width', Height: 'Height' })
-					.setValue(this.plugin.settings.ProcessAllVaultresizeMode)
+					.setValue(this.plugin.settings.ProcessAllVaultResizeModalresizeMode)
 					.onChange(async value => {
-						this.plugin.settings.ProcessAllVaultresizeMode = value;
+						this.plugin.settings.ProcessAllVaultResizeModalresizeMode = value;
 						await this.plugin.saveSettings();
 
 						if (value !== 'None') {
@@ -2454,7 +2495,6 @@ class ProcessAllVault extends Modal {
 			});
 	}
 }
-
 class ProcessAllVaultResizeModal extends Modal {
 	plugin: ImageConvertPLugin;
 
@@ -2469,7 +2509,7 @@ class ProcessAllVaultResizeModal extends Modal {
 
 		// Add an explanation of the selected resize mode
 		let explanation = '';
-		switch (this.plugin.settings.resizeMode) {
+		switch (this.plugin.settings.ProcessAllVaultResizeModalresizeMode) {
 			case 'Fit':
 				explanation = 'Fit mode resizes the image to fit within the desired dimensions while maintaining the aspect ratio of the image.';
 				break;
@@ -2492,14 +2532,14 @@ class ProcessAllVaultResizeModal extends Modal {
 		contentEl.createEl('p', { text: explanation });
 
 		// Add input fields for the desired dimensions based on the selected resize mode
-		if (['Fit', 'Fill'].includes(this.plugin.settings.resizeMode)) {
+		if (['Fit', 'Fill'].includes(this.plugin.settings.ProcessAllVaultResizeModalresizeMode)) {
 			const widthInput = new TextComponent(contentEl)
 				.setPlaceholder('Width')
-				.setValue(this.plugin.settings.desiredWidth.toString());
+				.setValue(this.plugin.settings.ProcessAllVaultResizeModaldesiredWidth.toString());
 
 			const heightInput = new TextComponent(contentEl)
 				.setPlaceholder('Height')
-				.setValue(this.plugin.settings.desiredHeight.toString());
+				.setValue(this.plugin.settings.ProcessAllVaultResizeModaldesiredHeight.toString());
 
 			// Add a button to save the settings and close the modal
 			new ButtonComponent(contentEl)
@@ -2507,12 +2547,12 @@ class ProcessAllVaultResizeModal extends Modal {
 				.onClick(async () => {
 					const width = parseInt(widthInput.getValue());
 					if (/^\d+$/.test(widthInput.getValue()) && width > 0) {
-						this.plugin.settings.desiredWidth = width;
+						this.plugin.settings.ProcessAllVaultResizeModaldesiredWidth = width;
 					}
 
 					const height = parseInt(heightInput.getValue());
 					if (/^\d+$/.test(heightInput.getValue()) && height > 0) {
-						this.plugin.settings.desiredHeight = height;
+						this.plugin.settings.ProcessAllVaultResizeModaldesiredHeight = height;
 					}
 
 					await this.plugin.saveSettings();
@@ -2522,9 +2562,9 @@ class ProcessAllVaultResizeModal extends Modal {
 			const lengthInput = new TextComponent(contentEl)
 				.setPlaceholder('Enter desired length in pixels')
 				.setValue(
-					['LongestEdge', 'ShortestEdge', 'Width', 'Height'].includes(this.plugin.settings.resizeMode)
-						? this.plugin.settings.desiredWidth.toString()
-						: this.plugin.settings.desiredHeight.toString()
+					['LongestEdge', 'ShortestEdge', 'Width', 'Height'].includes(this.plugin.settings.ProcessAllVaultResizeModalresizeMode)
+						? this.plugin.settings.ProcessAllVaultResizeModaldesiredWidth.toString()
+						: this.plugin.settings.ProcessAllVaultResizeModaldesiredHeight.toString()
 				);
 
 			// Add a button to save the settings and close the modal
@@ -2533,20 +2573,20 @@ class ProcessAllVaultResizeModal extends Modal {
 				.onClick(async () => {
 					const length = parseInt(lengthInput.getValue());
 					if (/^\d+$/.test(lengthInput.getValue()) && length > 0) {
-						if (['LongestEdge'].includes(this.plugin.settings.resizeMode)) {
-							this.plugin.settings.desiredLength = length;
+						if (['LongestEdge'].includes(this.plugin.settings.ProcessAllVaultResizeModalresizeMode)) {
+							this.plugin.settings.ProcessAllVaultResizeModaldesiredLength = length;
 						}
 
-						if (['ShortestEdge'].includes(this.plugin.settings.resizeMode)) {
-							this.plugin.settings.desiredLength = length;
+						if (['ShortestEdge'].includes(this.plugin.settings.ProcessAllVaultResizeModalresizeMode)) {
+							this.plugin.settings.ProcessAllVaultResizeModaldesiredLength = length;
 						}
 
-						if (['Width'].includes(this.plugin.settings.resizeMode)) {
-							this.plugin.settings.desiredWidth = length;
+						if (['Width'].includes(this.plugin.settings.ProcessAllVaultResizeModalresizeMode)) {
+							this.plugin.settings.ProcessAllVaultResizeModaldesiredWidth = length;
 						}
 
-						if (['Height'].includes(this.plugin.settings.resizeMode)) {
-							this.plugin.settings.desiredHeight = length;
+						if (['Height'].includes(this.plugin.settings.ProcessAllVaultResizeModalresizeMode)) {
+							this.plugin.settings.ProcessAllVaultResizeModaldesiredHeight = length;
 						}
 					}
 
@@ -2641,7 +2681,6 @@ class ProcessCurrentNote extends Modal {
 	
 	}
 }
-
 class ProcessCurrentNoteResizeModal extends Modal {
 	plugin: ImageConvertPLugin;
 
