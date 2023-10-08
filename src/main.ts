@@ -1177,6 +1177,41 @@ export default class ImageConvertPLugin extends Plugin {
 				new Notice('Error: No format selected for conversion.');
 				return;
 			}
+		} else if (this.settings.ProcessCurrentNotequality === 1 && this.settings.ProcessCurrentNoteresizeMode !== 'None') { // Do not compress, but allow resizing
+			let arrayBuffer;
+			if (file.extension === 'jpg' || file.extension === 'jpeg') {
+				arrayBuffer = await convertToJPG(
+					imgBlob,
+					1,
+					this.settings.ProcessCurrentNoteresizeMode,
+					this.settings.ProcessCurrentNoteresizeModedesiredWidth,
+					this.settings.ProcessCurrentNoteresizeModedesiredHeight,
+					this.settings.ProcessCurrentNoteresizeModedesiredLength
+				);
+			} else if (file.extension === 'png') {
+				arrayBuffer = await convertToPNG(
+					imgBlob,
+					1,
+					this.settings.ProcessCurrentNoteresizeMode,
+					this.settings.ProcessCurrentNoteresizeModedesiredWidth,
+					this.settings.ProcessCurrentNoteresizeModedesiredHeight,
+					this.settings.ProcessCurrentNoteresizeModedesiredLength
+				);
+			} else if (file.extension === 'webp') {
+				arrayBuffer = await convertToWebP(
+					imgBlob,
+					1,
+					this.settings.ProcessCurrentNoteresizeMode,
+					this.settings.ProcessCurrentNoteresizeModedesiredWidth,
+					this.settings.ProcessCurrentNoteresizeModedesiredHeight,
+					this.settings.ProcessCurrentNoteresizeModedesiredLength
+				);
+			}
+			if (arrayBuffer) {
+				await this.app.vault.modifyBinary(file, arrayBuffer);
+			} else {
+				new Notice('Error: Failed to resize image.');
+			}
 		} else {
 			new Notice('Original file kept without any compression.');
 		}
