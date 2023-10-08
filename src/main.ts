@@ -28,6 +28,9 @@ interface ImageConvertSettings {
 	ProcessCurrentNoteconvertTo: string;
 	ProcessCurrentNotequality: number;
 	ProcessCurrentNoteresizeMode: string;
+	ProcessCurrentNoteresizeModedesiredWidth: number;
+	ProcessCurrentNoteresizeModedesiredHeight: number;
+	ProcessCurrentNoteresizeModedesiredLength: number;
 	attachmentLocation: string;
 	attachmentSpecifiedFolder: string;
 	attachmentSubfolderName: string;
@@ -55,6 +58,9 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	ProcessCurrentNoteconvertTo: 'webp',
 	ProcessCurrentNotequality: 0.75,
 	ProcessCurrentNoteresizeMode: 'None',
+	ProcessCurrentNoteresizeModedesiredWidth: 600,
+	ProcessCurrentNoteresizeModedesiredHeight: 800,
+	ProcessCurrentNoteresizeModedesiredLength: 800,
 	attachmentLocation: 'disable',
 	attachmentSpecifiedFolder: '',
 	attachmentSubfolderName: '',
@@ -831,6 +837,8 @@ export default class ImageConvertPLugin extends Plugin {
 				imageCount++;
 				await this.convertAllVault(file);
 	
+				await refreshImagesInActiveNote();
+
 				// Calculate the elapsed time
 				const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
 	
@@ -855,8 +863,15 @@ export default class ImageConvertPLugin extends Plugin {
 		}
 	}
 	async convertAllVault(file: TFile) {
+		// Check if extension/format needs to be preserved
+		let extension = file.extension;
+		if (this.settings.ProcessAllVaultconvertTo && this.settings.ProcessAllVaultconvertTo !== 'disabled') {
+			extension = this.settings.ProcessAllVaultconvertTo;
+			await this.updateAllVaultLinks(file, extension);
+		} else {
+			await this.updateAllVaultLinks(file, extension);
+		}		
 
-		await this.updateAllVaultLinks(file, this.settings.ProcessAllVaultconvertTo);
 		const binary = await this.app.vault.readBinary(file);
 		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
 
@@ -969,7 +984,7 @@ export default class ImageConvertPLugin extends Plugin {
 			new Notice('Original file kept without any compression.');
 		}
 
-		const newFilePath = file.path.replace(/\.[^/.]+$/, "." + this.settings.ProcessAllVaultconvertTo);
+		const newFilePath = file.path.replace(/\.[^/.]+$/, "." + extension);
 		await this.app.vault.rename(file, newFilePath);
 	}
 	async updateAllVaultLinks(file: TFile, newExtension: string) { // https://forum.obsidian.md/t/vault-rename-file-path-doesnt-trigger-link-update/32317
@@ -1018,6 +1033,7 @@ export default class ImageConvertPLugin extends Plugin {
 					if (linkedFile instanceof TFile && isImage(linkedFile)) {
 						imageCount++;
 						await this.convertCurrentNoteImages(linkedFile);
+						refreshImagesInActiveNote();
 						const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
 						statusBarItemEl.setText(`Processing image ${imageCount} of ${totalLinks}, elapsed time: ${elapsedTime} seconds`);
 					}
@@ -1043,7 +1059,16 @@ export default class ImageConvertPLugin extends Plugin {
 			new Notice('Error: No active file found.');
 			return;
 		}
-		await this.updateCurrentNoteLinks(activeFile, file, this.settings.ProcessCurrentNoteconvertTo);
+		
+		// Check if extension/format needs to be preserved
+		let extension = file.extension;
+		if (this.settings.ProcessCurrentNoteconvertTo && this.settings.ProcessCurrentNoteconvertTo !== 'disabled') {
+			extension = this.settings.ProcessCurrentNoteconvertTo;
+			await this.updateCurrentNoteLinks(activeFile, file, extension);
+		} else {
+			await this.updateCurrentNoteLinks(activeFile, file, extension);
+		}	
+		
 		const binary = await this.app.vault.readBinary(file);
 		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
 
@@ -1088,9 +1113,9 @@ export default class ImageConvertPLugin extends Plugin {
 					imgBlob,
 					Number(this.settings.ProcessCurrentNotequality),
 					this.settings.ProcessCurrentNoteresizeMode,
-					this.settings.desiredWidth,
-					this.settings.desiredHeight,
-					this.settings.desiredLength
+					this.settings.ProcessCurrentNoteresizeModedesiredWidth,
+					this.settings.ProcessCurrentNoteresizeModedesiredHeight,
+					this.settings.ProcessCurrentNoteresizeModedesiredLength
 				);
 				await this.app.vault.modifyBinary(file, arrayBufferWebP);
 			} else if (this.settings.ProcessCurrentNoteconvertTo === 'jpg') {
@@ -1098,9 +1123,9 @@ export default class ImageConvertPLugin extends Plugin {
 					imgBlob,
 					Number(this.settings.ProcessCurrentNotequality),
 					this.settings.ProcessCurrentNoteresizeMode,
-					this.settings.desiredWidth,
-					this.settings.desiredHeight,
-					this.settings.desiredLength
+					this.settings.ProcessCurrentNoteresizeModedesiredWidth,
+					this.settings.ProcessCurrentNoteresizeModedesiredHeight,
+					this.settings.ProcessCurrentNoteresizeModedesiredLength
 				);
 				await this.app.vault.modifyBinary(file, arrayBufferJPG);
 			} else if (this.settings.ProcessCurrentNoteconvertTo === 'png') {
@@ -1108,9 +1133,9 @@ export default class ImageConvertPLugin extends Plugin {
 					imgBlob,
 					Number(this.settings.ProcessCurrentNotequality),
 					this.settings.ProcessCurrentNoteresizeMode,
-					this.settings.desiredWidth,
-					this.settings.desiredHeight,
-					this.settings.desiredLength
+					this.settings.ProcessCurrentNoteresizeModedesiredWidth,
+					this.settings.ProcessCurrentNoteresizeModedesiredHeight,
+					this.settings.ProcessCurrentNoteresizeModedesiredLength
 				);
 				await this.app.vault.modifyBinary(file, arrayBufferPNG);
 			} else if (this.settings.ProcessCurrentNoteconvertTo === 'disabled') {
@@ -1120,27 +1145,27 @@ export default class ImageConvertPLugin extends Plugin {
 						imgBlob,
 						Number(this.settings.ProcessCurrentNotequality),
 						this.settings.ProcessCurrentNoteresizeMode,
-						this.settings.desiredWidth,
-						this.settings.desiredHeight,
-						this.settings.desiredLength
+						this.settings.ProcessCurrentNoteresizeModedesiredWidth,
+						this.settings.ProcessCurrentNoteresizeModedesiredHeight,
+						this.settings.ProcessCurrentNoteresizeModedesiredLength
 					);
 				} else if (file.extension === 'png') {
 					arrayBuffer = await convertToPNG(
 						imgBlob,
 						Number(this.settings.ProcessCurrentNotequality),
 						this.settings.ProcessCurrentNoteresizeMode,
-						this.settings.desiredWidth,
-						this.settings.desiredHeight,
-						this.settings.desiredLength
+						this.settings.ProcessCurrentNoteresizeModedesiredWidth,
+						this.settings.ProcessCurrentNoteresizeModedesiredHeight,
+						this.settings.ProcessCurrentNoteresizeModedesiredLength
 					);
 				} else if (file.extension === 'webp') {
 					arrayBuffer = await convertToWebP(
 						imgBlob,
 						Number(this.settings.ProcessCurrentNotequality),
 						this.settings.ProcessCurrentNoteresizeMode,
-						this.settings.desiredWidth,
-						this.settings.desiredHeight,
-						this.settings.desiredLength
+						this.settings.ProcessCurrentNoteresizeModedesiredWidth,
+						this.settings.ProcessCurrentNoteresizeModedesiredHeight,
+						this.settings.ProcessCurrentNoteresizeModedesiredLength
 					);
 				}
 				if (arrayBuffer) {
@@ -1156,7 +1181,7 @@ export default class ImageConvertPLugin extends Plugin {
 			new Notice('Original file kept without any compression.');
 		}
 
-		const newFilePath = file.path.replace(/\.[^/.]+$/, "." + this.settings.ProcessCurrentNoteconvertTo);
+		const newFilePath = file.path.replace(/\.[^/.]+$/, "." + extension);
 		await this.app.vault.rename(file, newFilePath);
 	}
 	async updateCurrentNoteLinks(note: TFile, file: TFile, newExtension: string) {
@@ -1237,31 +1262,32 @@ function isImage(file: TFile): boolean {
 	return IMAGE_EXTS.includes(file.extension.toLowerCase());
 }
 
-// function findImageLinks(content: string): string[] {
-//     // This regular expression matches the syntax for image links in Obsidian
-//     const regex = /!\[\[(.*?)\]\]/g;
-
-//     const imageLinks: string[] = [];
-//     let match;
-
-//     // Use regex.exec() in a loop to find all matches in the content
-//     while ((match = regex.exec(content)) !== null) {
-//         // The path of the image is in the first capturing group
-//         let path = match[1];
-
-//         // Remove the size specification from the path
-//         const pipeIndex = path.indexOf('|');
-//         if (pipeIndex !== -1) {
-//             path = path.substring(0, pipeIndex);
-//         }
-
-//         imageLinks.push(path);
-//     }
-
-//     return imageLinks;
-// }
-
-
+async function refreshImagesInActiveNote() {
+	// {if any note is currently open} Refresh all images {currently will only auto update in Reading Mode}
+	const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+	if (activeView) {
+		const currentFile = activeView.file;
+		if (currentFile) {
+			const resolvedLinks = this.app.metadataCache.resolvedLinks;
+			const linksInCurrentNote = resolvedLinks[currentFile.path];
+			for (const link in linksInCurrentNote) {
+				const linkedFile = this.app.vault.getAbstractFileByPath(link);
+				if (linkedFile instanceof TFile && isImage(linkedFile)) {
+					// Get all img elements in the active note
+					const imgs = activeView.contentEl.querySelectorAll('img');
+					imgs.forEach((img: HTMLImageElement) => {
+						// Check if the img src matches the linked file path
+						if (img.src.includes(linkedFile.path)) {
+							// Refresh the image
+							const newSrc = img.src + (img.src.includes('?') ? '&' : '?') + new Date().getTime();
+							img.src = newSrc;
+						}
+					});
+				}
+			}
+		}
+	}
+}
 
 function convertToWebP(file: Blob, quality: number, resizeMode: string, desiredWidth: number, desiredHeight: number, desiredLength: number): Promise<ArrayBuffer> {
 	return new Promise((resolve, reject) => {
@@ -2454,7 +2480,7 @@ class ProcessCurrentNote extends Modal {
 
 						if (value !== 'None') {
 							// Open the ResizeModal when an option is selected
-							const modal = new ResizeModal(this.plugin);
+							const modal = new ProcessCurrentNoteResizeModal(this.plugin);
 							modal.open();
 						}
 					})
@@ -2476,5 +2502,107 @@ class ProcessCurrentNote extends Modal {
 				}
 			});
 	
+	}
+}
+
+class ProcessCurrentNoteResizeModal extends Modal {
+	plugin: ImageConvertPLugin;
+
+	constructor(plugin: ImageConvertPLugin) {
+		super(plugin.app);
+		this.plugin = plugin;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.empty();
+
+		// Add an explanation of the selected resize mode
+		let explanation = '';
+		switch (this.plugin.settings.ProcessCurrentNoteresizeMode) {
+			case 'Fit':
+				explanation = 'Fit mode resizes the image to fit within the desired dimensions while maintaining the aspect ratio of the image.';
+				break;
+			case 'Fill':
+				explanation = 'Fill mode resizes the image to fill the desired dimensions while maintaining the aspect ratio of the image. This may result in cropping of the image.';
+				break;
+			case 'LongestEdge':
+				explanation = 'Longest Edge mode resizes the longest side of the image to match the desired length while maintaining the aspect ratio of the image.';
+				break;
+			case 'ShortestEdge':
+				explanation = 'Shortest Edge mode resizes the shortest side of the image to match the desired length while maintaining the aspect ratio of the image.';
+				break;
+			case 'Width':
+				explanation = 'Width mode resizes the width of the image to match the desired width while maintaining the aspect ratio of the image.';
+				break;
+			case 'Height':
+				explanation = 'Height mode resizes the height of the image to match the desired height while maintaining the aspect ratio of the image.';
+				break;
+		}
+		contentEl.createEl('p', { text: explanation });
+
+		// Add input fields for the desired dimensions based on the selected resize mode
+		if (['Fit', 'Fill'].includes(this.plugin.settings.ProcessCurrentNoteresizeMode)) {
+			const widthInput = new TextComponent(contentEl)
+				.setPlaceholder('Width')
+				.setValue(this.plugin.settings.ProcessCurrentNoteresizeModedesiredWidth.toString());
+
+			const heightInput = new TextComponent(contentEl)
+				.setPlaceholder('Height')
+				.setValue(this.plugin.settings.ProcessCurrentNoteresizeModedesiredHeight.toString());
+
+			// Add a button to save the settings and close the modal
+			new ButtonComponent(contentEl)
+				.setButtonText('Save')
+				.onClick(async () => {
+					const width = parseInt(widthInput.getValue());
+					if (/^\d+$/.test(widthInput.getValue()) && width > 0) {
+						this.plugin.settings.ProcessCurrentNoteresizeModedesiredWidth = width;
+					}
+
+					const height = parseInt(heightInput.getValue());
+					if (/^\d+$/.test(heightInput.getValue()) && height > 0) {
+						this.plugin.settings.ProcessCurrentNoteresizeModedesiredHeight = height;
+					}
+
+					await this.plugin.saveSettings();
+					this.close();
+				});
+		} else {
+			const lengthInput = new TextComponent(contentEl)
+				.setPlaceholder('Enter desired length in pixels')
+				.setValue(
+					['LongestEdge', 'ShortestEdge', 'Width', 'Height'].includes(this.plugin.settings.ProcessCurrentNoteresizeMode)
+						? this.plugin.settings.ProcessCurrentNoteresizeModedesiredWidth.toString()
+						: this.plugin.settings.ProcessCurrentNoteresizeModedesiredHeight.toString()
+				);
+
+			// Add a button to save the settings and close the modal
+			new ButtonComponent(contentEl)
+				.setButtonText('Save')
+				.onClick(async () => {
+					const length = parseInt(lengthInput.getValue());
+					if (/^\d+$/.test(lengthInput.getValue()) && length > 0) {
+						if (['LongestEdge'].includes(this.plugin.settings.ProcessCurrentNoteresizeMode)) {
+							this.plugin.settings.ProcessCurrentNoteresizeModedesiredLength = length;
+						}
+
+						if (['ShortestEdge'].includes(this.plugin.settings.ProcessCurrentNoteresizeMode)) {
+							this.plugin.settings.ProcessCurrentNoteresizeModedesiredLength = length;
+						}
+
+						if (['Width'].includes(this.plugin.settings.ProcessCurrentNoteresizeMode)) {
+							this.plugin.settings.ProcessCurrentNoteresizeModedesiredWidth = length;
+						}
+
+						if (['Height'].includes(this.plugin.settings.ProcessCurrentNoteresizeMode)) {
+							this.plugin.settings.ProcessCurrentNoteresizeModedesiredHeight = length;
+						}
+					}
+
+					await this.plugin.saveSettings();
+					this.close();
+				});
+		}
 	}
 }
