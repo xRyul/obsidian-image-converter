@@ -1,7 +1,8 @@
 # Image Converter for ObsidianMD  
 <img width="600" alt="Image-Converter_Settings-sample" src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/75b1eaeb-bd31-4238-a059-a569656b4359">
 
-https://github.com/xRyul/obsidian-image-converter/assets/47340038/63a0646b-29ec-4055-abfc-55d31e07b2f7
+![258099823-63a0646b-29ec-4055-abfc-55d31e07b2f7](https://github.com/xRyul/obsidian-image-converter/assets/47340038/9d942075-9ecb-4246-8201-07b5d166c0e9)
+
 
 ## Features
 - Automatically convert dropped/pasted image into WEBP, JPG or PNG. 
