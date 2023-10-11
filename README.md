@@ -1,15 +1,15 @@
-# Image Converter for ObsidianMD
-https://github.com/xRyul/obsidian-image-converter/assets/47340038/63a0646b-29ec-4055-abfc-55d31e07b2f7
+# Image Converter for ObsidianMD  
+
+- <video src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/63a0646b-29ec-4055-abfc-55d31e07b2f7" width="600px">
 
 ## Features
 - Automatically convert dropped/pasted image into WEBP, JPG or PNG. 
 - Automatically convert HEIC and TIF files into WEBP, JPG, or PNG. 
 - Reduce file size of an image by specifying desired Quality value between 1-100
 - Auto-rename converted image.  
-- Auto-resize image based on 6 modes: Fit, Fill, Longest Side, Shortest Side, Height, Width
-	- Image resize by the Longest Side
-
-  https://github.com/xRyul/obsidian-image-converter/assets/47340038/6c287f86-08b8-4483-800d-040dd5207341
+- Auto-resize image based on 6 modes: Fit, Fill, Longest Edge, Shortest Edge, Height, Width
+	- Image resize by the Longest Edge
+	<video src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/6c287f86-08b8-4483-800d-040dd5207341" width="600px">
 
 - Ability to copy an image into clipboard via right click context menu
 	- 	<img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/2034a444-cd49-4ce0-af98-745694ba4986" width="600px">
@@ -34,15 +34,15 @@ The recommended export setting is WEBP set to Quality 75. This is the optimal se
 
 ### Example 1  - Comparison of Original converted to WEBP and JPG with Quality 1
 
-https://github.com/xRyul/obsidian-image-converter/assets/47340038/52ffd607-e92c-4b08-bde4-8a389fd992fc
+- <video src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/52ffd607-e92c-4b08-bde4-8a389fd992fc" width="600px">
 
 ### Example 2 - Comparison of Original converted to WEBP and JPG with Quality 1
 
-https://github.com/xRyul/obsidian-image-converter/assets/47340038/6978be85-6f83-47ba-a9df-1f5864c6fbcb
+- <video src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/6978be85-6f83-47ba-a9df-1f5864c6fbcb" width="600px">
 
 ### Example 3 - Comparison between WEBB 100 vs JPG 100 >  WEBB 1 vs JPG 1
 
-https://github.com/xRyul/obsidian-image-converter/assets/47340038/aa62380e-b977-42c5-8a2f-71cb09a811b7
+- <video src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/aa62380e-b977-42c5-8a2f-71cb09a811b7" width="600px">
 
 ### Comparison
 #### File size of converting one image format to another:
@@ -109,7 +109,7 @@ Below is the table which shows how much quality we lose with each conversion. Th
 
 ## How to install
 
-1. Downlaod `main.js`, `styles.css`, `manifest.json` files from this repo.
+1. Downlaod `main.js`, `manifest.json` files from this repo.
 2. Creane new folder inside `VaultFolder/.obsidian/plugins/` named  `obsidian-image-converter` . If plugins folder doesn't exist, then create it manually. 
 3. Move downloaded files into `/obsidian-image-converter` folder. 
 4. Enable the plugin in ObsidianMD. 
