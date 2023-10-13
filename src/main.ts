@@ -114,18 +114,21 @@ export default class ImageConvertPLugin extends Plugin {
 					const match = clipboardText.match(linkPattern);
 
 					if (match) {
-						const altText = match[1];
+						let altText = match[1];
 						const currentLink = match[2];
 						const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 						if (activeView) {
 							const editor = activeView.editor;
 							const longestSide = this.settings.customSize;
+							altText = altText.replace(/\|\d+(\|\d+)?/g, ''); // remove any sizing info from alt text
 							const newMarkdown = `![${altText}|${longestSide}](${currentLink})`;
 							const lineNumber = editor.getCursor().line;
 							const lineContent = editor.getLine(lineNumber);
 
-							const updatedLineContent = lineContent.replace(/!\[(.*?)\]\((.*?)\)/, newMarkdown);
+							// Use regex to replace existing sizing with custom size
+							const updatedLineContent = lineContent.replace(/!\[(.*?)\|\d+(\|\d+)?\]\((.*?)\)/, newMarkdown);
 							editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
+							
 						}
 					}
 				}
@@ -1777,12 +1780,16 @@ function isExternalLink(imageName: string): boolean {
 function updateExternalLink(activeView: MarkdownView, img: HTMLImageElement, newWidth: number, newHeight: number): void {
 	// Get the current link and alt text
 	const currentLink = img.getAttribute("src");
-	const altText = img.getAttribute("alt");
+	let altText = img.getAttribute("alt");
 	const editor = activeView.editor;
 
 	// Round newWidth to the nearest whole number
 	const longestSide = Math.round(Math.max(newWidth, newHeight));
 
+	if (altText) {
+		altText = altText.replace(/\|\d+(\|\d+)?/g, ''); // remove any sizing info from alt text
+	}
+	
 	// Construct the new markdown with the updated width
 	const newMarkdown = `![${altText}|${longestSide}](${currentLink})`;
 
