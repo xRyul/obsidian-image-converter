@@ -108,24 +108,25 @@ export default class ImageConvertPLugin extends Plugin {
 			// Apply custom size on external links: e.g.: | 100
 			// Check if the clipboard data is an external link
 			const linkPattern = /!\[(.*?)\]\((.*?)\)/;
+			if (this.settings.autoNonDestructiveResize === "customSize") {
+				if (linkPattern.test(clipboardText)) {
+					// Handle the external link
+					const match = clipboardText.match(linkPattern);
 
-			if (linkPattern.test(clipboardText)) {
-				// Handle the external link
-				const match = clipboardText.match(linkPattern);
+					if (match) {
+						const altText = match[1];
+						const currentLink = match[2];
+						const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+						if (activeView) {
+							const editor = activeView.editor;
+							const longestSide = this.settings.customSize;
+							const newMarkdown = `![${altText}|${longestSide}](${currentLink})`;
+							const lineNumber = editor.getCursor().line;
+							const lineContent = editor.getLine(lineNumber);
 
-				if (match) {
-					const altText = match[1];
-					const currentLink = match[2];
-					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-					if (activeView) {
-						const editor = activeView.editor;
-						const longestSide = this.settings.customSize;
-						const newMarkdown = `![${altText}|${longestSide}](${currentLink})`;
-						const lineNumber = editor.getCursor().line;
-						const lineContent = editor.getLine(lineNumber);
-
-						const updatedLineContent = lineContent.replace(/!\[(.*?)\]\((.*?)\)/, newMarkdown);
-						editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
+							const updatedLineContent = lineContent.replace(/!\[(.*?)\]\((.*?)\)/, newMarkdown);
+							editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
+						}
 					}
 				}
 			}
@@ -792,8 +793,8 @@ export default class ImageConvertPLugin extends Plugin {
 		if (this.settings.autoNonDestructiveResize === "customSize") {
 			const size = this.settings.customSize;
 			if (newLinkText.startsWith('![[')) {
-			// This is an internal link
-			newLinkText = newLinkText.replace(']]', `|${size}]]`);
+				// This is an internal link
+				newLinkText = newLinkText.replace(']]', `|${size}]]`);
 			} 
 			// else if (newLinkText.startsWith('![')) {
 			//   // This is an external link
@@ -1281,7 +1282,6 @@ export default class ImageConvertPLugin extends Plugin {
 		await this.app.vault.modify(note, content);
 	}
 	
-
 	
 	makeLinkText(file: TFile, sourcePath: string, subpath?: string): string {
 		return this.app.fileManager.generateMarkdownLink(file, sourcePath, subpath);
@@ -1793,7 +1793,7 @@ function updateExternalLink(activeView: MarkdownView, img: HTMLImageElement, new
 	const lineContent = editor.getLine(lineNumber);
 
 	// Replace the old markdown with the new one in the current line
-	const updatedLineContent = lineContent.replace(/!\[.*\]\(.*\)/, newMarkdown);
+	const updatedLineContent = lineContent.replace(/!\[(?<anchor>.*?)\|\d+(\|\d+)?\]\((?<link>.+?)\)/g, newMarkdown);
 
 	// Update only the current line in the editor
 	editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
