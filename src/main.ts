@@ -279,8 +279,7 @@ export default class ImageConvertPLugin extends Plugin {
 		);
 
 		// Allow resizing with SHIFT + Scrollwheel
-		// Initiate a single-click when hover over more than 1 external image.
-		// This solves a small bug, which would replace image1 while hovering over image2
+		// Fix a bug which on when hover on external images it would replace 1 image link with another
 		// Sometimes it would replace image1 with image2 because there is no way to find linenumber
 		// for external links. Linenumber gets shown only for internal images.
 		let storedImageName: string | null = null; // get imagename for comparison
@@ -321,9 +320,11 @@ export default class ImageConvertPLugin extends Plugin {
 								return;
 							}
 
-							const { newWidth, newHeight } = resizeImageScrollWheel(event, img);
+							const { newWidth, newHeight, newLeft, newTop } = resizeImageScrollWheel(event, img);
 							img.style.width = `${newWidth}px`;
 							img.style.height = `${newHeight}px`;
+							img.style.left = `${newLeft}px`;
+							img.style.top = `${newTop}px`;
 
 							const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 							if (activeView) {
@@ -1740,8 +1741,16 @@ function resizeImageScrollWheel(event: WheelEvent, img: HTMLImageElement) {
 	newWidth = Math.round(newWidth);
 	newHeight = Math.round(newHeight);
 
-	return { newWidth, newHeight };
+	// Calculate the new position of the image so that it zooms towards the mouse pointer
+	const rect = img.getBoundingClientRect();
+	const dx = event.clientX - rect.left; // horizontal distance from left edge of image to mouse pointer
+	const dy = event.clientY - rect.top; // vertical distance from top edge of image to mouse pointer
+	const newLeft = rect.left - dx * (newWidth / img.clientWidth - 1);
+	const newTop = rect.top - dy * (newHeight / img.clientHeight - 1);
+
+	return { newWidth, newHeight, newLeft, newTop };
 }
+
 
 function isBase64Image(src:any) {
     // Check if src starts with 'data:image'
