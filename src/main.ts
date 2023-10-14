@@ -102,17 +102,26 @@ export default class ImageConvertPLugin extends Plugin {
 		this.pasteListener = (event: ClipboardEvent) => {
 			userAction = true;
 			setTimeout(() => userAction = false, 100);
-			// Get the clipboard data as text
-			const clipboardText = event.clipboardData?.getData('Text') || '';
-
+			// Get the clipboard data as HTML and parse it as Markdown LINK
+			const clipboardHTML = event.clipboardData?.getData('text/html') || '';
+			const parser = new DOMParser();
+			const doc = parser.parseFromString(clipboardHTML, 'text/html');
+			const img = doc.querySelector('img');
+			let markdownImagefromClipboard = '';
+			if (img) {
+				const altText = img.alt;
+				const src = img.src;
+				markdownImagefromClipboard = `![${altText}](${src})`;
+			}
+			
 			// Apply custom size on external links: e.g.: | 100
 			// Check if the clipboard data is an external link
 			const linkPattern = /!\[(.*?)\]\((.*?)\)/;
 			if (this.settings.autoNonDestructiveResize === "customSize") {
-				if (linkPattern.test(clipboardText)) {
+				if (linkPattern.test(markdownImagefromClipboard)) {
+					console.log("true")
 					// Handle the external link
-					const match = clipboardText.match(linkPattern);
-
+					const match = markdownImagefromClipboard.match(linkPattern);
 					if (match) {
 						let altText = match[1];
 						const currentLink = match[2];
