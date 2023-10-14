@@ -125,8 +125,9 @@ export default class ImageConvertPLugin extends Plugin {
 							const lineNumber = editor.getCursor().line;
 							const lineContent = editor.getLine(lineNumber);
 
-							// Use regex to replace existing sizing with custom size
-							const updatedLineContent = lineContent.replace(/!\[(.*?)\|\d+(\|\d+)?\]\((.*?)\)/, newMarkdown);
+							// Use regex to replace existing sizing with custom size or add custom size if it doesn't exist on External Links
+							const updatedLineContent = lineContent.replace(/!\[(.*?)(\|\d+(\|\d+)?)?\]\((.*?)\)/, newMarkdown);
+
 							editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
 							
 						}
@@ -278,33 +279,24 @@ export default class ImageConvertPLugin extends Plugin {
 		);
 
 		// Allow resizing with SHIFT + Scrollwheel
-		let lastImg: HTMLImageElement | null = null;
 		// Initiate a single-click when hover over more than 1 external image.
 		// This solves a small bug, which would replace image1 while hovering over image2
 		// Sometimes it would replace image1 with image2 because there is no way to find linenumber
 		// for external links. Linenumber gets shown only for internal images.
+		let storedImageName: string | null = null; // get imagename for comparison
 		this.register(
 			this.onElement(
 				document,
 				"mouseover",
 				"img",
 				(event: MouseEvent) => {
-					const img = event.target as HTMLImageElement;
-					// If the mouse is over a new image and it's an external image, simulate a ==left click==
-					if (img !== lastImg && isExternalLink(img.src)) {
-						img.click();
-						lastImg = img;
-						// const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-						// if (activeView) {
-						// 	const editor = activeView.editor;
-						// 	const cursorPosition = editor.getCursor();
-
-						// 	// Set selection to none
-						// 	editor.setSelection({ line: cursorPosition.line, ch: 0 }, { line: cursorPosition.line, ch: 0 });
-						// 	editor.setCursor({ line: cursorPosition.line, ch: 0 });
-
-						// }
+					if (event.shiftKey) { // check if the shift key is pressed
+						// console.log('Shift key is pressed. Mouseover event will not fire.');
+						return;
 					}
+		
+					const img = event.target as HTMLImageElement;
+					storedImageName = getImageName(img);
 				}
 			)
 		);
@@ -316,13 +308,18 @@ export default class ImageConvertPLugin extends Plugin {
 				(event: WheelEvent) => {
 					if (!this.settings.resizeWithShiftScrollwheel) return;
 					if (event.shiftKey) { // check if the shift key is pressed
+
 						try {
 							const img = event.target as HTMLImageElement;
 
 							// get the image under the cursor
-							const imgUnderCursor = document.elementFromPoint(event.clientX, event.clientY) as HTMLImageElement;
+							const imageName = getImageName(img)
+
 							// if the image under the cursor is not the same as the event target, return
-							if (img !== imgUnderCursor) return;
+							if (imageName !== storedImageName) {
+								// console.log('Started scrolling over a new image');
+								return;
+							}
 
 							const { newWidth, newHeight } = resizeImageScrollWheel(event, img);
 							img.style.width = `${newWidth}px`;
@@ -332,23 +329,23 @@ export default class ImageConvertPLugin extends Plugin {
 							if (activeView) {
 								const imageName = getImageName(img);
 								if (imageName) { // Check if imageName is not null
-										
 									if (isExternalLink(imageName)) {
 										// console.log("editing external link")
 										updateExternalLink(activeView, img, newWidth, newHeight);
 									} else if (isBase64Image(imageName)) {
 										// console.log("editing base64 image")
-										resizeBase64Drag(activeView, imageName, newWidth)										
+										resizeBase64Drag(activeView, imageName, newWidth)
 									} else {
 										// console.log("editing internal link")
 										updateMarkdownLink(activeView, imageName, newWidth, newHeight);
-										
 									}
 								}
 							}
+
 						} catch (error) {
 							console.error('An error occurred:', error);
 						}
+
 					}
 				}
 			)
@@ -1789,7 +1786,7 @@ function updateExternalLink(activeView: MarkdownView, img: HTMLImageElement, new
 	if (altText) {
 		altText = altText.replace(/\|\d+(\|\d+)?/g, ''); // remove any sizing info from alt text
 	}
-	
+
 	// Construct the new markdown with the updated width
 	const newMarkdown = `![${altText}|${longestSide}](${currentLink})`;
 
@@ -1800,7 +1797,9 @@ function updateExternalLink(activeView: MarkdownView, img: HTMLImageElement, new
 	const lineContent = editor.getLine(lineNumber);
 
 	// Replace the old markdown with the new one in the current line
-	const updatedLineContent = lineContent.replace(/!\[(?<anchor>.*?)\|\d+(\|\d+)?\]\((?<link>.+?)\)/g, newMarkdown);
+	// If there is no sizing then add
+	// If there is sizing then make sure it is the only one and there are no duplicate e.g. | size | size
+	const updatedLineContent = lineContent.replace(/!\[(.*?)(\|\d+(\|\d+)?)?\]\((.*?)\)/, newMarkdown);
 
 	// Update only the current line in the editor
 	editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
