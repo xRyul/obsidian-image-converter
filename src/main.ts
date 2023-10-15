@@ -859,8 +859,14 @@ export default class ImageConvertPLugin extends Plugin {
 			return;
 		}
 
-		let findText = linkText
-		let replaceText = newLinkText
+		// 函数用于转义正则表达式中的特殊字符
+		function escapeRegExp(string) {
+			return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& 表示整个匹配的字符串
+		}
+
+		let findText = escapeRegExp(linkText);
+		let replaceText = newLinkText;
+
 		// 获取整个文档的内容
 		const docContent = editor.getValue();
 
@@ -872,11 +878,13 @@ export default class ImageConvertPLugin extends Plugin {
 
 		// 将新内容设置回编辑器
 		editor.setValue(newContent);
+
 		console.log("Editor: ", editor);
 		console.log("Find text: ", findText);
 		console.log("Replace text: ", replaceText);
 		console.log("Document content before replace: ", docContent);
 		console.log("Document content after replace: ", newContent);
+
 
 		// const editor = this.getActiveEditor(sourcePath);
 		// if (!editor) {
