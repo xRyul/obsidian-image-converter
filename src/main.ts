@@ -189,7 +189,7 @@ export default class ImageConvertPLugin extends Plugin {
 			// msg("粘贴事件，用户正在操作")
 			setTimeout(() => {
 				userAction = false;
-				msg("用户操作结束");
+				//msg("用户操作结束");
 			}, 10000);
 
 			// Get the clipboard data as text
@@ -703,7 +703,7 @@ export default class ImageConvertPLugin extends Plugin {
 			new Notice('Error: No active file found.');
 			return;
 		}
-		msg("正在操作文件:" + file.name)
+		//msg("正在操作文件:" + file.name)
 		// Start the conversion and show the status indicator
 		const statusBarItemEl = this.addStatusBarItem();
 		statusBarItemEl.setText(`Converting image... ⏳`);
