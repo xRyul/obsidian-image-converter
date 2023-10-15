@@ -85,6 +85,35 @@ function msg(tips: string): void {
 	new Notice(tips, 0);
 }
 
+function extractImageNames(clipboardText) {
+	// 使用换行符分割粘贴的文本
+	const lines = clipboardText.split('\n');
+
+	// 初始化一个空数组来存储图片文件名
+	const imageNames = [];
+
+	// 使用正则表达式来匹配Markdown图片链接
+	const regex = /!\[\[(.*?)\]\]/g;
+
+	// 遍历每一行来查找图片链接
+	for (const line of lines) {
+		let match;
+		while ((match = regex.exec(line)) !== null) {
+			// match[1] 包含第一个括号内的内容，即图片文件名
+			imageNames.push(match[1]);
+		}
+	}
+
+	return imageNames;
+}
+
+// // 使用示例
+// const clipboardText = "![[image1.png]]\n![[image2.png]]\n![[image3.png]]";
+// const imageNames = extractImageNames(clipboardText);
+
+// // 输出提取的图片文件名
+// console.log(imageNames);  // 输出：["image1.png", "image2.png", "image3.png"]
+
 // function replace_current_file(sourcePath, findText, replaceText) {
 // 	//editor=
 // 	const editor = this.getActiveEditor(sourcePath);
@@ -165,6 +194,10 @@ export default class ImageConvertPLugin extends Plugin {
 
 			// Get the clipboard data as text
 			const clipboardText = event.clipboardData?.getData('Text') || '';
+			// const imageNames = extractImageNames(clipboardText);
+
+			// // 输出提取的图片文件名
+			// console.log(imageNames);
 
 			//new Notice(clipboardText, 0)
 
