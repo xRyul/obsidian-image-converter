@@ -107,19 +107,19 @@ export default class ImageConvertPLugin extends Plugin {
 			const parser = new DOMParser();
 			const doc = parser.parseFromString(clipboardHTML, 'text/html');
 			const img = doc.querySelector('img');
+			console.log(img)
 			let markdownImagefromClipboard = '';
 			if (img) {
 				const altText = img.alt;
 				const src = img.src;
 				markdownImagefromClipboard = `![${altText}](${src})`;
 			}
-			
-			// Apply custom size on external links: e.g.: | 100
+			console.log(markdownImagefromClipboard)
+			// CLEAN external link and Apply custom size on external links: e.g.: | 100
 			// Check if the clipboard data is an external link
 			const linkPattern = /!\[(.*?)\]\((.*?)\)/;
 			if (this.settings.autoNonDestructiveResize === "customSize") {
 				if (linkPattern.test(markdownImagefromClipboard)) {
-					console.log("true")
 					// Handle the external link
 					const match = markdownImagefromClipboard.match(linkPattern);
 					if (match) {
@@ -134,11 +134,15 @@ export default class ImageConvertPLugin extends Plugin {
 							const lineNumber = editor.getCursor().line;
 							const lineContent = editor.getLine(lineNumber);
 
-							// Use regex to replace existing sizing with custom size or add custom size if it doesn't exist on External Links
-							const updatedLineContent = lineContent.replace(/!\[(.*?)(\|\d+(\|\d+)?)?\]\((.*?)\)/, newMarkdown);
+							// Preserve existing elements e.g. order/unordered list, comment, code
+							// find the start and end position of the image link in the line
+							const startPos = lineContent.indexOf(`![${altText}`);
+							const endPos = lineContent.indexOf(')', startPos) + 1;
 
-							editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
-							
+							// update the size value in the image's markdown link
+							if (startPos !== -1 && endPos !== -1) {
+								editor.replaceRange(newMarkdown, { line: lineNumber, ch: startPos }, { line: lineNumber, ch: endPos });
+							}
 						}
 					}
 				}
@@ -388,7 +392,7 @@ export default class ImageConvertPLugin extends Plugin {
 		// Add a command to process all images in the current note
 		this.addCommand({
 			id: 'process-all-images-current-note',
-			name: 'Process all images in the current note',
+			name: 'Process all images in current note',
 			callback: () => {
 				const modal = new ProcessCurrentNote(this);
 				modal.open();
@@ -398,7 +402,7 @@ export default class ImageConvertPLugin extends Plugin {
 			this.app.workspace.on("file-menu", (menu, file) => {
 				menu.addItem((item) => {
 					item
-						.setTitle("Process all images in the current note")
+						.setTitle("Process all images in current note")
 						.setIcon("cog")
 						.onClick(async () => {
 							const modal = new ProcessCurrentNote(this);
@@ -2632,10 +2636,36 @@ class ProcessCurrentNote extends Modal {
     onOpen() {
         const { contentEl } = this;
         
-		const heading = contentEl.createEl('h1');
-		heading.textContent = 'Convert, compress and resize';
-		const desc = contentEl.createEl('p');
-		desc.textContent = 'Running this will modify all your internal images in the current note. Please create backups. All internal image links will be automatically updated.';
+
+		const div1 = contentEl.createEl('div');
+		div1.style.display = 'flex';
+		div1.style.flexDirection = 'column';
+		div1.style.alignItems = 'center';
+		div1.style.justifyContent = 'center';
+		
+		const heading1 = div1.createEl('h2')
+		heading1.textContent = 'Convert, compress and resize';
+		
+		let noteName = 'current note';
+		let noteExtension = '';
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (activeView && activeView.file) {
+			noteName = activeView.file.basename;
+			noteExtension = activeView.file.extension;
+		} else {
+			noteName = "";
+		}
+	
+		const heading2 = div1.createEl('h6');
+		heading2.textContent = `all images in: ${noteName}.${noteExtension}`;
+		heading2.style.marginTop = '-18px';
+		
+		const desc = div1.createEl('p');
+		desc.textContent = 'Running this will modify all internal images in the current note. Please create backups. All internal image links will be automatically updated.';
+		desc.style.marginTop = '-10px'; // space between the heading and the paragraph
+		desc.style.padding = '20px'; // padding around the div
+		desc.style.borderRadius = '10px'; // rounded corners
+		
 
         // Add your settings here
         new Setting(contentEl)
