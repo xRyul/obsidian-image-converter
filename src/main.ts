@@ -148,22 +148,25 @@ export default class ImageConvertPLugin extends Plugin {
 		};
 
 		this.dropListener = () => { userAction = true; setTimeout(() => userAction = false, 100); };
-		document.addEventListener("paste", this.pasteListener);
-		document.addEventListener('drop', this.dropListener);
-		this.registerEvent(
-			this.app.vault.on('create', (file: TFile) => {
-				if (!(file instanceof TFile)) return;
-				//这个事件在obsidian启动的时候就会被调用，而且所有的.md .jpg文件...都会被触发。 
-				//new Notice(file.name, 0);
-				// if (isImage(file)) {
-				// 	new Notice(file.name, 100);
-				// }
-				if (isImage(file) && userAction) {
-					this.renameFile1(file);
-				}
-				userAction = false;
-			})
-		);
+
+		this.app.workspace.onLayoutReady(() => {
+			document.addEventListener("paste", this.pasteListener);
+			document.addEventListener('drop', this.dropListener);
+			this.registerEvent(
+				this.app.vault.on('create', (file: TFile) => {
+					if (!(file instanceof TFile)) return;
+					//这个事件在obsidian启动的时候就会被调用，而且所有的.md .jpg文件...都会被触发。 
+					new Notice(file.name, 0);
+					// if (isImage(file)) {
+					// 	new Notice(file.name, 100);
+					// }
+					if (isImage(file) && userAction) {
+						this.renameFile1(file);
+					}
+					userAction = false;
+				})
+			);
+		})
 
 		// Check if edge of an image was clicked upon
 		this.register(
