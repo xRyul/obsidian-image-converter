@@ -81,6 +81,13 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	rightClickContextMenu: true
 }
 
+function msg(tips: string): void {
+	new Notice(tips, 0);
+}
+
+
+
+
 export default class ImageConvertPLugin extends Plugin {
 	settings: ImageConvertSettings;
 
@@ -101,9 +108,18 @@ export default class ImageConvertPLugin extends Plugin {
 		// also if pasting, check if it is an External Link and wether to apply '| size' syntax to the link
 		this.pasteListener = (event: ClipboardEvent) => {
 			userAction = true;
-			setTimeout(() => userAction = false, 100);
+			msg("粘贴事件，用户正在操作")
+			//setTimeout(() => userAction = false, 100);
+			setTimeout(() => {
+				userAction = false;
+				msg("用户操作结束");
+			}, 100);
+
+
 			// Get the clipboard data as text
 			const clipboardText = event.clipboardData?.getData('Text') || '';
+
+			new Notice(clipboardText, 0)
 
 			// Apply custom size on external links: e.g.: | 100
 			// Check if the clipboard data is an external link
@@ -610,7 +626,7 @@ export default class ImageConvertPLugin extends Plugin {
 		// Start the conversion and show the status indicator
 		const statusBarItemEl = this.addStatusBarItem();
 		statusBarItemEl.setText(`Converting image... ⏳`);
-
+		msg("正在转化图片" + file.name)
 		const binary = await this.app.vault.readBinary(file);
 		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
 
