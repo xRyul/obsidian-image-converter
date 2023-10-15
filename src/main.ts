@@ -187,10 +187,10 @@ export default class ImageConvertPLugin extends Plugin {
 		this.pasteListener = (event: ClipboardEvent) => {
 			userAction = true;
 			// msg("粘贴事件，用户正在操作")
-			// setTimeout(() => {
-			// 	userAction = false;
-			// 	msg("用户操作结束");
-			// }, 5000);
+			setTimeout(() => {
+				userAction = false;
+				msg("用户操作结束");
+			}, 10000);
 
 			// Get the clipboard data as text
 			const clipboardText = event.clipboardData?.getData('Text') || '';
@@ -229,7 +229,7 @@ export default class ImageConvertPLugin extends Plugin {
 
 		this.dropListener = () => {
 			userAction = true;
-			//setTimeout(() => userAction = false, 5000);
+			setTimeout(() => userAction = false, 10000);
 		};
 
 		this.app.workspace.onLayoutReady(() => {
@@ -703,7 +703,7 @@ export default class ImageConvertPLugin extends Plugin {
 			new Notice('Error: No active file found.');
 			return;
 		}
-
+		msg("正在操作文件:" + file.name)
 		// Start the conversion and show the status indicator
 		const statusBarItemEl = this.addStatusBarItem();
 		statusBarItemEl.setText(`Converting image... ⏳`);
