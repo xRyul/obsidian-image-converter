@@ -133,13 +133,11 @@ export default class ImageConvertPLugin extends Plugin {
 		// also if pasting, check if it is an External Link and wether to apply '| size' syntax to the link
 		this.pasteListener = (event: ClipboardEvent) => {
 			userAction = true;
-			msg("粘贴事件，用户正在操作")
-
+			// msg("粘贴事件，用户正在操作")
 			// setTimeout(() => {
 			// 	userAction = false;
 			// 	msg("用户操作结束");
 			// }, 5000);
-
 
 			// Get the clipboard data as text
 			const clipboardText = event.clipboardData?.getData('Text') || '';
@@ -183,11 +181,6 @@ export default class ImageConvertPLugin extends Plugin {
 			this.registerEvent(
 				this.app.vault.on('create', (file: TFile) => {
 					if (!(file instanceof TFile)) return;
-					//这个事件在obsidian启动的时候就会被调用，而且所有的.md .jpg文件...都会被触发。 
-					new Notice(file.name, 0);
-					// if (isImage(file)) {
-					// 	new Notice(file.name, 100);
-					// }
 					if (isImage(file) && userAction) {
 						this.renameFile1(file);
 					}
@@ -657,7 +650,6 @@ export default class ImageConvertPLugin extends Plugin {
 		// Start the conversion and show the status indicator
 		const statusBarItemEl = this.addStatusBarItem();
 		statusBarItemEl.setText(`Converting image... ⏳`);
-		//msg("正在转化图片" + file.name)
 		const binary = await this.app.vault.readBinary(file);
 		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
 
@@ -859,50 +851,16 @@ export default class ImageConvertPLugin extends Plugin {
 			return;
 		}
 
-		// 函数用于转义正则表达式中的特殊字符
+		//replace old content
 		function escapeRegExp(string) {
 			return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& 表示整个匹配的字符串
 		}
-
 		let findText = escapeRegExp(linkText);
 		let replaceText = newLinkText;
-
-		// 获取整个文档的内容
 		const docContent = editor.getValue();
-
-		// 创建一个全局正则表达式，用于查找所有出现的 findText
 		const regex = new RegExp(findText, 'g');
-
-		// 将所有的 findText 替换为 replaceText
 		const newContent = docContent.replace(regex, replaceText);
-
-		// 将新内容设置回编辑器
 		editor.setValue(newContent);
-
-		console.log("Editor: ", editor);
-		console.log("Find text: ", findText);
-		console.log("Replace text: ", replaceText);
-		console.log("Document content before replace: ", docContent);
-		console.log("Document content after replace: ", newContent);
-
-
-		// const editor = this.getActiveEditor(sourcePath);
-		// if (!editor) {
-		// 	new Notice(`Failed to rename ${newName}: no active editor`);
-		// 	return;
-		// }
-		// const cursor = editor.getCursor();
-		// const line = editor.getLine(cursor.line);
-
-		// editor.transaction({
-		// 	changes: [
-		// 		{
-		// 			from: { ...cursor, ch: 0 },
-		// 			to: { ...cursor, ch: line.length },
-		// 			text: line.replace(linkText, newLinkText),
-		// 		},
-		// 	],
-		// });
 
 		// Do not show renamed from -> to notice if auto-renaming is disabled 
 		if (this.settings.autoRename === true) {
