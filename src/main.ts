@@ -85,6 +85,31 @@ function msg(tips: string): void {
 	new Notice(tips, 0);
 }
 
+// function replace_current_file(sourcePath, findText, replaceText) {
+// 	//editor=
+// 	const editor = this.getActiveEditor(sourcePath);
+// 	if (!editor) {
+// 		//new Notice(`Failed to rename ${newName}: no active editor`);
+// 		msg("fail to get editor")
+// 		return;
+// 	}
+
+// 	// 使用 replace_current_file 函数，并指定查找和替换的文本
+// 	replace_current_file(editor, 'aaa', 'bbb');
+
+// 	// 获取整个文档的内容
+// 	const docContent = editor.getValue();
+
+// 	// 创建一个全局正则表达式，用于查找所有出现的 findText
+// 	const regex = new RegExp(findText, 'g');
+
+// 	// 将所有的 findText 替换为 replaceText
+// 	const newContent = docContent.replace(regex, replaceText);
+
+// 	// 将新内容设置回编辑器
+// 	editor.setValue(newContent);
+// }
+
 
 
 
@@ -109,17 +134,17 @@ export default class ImageConvertPLugin extends Plugin {
 		this.pasteListener = (event: ClipboardEvent) => {
 			userAction = true;
 			msg("粘贴事件，用户正在操作")
-			//setTimeout(() => userAction = false, 100);
-			setTimeout(() => {
-				userAction = false;
-				msg("用户操作结束");
-			}, 100);
+
+			// setTimeout(() => {
+			// 	userAction = false;
+			// 	msg("用户操作结束");
+			// }, 5000);
 
 
 			// Get the clipboard data as text
 			const clipboardText = event.clipboardData?.getData('Text') || '';
 
-			new Notice(clipboardText, 0)
+			//new Notice(clipboardText, 0)
 
 			// Apply custom size on external links: e.g.: | 100
 			// Check if the clipboard data is an external link
@@ -147,7 +172,10 @@ export default class ImageConvertPLugin extends Plugin {
 			}
 		};
 
-		this.dropListener = () => { userAction = true; setTimeout(() => userAction = false, 100); };
+		this.dropListener = () => {
+			userAction = true;
+			//setTimeout(() => userAction = false, 5000);
+		};
 
 		this.app.workspace.onLayoutReady(() => {
 			document.addEventListener("paste", this.pasteListener);
@@ -163,7 +191,7 @@ export default class ImageConvertPLugin extends Plugin {
 					if (isImage(file) && userAction) {
 						this.renameFile1(file);
 					}
-					userAction = false;
+					//userAction = false;
 				})
 			);
 		})
@@ -629,7 +657,7 @@ export default class ImageConvertPLugin extends Plugin {
 		// Start the conversion and show the status indicator
 		const statusBarItemEl = this.addStatusBarItem();
 		statusBarItemEl.setText(`Converting image... ⏳`);
-		msg("正在转化图片" + file.name)
+		//msg("正在转化图片" + file.name)
 		const binary = await this.app.vault.readBinary(file);
 		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
 
@@ -796,17 +824,20 @@ export default class ImageConvertPLugin extends Plugin {
 		const originName = file.name;
 
 		statusBarItemEl.setText('Image converted ✅');
-		new Notice(`Image: ${decodeURIComponent(originName)} converted`);
+		//new Notice(`Image: ${decodeURIComponent(originName)} converted`);
+		let origin_file_convert_result = `Image: ${decodeURIComponent(originName)} converted`
 		statusBarItemEl.setText('');
 
 		const linkText = this.makeLinkText(file, sourcePath);
 		newPath = `${newPath}/${newName}`;
+		//msg("newPath:" + newPath)
 
 		try {
 			const decodedNewPath = decodeURIComponent(newPath);
 			await this.app.vault.rename(file, decodedNewPath);
 		} catch (err) {
-			new Notice(`Failed to rename ${decodeURIComponent(newName)}: ${err}`);
+			//new Notice(`Failed to rename ${decodeURIComponent(newName)}: ${err}`);
+			msg(`Failed to rename ${decodeURIComponent(newName)}: ${err}`)
 			throw err;
 		}
 
@@ -819,30 +850,51 @@ export default class ImageConvertPLugin extends Plugin {
 				// This is an internal link
 				newLinkText = newLinkText.replace(']]', `|${size}]]`);
 			}
-			// else if (newLinkText.startsWith('![')) {
-			//   // This is an external link
-			//   newLinkText = newLinkText.replace(']', `|${size}]`);
-			// }
 		}
-
+		//msg(origin_file_convert_result + "->" + newLinkText)
 
 		const editor = this.getActiveEditor(sourcePath);
 		if (!editor) {
 			new Notice(`Failed to rename ${newName}: no active editor`);
 			return;
 		}
-		const cursor = editor.getCursor();
-		const line = editor.getLine(cursor.line);
 
-		editor.transaction({
-			changes: [
-				{
-					from: { ...cursor, ch: 0 },
-					to: { ...cursor, ch: line.length },
-					text: line.replace(linkText, newLinkText),
-				},
-			],
-		});
+		let findText = linkText
+		let replaceText = newLinkText
+		// 获取整个文档的内容
+		const docContent = editor.getValue();
+
+		// 创建一个全局正则表达式，用于查找所有出现的 findText
+		const regex = new RegExp(findText, 'g');
+
+		// 将所有的 findText 替换为 replaceText
+		const newContent = docContent.replace(regex, replaceText);
+
+		// 将新内容设置回编辑器
+		editor.setValue(newContent);
+		console.log("Editor: ", editor);
+		console.log("Find text: ", findText);
+		console.log("Replace text: ", replaceText);
+		console.log("Document content before replace: ", docContent);
+		console.log("Document content after replace: ", newContent);
+
+		// const editor = this.getActiveEditor(sourcePath);
+		// if (!editor) {
+		// 	new Notice(`Failed to rename ${newName}: no active editor`);
+		// 	return;
+		// }
+		// const cursor = editor.getCursor();
+		// const line = editor.getLine(cursor.line);
+
+		// editor.transaction({
+		// 	changes: [
+		// 		{
+		// 			from: { ...cursor, ch: 0 },
+		// 			to: { ...cursor, ch: line.length },
+		// 			text: line.replace(linkText, newLinkText),
+		// 		},
+		// 	],
+		// });
 
 		// Do not show renamed from -> to notice if auto-renaming is disabled 
 		if (this.settings.autoRename === true) {
