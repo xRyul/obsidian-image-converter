@@ -155,27 +155,27 @@ export default class ImageConvertPLugin extends Plugin {
 
 		// 监听文件打开事件
 		// 跳到最后一行，可以实现，但是粘贴图片有可能会触发重新加载，导致界面跳开正在编辑的位置，就很烦人。
-		// this.registerEvent(
-		// 	this.app.workspace.on('file-open', async (file) => {
-		// 		// 获取当前活动的Markdown视图
-		// 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		this.registerEvent(
+			this.app.workspace.on('file-open', async (file) => {
+				// 获取当前活动的Markdown视图
+				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 
-		// 		// 确保视图存在
-		// 		if (activeView) {
-		// 			// 获取编辑器实例
-		// 			const editor = activeView.editor;
+				// 确保视图存在
+				if (activeView) {
+					// 获取编辑器实例
+					const editor = activeView.editor;
 
-		// 			// 获取文档的总行数
-		// 			const lastLine = editor.lineCount() - 1;
+					// 获取文档的总行数
+					const lastLine = editor.lineCount() - 1;
 
-		// 			// 将光标移动到最后一行
-		// 			editor.setCursor({ line: lastLine, ch: 0 });
+					// 将光标移动到最后一行
+					editor.setCursor({ line: lastLine, ch: 0 });
 
-		// 			// 如果你想滚动到最后一行，你可以使用以下代码
-		// 			editor.scrollIntoView({ line: lastLine, ch: 0 }, 200);
-		// 		}
-		// 	})
-		// );
+					// 如果你想滚动到最后一行，你可以使用以下代码
+					editor.scrollIntoView({ line: lastLine, ch: 0 }, 200);
+				}
+			})
+		);
 
 		// Add evenet listeners on paste and drop to prevent filerenaming during `sync` or `git pull`
 		// This allows us to check if  file was created as a result of a user action (like dropping 
