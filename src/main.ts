@@ -908,6 +908,14 @@ export default class ImageConvertPLugin extends Plugin {
 			new Notice(`Failed to rename ${newName}: no active editor`);
 			return;
 		}
+		// // 假设你已经获取了CodeMirror编辑器实例
+		// const editor = yourMarkdownView.editor;
+
+		// 获取当前光标位置
+		const cursor = editor.getCursor();
+
+		// 获取当前光标所在的行号
+		const currentLine = cursor.line;
 
 		//replace old content
 		function escapeRegExp(string) {
@@ -919,6 +927,12 @@ export default class ImageConvertPLugin extends Plugin {
 		const regex = new RegExp(findText, 'g');
 		const newContent = docContent.replace(regex, replaceText);
 		editor.setValue(newContent);
+
+		// 将光标设置到当前行（这实际上可能不是必需的，因为光标已经在那里）
+		editor.setCursor({ line: currentLine, ch: 0 });
+
+		// 确保当前行处于可见位置
+		editor.scrollIntoView({ line: currentLine, ch: 0 }, 200);  // 200 是垂直边距
 
 		// Do not show renamed from -> to notice if auto-renaming is disabled 
 		if (this.settings.autoRename === true) {
