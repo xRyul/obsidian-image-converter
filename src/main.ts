@@ -107,14 +107,14 @@ export default class ImageConvertPLugin extends Plugin {
 			const parser = new DOMParser();
 			const doc = parser.parseFromString(clipboardHTML, 'text/html');
 			const img = doc.querySelector('img');
-			console.log(img)
+
 			let markdownImagefromClipboard = '';
 			if (img) {
 				const altText = img.alt;
 				const src = img.src;
 				markdownImagefromClipboard = `![${altText}](${src})`;
 			}
-			console.log(markdownImagefromClipboard)
+
 			// CLEAN external link and Apply custom size on external links: e.g.: | 100
 			// Check if the clipboard data is an external link
 			const linkPattern = /!\[(.*?)\]\((.*?)\)/;
