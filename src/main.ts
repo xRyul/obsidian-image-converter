@@ -202,27 +202,36 @@ export default class ImageConvertPLugin extends Plugin {
 
 			//new Notice(clipboardText, 0)
 
-			// Apply custom size on external links: e.g.: | 100
+
+			// CLEAN external link and Apply custom size on external links: e.g.: | 100
 			// Check if the clipboard data is an external link
 			const linkPattern = /!\[(.*?)\]\((.*?)\)/;
+			if (this.settings.autoNonDestructiveResize === "customSize") {
+				if (linkPattern.test(markdownImagefromClipboard)) {
+					// Handle the external link
+					const match = markdownImagefromClipboard.match(linkPattern);
+					if (match) {
+						let altText = match[1];
+						const currentLink = match[2];
+						const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+						if (activeView) {
+							const editor = activeView.editor;
+							const longestSide = this.settings.customSize;
+							altText = altText.replace(/\|\d+(\|\d+)?/g, ''); // remove any sizing info from alt text
+							const newMarkdown = `![${altText}|${longestSide}](${currentLink})`;
+							const lineNumber = editor.getCursor().line;
+							const lineContent = editor.getLine(lineNumber);
 
-			if (linkPattern.test(clipboardText)) {
-				// Handle the external link
-				const match = clipboardText.match(linkPattern);
+							// Preserve existing elements e.g. order/unordered list, comment, code
+							// find the start and end position of the image link in the line
+							const startPos = lineContent.indexOf(`![${altText}`);
+							const endPos = lineContent.indexOf(')', startPos) + 1;
 
-				if (match) {
-					const altText = match[1];
-					const currentLink = match[2];
-					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-					if (activeView) {
-						const editor = activeView.editor;
-						const longestSide = this.settings.customSize;
-						const newMarkdown = `![${altText}|${longestSide}](${currentLink})`;
-						const lineNumber = editor.getCursor().line;
-						const lineContent = editor.getLine(lineNumber);
-
-						const updatedLineContent = lineContent.replace(/!\[(.*?)\]\((.*?)\)/, newMarkdown);
-						editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
+							// update the size value in the image's markdown link
+							if (startPos !== -1 && endPos !== -1) {
+								editor.replaceRange(newMarkdown, { line: lineNumber, ch: startPos }, { line: lineNumber, ch: endPos });
+							}
+						}
 					}
 				}
 			}
@@ -377,33 +386,23 @@ export default class ImageConvertPLugin extends Plugin {
 		);
 
 		// Allow resizing with SHIFT + Scrollwheel
-		let lastImg: HTMLImageElement | null = null;
-		// Initiate a single-click when hover over more than 1 external image.
-		// This solves a small bug, which would replace image1 while hovering over image2
+		// Fix a bug which on when hover on external images it would replace 1 image link with another
 		// Sometimes it would replace image1 with image2 because there is no way to find linenumber
 		// for external links. Linenumber gets shown only for internal images.
+		let storedImageName: string | null = null; // get imagename for comparison
 		this.register(
 			this.onElement(
 				document,
 				"mouseover",
 				"img",
 				(event: MouseEvent) => {
-					const img = event.target as HTMLImageElement;
-					// If the mouse is over a new image and it's an external image, simulate a ==left click==
-					if (img !== lastImg && isExternalLink(img.src)) {
-						img.click();
-						lastImg = img;
-						// const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-						// if (activeView) {
-						// 	const editor = activeView.editor;
-						// 	const cursorPosition = editor.getCursor();
-
-						// 	// Set selection to none
-						// 	editor.setSelection({ line: cursorPosition.line, ch: 0 }, { line: cursorPosition.line, ch: 0 });
-						// 	editor.setCursor({ line: cursorPosition.line, ch: 0 });
-
-						// }
+					if (event.shiftKey) { // check if the shift key is pressed
+						// console.log('Shift key is pressed. Mouseover event will not fire.');
+						return;
 					}
+		
+					const img = event.target as HTMLImageElement;
+					storedImageName = getImageName(img);
 				}
 			)
 		);
@@ -415,23 +414,29 @@ export default class ImageConvertPLugin extends Plugin {
 				(event: WheelEvent) => {
 					if (!this.settings.resizeWithShiftScrollwheel) return;
 					if (event.shiftKey) { // check if the shift key is pressed
+
 						try {
 							const img = event.target as HTMLImageElement;
 
 							// get the image under the cursor
-							const imgUnderCursor = document.elementFromPoint(event.clientX, event.clientY) as HTMLImageElement;
-							// if the image under the cursor is not the same as the event target, return
-							if (img !== imgUnderCursor) return;
+							const imageName = getImageName(img)
 
-							const { newWidth, newHeight } = resizeImageScrollWheel(event, img);
+							// if the image under the cursor is not the same as the event target, return
+							if (imageName !== storedImageName) {
+								// console.log('Started scrolling over a new image');
+								return;
+							}
+
+							const { newWidth, newHeight, newLeft, newTop } = resizeImageScrollWheel(event, img);
 							img.style.width = `${newWidth}px`;
 							img.style.height = `${newHeight}px`;
+							img.style.left = `${newLeft}px`;
+							img.style.top = `${newTop}px`;
 
 							const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 							if (activeView) {
 								const imageName = getImageName(img);
 								if (imageName) { // Check if imageName is not null
-
 									if (isExternalLink(imageName)) {
 										// console.log("editing external link")
 										updateExternalLink(activeView, img, newWidth, newHeight);
@@ -441,13 +446,14 @@ export default class ImageConvertPLugin extends Plugin {
 									} else {
 										// console.log("editing internal link")
 										updateMarkdownLink(activeView, imageName, newWidth, newHeight);
-
 									}
 								}
 							}
+
 						} catch (error) {
 							console.error('An error occurred:', error);
 						}
+
 					}
 				}
 			)
@@ -480,7 +486,7 @@ export default class ImageConvertPLugin extends Plugin {
 		// Add a command to process all images in the current note
 		this.addCommand({
 			id: 'process-all-images-current-note',
-			name: 'Process all images in the current note',
+			name: 'Process all images in current note',
 			callback: () => {
 				const modal = new ProcessCurrentNote(this);
 				modal.open();
@@ -490,7 +496,7 @@ export default class ImageConvertPLugin extends Plugin {
 			this.app.workspace.on("file-menu", (menu, file) => {
 				menu.addItem((item) => {
 					item
-						.setTitle("Process all images in the current note")
+						.setTitle("Process all images in current note")
 						.setIcon("cog")
 						.onClick(async () => {
 							const modal = new ProcessCurrentNote(this);
@@ -900,6 +906,7 @@ export default class ImageConvertPLugin extends Plugin {
 				// This is an internal link
 				newLinkText = newLinkText.replace(']]', `|${size}]]`);
 			}
+
 		}
 		//msg(origin_file_convert_result + "->" + newLinkText)
 
@@ -1395,8 +1402,6 @@ export default class ImageConvertPLugin extends Plugin {
 		await this.app.vault.modify(note, content);
 	}
 
-
-
 	makeLinkText(file: TFile, sourcePath: string, subpath?: string): string {
 		return this.app.fileManager.generateMarkdownLink(file, sourcePath, subpath);
 	}
@@ -1854,13 +1859,20 @@ function resizeImageScrollWheel(event: WheelEvent, img: HTMLImageElement) {
 	newWidth = Math.round(newWidth);
 	newHeight = Math.round(newHeight);
 
-	return { newWidth, newHeight };
+	// Calculate the new position of the image so that it zooms towards the mouse pointer
+	const rect = img.getBoundingClientRect();
+	const dx = event.clientX - rect.left; // horizontal distance from left edge of image to mouse pointer
+	const dy = event.clientY - rect.top; // vertical distance from top edge of image to mouse pointer
+	const newLeft = rect.left - dx * (newWidth / img.clientWidth - 1);
+	const newTop = rect.top - dy * (newHeight / img.clientHeight - 1);
+
+	return { newWidth, newHeight, newLeft, newTop };
 }
 
 function isBase64Image(src: any) {
 	// Check if src starts with 'data:image'
 	return src.startsWith('data:image');
-}
+
 
 function getImageName(img: HTMLImageElement): string | null {
 	// Get the image name from an image element: `src`
@@ -1891,11 +1903,15 @@ function isExternalLink(imageName: string): boolean {
 function updateExternalLink(activeView: MarkdownView, img: HTMLImageElement, newWidth: number, newHeight: number): void {
 	// Get the current link and alt text
 	const currentLink = img.getAttribute("src");
-	const altText = img.getAttribute("alt");
+	let altText = img.getAttribute("alt");
 	const editor = activeView.editor;
 
 	// Round newWidth to the nearest whole number
 	const longestSide = Math.round(Math.max(newWidth, newHeight));
+
+	if (altText) {
+		altText = altText.replace(/\|\d+(\|\d+)?/g, ''); // remove any sizing info from alt text
+	}
 
 	// Construct the new markdown with the updated width
 	const newMarkdown = `![${altText}|${longestSide}](${currentLink})`;
@@ -1907,7 +1923,9 @@ function updateExternalLink(activeView: MarkdownView, img: HTMLImageElement, new
 	const lineContent = editor.getLine(lineNumber);
 
 	// Replace the old markdown with the new one in the current line
-	const updatedLineContent = lineContent.replace(/!\[.*\]\(.*\)/, newMarkdown);
+	// If there is no sizing then add
+	// If there is sizing then make sure it is the only one and there are no duplicate e.g. | size | size
+	const updatedLineContent = lineContent.replace(/!\[(.*?)(\|\d+(\|\d+)?)?\]\((.*?)\)/, newMarkdown);
 
 	// Update only the current line in the editor
 	editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
@@ -2726,6 +2744,7 @@ class ProcessCurrentNote extends Modal {
 		heading.textContent = 'Convert, compress and resize';
 		const desc = contentEl.createEl('p');
 		desc.textContent = 'Running this will modify all your internal images in the current note. Please create backups. All internal image links will be automatically updated.';
+
 
 		// Add your settings here
 		new Setting(contentEl)
