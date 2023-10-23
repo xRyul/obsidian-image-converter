@@ -1,7 +1,7 @@
 {
 	"id": "image-converter",
 	"name": "Image Converter",
-	"version": "1.1.6",
+	"version": "1.1.7",
 	"minAppVersion": "0.15.0",
 	"description": "Convert, compress and resize images from one format to another by dragging and dropping or pasting into the note.",
 	"author": "xRyul",

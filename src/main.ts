@@ -1,7 +1,7 @@
 import { App, MarkdownView, Notice, Plugin, TFile, PluginSettingTab, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem } from 'obsidian';
 import { Platform } from 'obsidian';
 import UTIF from './UTIF.js';
-
+import moment from 'moment';
 
 // Import heic-convert only on Desktop
 let heic: any;
@@ -81,67 +81,6 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	rightClickContextMenu: true
 }
 
-function msg(tips: string): void {
-	new Notice(tips, 0);
-}
-
-function extractImageNames(clipboardText) {
-	// 使用换行符分割粘贴的文本
-	const lines = clipboardText.split('\n');
-
-	// 初始化一个空数组来存储图片文件名
-	const imageNames = [];
-
-	// 使用正则表达式来匹配Markdown图片链接
-	const regex = /!\[\[(.*?)\]\]/g;
-
-	// 遍历每一行来查找图片链接
-	for (const line of lines) {
-		let match;
-		while ((match = regex.exec(line)) !== null) {
-			// match[1] 包含第一个括号内的内容，即图片文件名
-			imageNames.push(match[1]);
-		}
-	}
-
-	return imageNames;
-}
-
-// // 使用示例
-// const clipboardText = "![[image1.png]]\n![[image2.png]]\n![[image3.png]]";
-// const imageNames = extractImageNames(clipboardText);
-
-// // 输出提取的图片文件名
-// console.log(imageNames);  // 输出：["image1.png", "image2.png", "image3.png"]
-
-// function replace_current_file(sourcePath, findText, replaceText) {
-// 	//editor=
-// 	const editor = this.getActiveEditor(sourcePath);
-// 	if (!editor) {
-// 		//new Notice(`Failed to rename ${newName}: no active editor`);
-// 		msg("fail to get editor")
-// 		return;
-// 	}
-
-// 	// 使用 replace_current_file 函数，并指定查找和替换的文本
-// 	replace_current_file(editor, 'aaa', 'bbb');
-
-// 	// 获取整个文档的内容
-// 	const docContent = editor.getValue();
-
-// 	// 创建一个全局正则表达式，用于查找所有出现的 findText
-// 	const regex = new RegExp(findText, 'g');
-
-// 	// 将所有的 findText 替换为 replaceText
-// 	const newContent = docContent.replace(regex, replaceText);
-
-// 	// 将新内容设置回编辑器
-// 	editor.setValue(newContent);
-// }
-
-
-
-
 export default class ImageConvertPLugin extends Plugin {
 	settings: ImageConvertSettings;
 
@@ -153,30 +92,6 @@ export default class ImageConvertPLugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		// 监听文件打开事件
-		// 跳到最后一行，可以实现，但是粘贴图片有可能会触发重新加载，导致界面跳开正在编辑的位置，就很烦人。
-		this.registerEvent(
-			this.app.workspace.on('file-open', async (file) => {
-				// 获取当前活动的Markdown视图
-				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-
-				// 确保视图存在
-				if (activeView) {
-					// 获取编辑器实例
-					const editor = activeView.editor;
-
-					// 获取文档的总行数
-					const lastLine = editor.lineCount() - 1;
-
-					// 将光标移动到最后一行
-					editor.setCursor({ line: lastLine, ch: 0 });
-
-					// 如果你想滚动到最后一行，你可以使用以下代码
-					editor.scrollIntoView({ line: lastLine, ch: 0 }, 200);
-				}
-			})
-		);
-
 		// Add evenet listeners on paste and drop to prevent filerenaming during `sync` or `git pull`
 		// This allows us to check if  file was created as a result of a user action (like dropping 
 		// or pasting an image into a note) rather than a git pull action.
@@ -187,21 +102,19 @@ export default class ImageConvertPLugin extends Plugin {
 		// also if pasting, check if it is an External Link and wether to apply '| size' syntax to the link
 		this.pasteListener = (event: ClipboardEvent) => {
 			userAction = true;
-			// msg("粘贴事件，用户正在操作")
-			setTimeout(() => {
-				userAction = false;
-				//msg("用户操作结束");
-			}, 10000);
+			setTimeout(() => userAction = false, 10000);
+			// Get the clipboard data as HTML and parse it as Markdown LINK
+			const clipboardHTML = event.clipboardData?.getData('text/html') || '';
+			const parser = new DOMParser();
+			const doc = parser.parseFromString(clipboardHTML, 'text/html');
+			const img = doc.querySelector('img');
 
-			// Get the clipboard data as text
-			const clipboardText = event.clipboardData?.getData('Text') || '';
-			// const imageNames = extractImageNames(clipboardText);
-
-			// // 输出提取的图片文件名
-			// console.log(imageNames);
-
-			//new Notice(clipboardText, 0)
-
+			let markdownImagefromClipboard = '';
+			if (img) {
+				const altText = img.alt;
+				const src = img.src;
+				markdownImagefromClipboard = `![${altText}](${src})`;
+			}
 
 			// CLEAN external link and Apply custom size on external links: e.g.: | 100
 			// Check if the clipboard data is an external link
@@ -251,10 +164,27 @@ export default class ImageConvertPLugin extends Plugin {
 					if (isImage(file) && userAction) {
 						this.renameFile1(file);
 					}
-					//userAction = false;
+					// userAction = false; // uncommented to allow multi-drop
 				})
 			);
 		})
+
+
+		// 监听文件打开事件
+		// 跳到最后一行，可以实现，但是粘贴图片有可能会触发重新加载，导致界面跳开正在编辑的位置，就很烦人。
+		// this.registerEvent(
+		// 	this.app.workspace.on('file-open', async (file) => {
+		// 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		// 		if (activeView) {
+		// 			const editor = activeView.editor;
+		// 			const lastLine = editor.lineCount() - 1;
+		// 			editor.setCursor({ line: lastLine, ch: 0 });
+		// 			// Ensure the current line is in a visible position
+		// 			editor.scrollIntoView({ from: { line: lastLine, ch: 0 }, to: { line: lastLine, ch: 0 } });
+
+		// 		}
+		// 	})
+		// )
 
 		// Check if edge of an image was clicked upon
 		this.register(
@@ -400,7 +330,7 @@ export default class ImageConvertPLugin extends Plugin {
 						// console.log('Shift key is pressed. Mouseover event will not fire.');
 						return;
 					}
-		
+
 					const img = event.target as HTMLImageElement;
 					storedImageName = getImageName(img);
 				}
@@ -710,10 +640,11 @@ export default class ImageConvertPLugin extends Plugin {
 			new Notice('Error: No active file found.');
 			return;
 		}
-		//msg("正在操作文件:" + file.name)
+
 		// Start the conversion and show the status indicator
 		const statusBarItemEl = this.addStatusBarItem();
 		statusBarItemEl.setText(`Converting image... ⏳`);
+
 		const binary = await this.app.vault.readBinary(file);
 		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
 
@@ -880,20 +811,17 @@ export default class ImageConvertPLugin extends Plugin {
 		const originName = file.name;
 
 		statusBarItemEl.setText('Image converted ✅');
-		//new Notice(`Image: ${decodeURIComponent(originName)} converted`);
-		let origin_file_convert_result = `Image: ${decodeURIComponent(originName)} converted`
+		new Notice(`Image: ${decodeURIComponent(originName)} converted`);
 		statusBarItemEl.setText('');
 
 		const linkText = this.makeLinkText(file, sourcePath);
 		newPath = `${newPath}/${newName}`;
-		//msg("newPath:" + newPath)
 
 		try {
 			const decodedNewPath = decodeURIComponent(newPath);
 			await this.app.vault.rename(file, decodedNewPath);
 		} catch (err) {
-			//new Notice(`Failed to rename ${decodeURIComponent(newName)}: ${err}`);
-			msg(`Failed to rename ${decodeURIComponent(newName)}: ${err}`)
+			new Notice(`Failed to rename ${decodeURIComponent(newName)}: ${err}`);
 			throw err;
 		}
 
@@ -906,40 +834,36 @@ export default class ImageConvertPLugin extends Plugin {
 				// This is an internal link
 				newLinkText = newLinkText.replace(']]', `|${size}]]`);
 			}
-
+			// else if (newLinkText.startsWith('![')) {
+			//   // This is an external link
+			//   newLinkText = newLinkText.replace(']', `|${size}]`);
+			// }
 		}
-		//msg(origin_file_convert_result + "->" + newLinkText)
+
 
 		const editor = this.getActiveEditor(sourcePath);
 		if (!editor) {
 			new Notice(`Failed to rename ${newName}: no active editor`);
 			return;
 		}
-		// // 假设你已经获取了CodeMirror编辑器实例
-		// const editor = yourMarkdownView.editor;
-
-		// 获取当前光标位置
 		const cursor = editor.getCursor();
 
-		// 获取当前光标所在的行号
-		const currentLine = cursor.line;
 
-		//replace old content
-		function escapeRegExp(string) {
+		// Multi-drop-rename
+		const currentLine = cursor.line;
+		function escapeRegExp(string: string) {
 			return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& 表示整个匹配的字符串
 		}
-		let findText = escapeRegExp(linkText);
-		let replaceText = newLinkText;
+		const findText = escapeRegExp(linkText);
+		const replaceText = newLinkText;
 		const docContent = editor.getValue();
 		const regex = new RegExp(findText, 'g');
 		const newContent = docContent.replace(regex, replaceText);
 		editor.setValue(newContent);
-
-		// 将光标设置到当前行（这实际上可能不是必需的，因为光标已经在那里）
 		editor.setCursor({ line: currentLine, ch: 0 });
+		// Ensure the current line is in a visible position
+		editor.scrollIntoView({ from: { line: currentLine, ch: 0 }, to: { line: currentLine, ch: 0 } });
 
-		// 确保当前行处于可见位置
-		editor.scrollIntoView({ line: currentLine, ch: 0 }, 200);  // 200 是垂直边距
 
 		// Do not show renamed from -> to notice if auto-renaming is disabled 
 		if (this.settings.autoRename === true) {
@@ -1402,17 +1326,19 @@ export default class ImageConvertPLugin extends Plugin {
 		await this.app.vault.modify(note, content);
 	}
 
+
 	makeLinkText(file: TFile, sourcePath: string, subpath?: string): string {
 		return this.app.fileManager.generateMarkdownLink(file, sourcePath, subpath);
 	}
 	async generateNewName(file: TFile, activeFile: TFile): Promise<string> {
-		const newName = activeFile.basename + '-' + new Date().toISOString().replace(/[-:T.Z]/g, '');
+		const newName = activeFile.basename + '-' + moment().format("YYYYMMDDHHmmssSSS");
 		let extension = file.extension;
 		if (this.settings.convertTo && this.settings.convertTo !== 'disabled') {
 			extension = this.settings.convertTo;
 		}
 		return `${newName}.${extension}`;
 	}
+	
 	async keepOrgName(file: TFile, activeFile: TFile): Promise<string> {
 		let newName = file.basename;
 		let extension = file.extension;
@@ -1869,10 +1795,11 @@ function resizeImageScrollWheel(event: WheelEvent, img: HTMLImageElement) {
 	return { newWidth, newHeight, newLeft, newTop };
 }
 
+
 function isBase64Image(src: any) {
 	// Check if src starts with 'data:image'
 	return src.startsWith('data:image');
-
+}
 
 function getImageName(img: HTMLImageElement): string | null {
 	// Get the image name from an image element: `src`
@@ -2740,10 +2667,35 @@ class ProcessCurrentNote extends Modal {
 	onOpen() {
 		const { contentEl } = this;
 
-		const heading = contentEl.createEl('h1');
-		heading.textContent = 'Convert, compress and resize';
-		const desc = contentEl.createEl('p');
-		desc.textContent = 'Running this will modify all your internal images in the current note. Please create backups. All internal image links will be automatically updated.';
+
+		const div1 = contentEl.createEl('div');
+		div1.style.display = 'flex';
+		div1.style.flexDirection = 'column';
+		div1.style.alignItems = 'center';
+		div1.style.justifyContent = 'center';
+
+		const heading1 = div1.createEl('h2')
+		heading1.textContent = 'Convert, compress and resize';
+
+		let noteName = 'current note';
+		let noteExtension = '';
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (activeView && activeView.file) {
+			noteName = activeView.file.basename;
+			noteExtension = activeView.file.extension;
+		} else {
+			noteName = "";
+		}
+
+		const heading2 = div1.createEl('h6');
+		heading2.textContent = `all images in: ${noteName}.${noteExtension}`;
+		heading2.style.marginTop = '-18px';
+
+		const desc = div1.createEl('p');
+		desc.textContent = 'Running this will modify all internal images in the current note. Please create backups. All internal image links will be automatically updated.';
+		desc.style.marginTop = '-10px'; // space between the heading and the paragraph
+		desc.style.padding = '20px'; // padding around the div
+		desc.style.borderRadius = '10px'; // rounded corners
 
 
 		// Add your settings here

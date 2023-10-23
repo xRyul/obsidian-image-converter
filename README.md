@@ -1,17 +1,15 @@
-# Image Converter for ObsidianMD  
-<img width="600" alt="Image-Converter_Settings-sample" src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/75b1eaeb-bd31-4238-a059-a569656b4359">
-
-![258099823-63a0646b-29ec-4055-abfc-55d31e07b2f7](https://github.com/xRyul/obsidian-image-converter/assets/47340038/9d942075-9ecb-4246-8201-07b5d166c0e9)
-
+# Image Converter for ObsidianMD
+https://github.com/xRyul/obsidian-image-converter/assets/47340038/63a0646b-29ec-4055-abfc-55d31e07b2f7
 
 ## Features
 - Automatically convert dropped/pasted image into WEBP, JPG or PNG. 
 - Automatically convert HEIC and TIF files into WEBP, JPG, or PNG. 
 - Reduce file size of an image by specifying desired Quality value between 1-100
 - Auto-rename converted image.  
-- Auto-resize image based on 6 modes: Fit, Fill, Longest Edge, Shortest Edge, Height, Width
-	- Image resize by the Longest Edge
-	<video src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/6c287f86-08b8-4483-800d-040dd5207341" width="600px">
+- Auto-resize image based on 6 modes: Fit, Fill, Longest Side, Shortest Side, Height, Width
+	- Image resize by the Longest Side
+
+  https://github.com/xRyul/obsidian-image-converter/assets/47340038/6c287f86-08b8-4483-800d-040dd5207341
 
 - Ability to copy an image into clipboard via right click context menu
 	- 	<img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/2034a444-cd49-4ce0-af98-745694ba4986" width="600px">
@@ -36,24 +34,24 @@ The recommended export setting is WEBP set to Quality 75. This is the optimal se
 
 ### Example 1  - Comparison of Original converted to WEBP and JPG with Quality 1
 
-- <video src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/52ffd607-e92c-4b08-bde4-8a389fd992fc" width="600px">
+https://github.com/xRyul/obsidian-image-converter/assets/47340038/52ffd607-e92c-4b08-bde4-8a389fd992fc
 
 ### Example 2 - Comparison of Original converted to WEBP and JPG with Quality 1
 
-- <video src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/6978be85-6f83-47ba-a9df-1f5864c6fbcb" width="600px">
+https://github.com/xRyul/obsidian-image-converter/assets/47340038/6978be85-6f83-47ba-a9df-1f5864c6fbcb
 
 ### Example 3 - Comparison between WEBB 100 vs JPG 100 >  WEBB 1 vs JPG 1
 
-- <video src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/aa62380e-b977-42c5-8a2f-71cb09a811b7" width="600px">
+https://github.com/xRyul/obsidian-image-converter/assets/47340038/aa62380e-b977-42c5-8a2f-71cb09a811b7
 
 ### Comparison
 #### File size of converting one image format to another:
 
-| From/To | WEBP                                               | JPG                                        | PNG                                         |
-| ------- | -------------------------------------------------- | ------------------------------------------ | ------------------------------------------- |
-| JPG     | 64,122 KB (100) <br> 7,482 KB (50) <br> 480 KB (1) | 52,864 KB (100)<br>5,926KB(50)<br>363KB(1) | 96,556KB(100)<br>44,702KB(50)<br>9,072KB(1) |
-| PNG     | 21,812KB(100)<br>1,520KB(50)<br>401KB(1)           | 14,744KB(100)<br>1,776KB(50)<br>163KB(1)   | 29,830KB(100)<br>12,161KB(50)<br>3,226KB(1) |
-| WEBP    | 30,960KB(100)<br>1,414KB(50)<br>353KB(1)           | 19,236KB(100)<br>2,000KB(50)<br>189KB(1)   | 43,154KB(100)<br>15,327KB(50)<br>1,806KB(1) |
+| From/To | WEBP | JPG | PNG |
+| --- | --- | --- | --- |
+| JPG | 64,122 KB (100) <br> 7,482 KB (50) <br> 480 KB (1)|52,864 KB (100)<br>5,926KB(50)<br>363KB(1)|96,556KB(100)<br>44,702KB(50)<br>9,072KB(1)| 
+| PNG |21,812KB(100)<br>1,520KB(50)<br>401KB(1)|14,744KB(100)<br>1,776KB(50)<br>163KB(1)|29,830KB(100)<br>12,161KB(50)<br>3,226KB(1)| 
+| WEBP |30,960KB(100)<br>1,414KB(50)<br>353KB(1)|19,236KB(100)<br>2,000KB(50)<br>189KB(1)|43,154KB(100)<br>15,327KB(50)<br>1,806KB(1)| 
 
 - The numbers in the parentheses indicate the quality of the conversion. 
 
@@ -61,11 +59,11 @@ The recommended export setting is WEBP set to Quality 75. This is the optimal se
 
 The percentage change is calculated by comparing the file size after conversion to the original file size of the image being converted.  
 
-| From/To | WEBP                                                                           | JPG                                                                    | PNG                                    |
-| ------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------- | -------------------------------------- |
-| JPG     | +21.4% (100)PSNR: 45.85 <br> -85.9% (50)PSNR: 31.16 <br> -99.1% (1)PSNR: 26.28 | +29.3%(100)<br>-85.8%(50) PSNR:29.25<br>-99.3%(1) PSNR:23.2            | +135.9%(100)<br>+8.9%(50)<br>-78%(1)   |
-| PNG     | -6.9%(100)PSNR: 34.78<br>-93.5%(50)PSNR: 29.23<br>-98.3%(1)PSNR: 23.52         | -37%(100)PSNR: 35.07<br>-92.4%(50) PSNR: 28.62<br>-99.3%(1)PSNR: 19.52 | +27.4%(100)<br>-48%(50)<br>-86.2%(1)   |
-| WEBP    | +8.8%(100)PSNR: 38.46<br>-95%(50)PSNR: 32.72<br>-98.8%(1)PSNR: 27.98           | -32.4%(100)PSNR: 39.04<br>-93%(50)PSNR: 32.65<br>-99.3%(1)PSNR: 22.79  | +51.8%(100)<br>-46.1%(50)<br>-93.6%(1) |
+| From/To | WEBP | JPG | PNG |
+| --- | --- | --- | --- |
+| JPG | +21.4% (100)PSNR: 45.85 <br> -85.9% (50)PSNR: 31.16 <br> -99.1% (1)PSNR: 26.28|+29.3%(100)<br>-85.8%(50) PSNR:29.25<br>-99.3%(1) PSNR:23.2|+135.9%(100)<br>+8.9%(50)<br>-78%(1)| 
+| PNG |-6.9%(100)PSNR: 34.78<br>-93.5%(50)PSNR: 29.23<br>-98.3%(1)PSNR: 23.52|-37%(100)PSNR: 35.07<br>-92.4%(50) PSNR: 28.62<br>-99.3%(1)PSNR: 19.52|+27.4%(100)<br>-48%(50)<br>-86.2%(1)| 
+| WEBP |+8.8%(100)PSNR: 38.46<br>-95%(50)PSNR: 32.72<br>-98.8%(1)PSNR: 27.98|-32.4%(100)PSNR: 39.04<br>-93%(50)PSNR: 32.65<br>-99.3%(1)PSNR: 22.79|+51.8%(100)<br>-46.1%(50)<br>-93.6%(1)| 
 
 
 #### PSNR and the loss of quality:  
@@ -110,13 +108,11 @@ Below is the table which shows how much quality we lose with each conversion. Th
 - Improve conversion speed for large files 100MB+ .
 
 ## How to install
-1. Downlaod `main.js`, `manifest.json` files from this repo.
+
+1. Downlaod `main.js`, `styles.css`, `manifest.json` files from this repo.
 2. Creane new folder inside `VaultFolder/.obsidian/plugins/` named  `obsidian-image-converter` . If plugins folder doesn't exist, then create it manually. 
 3. Move downloaded files into `/obsidian-image-converter` folder. 
 4. Enable the plugin in ObsidianMD. 
 
 # Credits
 - This repo is heavily inspired by https://github.com/musug/obsidian-paste-png-to-jpeg musug has created an amazing ground work for the project, but sadly who has gone AWOL leaving the project behind without fixing some major issues. Hence, this is an attempt to rejuvenate the project.
-
-
-
