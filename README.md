@@ -49,11 +49,11 @@ The recommended export setting is WEBP set to Quality 75. This is the optimal se
 ### Comparison
 #### File size of converting one image format to another:
 
-| From/To | WEBP | JPG | PNG |
-| --- | --- | --- | --- |
-| JPG | 64,122 KB (100) <br> 7,482 KB (50) <br> 480 KB (1)|52,864 KB (100)<br>5,926KB(50)<br>363KB(1)|96,556KB(100)<br>44,702KB(50)<br>9,072KB(1)| 
-| PNG |21,812KB(100)<br>1,520KB(50)<br>401KB(1)|14,744KB(100)<br>1,776KB(50)<br>163KB(1)|29,830KB(100)<br>12,161KB(50)<br>3,226KB(1)| 
-| WEBP |30,960KB(100)<br>1,414KB(50)<br>353KB(1)|19,236KB(100)<br>2,000KB(50)<br>189KB(1)|43,154KB(100)<br>15,327KB(50)<br>1,806KB(1)| 
+| From/To | WEBP                                               | JPG                                        | PNG                                         |
+| ------- | -------------------------------------------------- | ------------------------------------------ | ------------------------------------------- |
+| JPG     | 64,122 KB (100) <br> 7,482 KB (50) <br> 480 KB (1) | 52,864 KB (100)<br>5,926KB(50)<br>363KB(1) | 96,556KB(100)<br>44,702KB(50)<br>9,072KB(1) |
+| PNG     | 21,812KB(100)<br>1,520KB(50)<br>401KB(1)           | 14,744KB(100)<br>1,776KB(50)<br>163KB(1)   | 29,830KB(100)<br>12,161KB(50)<br>3,226KB(1) |
+| WEBP    | 30,960KB(100)<br>1,414KB(50)<br>353KB(1)           | 19,236KB(100)<br>2,000KB(50)<br>189KB(1)   | 43,154KB(100)<br>15,327KB(50)<br>1,806KB(1) |
 
 - The numbers in the parentheses indicate the quality of the conversion. 
 
@@ -61,11 +61,11 @@ The recommended export setting is WEBP set to Quality 75. This is the optimal se
 
 The percentage change is calculated by comparing the file size after conversion to the original file size of the image being converted.  
 
-| From/To | WEBP | JPG | PNG |
-| --- | --- | --- | --- |
-| JPG | +21.4% (100)PSNR: 45.85 <br> -85.9% (50)PSNR: 31.16 <br> -99.1% (1)PSNR: 26.28|+29.3%(100)<br>-85.8%(50) PSNR:29.25<br>-99.3%(1) PSNR:23.2|+135.9%(100)<br>+8.9%(50)<br>-78%(1)| 
-| PNG |-6.9%(100)PSNR: 34.78<br>-93.5%(50)PSNR: 29.23<br>-98.3%(1)PSNR: 23.52|-37%(100)PSNR: 35.07<br>-92.4%(50) PSNR: 28.62<br>-99.3%(1)PSNR: 19.52|+27.4%(100)<br>-48%(50)<br>-86.2%(1)| 
-| WEBP |+8.8%(100)PSNR: 38.46<br>-95%(50)PSNR: 32.72<br>-98.8%(1)PSNR: 27.98|-32.4%(100)PSNR: 39.04<br>-93%(50)PSNR: 32.65<br>-99.3%(1)PSNR: 22.79|+51.8%(100)<br>-46.1%(50)<br>-93.6%(1)| 
+| From/To | WEBP                                                                           | JPG                                                                    | PNG                                    |
+| ------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------- | -------------------------------------- |
+| JPG     | +21.4% (100)PSNR: 45.85 <br> -85.9% (50)PSNR: 31.16 <br> -99.1% (1)PSNR: 26.28 | +29.3%(100)<br>-85.8%(50) PSNR:29.25<br>-99.3%(1) PSNR:23.2            | +135.9%(100)<br>+8.9%(50)<br>-78%(1)   |
+| PNG     | -6.9%(100)PSNR: 34.78<br>-93.5%(50)PSNR: 29.23<br>-98.3%(1)PSNR: 23.52         | -37%(100)PSNR: 35.07<br>-92.4%(50) PSNR: 28.62<br>-99.3%(1)PSNR: 19.52 | +27.4%(100)<br>-48%(50)<br>-86.2%(1)   |
+| WEBP    | +8.8%(100)PSNR: 38.46<br>-95%(50)PSNR: 32.72<br>-98.8%(1)PSNR: 27.98           | -32.4%(100)PSNR: 39.04<br>-93%(50)PSNR: 32.65<br>-99.3%(1)PSNR: 22.79  | +51.8%(100)<br>-46.1%(50)<br>-93.6%(1) |
 
 
 #### PSNR and the loss of quality:  
@@ -110,7 +110,6 @@ Below is the table which shows how much quality we lose with each conversion. Th
 - Improve conversion speed for large files 100MB+ .
 
 ## How to install
-
 1. Downlaod `main.js`, `manifest.json` files from this repo.
 2. Creane new folder inside `VaultFolder/.obsidian/plugins/` named  `obsidian-image-converter` . If plugins folder doesn't exist, then create it manually. 
 3. Move downloaded files into `/obsidian-image-converter` folder. 
@@ -118,3 +117,6 @@ Below is the table which shows how much quality we lose with each conversion. Th
 
 # Credits
 - This repo is heavily inspired by https://github.com/musug/obsidian-paste-png-to-jpeg musug has created an amazing ground work for the project, but sadly who has gone AWOL leaving the project behind without fixing some major issues. Hence, this is an attempt to rejuvenate the project.
+
+
+
