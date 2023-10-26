@@ -2,6 +2,9 @@ import { App, MarkdownView, Notice, Plugin, TFile, PluginSettingTab, Setting, Ed
 import { Platform } from 'obsidian';
 import UTIF from './UTIF.js';
 import moment from 'moment';
+import exifr from 'exifr'
+import probe from 'probe-image-size';
+
 
 // Import heic-convert only on Desktop
 let heic: any;
@@ -40,6 +43,7 @@ interface ImageConvertSettings {
 	resizeMode: string;
 	autoNonDestructiveResize: string,
 	customSize: string,
+	customSizeLongestSide: string,
 	desiredWidth: number;
 	desiredHeight: number;
 	desiredLength: number;
@@ -73,6 +77,7 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	resizeMode: 'None',
 	autoNonDestructiveResize: "disabled",
 	customSize: "",
+	customSizeLongestSide: "",
 	desiredWidth: 600,
 	desiredHeight: 800,
 	desiredLength: 800,
@@ -83,6 +88,8 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 
 export default class ImageConvertPLugin extends Plugin {
 	settings: ImageConvertSettings;
+	longestSide: number | null = null;
+	widthSide: number | null = null;
 
 	// Declare the properties
 	pasteListener: (event: ClipboardEvent) => void;
@@ -119,7 +126,7 @@ export default class ImageConvertPLugin extends Plugin {
 			// CLEAN external link and Apply custom size on external links: e.g.: | 100
 			// Check if the clipboard data is an external link
 			const linkPattern = /!\[(.*?)\]\((.*?)\)/;
-			if (this.settings.autoNonDestructiveResize === "customSize") {
+			if (this.settings.autoNonDestructiveResize === "customSize" || this.settings.autoNonDestructiveResize === "fitImage") {
 				if (linkPattern.test(markdownImagefromClipboard)) {
 					// Handle the external link
 					const match = markdownImagefromClipboard.match(linkPattern);
@@ -129,7 +136,12 @@ export default class ImageConvertPLugin extends Plugin {
 						const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 						if (activeView) {
 							const editor = activeView.editor;
-							const longestSide = this.settings.customSize;
+							let longestSide;
+							if (this.settings.autoNonDestructiveResize === "customSize") {
+								longestSide = this.settings.customSize;
+							} else if (this.settings.autoNonDestructiveResize === "fitImage") {
+								longestSide = this.settings.customSizeLongestSide;
+							}
 							altText = altText.replace(/\|\d+(\|\d+)?/g, ''); // remove any sizing info from alt text
 							const newMarkdown = `![${altText}|${longestSide}](${currentLink})`;
 							const lineNumber = editor.getCursor().line;
@@ -168,23 +180,6 @@ export default class ImageConvertPLugin extends Plugin {
 				})
 			);
 		})
-
-
-		// 监听文件打开事件
-		// 跳到最后一行，可以实现，但是粘贴图片有可能会触发重新加载，导致界面跳开正在编辑的位置，就很烦人。
-		// this.registerEvent(
-		// 	this.app.workspace.on('file-open', async (file) => {
-		// 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-		// 		if (activeView) {
-		// 			const editor = activeView.editor;
-		// 			const lastLine = editor.lineCount() - 1;
-		// 			editor.setCursor({ line: lastLine, ch: 0 });
-		// 			// Ensure the current line is in a visible position
-		// 			editor.scrollIntoView({ from: { line: lastLine, ch: 0 }, to: { line: lastLine, ch: 0 } });
-
-		// 		}
-		// 	})
-		// )
 
 		// Check if edge of an image was clicked upon
 		this.register(
@@ -645,9 +640,21 @@ export default class ImageConvertPLugin extends Plugin {
 		const statusBarItemEl = this.addStatusBarItem();
 		statusBarItemEl.setText(`Converting image... ⏳`);
 
+		// Image as a blob
 		const binary = await this.app.vault.readBinary(file);
 		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
-
+		
+		// Get metadata
+		// await getEXIF(file);
+		this.widthSide = await getWidthSide(binary);
+		const maxWidth = printEditorLineWidth(this.app);
+		if (this.widthSide !== null && typeof maxWidth === 'number') {
+			this.settings.customSizeLongestSide = (this.widthSide < maxWidth ? this.widthSide : maxWidth).toString();
+			await this.saveSettings();
+		}
+		
+		
+		
 		if (file.extension === 'tif' || file.extension === 'tiff') {
 
 			// Convert ArrayBuffer to Uint8Array
@@ -679,7 +686,7 @@ export default class ImageConvertPLugin extends Plugin {
 			});
 
 		}
-
+		
 		if (file.extension === 'heic') {
 			// Convert ArrayBuffer to Buffer
 			const binaryBuffer = Buffer.from(binary);
@@ -693,7 +700,7 @@ export default class ImageConvertPLugin extends Plugin {
 
 			imgBlob = new Blob([outputBuffer], { type: 'image/jpeg' });
 		}
-
+		
 		if (this.settings.quality !== 1) { // If quality is set to 100, then simply use original image without compression
 			if (this.settings.convertTo === 'webp') {
 				const arrayBufferWebP = await convertToWebP(
@@ -769,7 +776,7 @@ export default class ImageConvertPLugin extends Plugin {
 			// Bypass conversion and compression, keep original file
 			new Notice('Original file kept without any compression.');
 		}
-
+		
 		let newName = await this.keepOrgName(file, activeFile);
 		if (this.settings.autoRename) {
 			newName = await this.generateNewName(file, activeFile);
@@ -828,8 +835,13 @@ export default class ImageConvertPLugin extends Plugin {
 		let newLinkText = this.makeLinkText(file, sourcePath);
 
 		// Add the size to the markdown link
-		if (this.settings.autoNonDestructiveResize === "customSize") {
-			const size = this.settings.customSize;
+		if (this.settings.autoNonDestructiveResize === "customSize" || this.settings.autoNonDestructiveResize === "fitImage") {
+			let size;
+			if (this.settings.autoNonDestructiveResize === "customSize") {
+				size = this.settings.customSize;
+			} else if (this.settings.autoNonDestructiveResize === "fitImage") {
+				size = this.settings.customSizeLongestSide;
+			}
 			if (newLinkText.startsWith('![[')) {
 				// This is an internal link
 				newLinkText = newLinkText.replace(']]', `|${size}]]`);
@@ -1367,9 +1379,6 @@ export default class ImageConvertPLugin extends Plugin {
 		return null;
 	}
 
-
-
-
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 	}
@@ -1755,6 +1764,8 @@ function reduceColorDepth(imageData: ImageData, colorDepth: number): ImageData {
 	return reducedImageData;
 }
 
+
+
 function base64ToArrayBuffer(code: string): ArrayBuffer {
 	const parts = code.split(';base64,');
 	const raw = window.atob(parts[1]);
@@ -1800,6 +1811,79 @@ function isBase64Image(src: any) {
 	// Check if src starts with 'data:image'
 	return src.startsWith('data:image');
 }
+
+async function getEXIF(file:TFile){
+    // Image as a blob
+    const binary = await this.app.vault.readBinary(file);
+    const imgBlob = new Blob([binary], { type: `image/${file.extension}` });
+
+    // Use blob to get image metadata
+    const reader = new FileReader();
+
+    return new Promise((resolve, reject) => {
+        reader.onloadend = async function() {
+            if (reader.result) {
+                try {
+                    const exif = await exifr.parse(reader.result);
+                    console.log(exif);
+                    resolve(exif); // Resolve the promise with the exif data
+                } catch (error) {
+                    reject(error); // Reject the promise with the error
+                }
+            }
+        };
+        reader.readAsArrayBuffer(imgBlob);
+    });
+}
+
+async function getLongestSide(binary: ArrayBuffer) {
+    console.log(binary);
+    // Convert the binary data to a Buffer
+    const buffer = Buffer.from(binary);
+    // Get the image dimensions using probe-image-size
+    const result = probe.sync(buffer);
+    if (result) {
+        // Return the longest side
+        const longestSide = Math.max(result.width, result.height);
+        console.log("Longest Side of an image:", longestSide);
+        return longestSide;
+    } else {
+        console.log("Failed to get image dimensions");
+        return null;
+    }
+}
+
+
+async function getWidthSide(binary: ArrayBuffer) {
+    console.log(binary);
+    // Convert the binary data to a Buffer
+    const buffer = Buffer.from(binary);
+    // Get the image dimensions using probe-image-size
+    const result = probe.sync(buffer);
+    if (result) {
+        // Return the longest side
+        const widthSide = Math.max(result.width);
+        console.log("Longest Side of an image:", widthSide);
+        return widthSide;
+    } else {
+        console.log("Failed to get image dimensions");
+        return null;
+    }
+}
+
+function printEditorLineWidth(app: App) {
+    const activeView = app.workspace.getActiveViewOfType(MarkdownView);
+    if (activeView) {
+        const editorElement = activeView.editor.containerEl;
+        const style = getComputedStyle(editorElement);
+		let editorLineWidth = style.getPropertyValue('--file-line-width');
+        // Remove 'px' from the end and convert to a number
+        editorLineWidth = Number(editorLineWidth.slice(0, -2))
+        console.log("Editor max length:", editorLineWidth);
+        return editorLineWidth;
+    }
+}
+
 
 function getImageName(img: HTMLImageElement): string | null {
 	// Get the image name from an image element: `src`
@@ -1985,7 +2069,6 @@ function deleteMarkdownLink(activeView: MarkdownView, imageName: string | null) 
 		}
 	}
 }
-
 async function deleteImageFromVault(event: MouseEvent, app: any) {
 	// Get the image element and its src attribute
 	const img = event.target as HTMLImageElement;
@@ -2081,6 +2164,16 @@ async function deleteImageFromVault(event: MouseEvent, app: any) {
 	}
 }
 
+// async function customSizeFitImageSize(){
+// 	// Get the computed style of the root element
+// 	const style = getComputedStyle(document.documentElement);
+// 	// Get the value of the --file-line-width variable
+// 	const maxWidth = style.getPropertyValue('--file-line-width');
+// 	// Remove 'px' from the end and convert to a number
+// 	const maxWidth = Number(maxWidth.slice(0, -2));
+// 	const longestSide = this.plugin.longestSide; 
+
+// }
 
 class ImageConvertTab extends PluginSettingTab {
 	plugin: ImageConvertPLugin;
@@ -2229,22 +2322,42 @@ class ImageConvertTab extends PluginSettingTab {
 
 		/////////////////////////////////////////////
 		// Create a function to update the custom size setting
-		const updateCustomSizeSetting = (value: string) => {
+		// Update function to handle "Fit Image" option
+		const updateCustomSizeSetting = async (value: string) => {
 			if (value === "customSize") {
 				// If "customSize" is selected, show the "Custom size" field
 				customSizeSetting.settingEl.style.display = 'flex';
+			} else if (value === "fitImage") {
+				// If "fitImage" is selected, calculate the size based on the max width of the notes editor and longest side of an image
+				// const maxWidth = getEditorMaxWidth();
+				// const longestSide = this.plugin.longestSide; 
+				// if (longestSide !== null) {  // Check if longestSide is not null before using it
+                //     this.plugin.settings.customSizeLongestSide = Math.min(maxWidth, longestSide).toString();
+				// 	await this.plugin.saveSettings();
+                // }
+				customSizeSetting.settingEl.style.display = 'none';
 			} else {
-				// If "customSize" is not selected, hide the "Custom size" field
+				// If neither "customSize" nor "fitImage" is selected, hide the "Custom size" field
 				customSizeSetting.settingEl.style.display = 'none';
 			}
 		};
+		// Function to get the max width of the notes editor
+		// const getEditorMaxWidth = () => {
+		// 	// Get the computed style of the root element
+		// 	const style = getComputedStyle(document.documentElement);
+		// 	// Get the value of the --file-line-width variable
+		// 	const maxWidth = style.getPropertyValue('--file-line-width');
+		// 	// Remove 'px' from the end and convert to a number
+		// 	return Number(maxWidth.slice(0, -2));
+		// };
 
+		// Add "Fit Image" option to the dropdown
 		new Setting(containerEl)
 			.setName("Non-destructive resize:")
 			.setDesc(`Automatically apply "|size" to dropped/pasted images.`)
 			.addDropdown((dropdown) =>
 				dropdown
-					.addOptions({ disabled: "None", customSize: "Custom" })
+					.addOptions({ disabled: "None", customSize: "Custom", fitImage: "Fit Image" }) // Add "Fit Image" option
 					.setValue(this.plugin.settings.autoNonDestructiveResize)
 					.onChange(async (value) => {
 						this.plugin.settings.autoNonDestructiveResize = value;
@@ -2252,6 +2365,7 @@ class ImageConvertTab extends PluginSettingTab {
 						updateCustomSizeSetting(value);
 					})
 			);
+
 
 		const customSizeSetting = new Setting(containerEl)
 			.setName('Custom Size:')
@@ -2266,6 +2380,8 @@ class ImageConvertTab extends PluginSettingTab {
 
 		// Initially hide the custom size setting
 		updateCustomSizeSetting(this.plugin.settings.autoNonDestructiveResize);
+
+		
 
 		/////////////////////////////////////////////
 
