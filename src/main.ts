@@ -2,7 +2,7 @@ import { App, MarkdownView, Notice, Plugin, TFile, PluginSettingTab, Setting, Ed
 import { Platform } from 'obsidian';
 import UTIF from './UTIF.js';
 import moment from 'moment';
-import exifr from 'exifr'
+// import exifr from 'exifr'
 import probe from 'probe-image-size';
 
 
@@ -173,6 +173,7 @@ export default class ImageConvertPLugin extends Plugin {
 			this.registerEvent(
 				this.app.vault.on('create', (file: TFile) => {
 					if (!(file instanceof TFile)) return;
+					console.log(isImage(file));
 					if (isImage(file) && userAction) {
 						this.renameFile1(file);
 					}
@@ -646,7 +647,7 @@ export default class ImageConvertPLugin extends Plugin {
 		
 		// Get metadata
 		// await getEXIF(file);
-		this.widthSide = await getWidthSide(binary);
+		this.widthSide = await getImageWidthSide(binary);
 		const maxWidth = printEditorLineWidth(this.app);
 		if (this.widthSide !== null && typeof maxWidth === 'number') {
 			this.settings.customSizeLongestSide = (this.widthSide < maxWidth ? this.widthSide : maxWidth).toString();
@@ -1388,7 +1389,7 @@ export default class ImageConvertPLugin extends Plugin {
 	}
 }
 function isImage(file: TFile): boolean {
-	const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'tif', 'tiff'];
+	const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'tif', 'tiff', 'bmp'];
 	return IMAGE_EXTS.includes(file.extension.toLowerCase());
 }
 
@@ -1812,50 +1813,50 @@ function isBase64Image(src: any) {
 	return src.startsWith('data:image');
 }
 
-async function getEXIF(file:TFile){
-    // Image as a blob
-    const binary = await this.app.vault.readBinary(file);
-    const imgBlob = new Blob([binary], { type: `image/${file.extension}` });
+// async function getEXIF(file:TFile){
+//     // Image as a blob
+//     const binary = await this.app.vault.readBinary(file);
+//     const imgBlob = new Blob([binary], { type: `image/${file.extension}` });
 
-    // Use blob to get image metadata
-    const reader = new FileReader();
+//     // Use blob to get image metadata
+//     const reader = new FileReader();
 
-    return new Promise((resolve, reject) => {
-        reader.onloadend = async function() {
-            if (reader.result) {
-                try {
-                    const exif = await exifr.parse(reader.result);
-                    console.log(exif);
-                    resolve(exif); // Resolve the promise with the exif data
-                } catch (error) {
-                    reject(error); // Reject the promise with the error
-                }
-            }
-        };
-        reader.readAsArrayBuffer(imgBlob);
-    });
-}
+//     return new Promise((resolve, reject) => {
+//         reader.onloadend = async function() {
+//             if (reader.result) {
+//                 try {
+//                     const exif = await exifr.parse(reader.result);
+//                     // console.log(exif);
+//                     resolve(exif); // Resolve the promise with the exif data
+//                 } catch (error) {
+//                     reject(error); // Reject the promise with the error
+//                 }
+//             }
+//         };
+//         reader.readAsArrayBuffer(imgBlob);
+//     });
+// }
 
-async function getLongestSide(binary: ArrayBuffer) {
-    console.log(binary);
-    // Convert the binary data to a Buffer
-    const buffer = Buffer.from(binary);
-    // Get the image dimensions using probe-image-size
-    const result = probe.sync(buffer);
-    if (result) {
-        // Return the longest side
-        const longestSide = Math.max(result.width, result.height);
-        console.log("Longest Side of an image:", longestSide);
-        return longestSide;
-    } else {
-        console.log("Failed to get image dimensions");
-        return null;
-    }
-}
+// async function getLongestSide(binary: ArrayBuffer) {
+//     // console.log(binary);
+//     // Convert the binary data to a Buffer
+//     const buffer = Buffer.from(binary);
+//     // Get the image dimensions using probe-image-size
+//     const result = probe.sync(buffer);
+//     if (result) {
+//         // Return the longest side
+//         const longestSide = Math.max(result.width, result.height);
+//         // console.log("Longest Side of an image:", longestSide);
+//         return longestSide;
+//     } else {
+//         // console.log("Failed to get image dimensions");
+//         return null;
+//     }
+// }
 
 
-async function getWidthSide(binary: ArrayBuffer) {
-    console.log(binary);
+async function getImageWidthSide(binary: ArrayBuffer) {
+    // console.log(binary);
     // Convert the binary data to a Buffer
     const buffer = Buffer.from(binary);
     // Get the image dimensions using probe-image-size
@@ -1863,7 +1864,7 @@ async function getWidthSide(binary: ArrayBuffer) {
     if (result) {
         // Return the longest side
         const widthSide = Math.max(result.width);
-        console.log("Longest Side of an image:", widthSide);
+        // console.log("Longest Side of an image:", widthSide);
         return widthSide;
     } else {
         console.log("Failed to get image dimensions");
@@ -1872,17 +1873,21 @@ async function getWidthSide(binary: ArrayBuffer) {
 }
 
 function printEditorLineWidth(app: App) {
+    let editorLineWidth: string | number = ''; // Declare the variable here
     const activeView = app.workspace.getActiveViewOfType(MarkdownView);
     if (activeView) {
-        const editorElement = activeView.editor.containerEl;
+        const editorElement = (activeView.editor as any).containerEl;
         const style = getComputedStyle(editorElement);
-		let editorLineWidth = style.getPropertyValue('--file-line-width');
-        // Remove 'px' from the end and convert to a number
-        editorLineWidth = Number(editorLineWidth.slice(0, -2))
-        console.log("Editor max length:", editorLineWidth);
-        return editorLineWidth;
+        editorLineWidth = style.getPropertyValue('--file-line-width');
+        // Remove 'px' from the end
+        editorLineWidth = editorLineWidth.slice(0, -2);
+        // Now convert it into a number
+        editorLineWidth = Number(editorLineWidth);
+		
     }
+    return editorLineWidth; // Make sure to return or use the variable
 }
+
 
 
 function getImageName(img: HTMLImageElement): string | null {
@@ -2357,7 +2362,7 @@ class ImageConvertTab extends PluginSettingTab {
 			.setDesc(`Automatically apply "|size" to dropped/pasted images.`)
 			.addDropdown((dropdown) =>
 				dropdown
-					.addOptions({ disabled: "None", customSize: "Custom", fitImage: "Fit Image" }) // Add "Fit Image" option
+					.addOptions({ disabled: "None", fitImage: "Fit Image", customSize: "Custom",  }) // Add "Fit Image" option
 					.setValue(this.plugin.settings.autoNonDestructiveResize)
 					.onChange(async (value) => {
 						this.plugin.settings.autoNonDestructiveResize = value;
