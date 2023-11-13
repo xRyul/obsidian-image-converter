@@ -5,7 +5,6 @@ import moment from 'moment';
 // import exifr from 'exifr'
 import probe from 'probe-image-size';
 
-
 // Import heic-convert only on Desktop
 let heic: any;
 if (!Platform.isMobile) {
@@ -95,10 +94,14 @@ export default class ImageConvertPLugin extends Plugin {
 	pasteListener: (event: ClipboardEvent) => void;
 	dropListener: () => void;
 	mouseOverHandler: (event: MouseEvent) => void;
+	fileQueue: TFile[] = [];
+	isProcessingQueue = false;
 
 	async onload() {
 		await this.loadSettings();
-
+		this.addSettingTab(new ImageConvertTab(this.app, this));
+		
+		
 		// Add evenet listeners on paste and drop to prevent filerenaming during `sync` or `git pull`
 		// This allows us to check if  file was created as a result of a user action (like dropping 
 		// or pasting an image into a note) rather than a git pull action.
@@ -173,21 +176,24 @@ export default class ImageConvertPLugin extends Plugin {
 			this.registerEvent(
 				this.app.vault.on('create', (file: TFile) => {
 					if (!(file instanceof TFile)) return;
-					console.log(isImage(file));
 					if (isImage(file) && userAction) {
-						this.renameFile1(file);
+						this.fileQueue.push(file);
+						this.processQueue();
 					}
 					// userAction = false; // uncommented to allow multi-drop
 				})
 			);
 		})
 
+
+		
+
 		// Check if edge of an image was clicked upon
 		this.register(
 			this.onElement(
 				document,
 				"mousedown",
-				"img",
+				"img, video",
 				(event: MouseEvent) => {
 					if (!this.settings.resizeByDragging) return;
 
@@ -197,11 +203,14 @@ export default class ImageConvertPLugin extends Plugin {
 						// disabling the defaults which locks the image (alhtough, links are still movable)
 						event.preventDefault();
 					}
-					const img = event.target as HTMLImageElement;
+					const img = event.target as HTMLImageElement | HTMLVideoElement;
+
 					const rect = img.getBoundingClientRect();
+
 					const x = event.clientX - rect.left;
 					const y = event.clientY - rect.top;
 					const edgeSize = 30; // size of the edge in pixels
+
 					if ((x >= rect.width - edgeSize || x <= edgeSize) || (y >= rect.height - edgeSize || y <= edgeSize)) {
 						// user clicked on any of the edges of the image
 						// Cursor must be active only on the image or the img markdown link
@@ -215,17 +224,35 @@ export default class ImageConvertPLugin extends Plugin {
 						const updateThreshold = 5; // The mouse must move at least 5 pixels before an update
 
 						const onMouseMove = (event: MouseEvent) => {
+							
 							const { newWidth, newHeight } = resizeImageDrag(event, img, startX, startY, startWidth, startHeight);
-
-							img.style.width = `${newWidth}px`;
-							img.style.height = `${newHeight}px`;
-
+							// Apply the new dimensions to the image or video
+							if (img instanceof HTMLImageElement) {
+								img.style.border = 'solid';
+								img.style.borderWidth = '2px';
+								img.style.borderColor = 'blue';
+								img.style.boxSizing = 'border-box';
+								img.style.width = `${newWidth}px`;
+								img.style.height = `${newHeight}px`;
+							} else if (img instanceof HTMLVideoElement) {
+								img.style.border = 'solid';
+								img.style.borderWidth = '2px';
+								img.style.borderColor = 'blue';
+								img.style.boxSizing = 'border-box';
+								// Check if img.parentElement is not null before trying to access its clientWidth property
+								if (img.parentElement){
+									const containerWidth = img.parentElement.clientWidth;
+									const newWidthPercentage = (newWidth / containerWidth) * 100;
+									img.style.width = `${newWidthPercentage}%`;
+								}
+							}
+							
 							// Check if the mouse has moved more than the update threshold
 							if (Math.abs(event.clientX - lastUpdateX) > updateThreshold || Math.abs(event.clientY - lastUpdateY) > updateThreshold) {
 								const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 								if (activeView) {
 									const imageName = getImageName(img);
-
+									
 									if (imageName) { // Check if imageName is not null
 
 										if (isExternalLink(imageName)) {
@@ -236,8 +263,7 @@ export default class ImageConvertPLugin extends Plugin {
 											resizeBase64Drag(activeView, imageName, newWidth)
 										} else {
 											// console.log("editing internal link")
-											updateMarkdownLink(activeView, imageName, newWidth, newHeight);
-
+											updateMarkdownLink(activeView, img, imageName, newWidth, newHeight);
 										}
 									}
 								}
@@ -264,10 +290,10 @@ export default class ImageConvertPLugin extends Plugin {
 			this.onElement(
 				document,
 				"mouseover",
-				"img",
+				"img, video",
 				(event: MouseEvent) => {
 					if (!this.settings.resizeByDragging) return;
-					const img = event.target as HTMLImageElement;
+					const img = event.target as HTMLImageElement | HTMLVideoElement;
 					const rect = img.getBoundingClientRect(); // Cache this
 					const edgeSize = 30; // size of the edge in pixels
 
@@ -301,10 +327,10 @@ export default class ImageConvertPLugin extends Plugin {
 			this.onElement(
 				document,
 				"mouseout",
-				"img",
+				"img, video",
 				(event: MouseEvent) => {
 					if (!this.settings.resizeByDragging) return;
-					const img = event.target as HTMLImageElement;
+					const img = event.target as HTMLImageElement | HTMLVideoElement;
 					img.style.borderStyle = 'none';
 					img.style.outline = 'none';
 				}
@@ -320,14 +346,14 @@ export default class ImageConvertPLugin extends Plugin {
 			this.onElement(
 				document,
 				"mouseover",
-				"img",
+				"img, video",
 				(event: MouseEvent) => {
 					if (event.shiftKey) { // check if the shift key is pressed
 						// console.log('Shift key is pressed. Mouseover event will not fire.');
 						return;
 					}
 
-					const img = event.target as HTMLImageElement;
+					const img = event.target as HTMLImageElement | HTMLVideoElement;
 					storedImageName = getImageName(img);
 				}
 			)
@@ -336,13 +362,13 @@ export default class ImageConvertPLugin extends Plugin {
 			this.onElement(
 				document,
 				"wheel",
-				"img",
+				"img, video",
 				(event: WheelEvent) => {
 					if (!this.settings.resizeWithShiftScrollwheel) return;
 					if (event.shiftKey) { // check if the shift key is pressed
 
 						try {
-							const img = event.target as HTMLImageElement;
+							const img = event.target as HTMLImageElement | HTMLVideoElement;
 
 							// get the image under the cursor
 							const imageName = getImageName(img)
@@ -354,10 +380,17 @@ export default class ImageConvertPLugin extends Plugin {
 							}
 
 							const { newWidth, newHeight, newLeft, newTop } = resizeImageScrollWheel(event, img);
-							img.style.width = `${newWidth}px`;
-							img.style.height = `${newHeight}px`;
-							img.style.left = `${newLeft}px`;
-							img.style.top = `${newTop}px`;
+							if (img instanceof HTMLImageElement) {
+								img.style.width = `${newWidth}px`;
+								img.style.height = `${newHeight}px`;
+								img.style.left = `${newLeft}px`;
+								img.style.top = `${newTop}px`;
+	
+							} else if (img instanceof HTMLVideoElement) {
+								img.style.width = `${newWidth}%`;
+								// img.style.height = 'auto'; // Maintain the aspect ratio
+							}
+							
 
 							const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 							if (activeView) {
@@ -371,7 +404,7 @@ export default class ImageConvertPLugin extends Plugin {
 										resizeBase64Drag(activeView, imageName, newWidth)
 									} else {
 										// console.log("editing internal link")
-										updateMarkdownLink(activeView, imageName, newWidth, newHeight);
+										updateMarkdownLink(activeView, img, imageName, newWidth, newHeight);
 									}
 								}
 							}
@@ -396,8 +429,6 @@ export default class ImageConvertPLugin extends Plugin {
 				this.onContextMenu.bind(this)
 			)
 		);
-
-		this.addSettingTab(new ImageConvertTab(this.app, this));
 
 		// Add a command to process all images in the vault
 		this.addCommand({
@@ -448,6 +479,19 @@ export default class ImageConvertPLugin extends Plugin {
 		});
 	}
 
+	async processQueue() {
+		if (this.isProcessingQueue) return;
+		this.isProcessingQueue = true;
+		while (this.fileQueue.length > 0) {
+			const file = this.fileQueue.shift();
+			if (!(file instanceof TFile)) return;
+			if (isImage(file)) {
+				await this.renameFile1(file);
+			}
+			
+		}
+		this.isProcessingQueue = false;
+	}
 	onElement(
 		el: Document,
 		event: keyof HTMLElementEventMap,
@@ -628,7 +672,7 @@ export default class ImageConvertPLugin extends Plugin {
 		}
 
 	}
-
+	
 	async renameFile1(file: TFile) { // 1 added to the naming to differentitate from defualt obsidian renameFile func
 		const activeFile = this.getActiveFile();
 
@@ -644,18 +688,19 @@ export default class ImageConvertPLugin extends Plugin {
 		// Image as a blob
 		const binary = await this.app.vault.readBinary(file);
 		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
-		
 		// Get metadata
 		// await getEXIF(file);
-		this.widthSide = await getImageWidthSide(binary);
-		const maxWidth = printEditorLineWidth(this.app);
-		if (this.widthSide !== null && typeof maxWidth === 'number') {
-			this.settings.customSizeLongestSide = (this.widthSide < maxWidth ? this.widthSide : maxWidth).toString();
-			await this.saveSettings();
+
+		if (this.settings.autoNonDestructiveResize === "customSize" || this.settings.autoNonDestructiveResize === "fitImage") {
+			this.widthSide = await getImageWidthSide(binary);
+			const maxWidth = printEditorLineWidth(this.app);
+			if (this.widthSide !== null && typeof maxWidth === 'number') {
+				this.settings.customSizeLongestSide = (this.widthSide < maxWidth ? this.widthSide : maxWidth).toString();
+				await this.saveSettings();
+			}
 		}
 		
-		
-		
+
 		if (file.extension === 'tif' || file.extension === 'tiff') {
 
 			// Convert ArrayBuffer to Uint8Array
@@ -884,6 +929,7 @@ export default class ImageConvertPLugin extends Plugin {
 		}
 	}
 
+	
 	//Process All Vault
 	async processAllVaultImages() {
 		const getallfiles = this.app.vault.getFiles();
@@ -1389,7 +1435,7 @@ export default class ImageConvertPLugin extends Plugin {
 	}
 }
 function isImage(file: TFile): boolean {
-	const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'tif', 'tiff', 'bmp'];
+	const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'tif', 'tiff', 'bmp', 'svg', 'gif', 'mov'];
 	return IMAGE_EXTS.includes(file.extension.toLowerCase());
 }
 
@@ -1765,8 +1811,6 @@ function reduceColorDepth(imageData: ImageData, colorDepth: number): ImageData {
 	return reducedImageData;
 }
 
-
-
 function base64ToArrayBuffer(code: string): ArrayBuffer {
 	const parts = code.split(';base64,');
 	const raw = window.atob(parts[1]);
@@ -1778,35 +1822,41 @@ function base64ToArrayBuffer(code: string): ArrayBuffer {
 	return uInt8Array.buffer;
 }
 
-function resizeImageScrollWheel(event: WheelEvent, img: HTMLImageElement) {
-	const delta = Math.sign(event.deltaY); // get the direction of the scroll
-	const scaleFactor = 1.1; // set the scale factor for resizing
-	let newWidth, newHeight;
+function resizeImageScrollWheel(event: WheelEvent, img: HTMLImageElement | HTMLVideoElement) {
+    const delta = Math.sign(event.deltaY); // get the direction of the scroll
+    const scaleFactor = delta < 0 ? 1.1 : 0.9; // set the scale factor for resizing
 
-	if (delta < 0) {
-		// user scrolled up, increase the size of the image
-		newWidth = img.clientWidth * scaleFactor;
-		newHeight = img.clientHeight * scaleFactor;
-	} else {
-		// user scrolled down, decrease the size of the image
-		newWidth = img.clientWidth / scaleFactor;
-		newHeight = img.clientHeight / scaleFactor;
-	}
+    let newWidth;
+    if (img instanceof HTMLVideoElement && img.style.width.endsWith('%')) {
+        // If the element is a video and the width is in percentages, calculate the new width in percentages
+        newWidth = parseFloat(img.style.width) * scaleFactor;
+        // Ensure the width is within the range 1% - 100%
+        newWidth = Math.max(1, Math.min(newWidth, 100));
+    } else {
+        // If the element is an image or the width is in pixels, calculate the new width in pixels
+        newWidth = img.clientWidth * scaleFactor;
+        // Ensure the image doesn't get too small
+        newWidth = Math.max(newWidth, 50);
+    }
 
-	// Round the values to the nearest whole number
-	newWidth = Math.round(newWidth);
-	newHeight = Math.round(newHeight);
+    // Calculate the new height while maintaining the aspect ratio
+    const aspectRatio = img.clientWidth / img.clientHeight;
+    let newHeight = newWidth / aspectRatio;
+    newHeight = Math.max(newHeight, 50); // Ensure the image doesn't get too small
 
-	// Calculate the new position of the image so that it zooms towards the mouse pointer
-	const rect = img.getBoundingClientRect();
-	const dx = event.clientX - rect.left; // horizontal distance from left edge of image to mouse pointer
-	const dy = event.clientY - rect.top; // vertical distance from top edge of image to mouse pointer
-	const newLeft = rect.left - dx * (newWidth / img.clientWidth - 1);
-	const newTop = rect.top - dy * (newHeight / img.clientHeight - 1);
+    // Round the values to the nearest whole number
+    newWidth = Math.round(newWidth);
+    newHeight = Math.round(newHeight);
 
-	return { newWidth, newHeight, newLeft, newTop };
+    // Calculate the new position of the image so that it zooms towards the mouse pointer
+    const rect = img.getBoundingClientRect();
+    const dx = event.clientX - rect.left; // horizontal distance from left edge of image to mouse pointer
+    const dy = event.clientY - rect.top; // vertical distance from top edge of image to mouse pointer
+    const newLeft = rect.left - dx * (newWidth / img.clientWidth - 1);
+    const newTop = rect.top - dy * (newHeight / img.clientHeight - 1);
+
+    return { newWidth, newHeight, newLeft, newTop };
 }
-
 
 function isBase64Image(src: any) {
 	// Check if src starts with 'data:image'
@@ -1873,7 +1923,7 @@ async function getImageWidthSide(binary: ArrayBuffer) {
 }
 
 function printEditorLineWidth(app: App) {
-    let editorLineWidth: string | number = ''; // Declare the variable here
+    let editorLineWidth: string | number = '';
     const activeView = app.workspace.getActiveViewOfType(MarkdownView);
     if (activeView) {
         const editorElement = (activeView.editor as any).containerEl;
@@ -1890,7 +1940,7 @@ function printEditorLineWidth(app: App) {
 
 
 
-function getImageName(img: HTMLImageElement): string | null {
+function getImageName(img: HTMLImageElement | HTMLVideoElement): string | null {
 	// Get the image name from an image element: `src`
 	let imageName = img.getAttribute("src");
 
@@ -1916,7 +1966,7 @@ function isExternalLink(imageName: string): boolean {
 	// This is a simple check that assumes any link starting with 'http' is an external link.
 	return imageName.startsWith('http');
 }
-function updateExternalLink(activeView: MarkdownView, img: HTMLImageElement, newWidth: number, newHeight: number): void {
+function updateExternalLink(activeView: MarkdownView, img: HTMLImageElement | HTMLVideoElement, newWidth: number, newHeight: number): void {
 	// Get the current link and alt text
 	const currentLink = img.getAttribute("src");
 	let altText = img.getAttribute("alt");
@@ -1946,25 +1996,48 @@ function updateExternalLink(activeView: MarkdownView, img: HTMLImageElement, new
 	// Update only the current line in the editor
 	editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
 }
-function resizeImageDrag(event: MouseEvent, img: HTMLImageElement, startX: number, startY: number, startWidth: number, startHeight: number) {
-	const currentX = event.clientX;
-	// const currentY = event.clientY;
-	const aspectRatio = startWidth / startHeight;
+function resizeImageDrag(event: MouseEvent, img: HTMLImageElement | HTMLVideoElement, startX: number, startY: number, startWidth: number, startHeight: number) {
+    const currentX = event.clientX;
+    const aspectRatio = startWidth / startHeight;
 
-	let newWidth = startWidth + (currentX - startX);
-	let newHeight = newWidth / aspectRatio;
-
+    let newWidth = startWidth;
+	newWidth = startWidth + (currentX - startX);
 	// Ensure the image doesn't get too small
 	newWidth = Math.max(newWidth, 50);
-	newHeight = Math.max(newHeight, 50);
 
-	// Round the values to the nearest whole number
-	newWidth = Math.round(newWidth);
-	newHeight = Math.round(newHeight);
 
-	return { newWidth, newHeight };
+    let newHeight = newWidth / aspectRatio;
+
+    // Round the values to the nearest whole number
+    newWidth = Math.round(newWidth);
+    newHeight = Math.round(newHeight);
+
+    return { newWidth, newHeight };
 }
-function updateMarkdownLink(activeView: MarkdownView, imageName: string | null, newWidth: number, newHeight: number) {
+
+// function isLinkInPercentage(activeView: MarkdownView, imageName: string): boolean {
+//     const editor = activeView.editor;
+//     const doc = editor.getDoc();
+//     const lineCount = doc.lineCount();
+
+//     // Iterate over each line in the document
+//     for (let i = 0; i < lineCount; i++) {
+//         const line = doc.getLine(i);
+
+//         // Check if the line contains the image name
+//         if (line.includes(imageName)) {
+//             // Extract the size from the markdown link
+//             const match = line.match(/!\[\[.*\|(.*)\]\]/);
+//             if (match && match[1] && match[1].endsWith('%')) {
+//                 return true;
+//             }
+//         }
+//     }
+	
+//     return false;
+// }
+
+function updateMarkdownLink(activeView: MarkdownView, img: HTMLImageElement | HTMLVideoElement, imageName: string | null, newWidth: number, newHeight: number) {
 	const editor = activeView.editor;
 	const doc = editor.getDoc();
 	const lineCount = doc.lineCount();
@@ -1985,7 +2058,31 @@ function updateMarkdownLink(activeView: MarkdownView, imageName: string | null, 
 		const cursor = editor.getCursor();
 		const line = editor.getLine(cursor.line);
 		// calculate the longest side of the image
-		const longestSide = Math.round(Math.max(newWidth, newHeight));
+		let longestSide;
+		if (img instanceof HTMLImageElement) {
+			const percentageIndex = line.indexOf('%', line.indexOf(`![[${imageName}`));
+			if (percentageIndex !== -1 && percentageIndex < line.indexOf(']]')) {
+				// If the original link contains a percentage, calculate the new width as a percentage of the original size
+				newWidth = Math.round((newWidth / img.naturalWidth) * 100);
+				newWidth = Math.min(newWidth, 100);
+				longestSide = `${newWidth}%`;
+
+			} else {
+				// If the original link contains a pixel value, continue resizing in pixels
+				longestSide = Math.round(Math.max(newWidth, newHeight));
+			}
+		} else if (img instanceof HTMLVideoElement) {
+			// Check if the link already includes a width in percentages
+			const percentageIndex = line.indexOf('%', line.indexOf(`![[${imageName}`));
+			if (percentageIndex !== -1 && percentageIndex < line.indexOf(']]')) {
+				// If it does, continue resizing in percentages
+				newWidth = Math.min(newWidth, 100);
+				longestSide = `${newWidth}%`;
+			} else {
+				// If it doesn't, continue resizing in pixels
+				longestSide = Math.round(newWidth);
+			}
+		}
 		// find the start and end position of the image link in the line
 		const startPos = line.indexOf(`![[${imageName}`);
 		const endPos = line.indexOf(']]', startPos) + 2;
@@ -2247,7 +2344,7 @@ class ImageConvertTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName('Auto rename')
 			.setDesc(
-				`Automatically rename dropped image into current notes name + todays date (YYYYMMDDHHMMSS). For instance, image "testImage.jpg" dropped into note "Howtotakenotes.md" becomes "Howtotakenotes-20230927164411.webp"`
+				`Automatically rename dropped image into current notes name + todays date (YYYYMMDDHHMMSSSSS). For instance, image "testImage.jpg" dropped into note "Howtotakenotes.md" becomes "Howtotakenotes-20230927164411.webp"`
 			)
 			.addToggle(toggle =>
 				toggle
@@ -2988,3 +3085,4 @@ class ProcessCurrentNoteResizeModal extends Modal {
 		}
 	}
 }
+
