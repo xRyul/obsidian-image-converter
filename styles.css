@@ -1,0 +1,806 @@
+
+/* Video Resize */
+[alt~="1%"] video {
+    width: 1%;
+}
+
+[alt~="2%"] video {
+    width: 2%;
+}
+
+[alt~="3%"] video {
+    width: 3%;
+}
+
+[alt~="4%"] video {
+    width: 4%;
+}
+
+[alt~="5%"] video {
+    width: 5%;
+}
+
+[alt~="6%"] video {
+    width: 6%;
+}
+
+[alt~="7%"] video {
+    width: 7%;
+}
+
+[alt~="8%"] video {
+    width: 8%;
+}
+
+[alt~="9%"] video {
+    width: 9%;
+}
+
+[alt~="10%"] video {
+    width: 10%;
+}
+
+[alt~="11%"] video {
+    width: 11%;
+}
+
+[alt~="12%"] video {
+    width: 12%;
+}
+
+[alt~="13%"] video {
+    width: 13%;
+}
+
+[alt~="14%"] video {
+    width: 14%;
+}
+
+[alt~="15%"] video {
+    width: 15%;
+}
+
+[alt~="16%"] video {
+    width: 16%;
+}
+
+[alt~="17%"] video {
+    width: 17%;
+}
+
+[alt~="18%"] video {
+    width: 18%;
+}
+
+[alt~="19%"] video {
+    width: 19%;
+}
+
+[alt~="20%"] video {
+    width: 20%;
+}
+
+[alt~="21%"] video {
+    width: 21%;
+}
+
+[alt~="22%"] video {
+    width: 22%;
+}
+
+[alt~="23%"] video {
+    width: 23%;
+}
+
+[alt~="24%"] video {
+    width: 24%;
+}
+
+[alt~="25%"] video {
+    width: 25%;
+}
+
+[alt~="26%"] video {
+    width: 26%;
+}
+
+[alt~="27%"] video {
+    width: 27%;
+}
+
+[alt~="28%"] video {
+    width: 28%;
+}
+
+[alt~="29%"] video {
+    width: 29%;
+}
+
+[alt~="30%"] video {
+    width: 30%;
+}
+
+[alt~="31%"] video {
+    width: 31%;
+}
+
+[alt~="32%"] video {
+    width: 32%;
+}
+
+[alt~="33%"] video {
+    width: 33%;
+}
+
+[alt~="34%"] video {
+    width: 34%;
+}
+
+[alt~="35%"] video {
+    width: 35%;
+}
+
+[alt~="36%"] video {
+    width: 36%;
+}
+
+[alt~="37%"] video {
+    width: 37%;
+}
+
+[alt~="38%"] video {
+    width: 38%;
+}
+
+[alt~="39%"] video {
+    width: 39%;
+}
+
+[alt~="40%"] video {
+    width: 40%;
+}
+
+[alt~="41%"] video {
+    width: 41%;
+}
+
+[alt~="42%"] video {
+    width: 42%;
+}
+
+[alt~="43%"] video {
+    width: 43%;
+}
+
+[alt~="44%"] video {
+    width: 44%;
+}
+
+[alt~="45%"] video {
+    width: 45%;
+}
+
+[alt~="46%"] video {
+    width: 46%;
+}
+
+[alt~="47%"] video {
+    width: 47%;
+}
+
+[alt~="48%"] video {
+    width: 48%;
+}
+
+[alt~="49%"] video {
+    width: 49%;
+}
+
+[alt~="50%"] video {
+    width: 50%;
+}
+
+[alt~="51%"] video {
+    width: 51%;
+}
+
+[alt~="52%"] video {
+    width: 52%;
+}
+
+[alt~="53%"] video {
+    width: 53%;
+}
+
+[alt~="54%"] video {
+    width: 54%;
+}
+
+[alt~="55%"] video {
+    width: 55%;
+}
+
+[alt~="56%"] video {
+    width: 56%;
+}
+
+[alt~="57%"] video {
+    width: 57%;
+}
+
+[alt~="58%"] video {
+    width: 58%;
+}
+
+[alt~="59%"] video {
+    width: 59%;
+}
+
+[alt~="60%"] video {
+    width: 60%;
+}
+
+[alt~="61%"] video {
+    width: 61%;
+}
+
+[alt~="62%"] video {
+    width: 62%;
+}
+
+[alt~="63%"] video {
+    width: 63%;
+}
+
+[alt~="64%"] video {
+    width: 64%;
+}
+
+[alt~="65%"] video {
+    width: 65%;
+}
+
+[alt~="66%"] video {
+    width: 66%;
+}
+
+[alt~="67%"] video {
+    width: 67%;
+}
+
+[alt~="68%"] video {
+    width: 68%;
+}
+
+[alt~="69%"] video {
+    width: 69%;
+}
+
+[alt~="70%"] video {
+    width: 70%;
+}
+
+[alt~="71%"] video {
+    width: 71%;
+}
+
+[alt~="72%"] video {
+    width: 72%;
+}
+
+[alt~="73%"] video {
+    width: 73%;
+}
+
+[alt~="74%"] video {
+    width: 74%;
+}
+
+[alt~="75%"] video {
+    width: 75%;
+}
+
+[alt~="76%"] video {
+    width: 76%;
+}
+
+[alt~="77%"] video {
+    width: 77%;
+}
+
+[alt~="78%"] video {
+    width: 78%;
+}
+
+[alt~="79%"] video {
+    width: 79%;
+}
+
+[alt~="80%"] video {
+    width: 80%;
+}
+
+[alt~="81%"] video {
+    width: 81%;
+}
+
+[alt~="82%"] video {
+    width: 82%;
+}
+
+[alt~="83%"] video {
+    width: 83%;
+}
+
+[alt~="84%"] video {
+    width: 84%;
+}
+
+[alt~="85%"] video {
+    width: 85%;
+}
+
+[alt~="86%"] video {
+    width: 86%;
+}
+
+[alt~="87%"] video {
+    width: 87%;
+}
+
+[alt~="88%"] video {
+    width: 88%;
+}
+
+[alt~="89%"] video {
+    width: 89%;
+}
+
+[alt~="90%"] video {
+    width: 90%;
+}
+
+[alt~="91%"] video {
+    width: 91%;
+}
+
+[alt~="92%"] video {
+    width: 92%;
+}
+
+[alt~="93%"] video {
+    width: 93%;
+}
+
+[alt~="94%"] video {
+    width: 94%;
+}
+
+[alt~="95%"] video {
+    width: 95%;
+}
+
+[alt~="96%"] video {
+    width: 96%;
+}
+
+[alt~="97%"] video {
+    width: 97%;
+}
+
+[alt~="98%"] video {
+    width: 98%;
+}
+
+[alt~="99%"] video {
+    width: 99%;
+}
+
+[alt~="100%"] video {
+    width: 100%;
+}
+
+
+/* Image Resize */
+
+
+/* img Resize */
+[alt~="1%"] img {
+    width: 1%;
+}
+
+[alt~="2%"] img {
+    width: 2%;
+}
+
+[alt~="3%"] img {
+    width: 3%;
+}
+
+[alt~="4%"] img {
+    width: 4%;
+}
+
+[alt~="5%"] img {
+    width: 5%;
+}
+
+[alt~="6%"] img {
+    width: 6%;
+}
+
+[alt~="7%"] img {
+    width: 7%;
+}
+
+[alt~="8%"] img {
+    width: 8%;
+}
+
+[alt~="9%"] img {
+    width: 9%;
+}
+
+[alt~="10%"] img {
+    width: 10%;
+}
+
+[alt~="11%"] img {
+    width: 11%;
+}
+
+[alt~="12%"] img {
+    width: 12%;
+}
+
+[alt~="13%"] img {
+    width: 13%;
+}
+
+[alt~="14%"] img {
+    width: 14%;
+}
+
+[alt~="15%"] img {
+    width: 15%;
+}
+
+[alt~="16%"] img {
+    width: 16%;
+}
+
+[alt~="17%"] img {
+    width: 17%;
+}
+
+[alt~="18%"] img {
+    width: 18%;
+}
+
+[alt~="19%"] img {
+    width: 19%;
+}
+
+[alt~="20%"] img {
+    width: 20%;
+}
+
+[alt~="21%"] img {
+    width: 21%;
+}
+
+[alt~="22%"] img {
+    width: 22%;
+}
+
+[alt~="23%"] img {
+    width: 23%;
+}
+
+[alt~="24%"] img {
+    width: 24%;
+}
+
+[alt~="25%"] img {
+    width: 25%;
+}
+
+[alt~="26%"] img {
+    width: 26%;
+}
+
+[alt~="27%"] img {
+    width: 27%;
+}
+
+[alt~="28%"] img {
+    width: 28%;
+}
+
+[alt~="29%"] img {
+    width: 29%;
+}
+
+[alt~="30%"] img {
+    width: 30%;
+}
+
+[alt~="31%"] img {
+    width: 31%;
+}
+
+[alt~="32%"] img {
+    width: 32%;
+}
+
+[alt~="33%"] img {
+    width: 33%;
+}
+
+[alt~="34%"] img {
+    width: 34%;
+}
+
+[alt~="35%"] img {
+    width: 35%;
+}
+
+[alt~="36%"] img {
+    width: 36%;
+}
+
+[alt~="37%"] img {
+    width: 37%;
+}
+
+[alt~="38%"] img {
+    width: 38%;
+}
+
+[alt~="39%"] img {
+    width: 39%;
+}
+
+[alt~="40%"] img {
+    width: 40%;
+}
+
+[alt~="41%"] img {
+    width: 41%;
+}
+
+[alt~="42%"] img {
+    width: 42%;
+}
+
+[alt~="43%"] img {
+    width: 43%;
+}
+
+[alt~="44%"] img {
+    width: 44%;
+}
+
+[alt~="45%"] img {
+    width: 45%;
+}
+
+[alt~="46%"] img {
+    width: 46%;
+}
+
+[alt~="47%"] img {
+    width: 47%;
+}
+
+[alt~="48%"] img {
+    width: 48%;
+}
+
+[alt~="49%"] img {
+    width: 49%;
+}
+
+[alt~="50%"] img {
+    width: 50%;
+}
+
+[alt~="51%"] img {
+    width: 51%;
+}
+
+[alt~="52%"] img {
+    width: 52%;
+}
+
+[alt~="53%"] img {
+    width: 53%;
+}
+
+[alt~="54%"] img {
+    width: 54%;
+}
+
+[alt~="55%"] img {
+    width: 55%;
+}
+
+[alt~="56%"] img {
+    width: 56%;
+}
+
+[alt~="57%"] img {
+    width: 57%;
+}
+
+[alt~="58%"] img {
+    width: 58%;
+}
+
+[alt~="59%"] img {
+    width: 59%;
+}
+
+[alt~="60%"] img {
+    width: 60%;
+}
+
+[alt~="61%"] img {
+    width: 61%;
+}
+
+[alt~="62%"] img {
+    width: 62%;
+}
+
+[alt~="63%"] img {
+    width: 63%;
+}
+
+[alt~="64%"] img {
+    width: 64%;
+}
+
+[alt~="65%"] img {
+    width: 65%;
+}
+
+[alt~="66%"] img {
+    width: 66%;
+}
+
+[alt~="67%"] img {
+    width: 67%;
+}
+
+[alt~="68%"] img {
+    width: 68%;
+}
+
+[alt~="69%"] img {
+    width: 69%;
+}
+
+[alt~="70%"] img {
+    width: 70%;
+}
+
+[alt~="71%"] img {
+    width: 71%;
+}
+
+[alt~="72%"] img {
+    width: 72%;
+}
+
+[alt~="73%"] img {
+    width: 73%;
+}
+
+[alt~="74%"] img {
+    width: 74%;
+}
+
+[alt~="75%"] img {
+    width: 75%;
+}
+
+[alt~="76%"] img {
+    width: 76%;
+}
+
+[alt~="77%"] img {
+    width: 77%;
+}
+
+[alt~="78%"] img {
+    width: 78%;
+}
+
+[alt~="79%"] img {
+    width: 79%;
+}
+
+[alt~="80%"] img {
+    width: 80%;
+}
+
+[alt~="81%"] img {
+    width: 81%;
+}
+
+[alt~="82%"] img {
+    width: 82%;
+}
+
+[alt~="83%"] img {
+    width: 83%;
+}
+
+[alt~="84%"] img {
+    width: 84%;
+}
+
+[alt~="85%"] img {
+    width: 85%;
+}
+
+[alt~="86%"] img {
+    width: 86%;
+}
+
+[alt~="87%"] img {
+    width: 87%;
+}
+
+[alt~="88%"] img {
+    width: 88%;
+}
+
+[alt~="89%"] img {
+    width: 89%;
+}
+
+[alt~="90%"] img {
+    width: 90%;
+}
+
+[alt~="91%"] img {
+    width: 91%;
+}
+
+[alt~="92%"] img {
+    width: 92%;
+}
+
+[alt~="93%"] img {
+    width: 93%;
+}
+
+[alt~="94%"] img {
+    width: 94%;
+}
+
+[alt~="95%"] img {
+    width: 95%;
+}
+
+[alt~="96%"] img {
+    width: 96%;
+}
+
+[alt~="97%"] img {
+    width: 97%;
+}
+
+[alt~="98%"] img {
+    width: 98%;
+}
+
+[alt~="99%"] img {
+    width: 99%;
+}
+
+[alt~="100%"] img {
+    width: 100%;
+}

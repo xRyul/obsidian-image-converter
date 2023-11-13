@@ -737,15 +737,56 @@ export default class ImageConvertPLugin extends Plugin {
 			// Convert ArrayBuffer to Buffer
 			const binaryBuffer = Buffer.from(binary);
 
-			// Convert HEIC to JPG
-			const outputBuffer = await heic({
-				buffer: binaryBuffer,
-				format: 'JPEG',
-				quality: Number(this.settings.quality)
-			});
+			// If convertTo is not 'disabled', convert HEIC
+			if (this.settings.convertTo !== 'disabled') {
+				const outputBuffer = await heic({
+					buffer: binaryBuffer,
+					format: 'JPEG',
+					quality: 1
+				});
 
-			imgBlob = new Blob([outputBuffer], { type: 'image/jpeg' });
+				imgBlob = new Blob([outputBuffer], { type: 'image/jpeg' });
+
+				if (this.settings.convertTo === 'webp') {
+					const arrayBufferWebP = await convertToWebP(
+						imgBlob,
+						Number(this.settings.quality),
+						this.settings.resizeMode,
+						this.settings.desiredWidth,
+						this.settings.desiredHeight,
+						this.settings.desiredLength
+					);
+					await this.app.vault.modifyBinary(file, arrayBufferWebP);
+				} else if (this.settings.convertTo === 'jpg') {
+					const arrayBufferJPG = await convertToJPG(
+						imgBlob,
+						Number(this.settings.quality),
+						this.settings.resizeMode,
+						this.settings.desiredWidth,
+						this.settings.desiredHeight,
+						this.settings.desiredLength
+					);
+					await this.app.vault.modifyBinary(file, arrayBufferJPG);
+				} else if (this.settings.convertTo === 'png') {
+					const arrayBufferPNG = await convertToPNG(
+						imgBlob,
+						Number(this.settings.quality),
+						this.settings.resizeMode,
+						this.settings.desiredWidth,
+						this.settings.desiredHeight,
+						this.settings.desiredLength
+					);
+					await this.app.vault.modifyBinary(file, arrayBufferPNG);
+				} else {
+					new Notice('Error: No format selected for conversion.');
+					return;
+				}
+			} else {
+				// Bypass conversion and compression, keep original file
+				new Notice('Original file kept without any compression or conversion.');
+			}
 		}
+
 		
 		if (this.settings.quality !== 1) { // If quality is set to 100, then simply use original image without compression
 			if (this.settings.convertTo === 'webp') {
