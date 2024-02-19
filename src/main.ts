@@ -890,7 +890,8 @@ export default class ImageConvertPLugin extends Plugin {
 				break;
 
 			case 'subfolder':
-				newPath = activeFile.path.substring(0, activeFile.path.lastIndexOf('/')) + '/' + this.settings.attachmentSubfolderName;
+				let transAttachmentSubFolderName = this.settings.attachmentSubfolderName.replace(/\${filename}/g, activeFile.basename)
+				newPath = activeFile.path.substring(0, activeFile.path.lastIndexOf('/')) + '/' + transAttachmentSubFolderName;
 				break;
 			default:
 				newPath = '/';
