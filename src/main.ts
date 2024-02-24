@@ -2077,11 +2077,15 @@ function updateMarkdownLink(activeView: MarkdownView, img: HTMLImageElement | HT
 	const doc = editor.getDoc();
 	const lineCount = doc.lineCount();
 
+	let imageFileName: string;
+	if (imageName != null) {
+		imageFileName = imageName.split("/").pop();
+	}
 	// find the line containing the image's markdown link
 	let lineIndex: number | undefined;
 	for (let i = 0; i < lineCount; i++) {
 		const line = doc.getLine(i);
-		if (line.includes(`![[${imageName}`)) {
+		if (line.includes(`![[${imageName}`) || (imageFileName != null && line.includes(`![[${imageFileName}`))) {
 			lineIndex = i;
 			break;
 		}
