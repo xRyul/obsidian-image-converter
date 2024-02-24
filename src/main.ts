@@ -2212,6 +2212,27 @@ function deleteMarkdownLink(activeView: MarkdownView, imageName: string | null) 
 		}
 	}
 }
+
+function relativizeImagePathToVaultFolder(imagePath: string, app: any) {
+	// Decode the URL for cases where vault name might have spaces
+	imagePath = decodeURIComponent(imagePath);
+	// Get Vault Name
+	const rootFolder = app.vault.getName();
+	// Find the position of the root folder in the path
+	const rootFolderIndex = imagePath.indexOf(rootFolder);
+
+	// Remove everything before the root folder
+	if (rootFolderIndex !== -1) {
+		imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
+	}
+
+	// Remove the query string
+	imagePath = imagePath.split('?')[0];
+	// Decode percent-encoded characters
+	const decodedPath = decodeURIComponent(imagePath);
+	return decodedPath;
+}
+
 async function deleteImageFromVault(event: MouseEvent, app: any) {
 	// Get the image element and its src attribute
 	const img = event.target as HTMLImageElement;
@@ -2240,8 +2261,7 @@ async function deleteImageFromVault(event: MouseEvent, app: any) {
 			new Notice('External image link deleted from the note');
 		} else {
 			// Delete image
-			// Get Vault Name
-			const rootFolder = app.vault.getName();
+		
 			const activeView = app.workspace.getActiveViewOfType(MarkdownView);
 
 		
@@ -2249,23 +2269,7 @@ async function deleteImageFromVault(event: MouseEvent, app: any) {
 			// thus we need to get rid of anything what is not part of the vault
 			let imagePath = img.getAttribute('src');
 			if (imagePath) {
-				// Decode the URL for cases where vault name might have spaces
-				imagePath = decodeURIComponent(imagePath);
-				// Get Vault Name
-				const rootFolder = app.vault.getName();
-				// Find the position of the root folder in the path
-				const rootFolderIndex = imagePath.indexOf(rootFolder);
-
-				// Remove everything before the root folder
-				if (rootFolderIndex !== -1) {
-					imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
-				}
-
-				// Remove the query string
-				imagePath = imagePath.split('?')[0];
-				// Decode percent-encoded characters
-				const decodedPath = decodeURIComponent(imagePath);
-
+				const decodedPath = relativizeImagePathToVaultFolder(imagePath, app);
 				const file = app.vault.getAbstractFileByPath(decodedPath);
 				if (file instanceof TFile && isImage(file)) {
 					// Delete the image
