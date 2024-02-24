@@ -1992,13 +1992,7 @@ function getImageName(img: HTMLImageElement | HTMLVideoElement): string | null {
 			// If it's a base64 image, return the entire `src` attribute
 			return imageName;
 		} else if (!isExternalLink(imageName)) {
-			// If it's not an external link, extract the file name
-			const parts = imageName.split("/");
-			const lastPart = parts.pop();
-			if (lastPart) {
-				imageName = lastPart.split("?")[0];
-				imageName = decodeURIComponent(imageName);
-			}
+			return relativizeImagePathToVaultFolder(imageName, this.app);
 		}
 	}
 	return imageName;
