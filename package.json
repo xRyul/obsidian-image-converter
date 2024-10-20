@@ -22,6 +22,7 @@
 		"typescript": "4.7.4"
 	},
 	"dependencies": {
-		"heic-convert": "^1.2.4"
+		"heic-convert": "^1.2.4",
+		"probe-image-size": "^7.2.3"
 	}
 }
