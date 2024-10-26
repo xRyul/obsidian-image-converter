@@ -30,6 +30,7 @@ interface ImageConvertSettings {
 	ProcessAllVaultResizeModaldesiredWidth: number;
 	ProcessAllVaultResizeModaldesiredHeight: number;
 	ProcessAllVaultResizeModaldesiredLength: number;
+	ProcessAllVaultskipImagesInTargetFormat: boolean;
 	ProcessCurrentNoteconvertTo: string;
 	ProcessCurrentNotequality: number;
 	ProcessCurrentNoteResizeModalresizeMode: string;
@@ -892,7 +893,8 @@ export default class ImageConvertPLugin extends Plugin {
 				break;
 
 			case 'subfolder':
-				newPath = activeFile.path.substring(0, activeFile.path.lastIndexOf('/')) + '/' + this.settings.attachmentSubfolderName;
+				let transAttachmentSubFolderName = this.settings.attachmentSubfolderName.replace(/\${filename}/g, activeFile.basename)
+				newPath = activeFile.path.substring(0, activeFile.path.lastIndexOf('/')) + '/' + transAttachmentSubFolderName;
 				break;
 			default:
 				newPath = '/';
@@ -972,11 +974,18 @@ export default class ImageConvertPLugin extends Plugin {
 		}
 	}
 
+	shouldProcessImage(image: TFile): boolean {
+		if (this.settings.ProcessAllVaultskipImagesInTargetFormat && image.extension === this.settings.ProcessAllVaultconvertTo) {
+			return false;
+		}
+		return true;
+	}
 
+	
 	//Process All Vault
 	async processAllVaultImages() {
 		const getallfiles = this.app.vault.getFiles();
-		const files = getallfiles.filter(file => file instanceof TFile && isImage(file));
+		const files = getallfiles.filter(file => file instanceof TFile && isImage(file) && this.shouldProcessImage(file));
 		let imageCount = 0;
 
 		// Create a status bar item
@@ -988,8 +997,11 @@ export default class ImageConvertPLugin extends Plugin {
 		for (const file of files) {
 			if (isImage(file)) {
 				imageCount++;
+				
+				// Log each file, this way the log will show files even if there is an error
+				console.log(`Processing image ${imageCount} of ${files.length}: ${file.name} ${file.path}`)
+				
 				await this.convertAllVault(file);
-
 				await refreshImagesInActiveNote();
 
 				// Calculate the elapsed time
@@ -997,8 +1009,6 @@ export default class ImageConvertPLugin extends Plugin {
 
 				// Update the status bar item
 				statusBarItemEl.setText(`Processing image ${imageCount} of ${files.length}, elapsed time: ${elapsedTime} seconds`);
-				// Log each file, if there is delay, at least log will show corrupt file
-				console.log(`${imageCount} of ${files.length} ${file.name} ${file.path}  ${elapsedTime} seconds elapsed`);
 			}
 		}
 
@@ -2825,6 +2835,18 @@ class ProcessAllVault extends Modal {
 						}
 					})
 			);
+		
+		new Setting(contentEl)
+			.setName('Skip images in target format')
+			.setDesc('Selecting this will skip images that already are in the target format. This is useful if you have a very large library, and want to process images in batches.')
+			.addToggle(toggle =>
+				toggle
+					.setValue(this.plugin.settings.ProcessAllVaultskipImagesInTargetFormat)
+					.onChange(async value => {
+						this.plugin.settings.ProcessAllVaultskipImagesInTargetFormat = value;
+						await this.plugin.saveSettings();
+					})
+			);
 
 		// Add a submit button
 		new ButtonComponent(contentEl)
@@ -3150,4 +3172,3 @@ class ProcessCurrentNoteResizeModal extends Modal {
 		}
 	}
 }
-
