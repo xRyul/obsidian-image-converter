@@ -41,6 +41,7 @@ interface ImageConvertSettings {
 	attachmentSpecifiedFolder: string;
 	attachmentSubfolderName: string;
 	resizeMode: string;
+	renameFormat: string;
 	autoNonDestructiveResize: string,
 	customSize: string,
 	customSizeLongestSide: string,
@@ -75,6 +76,7 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	attachmentSpecifiedFolder: '',
 	attachmentSubfolderName: '',
 	resizeMode: 'None',
+	renameFormat: 'date',
 	autoNonDestructiveResize: "disabled",
 	customSize: "",
 	customSizeLongestSide: "",
@@ -101,8 +103,8 @@ export default class ImageConvertPLugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 		this.addSettingTab(new ImageConvertTab(this.app, this));
-		
-		
+
+
 		// Add evenet listeners on paste and drop to prevent filerenaming during `sync` or `git pull`
 		// This allows us to check if  file was created as a result of a user action (like dropping 
 		// or pasting an image into a note) rather than a git pull action.
@@ -187,7 +189,7 @@ export default class ImageConvertPLugin extends Plugin {
 		})
 
 
-		
+
 
 		// Check if edge of an image was clicked upon
 		this.register(
@@ -225,7 +227,7 @@ export default class ImageConvertPLugin extends Plugin {
 						const updateThreshold = 5; // The mouse must move at least 5 pixels before an update
 
 						const onMouseMove = (event: MouseEvent) => {
-							
+
 							const { newWidth, newHeight } = resizeImageDrag(event, img, startX, startY, startWidth, startHeight);
 							// Apply the new dimensions to the image or video
 							if (img instanceof HTMLImageElement) {
@@ -241,19 +243,19 @@ export default class ImageConvertPLugin extends Plugin {
 								img.style.borderColor = 'blue';
 								img.style.boxSizing = 'border-box';
 								// Check if img.parentElement is not null before trying to access its clientWidth property
-								if (img.parentElement){
+								if (img.parentElement) {
 									const containerWidth = img.parentElement.clientWidth;
 									const newWidthPercentage = (newWidth / containerWidth) * 100;
 									img.style.width = `${newWidthPercentage}%`;
 								}
 							}
-							
+
 							// Check if the mouse has moved more than the update threshold
 							if (Math.abs(event.clientX - lastUpdateX) > updateThreshold || Math.abs(event.clientY - lastUpdateY) > updateThreshold) {
 								const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 								if (activeView) {
 									const imageName = getImageName(img);
-									
+
 									if (imageName) { // Check if imageName is not null
 
 										if (isExternalLink(imageName)) {
@@ -386,12 +388,12 @@ export default class ImageConvertPLugin extends Plugin {
 								img.style.height = `${newHeight}px`;
 								img.style.left = `${newLeft}px`;
 								img.style.top = `${newTop}px`;
-	
+
 							} else if (img instanceof HTMLVideoElement) {
 								img.style.width = `${newWidth}%`;
 								// img.style.height = 'auto'; // Maintain the aspect ratio
 							}
-							
+
 
 							const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 							if (activeView) {
@@ -489,7 +491,7 @@ export default class ImageConvertPLugin extends Plugin {
 			if (isImage(file)) {
 				await this.renameFile1(file);
 			}
-			
+
 		}
 		this.isProcessingQueue = false;
 	}
@@ -534,7 +536,7 @@ export default class ImageConvertPLugin extends Plugin {
 						const img = new Image();
 						img.crossOrigin = 'anonymous'; // Set crossOrigin to 'anonymous' for copying external images
 						const targetImg = event.target as HTMLImageElement; // Cast target to HTMLImageElement
-						img.onload = async function () {
+						img.onload = async function() {
 							const canvas = document.createElement('canvas');
 							canvas.width = img.naturalWidth;
 							canvas.height = img.naturalHeight;
@@ -561,7 +563,7 @@ export default class ImageConvertPLugin extends Plugin {
 						const img = new Image();
 						img.crossOrigin = 'anonymous'; // Set crossOrigin to 'anonymous'
 						const targetImg = event.target as HTMLImageElement; // Cast target to HTMLImageElement
-						img.onload = async function () {
+						img.onload = async function() {
 							const canvas = document.createElement('canvas');
 							canvas.width = img.naturalWidth;
 							canvas.height = img.naturalHeight;
@@ -673,7 +675,7 @@ export default class ImageConvertPLugin extends Plugin {
 		}
 
 	}
-	
+
 	async renameFile1(file: TFile) { // 1 added to the naming to differentitate from defualt obsidian renameFile func
 		const activeFile = this.getActiveFile();
 
@@ -700,7 +702,7 @@ export default class ImageConvertPLugin extends Plugin {
 				await this.saveSettings();
 			}
 		}
-		
+
 
 		if (file.extension === 'tif' || file.extension === 'tiff') {
 
@@ -733,7 +735,7 @@ export default class ImageConvertPLugin extends Plugin {
 			});
 
 		}
-		
+
 		if (file.extension === 'heic') {
 			// Convert ArrayBuffer to Buffer
 			const binaryBuffer = Buffer.from(binary);
@@ -788,7 +790,7 @@ export default class ImageConvertPLugin extends Plugin {
 			}
 		}
 
-		
+
 		if (this.settings.quality !== 1) { // If quality is set to 100, then simply use original image without compression
 			if (this.settings.convertTo === 'webp') {
 				const arrayBufferWebP = await convertToWebP(
@@ -864,7 +866,7 @@ export default class ImageConvertPLugin extends Plugin {
 			// Bypass conversion and compression, keep original file
 			new Notice('Original file kept without any compression.');
 		}
-		
+
 		let newName = await this.keepOrgName(file, activeFile);
 		if (this.settings.autoRename) {
 			newName = await this.generateNewName(file, activeFile);
@@ -1437,18 +1439,24 @@ export default class ImageConvertPLugin extends Plugin {
 	}
 
 
+	generateRandomHex(size: number) {
+		const array = new Uint8Array(size);
+		window.crypto.getRandomValues(array);
+		return Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
+	}
+
 	makeLinkText(file: TFile, sourcePath: string, subpath?: string): string {
 		return this.app.fileManager.generateMarkdownLink(file, sourcePath, subpath);
 	}
 	async generateNewName(file: TFile, activeFile: TFile): Promise<string> {
-		const newName = activeFile.basename + '-' + moment().format("YYYYMMDDHHmmssSSS");
+		const newName = this.settings.renameFormat == "date" ? activeFile.basename + '-' + moment().format("YYYYMMDDHHmmssSSS") : activeFile.basename + '-' + this.generateRandomHex(16);
 		let extension = file.extension;
 		if (this.settings.convertTo && this.settings.convertTo !== 'disabled') {
 			extension = this.settings.convertTo;
 		}
 		return `${newName}.${extension}`;
 	}
-	
+
 	async keepOrgName(file: TFile, activeFile: TFile): Promise<string> {
 		let newName = file.basename;
 		let extension = file.extension;
@@ -1874,39 +1882,39 @@ function base64ToArrayBuffer(code: string): ArrayBuffer {
 }
 
 function resizeImageScrollWheel(event: WheelEvent, img: HTMLImageElement | HTMLVideoElement) {
-    const delta = Math.sign(event.deltaY); // get the direction of the scroll
-    const scaleFactor = delta < 0 ? 1.1 : 0.9; // set the scale factor for resizing
+	const delta = Math.sign(event.deltaY); // get the direction of the scroll
+	const scaleFactor = delta < 0 ? 1.1 : 0.9; // set the scale factor for resizing
 
-    let newWidth;
-    if (img instanceof HTMLVideoElement && img.style.width.endsWith('%')) {
-        // If the element is a video and the width is in percentages, calculate the new width in percentages
-        newWidth = parseFloat(img.style.width) * scaleFactor;
-        // Ensure the width is within the range 1% - 100%
-        newWidth = Math.max(1, Math.min(newWidth, 100));
-    } else {
-        // If the element is an image or the width is in pixels, calculate the new width in pixels
-        newWidth = img.clientWidth * scaleFactor;
-        // Ensure the image doesn't get too small
-        newWidth = Math.max(newWidth, 50);
-    }
+	let newWidth;
+	if (img instanceof HTMLVideoElement && img.style.width.endsWith('%')) {
+		// If the element is a video and the width is in percentages, calculate the new width in percentages
+		newWidth = parseFloat(img.style.width) * scaleFactor;
+		// Ensure the width is within the range 1% - 100%
+		newWidth = Math.max(1, Math.min(newWidth, 100));
+	} else {
+		// If the element is an image or the width is in pixels, calculate the new width in pixels
+		newWidth = img.clientWidth * scaleFactor;
+		// Ensure the image doesn't get too small
+		newWidth = Math.max(newWidth, 50);
+	}
 
-    // Calculate the new height while maintaining the aspect ratio
-    const aspectRatio = img.clientWidth / img.clientHeight;
-    let newHeight = newWidth / aspectRatio;
-    newHeight = Math.max(newHeight, 50); // Ensure the image doesn't get too small
+	// Calculate the new height while maintaining the aspect ratio
+	const aspectRatio = img.clientWidth / img.clientHeight;
+	let newHeight = newWidth / aspectRatio;
+	newHeight = Math.max(newHeight, 50); // Ensure the image doesn't get too small
 
-    // Round the values to the nearest whole number
-    newWidth = Math.round(newWidth);
-    newHeight = Math.round(newHeight);
+	// Round the values to the nearest whole number
+	newWidth = Math.round(newWidth);
+	newHeight = Math.round(newHeight);
 
-    // Calculate the new position of the image so that it zooms towards the mouse pointer
-    const rect = img.getBoundingClientRect();
-    const dx = event.clientX - rect.left; // horizontal distance from left edge of image to mouse pointer
-    const dy = event.clientY - rect.top; // vertical distance from top edge of image to mouse pointer
-    const newLeft = rect.left - dx * (newWidth / img.clientWidth - 1);
-    const newTop = rect.top - dy * (newHeight / img.clientHeight - 1);
+	// Calculate the new position of the image so that it zooms towards the mouse pointer
+	const rect = img.getBoundingClientRect();
+	const dx = event.clientX - rect.left; // horizontal distance from left edge of image to mouse pointer
+	const dy = event.clientY - rect.top; // vertical distance from top edge of image to mouse pointer
+	const newLeft = rect.left - dx * (newWidth / img.clientWidth - 1);
+	const newTop = rect.top - dy * (newHeight / img.clientHeight - 1);
 
-    return { newWidth, newHeight, newLeft, newTop };
+	return { newWidth, newHeight, newLeft, newTop };
 }
 
 function isBase64Image(src: any) {
@@ -1957,36 +1965,36 @@ function isBase64Image(src: any) {
 
 
 async function getImageWidthSide(binary: ArrayBuffer) {
-    // console.log(binary);
-    // Convert the binary data to a Buffer
-    const buffer = Buffer.from(binary);
-    // Get the image dimensions using probe-image-size
-    const result = probe.sync(buffer);
-    if (result) {
-        // Return the longest side
-        const widthSide = Math.max(result.width);
-        // console.log("Longest Side of an image:", widthSide);
-        return widthSide;
-    } else {
-        console.log("Failed to get image dimensions");
-        return null;
-    }
+	// console.log(binary);
+	// Convert the binary data to a Buffer
+	const buffer = Buffer.from(binary);
+	// Get the image dimensions using probe-image-size
+	const result = probe.sync(buffer);
+	if (result) {
+		// Return the longest side
+		const widthSide = Math.max(result.width);
+		// console.log("Longest Side of an image:", widthSide);
+		return widthSide;
+	} else {
+		console.log("Failed to get image dimensions");
+		return null;
+	}
 }
 
 function printEditorLineWidth(app: App) {
-    let editorLineWidth: string | number = '';
-    const activeView = app.workspace.getActiveViewOfType(MarkdownView);
-    if (activeView) {
-        const editorElement = (activeView.editor as any).containerEl;
-        const style = getComputedStyle(editorElement);
-        editorLineWidth = style.getPropertyValue('--file-line-width');
-        // Remove 'px' from the end
-        editorLineWidth = editorLineWidth.slice(0, -2);
-        // Now convert it into a number
-        editorLineWidth = Number(editorLineWidth);
-		
-    }
-    return editorLineWidth; // Make sure to return or use the variable
+	let editorLineWidth: string | number = '';
+	const activeView = app.workspace.getActiveViewOfType(MarkdownView);
+	if (activeView) {
+		const editorElement = (activeView.editor as any).containerEl;
+		const style = getComputedStyle(editorElement);
+		editorLineWidth = style.getPropertyValue('--file-line-width');
+		// Remove 'px' from the end
+		editorLineWidth = editorLineWidth.slice(0, -2);
+		// Now convert it into a number
+		editorLineWidth = Number(editorLineWidth);
+
+	}
+	return editorLineWidth; // Make sure to return or use the variable
 }
 
 
@@ -2048,22 +2056,22 @@ function updateExternalLink(activeView: MarkdownView, img: HTMLImageElement | HT
 	editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
 }
 function resizeImageDrag(event: MouseEvent, img: HTMLImageElement | HTMLVideoElement, startX: number, startY: number, startWidth: number, startHeight: number) {
-    const currentX = event.clientX;
-    const aspectRatio = startWidth / startHeight;
+	const currentX = event.clientX;
+	const aspectRatio = startWidth / startHeight;
 
-    let newWidth = startWidth;
+	let newWidth = startWidth;
 	newWidth = startWidth + (currentX - startX);
 	// Ensure the image doesn't get too small
 	newWidth = Math.max(newWidth, 50);
 
 
-    let newHeight = newWidth / aspectRatio;
+	let newHeight = newWidth / aspectRatio;
 
-    // Round the values to the nearest whole number
-    newWidth = Math.round(newWidth);
-    newHeight = Math.round(newHeight);
+	// Round the values to the nearest whole number
+	newWidth = Math.round(newWidth);
+	newHeight = Math.round(newHeight);
 
-    return { newWidth, newHeight };
+	return { newWidth, newHeight };
 }
 
 // function isLinkInPercentage(activeView: MarkdownView, imageName: string): boolean {
@@ -2084,7 +2092,7 @@ function resizeImageDrag(event: MouseEvent, img: HTMLImageElement | HTMLVideoEle
 //             }
 //         }
 //     }
-	
+
 //     return false;
 // }
 
@@ -2406,6 +2414,22 @@ class ImageConvertTab extends PluginSettingTab {
 					})
 			);
 
+		new Setting(containerEl)
+			.setName('Rename format')
+			.setDesc(
+				`Select a rename format. Date will append a date. Hex will append a random hexadecimal string.`
+			)
+			.addDropdown(dropdown => {
+				dropdown.addOption("date", "Date")
+					.addOption("hex", "Hex")
+					.setValue(this.plugin.settings.renameFormat)
+					.onChange(async (value) => {
+						this.plugin.settings.renameFormat = value;
+						await this.plugin.saveSettings();
+					});
+
+			});
+
 		// OUTPUT
 		// Update outputSetting name and description
 		const updateOutputSetting = (value: string) => {
@@ -2485,9 +2509,9 @@ class ImageConvertTab extends PluginSettingTab {
 				// const maxWidth = getEditorMaxWidth();
 				// const longestSide = this.plugin.longestSide; 
 				// if (longestSide !== null) {  // Check if longestSide is not null before using it
-                //     this.plugin.settings.customSizeLongestSide = Math.min(maxWidth, longestSide).toString();
+				//     this.plugin.settings.customSizeLongestSide = Math.min(maxWidth, longestSide).toString();
 				// 	await this.plugin.saveSettings();
-                // }
+				// }
 				customSizeSetting.settingEl.style.display = 'none';
 			} else {
 				// If neither "customSize" nor "fitImage" is selected, hide the "Custom size" field
@@ -2510,7 +2534,7 @@ class ImageConvertTab extends PluginSettingTab {
 			.setDesc(`Automatically apply "|size" to dropped/pasted images.`)
 			.addDropdown((dropdown) =>
 				dropdown
-					.addOptions({ disabled: "None", fitImage: "Fit Image", customSize: "Custom",  }) // Add "Fit Image" option
+					.addOptions({ disabled: "None", fitImage: "Fit Image", customSize: "Custom", }) // Add "Fit Image" option
 					.setValue(this.plugin.settings.autoNonDestructiveResize)
 					.onChange(async (value) => {
 						this.plugin.settings.autoNonDestructiveResize = value;
@@ -2534,7 +2558,7 @@ class ImageConvertTab extends PluginSettingTab {
 		// Initially hide the custom size setting
 		updateCustomSizeSetting(this.plugin.settings.autoNonDestructiveResize);
 
-		
+
 
 		/////////////////////////////////////////////
 
