@@ -192,7 +192,22 @@ export default class ImageConvertPlugin extends Plugin {
 		// also if pasting, check if it is an External Link and wether to apply '| size' syntax to the link
 		this.pasteListener = (event: ClipboardEvent) => {
 			userAction = true;
-			setTimeout(() => userAction = false, 10000);
+
+			// Reset batch counter for new paste operation
+			this.currentBatchTotal = 0;
+			this.batchStarted = true;
+		
+			// Handle different types of paste data
+			const items = event.clipboardData?.items;
+			if (!items) return;
+		
+			// Count potential images in clipboard
+			const imageItems = Array.from(items).filter(item => 
+				item.kind === 'file' && item.type.startsWith('image/')
+			);
+			
+			this.currentBatchTotal = imageItems.length;
+
 			// Get the clipboard data as HTML and parse it as Markdown LINK
 			const clipboardHTML = event.clipboardData?.getData('text/html') || '';
 			const parser = new DOMParser();
@@ -243,6 +258,10 @@ export default class ImageConvertPlugin extends Plugin {
 					}
 				}
 			}
+			setTimeout(() => {
+				userAction = false;
+				this.batchStarted = false;
+			}, 10000);
 		};
 
 		// Initialize Queue
@@ -5154,4 +5173,3 @@ class ProcessCurrentNoteResizeModal extends Modal {
 		}
 	}
 }
-
