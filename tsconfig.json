@@ -18,7 +18,7 @@
       "ES7"
     ],
     "allowSyntheticDefaultImports": true,
-    "outDir": "./dist"  // Add this line
+    "outDir": "./dist"
   },
   "include": [
     "**/*.ts",

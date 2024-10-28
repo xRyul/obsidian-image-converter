@@ -1,11 +1,16 @@
-import { App, MarkdownView, Notice, Plugin, TFile, PluginSettingTab, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem } from 'obsidian';
-import { Platform } from 'obsidian';
-import UTIF from './UTIF.js';
+// working 2
+import { App, MarkdownView, Notice, Plugin, TFile, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
 import moment from 'moment';
 // import exifr from 'exifr'
-import probe from 'probe-image-size';
 
-// Import heic-convert only on Desktop
+/*
+
+UTIF, HEIC, and probe modules - Instead of always loading it,
+we now load them only and only, when TIFF, heic image is detected - this 
+increases load speed efficiency drastically.
+
+import UTIF from './UTIF.js'; 
+import probe from 'probe-image-size';
 let heic: any;
 if (!Platform.isMobile) {
 	import('heic-convert').then(module => {
@@ -13,17 +18,38 @@ if (!Platform.isMobile) {
 	});
 }
 
+*/
+
+
 interface Listener {
-	(this: Document, ev: Event): any;
+	(this: Document, ev: Event): void;
 }
 
+interface QueueItem {
+	file: TFile;
+	attempts: number;
+	addedAt: number;
+}
 interface ImageConvertSettings {
 	autoRename: boolean;
+	showRenameNotice: boolean;
+	useCustomRenaming: boolean;
+	customRenameTemplate: string;
+	customRenameDefaultTemplate: string; // For reset functionality
+
 	convertToWEBP: boolean;
 	convertToJPG: boolean;
 	convertToPNG: boolean;
 	convertTo: string;
 	quality: number;
+
+	baseTimeout: number;
+	timeoutPerMB: number;
+
+	showNoticeMessages: boolean; // For processing notices
+	showProgress: boolean;
+	showSummary: boolean;
+
 	ProcessAllVaultconvertTo: string;
 	ProcessAllVaultquality: number;
 	ProcessAllVaultResizeModalresizeMode: string;
@@ -31,17 +57,21 @@ interface ImageConvertSettings {
 	ProcessAllVaultResizeModaldesiredHeight: number;
 	ProcessAllVaultResizeModaldesiredLength: number;
 	ProcessAllVaultskipImagesInTargetFormat: boolean;
+
 	ProcessCurrentNoteconvertTo: string;
 	ProcessCurrentNotequality: number;
 	ProcessCurrentNoteResizeModalresizeMode: string;
 	ProcessCurrentNoteresizeModaldesiredWidth: number;
 	ProcessCurrentNoteresizeModaldesiredHeight: number;
 	ProcessCurrentNoteresizeModaldesiredLength: number;
-	attachmentLocation: string;
+
+	attachmentLocation: 'disable' | 'root' | 'specified' | 'current' | 'subfolder' | 'customOutput';
 	attachmentSpecifiedFolder: string;
 	attachmentSubfolderName: string;
+	customOutputPath: string;
+	previewPath: string;
+
 	resizeMode: string;
-	renameFormat: string;
 	autoNonDestructiveResize: string,
 	customSize: string,
 	customSizeLongestSide: string,
@@ -51,32 +81,61 @@ interface ImageConvertSettings {
 	resizeByDragging: boolean;
 	resizeWithShiftScrollwheel: boolean;
 	rightClickContextMenu: boolean;
+
+	rememberScrollPosition: boolean;
+	cursorPosition: 'front' | 'back';
+
 }
+
+interface SettingsTab {
+	id: string;
+	name: string;
+	icon?: string; // Optional icon for the tab
+}
+
 
 const DEFAULT_SETTINGS: ImageConvertSettings = {
 	autoRename: true,
+	showRenameNotice: false,
+	useCustomRenaming: false,
+	customRenameTemplate: '{imageName}-{date:YYYYMMDDHHmmssSSS}',
+	customRenameDefaultTemplate: '{imageName}-{date:YYYYMMDDHHmmssSSS}',
+
 	convertToWEBP: true,
 	convertToJPG: false,
 	convertToPNG: false,
 	convertTo: 'webp',
 	quality: 0.75,
+
+	baseTimeout: 20000,
+	timeoutPerMB: 1000,
+
+	showNoticeMessages: false,
+	showProgress: true,
+	showSummary: true,
+
 	ProcessAllVaultconvertTo: 'webp',
 	ProcessAllVaultquality: 0.75,
 	ProcessAllVaultResizeModalresizeMode: 'None',
 	ProcessAllVaultResizeModaldesiredWidth: 600,
 	ProcessAllVaultResizeModaldesiredHeight: 800,
 	ProcessAllVaultResizeModaldesiredLength: 800,
+	ProcessAllVaultskipImagesInTargetFormat: true,
+
 	ProcessCurrentNoteconvertTo: 'webp',
 	ProcessCurrentNotequality: 0.75,
 	ProcessCurrentNoteResizeModalresizeMode: 'None',
 	ProcessCurrentNoteresizeModaldesiredWidth: 600,
 	ProcessCurrentNoteresizeModaldesiredHeight: 800,
 	ProcessCurrentNoteresizeModaldesiredLength: 800,
+
 	attachmentLocation: 'disable',
 	attachmentSpecifiedFolder: '',
 	attachmentSubfolderName: '',
+	customOutputPath: '',
+	previewPath: '',
+
 	resizeMode: 'None',
-	renameFormat: 'date',
 	autoNonDestructiveResize: "disabled",
 	customSize: "",
 	customSizeLongestSide: "",
@@ -85,25 +144,43 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	desiredLength: 800,
 	resizeByDragging: true,
 	resizeWithShiftScrollwheel: true,
-	rightClickContextMenu: true
+	rightClickContextMenu: true,
+
+	rememberScrollPosition: true,
+	cursorPosition: 'back'
 }
 
-export default class ImageConvertPLugin extends Plugin {
+export default class ImageConvertPlugin extends Plugin {
 	settings: ImageConvertSettings;
 	longestSide: number | null = null;
 	widthSide: number | null = null;
 
 	// Declare the properties
 	pasteListener: (event: ClipboardEvent) => void;
-	dropListener: () => void;
+	dropListener: (event: DragEvent) => void;
 	mouseOverHandler: (event: MouseEvent) => void;
-	fileQueue: TFile[] = [];
-	isProcessingQueue = false;
+
+	// Queue
+	private fileQueue: QueueItem[] = [];
+	private isProcessingQueue = false;
+	private currentBatchTotal = 0;
+	private processedInCurrentBatch = 0;
+	private batchStarted = false;
+
+	private readonly MAX_ATTEMPTS = 3;
+	private readonly CONCURRENT_PROCESSING_LIMIT = 4;
+	private readonly BASE_TIMEOUT = 20000; // 20 seconds base timeout
+	private readonly SIZE_FACTOR = 1024 * 1024; // 1MB
+	private readonly TIMEOUT_PER_MB = 1000; // Additional milliseconds per MB
+
+	private statusBarItemEl: HTMLElement;
+	private mobileProgressEl: HTMLElement | null = null;
+
+	private counters: Map<string, number> = new Map();
 
 	async onload() {
 		await this.loadSettings();
 		this.addSettingTab(new ImageConvertTab(this.app, this));
-
 
 		// Add evenet listeners on paste and drop to prevent filerenaming during `sync` or `git pull`
 		// This allows us to check if  file was created as a result of a user action (like dropping 
@@ -168,28 +245,56 @@ export default class ImageConvertPLugin extends Plugin {
 			}
 		};
 
-		this.dropListener = () => {
+		// Initialize Queue
+		this.updateQueueStatus();
+
+		this.dropListener = (event: DragEvent) => {
 			userAction = true;
-			setTimeout(() => userAction = false, 10000);
+
+			// Reset batch counter at the start of new drop
+			// and then count all. This helps detecting images which were dropped in batches
+			this.currentBatchTotal = 0;
+			this.batchStarted = true;
+
+			if (event.dataTransfer?.items) {
+				const imageFiles = Array.from(event.dataTransfer.items)
+					.filter(item => item.kind === 'file' && item.type.startsWith('image/'));
+				this.currentBatchTotal = imageFiles.length;
+			} else if (event.dataTransfer?.files) {
+				const imageFiles = Array.from(event.dataTransfer.files)
+					.filter(file => file.type.startsWith('image/'));
+				this.currentBatchTotal = imageFiles.length;
+			}
+
+			setTimeout(() => {
+				userAction = false;
+				this.batchStarted = false;
+			}, 10000);
 		};
 
 		this.app.workspace.onLayoutReady(() => {
-			document.addEventListener("paste", this.pasteListener);
-			document.addEventListener('drop', this.dropListener);
-			this.registerEvent(
-				this.app.vault.on('create', (file: TFile) => {
-					if (!(file instanceof TFile)) return;
-					if (isImage(file) && userAction) {
-						this.fileQueue.push(file);
-						this.processQueue();
-					}
-					// userAction = false; // uncommented to allow multi-drop
-				})
-			);
-		})
+			const leaves = this.app.workspace.getLeavesOfType('markdown');
+			leaves.forEach(leaf => {
+				const doc = leaf.view.containerEl.ownerDocument;
+				doc.addEventListener("paste", this.pasteListener);
+				doc.addEventListener('drop', this.dropListener as EventListener);
+			});
 
+			this.registerEvent(this.app.vault.on('create', (file: TFile) => {
+				if (!(file instanceof TFile) || !isImage(file) || !userAction) return;
+				if (!this.batchStarted) {
+					this.currentBatchTotal = 1;
+				}
+				this.fileQueue.push({ file, attempts: 0, addedAt: Date.now() });
+				this.updateQueueStatus();
+				this.processQueue();
+			}));
+		});
 
-
+		// Show progress bar on mobile
+		this.mobileProgressEl = document.body.createEl('div', {
+			cls: 'image-converter-mobile-progress'
+		});
 
 		// Check if edge of an image was clicked upon
 		this.register(
@@ -200,12 +305,20 @@ export default class ImageConvertPLugin extends Plugin {
 				(event: MouseEvent) => {
 					if (!this.settings.resizeByDragging) return;
 
+					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+					if (!activeView) return; // Ensure the active view is a Markdown note
+					// Check if the image is within the markdown view container
+					const markdownContainer = activeView.containerEl;
+					const target = event.target as HTMLElement;
+					if (!markdownContainer.contains(target)) return;
+
 					// Only prevent default if left mouse button is pressed
 					if (event.button === 0) {
 						// Fix the behaviour, where image gets duplicated because of the move on drag,
 						// disabling the defaults which locks the image (alhtough, links are still movable)
 						event.preventDefault();
 					}
+
 					const img = event.target as HTMLImageElement | HTMLVideoElement;
 
 					const rect = img.getBoundingClientRect();
@@ -233,14 +346,14 @@ export default class ImageConvertPLugin extends Plugin {
 							if (img instanceof HTMLImageElement) {
 								img.style.border = 'solid';
 								img.style.borderWidth = '2px';
-								img.style.borderColor = 'blue';
+								// img.style.borderColor = 'blue';
 								img.style.boxSizing = 'border-box';
 								img.style.width = `${newWidth}px`;
 								img.style.height = `${newHeight}px`;
 							} else if (img instanceof HTMLVideoElement) {
 								img.style.border = 'solid';
 								img.style.borderWidth = '2px';
-								img.style.borderColor = 'blue';
+								// img.style.borderColor = 'blue';
 								img.style.boxSizing = 'border-box';
 								// Check if img.parentElement is not null before trying to access its clientWidth property
 								if (img.parentElement) {
@@ -280,6 +393,29 @@ export default class ImageConvertPLugin extends Plugin {
 						const onMouseUp = () => {
 							document.removeEventListener("mousemove", onMouseMove);
 							document.removeEventListener("mouseup", onMouseUp);
+
+							// Add a slight delay before setting the cursor position
+							setTimeout(() => {
+								// Set the cursor position based on the setting
+								const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+								if (activeView) {
+									const editor = activeView.editor;
+									const cursorPos = editor.getCursor();
+									const lineContent = editor.getLine(cursorPos.line);
+									const imageName = getImageName(img);
+
+									if (imageName) {
+										let newCursorPos;
+										if (this.settings.cursorPosition === 'front') {
+											newCursorPos = { line: cursorPos.line, ch: Math.max(lineContent.indexOf(imageName) - 3, 0) };
+										} else {
+											const linkEnd = lineContent.indexOf(imageName) + imageName.length + 6;
+											newCursorPos = { line: cursorPos.line, ch: Math.min(linkEnd, lineContent.length) };
+										}
+										editor.setCursor(newCursorPos);
+									}
+								}
+							}, 100); // Adjust the delay as needed
 						};
 						document.addEventListener("mousemove", onMouseMove);
 						document.addEventListener("mouseup", onMouseUp);
@@ -287,7 +423,35 @@ export default class ImageConvertPLugin extends Plugin {
 				}
 			)
 		);
+		// Custom event listener to handle cursor positioning after resizing
+		this.register(this.onElement(document, "mouseup", "img, video", (event: MouseEvent) => {
+			const img = event.target as HTMLImageElement | HTMLVideoElement;
 
+			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!activeView) return; // Ensure the active view is a Markdown note
+			// Check if the image is within the markdown view container
+			const markdownContainer = activeView.containerEl;
+			const target = event.target as HTMLElement;
+			if (!markdownContainer.contains(target)) return;
+
+			if (activeView) {
+				const editor = activeView.editor;
+				const cursorPos = editor.getCursor();
+				const lineContent = editor.getLine(cursorPos.line);
+				const imageName = getImageName(img);
+
+				if (imageName) {
+					let newCursorPos;
+					if (this.settings.cursorPosition === 'front') {
+						newCursorPos = { line: cursorPos.line, ch: Math.max(lineContent.indexOf(imageName) - 3, 0) };
+					} else {
+						const linkEnd = lineContent.indexOf(imageName) + imageName.length + 6;
+						newCursorPos = { line: cursorPos.line, ch: Math.min(linkEnd, lineContent.length) };
+					}
+					editor.setCursor(newCursorPos);
+				}
+			}
+		}));
 		// Create handle to resize image by dragging the edge of an image
 		this.register(
 			this.onElement(
@@ -296,6 +460,13 @@ export default class ImageConvertPLugin extends Plugin {
 				"img, video",
 				(event: MouseEvent) => {
 					if (!this.settings.resizeByDragging) return;
+					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+					if (!activeView) return; // Ensure the active view is a Markdown note
+					// Check if the image is within the markdown view container
+					const markdownContainer = activeView.containerEl;
+					const target = event.target as HTMLElement;
+					if (!markdownContainer.contains(target)) return;
+
 					const img = event.target as HTMLImageElement | HTMLVideoElement;
 					const rect = img.getBoundingClientRect(); // Cache this
 					const edgeSize = 30; // size of the edge in pixels
@@ -351,6 +522,12 @@ export default class ImageConvertPLugin extends Plugin {
 				"mouseover",
 				"img, video",
 				(event: MouseEvent) => {
+					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+					if (!activeView) return; // Ensure the active view is a Markdown note
+					// Check if the image is within the markdown view container
+					const markdownContainer = activeView.containerEl;
+					const target = event.target as HTMLElement;
+					if (!markdownContainer.contains(target)) return;
 					if (event.shiftKey) { // check if the shift key is pressed
 						// console.log('Shift key is pressed. Mouseover event will not fire.');
 						return;
@@ -368,6 +545,12 @@ export default class ImageConvertPLugin extends Plugin {
 				"img, video",
 				(event: WheelEvent) => {
 					if (!this.settings.resizeWithShiftScrollwheel) return;
+					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+					if (!activeView) return; // Ensure the active view is a Markdown note
+					// Check if the image is within the markdown view container
+					const markdownContainer = activeView.containerEl;
+					const target = event.target as HTMLElement;
+					if (!markdownContainer.contains(target)) return;
 					if (event.shiftKey) { // check if the shift key is pressed
 
 						try {
@@ -471,8 +654,12 @@ export default class ImageConvertPLugin extends Plugin {
 	async onunload() {
 		// Remove event listener for contextmenu event on image elements
 		// Remove the event listeners when the plugin is unloaded
-		document.removeEventListener('paste', this.pasteListener);
-		document.removeEventListener('drop', this.dropListener);
+		const leaves = this.app.workspace.getLeavesOfType('markdown');
+		leaves.forEach(leaf => {
+			const doc = leaf.view.containerEl.ownerDocument;
+			doc.removeEventListener("paste", this.pasteListener);
+			doc.removeEventListener("drop", this.dropListener as EventListener);
+		});
 		// Unload border for resizing image
 		document.querySelectorAll("img").forEach((img) => {
 			img.removeEventListener("mousemove", this.mouseOverHandler);
@@ -480,21 +667,266 @@ export default class ImageConvertPLugin extends Plugin {
 			img.style.cursor = "default";
 			img.style.outline = "none";
 		});
+		this.fileQueue = [];
+		this.isProcessingQueue = false;
+		if (this.statusBarItemEl) {
+			this.statusBarItemEl.remove();
+		}
 	}
 
-	async processQueue() {
+	// Queue
+	/////////////////////////////////
+	// Handle large batches of images via the queue
+	// - Dynamically adjust batch sizes based on file size
+	//		- Larger files = smaller batches
+	// 		- Smaller files = larger batches
+	// - Add delay between batches to not overload Obsidian
+	// - Retry MAX=3 times for failed conversions
+	// - Timeout. Prevents hanging on problematic files via timeout for extra large files, or when it takes too long to process the image
+	/* ------------------------------------------------------------- */
+	private async processQueue() {
 		if (this.isProcessingQueue) return;
 		this.isProcessingQueue = true;
-		while (this.fileQueue.length > 0) {
-			const file = this.fileQueue.shift();
-			if (!(file instanceof TFile)) return;
-			if (isImage(file)) {
-				await this.renameFile1(file);
-			}
 
+		const totalImages = this.currentBatchTotal;
+		this.processedInCurrentBatch = 0;
+		const failedItems: string[] = [];
+		const processedItems: string[] = [];
+
+		try {
+			while (this.fileQueue.length > 0) {
+				const pendingItems = this.fileQueue.slice(0, this.CONCURRENT_PROCESSING_LIMIT);
+				const totalSizeMB = await this.calculateTotalSize(pendingItems);
+				const effectiveBatchSize = this.calculateEffectiveBatchSize(totalSizeMB);
+				const itemsToProcess = pendingItems.slice(0, effectiveBatchSize);
+
+				// Add longer delays for larger files
+				// Minimum is 100ms delay
+				// Maximum 2000ms = 2s
+				const delayBetweenFiles = Math.min(2000, Math.max(100, totalSizeMB * 100));
+				await new Promise(resolve => setTimeout(resolve, delayBetweenFiles));
+
+				// Show progress before processing each batch
+				itemsToProcess.forEach(item => {
+					this.processedInCurrentBatch++;
+					if (this.settings.showProgress) {
+						this.showProgress(item.file.name, this.processedInCurrentBatch, totalImages);
+					}
+				});
+
+				const processingPromises = itemsToProcess.map(item =>
+					this.processQueueItem(item)
+						.catch(error => {
+							console.error(`Error processing ${item.file.name}:`, error);
+							throw error; // Re-throw to be caught by Promise.allSettled
+						})
+				);
+
+				const results = await Promise.allSettled(processingPromises);
+
+				results.forEach((result, index) => {
+					const item = itemsToProcess[index];
+					if (result.status === 'rejected') {
+						item.attempts++;
+
+						if (item.attempts < this.MAX_ATTEMPTS) {
+							this.fileQueue.push(item);
+							if (this.settings.showProgress) {
+								new Notice(`Retrying ${item.file.name} (Attempt ${item.attempts + 1}/${this.MAX_ATTEMPTS})`);
+							}
+							failedItems.push(`${item.file.name} (Retry ${item.attempts + 1}/${this.MAX_ATTEMPTS})`);
+						} else {
+							if (this.settings.showProgress) {
+								new Notice(`Failed to process ${item.file.name} after ${this.MAX_ATTEMPTS} attempts`);
+							}
+							failedItems.push(`${item.file.name} (Failed after ${this.MAX_ATTEMPTS} attempts)`);
+						}
+					} else {
+						processedItems.push(item.file.name);
+					}
+				});
+
+				this.fileQueue = this.fileQueue.slice(itemsToProcess.length);
+				this.updateQueueStatus();
+
+				if (this.fileQueue.length > 0) {
+					const delay = Math.min(0, Math.max(10, totalSizeMB));
+					await new Promise(resolve => setTimeout(resolve, delay));
+				}
+			}
+		} finally {
+			this.isProcessingQueue = false;
+			this.updateQueueStatus();
+
+			if (this.settings.showSummary) {
+				this.showSummary(processedItems, failedItems, totalImages);
+				// Reset counters after showing summary
+				this.currentBatchTotal = 0;
+				this.processedInCurrentBatch = 0;
+			}
 		}
-		this.isProcessingQueue = false;
 	}
+
+	private async calculateTotalSize(items: QueueItem[]): Promise<number> {
+		let totalSize = 0;
+		for (const item of items) {
+			const stat = await this.app.vault.adapter.stat(item.file.path);
+			if (stat) {
+				totalSize += stat.size / (1024 * 1024); // Convert to MB
+			}
+		}
+		return totalSize;
+	}
+
+	private calculateEffectiveBatchSize(totalSizeMB: number): number {
+		// Adjust batch size based on total size
+		if (totalSizeMB > 15) return 1;  // Very large files
+		if (totalSizeMB > 8) return 2;  // large files
+		if (totalSizeMB > 4) return 3;  // Medium files
+		return this.CONCURRENT_PROCESSING_LIMIT;  // Normal case
+	}
+
+	private async processQueueItem(item: QueueItem): Promise<void> {
+		// Pre-check file existence and size
+		const stat = await this.app.vault.adapter.stat(item.file.path);
+		if (!stat) {
+			throw new Error(`Could not get file stats for ${item.file.name}`);
+		}
+
+		const initialSizeBytes = stat.size;
+		const initialSizeMB = (initialSizeBytes / (1024 * 1024)).toFixed(2);
+
+		// Optimize timeout calculation
+		const dynamicTimeout = Math.max(
+			this.BASE_TIMEOUT,
+			Math.min(
+				60000, // Max 60 seconds
+				this.BASE_TIMEOUT + (initialSizeBytes / this.SIZE_FACTOR) * this.TIMEOUT_PER_MB
+			)
+		);
+
+		// Only show notice for larger files
+		if (initialSizeBytes > 1024 * 1024) { // Only for files > 1MB
+			// console.log(`Processing ${item.file.name} (${initialSizeMB}MB) with ${Math.round(dynamicTimeout/1000)}s timeout`);
+			this.showNotice(`Processing ${item.file.name} (${initialSizeMB}MB)`, 'processing');
+		}
+
+		let timeoutId: number;
+
+		try {
+			await Promise.race([
+				new Promise<void>((resolve, reject) => {
+					const processFile = () => {
+						this.renameFile1(item.file)
+							.then(() => this.app.vault.adapter.stat(item.file.path))
+							.then(finalStat => {
+								if (!finalStat) {
+									throw new Error(`Could not get final file stats for ${item.file.name}`);
+								}
+								const finalSizeBytes = finalStat.size;
+								const finalSizeMB = (finalSizeBytes / (1024 * 1024)).toFixed(2);
+								const compressionRatio = ((1 - (finalSizeBytes / initialSizeBytes)) * 100).toFixed(1);
+
+								// Only show completion notice for significant compressions
+								if (initialSizeBytes > 1024 * 1024 || Number(compressionRatio) > 20) {
+									// console.log(`Completed ${item.file.name}: ${initialSizeMB}MB → ${finalSizeMB}MB (${compressionRatio}% reduction)`);
+									this.showNotice(`Completed ${item.file.name}: ${initialSizeMB}MB → ${finalSizeMB}MB (${compressionRatio}% reduction)`, 'processing');
+								}
+
+								window.clearTimeout(timeoutId);
+								resolve();
+							})
+							.catch(error => {
+								window.clearTimeout(timeoutId);
+								reject(error);
+							});
+					};
+
+					processFile();
+				}),
+				new Promise<void>((_, reject) => {
+					timeoutId = window.setTimeout(() => {
+						reject(new Error(`Processing timeout after ${Math.round(dynamicTimeout / 1000)}s`));
+					}, dynamicTimeout);
+				})
+			]);
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+			console.error(`Error processing ${item.file.name}: ${errorMessage}`);
+			this.showNotice(`Error processing ${item.file.name}: ${errorMessage}`, 'processing');
+			throw error;
+		}
+	}
+
+	private updateQueueStatus() {
+		if (!this.settings.showProgress) return;
+
+		const statusText = this.fileQueue.length === 0 && !this.isProcessingQueue
+			? ''
+			: `Image: ${this.fileQueue.length} of ${this.currentBatchTotal} remaining${this.isProcessingQueue ? ' (Processing...)' : ''}`;
+
+		if (this.mobileProgressEl) {
+			if (statusText) {
+				this.mobileProgressEl.empty();
+				this.mobileProgressEl.createEl('span', { text: statusText });
+				this.mobileProgressEl.addClass('show');
+			} else {
+				this.mobileProgressEl.removeClass('show');
+			}
+		}
+	}
+	/////////////////////////////////
+
+	private showNotice(message: string, noticeType: 'rename' | 'processing') {
+		switch (noticeType) {
+			case 'rename':
+				if (this.settings.autoRename && this.settings.showRenameNotice) {
+					new Notice(message);
+				}
+				break;
+			case 'processing':
+				if (this.settings.showNoticeMessages) {
+					new Notice(message);
+				}
+				break;
+		}
+	}
+
+	private showProgress(fileName: string, current: number, total: number) {
+		const actualTotal = this.currentBatchTotal || total;
+		const progressText = `Processing ${current} of ${actualTotal}: ${fileName}`;
+
+		if (this.mobileProgressEl) {
+			this.mobileProgressEl.empty();
+			this.mobileProgressEl.createEl('span', { text: progressText });
+			this.mobileProgressEl.addClass('show');
+		}
+	}
+
+	private showSummary(processedItems: string[], failedItems: string[], totalImages: number) {
+		if (processedItems.length === 0 && failedItems.length === 0) return;
+
+		let summaryText = `📊 Image Converter Summary\n`;
+		summaryText += `Total Images detected: ${totalImages}\n`;
+
+		if (processedItems.length > 0) {
+			summaryText += `✓ Successfully processed: ${processedItems.length}\n`;
+		}
+
+		if (failedItems.length > 0) {
+			summaryText += `❌ Failed: ${failedItems.length}\n`;
+			summaryText += 'Failed Items:\n';
+			failedItems.forEach(item => {
+				summaryText += `  • ${item}\n`;
+			});
+		}
+
+		new Notice(summaryText, 10000);
+	}
+	/* ------------------------------------------------------------- */
+	/* ------------------------------------------------------------- */
+
+
 	onElement(
 		el: Document,
 		event: keyof HTMLElementEventMap,
@@ -536,7 +968,7 @@ export default class ImageConvertPLugin extends Plugin {
 						const img = new Image();
 						img.crossOrigin = 'anonymous'; // Set crossOrigin to 'anonymous' for copying external images
 						const targetImg = event.target as HTMLImageElement; // Cast target to HTMLImageElement
-						img.onload = async function() {
+						img.onload = async function () {
 							const canvas = document.createElement('canvas');
 							canvas.width = img.naturalWidth;
 							canvas.height = img.naturalHeight;
@@ -563,7 +995,7 @@ export default class ImageConvertPLugin extends Plugin {
 						const img = new Image();
 						img.crossOrigin = 'anonymous'; // Set crossOrigin to 'anonymous'
 						const targetImg = event.target as HTMLImageElement; // Cast target to HTMLImageElement
-						img.onload = async function() {
+						img.onload = async function () {
 							const canvas = document.createElement('canvas');
 							canvas.width = img.naturalWidth;
 							canvas.height = img.naturalHeight;
@@ -676,303 +1108,800 @@ export default class ImageConvertPLugin extends Plugin {
 
 	}
 
-	async renameFile1(file: TFile) { // 1 added to the naming to differentitate from defualt obsidian renameFile func
+
+	// Work on the file
+	/* ------------------------------------------------------------- */
+	async renameFile1(file: TFile): Promise<void> {
 		const activeFile = this.getActiveFile();
-
 		if (!activeFile) {
-			new Notice('Error: No active file found.');
-			return;
+			throw new Error('No active file found');
 		}
 
-		// Start the conversion and show the status indicator
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText(`Converting image... ⏳`);
+		try {
+			// 1. Process the image and save it
+			const binary = await this.app.vault.readBinary(file);
+			const imgBlob = await this.processImage(file, binary);
 
-		// Image as a blob
-		const binary = await this.app.vault.readBinary(file);
-		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
-		// Get metadata
-		// await getEXIF(file);
-
-		if (this.settings.autoNonDestructiveResize === "customSize" || this.settings.autoNonDestructiveResize === "fitImage") {
-			this.widthSide = await getImageWidthSide(binary);
-			const maxWidth = printEditorLineWidth(this.app);
-			if (this.widthSide !== null && typeof maxWidth === 'number') {
-				this.settings.customSizeLongestSide = (this.widthSide < maxWidth ? this.widthSide : maxWidth).toString();
-				await this.saveSettings();
+			if (imgBlob instanceof Blob) {
+				const arrayBuffer = await imgBlob.arrayBuffer();
+				await this.app.vault.modifyBinary(file, arrayBuffer);
 			}
-		}
 
 
-		if (file.extension === 'tif' || file.extension === 'tiff') {
-
-			// Convert ArrayBuffer to Uint8Array
-			const binaryUint8Array = new Uint8Array(binary);
-
-			// Decode TIFF image
-			const ifds = UTIF.decode(binaryUint8Array);
-			UTIF.decodeImage(binaryUint8Array, ifds[0]);
-			const rgba = UTIF.toRGBA8(ifds[0]);
-
-			// Create canvas and draw image
-			const canvas = document.createElement('canvas');
-			canvas.width = ifds[0].width;
-			canvas.height = ifds[0].height;
-			const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
-			const imageData = ctx.createImageData(canvas.width, canvas.height);
-			imageData.data.set(rgba);
-			ctx.putImageData(imageData, 0, 0);
-
-			// Convert canvas to Blob
-			imgBlob = await new Promise<Blob>((resolve, reject) => {
-				canvas.toBlob((blob) => {
-					if (blob) {
-						resolve(blob);
-					} else {
-						reject(new Error('Failed to convert canvas to Blob'));
+			// 2. while we are here - reading the image, lets check its width too. 
+			// So we could later pass it into custom sizing options etc. 
+			// Only check it if the setting for customSize or fitImage is enabled  as there are the only options currently need it
+			if (this.settings.autoNonDestructiveResize === "customSize" || this.settings.autoNonDestructiveResize === "fitImage") {
+				try {
+					this.widthSide = await getImageWidthSide(binary);
+					const maxWidth = printEditorLineWidth(this.app);
+					if (this.widthSide !== null && typeof maxWidth === 'number') {
+						this.settings.customSizeLongestSide = (this.widthSide < maxWidth ? this.widthSide : maxWidth).toString();
+						await this.saveSettings();
 					}
-				});
-			});
-
-		}
-
-		if (file.extension === 'heic') {
-			// Convert ArrayBuffer to Buffer
-			const binaryBuffer = Buffer.from(binary);
-
-			// If convertTo is not 'disabled', convert HEIC
-			if (this.settings.convertTo !== 'disabled') {
-				const outputBuffer = await heic({
-					buffer: binaryBuffer,
-					format: 'JPEG',
-					quality: 1
-				});
-
-				imgBlob = new Blob([outputBuffer], { type: 'image/jpeg' });
-
-				if (this.settings.convertTo === 'webp') {
-					const arrayBufferWebP = await convertToWebP(
-						imgBlob,
-						Number(this.settings.quality),
-						this.settings.resizeMode,
-						this.settings.desiredWidth,
-						this.settings.desiredHeight,
-						this.settings.desiredLength
-					);
-					await this.app.vault.modifyBinary(file, arrayBufferWebP);
-				} else if (this.settings.convertTo === 'jpg') {
-					const arrayBufferJPG = await convertToJPG(
-						imgBlob,
-						Number(this.settings.quality),
-						this.settings.resizeMode,
-						this.settings.desiredWidth,
-						this.settings.desiredHeight,
-						this.settings.desiredLength
-					);
-					await this.app.vault.modifyBinary(file, arrayBufferJPG);
-				} else if (this.settings.convertTo === 'png') {
-					const arrayBufferPNG = await convertToPNG(
-						imgBlob,
-						Number(this.settings.quality),
-						this.settings.resizeMode,
-						this.settings.desiredWidth,
-						this.settings.desiredHeight,
-						this.settings.desiredLength
-					);
-					await this.app.vault.modifyBinary(file, arrayBufferPNG);
-				} else {
-					new Notice('Error: No format selected for conversion.');
-					return;
+				} catch (error) {
+					console.error('Could not determine image dimensions, using default settings');
 				}
-			} else {
-				// Bypass conversion and compression, keep original file
-				new Notice('Original file kept without any compression or conversion.');
 			}
-		}
 
-
-		if (this.settings.quality !== 1) { // If quality is set to 100, then simply use original image without compression
-			if (this.settings.convertTo === 'webp') {
-				const arrayBufferWebP = await convertToWebP(
-					imgBlob,
-					Number(this.settings.quality),
-					this.settings.resizeMode,
-					this.settings.desiredWidth,
-					this.settings.desiredHeight,
-					this.settings.desiredLength
-				);
-				await this.app.vault.modifyBinary(file, arrayBufferWebP);
-			} else if (this.settings.convertTo === 'jpg') {
-				const arrayBufferJPG = await convertToJPG(
-					imgBlob,
-					Number(this.settings.quality),
-					this.settings.resizeMode,
-					this.settings.desiredWidth,
-					this.settings.desiredHeight,
-					this.settings.desiredLength
-				);
-				await this.app.vault.modifyBinary(file, arrayBufferJPG);
-			} else if (this.settings.convertTo === 'png') {
-				const arrayBufferPNG = await convertToPNG(
-					imgBlob,
-					Number(this.settings.quality),
-					this.settings.resizeMode,
-					this.settings.desiredWidth,
-					this.settings.desiredHeight,
-					this.settings.desiredLength
-				);
-				await this.app.vault.modifyBinary(file, arrayBufferPNG);
-			} else if (this.settings.convertTo === 'disabled') {
-				// Recognize the dropped image's extension and apply compression
-				let arrayBuffer;
-				if (file.extension === 'jpg' || file.extension === 'jpeg') {
-					arrayBuffer = await convertToJPG(
-						imgBlob,
-						Number(this.settings.quality),
-						this.settings.resizeMode,
-						this.settings.desiredWidth,
-						this.settings.desiredHeight,
-						this.settings.desiredLength
-					);
-				} else if (file.extension === 'png') {
-					arrayBuffer = await convertToPNG(
-						imgBlob,
-						Number(this.settings.quality),
-						this.settings.resizeMode,
-						this.settings.desiredWidth,
-						this.settings.desiredHeight,
-						this.settings.desiredLength
-					);
-				} else if (file.extension === 'webp') {
-					arrayBuffer = await convertToWebP(
-						imgBlob,
-						Number(this.settings.quality),
-						this.settings.resizeMode,
-						this.settings.desiredWidth,
-						this.settings.desiredHeight,
-						this.settings.desiredLength
-					);
-				}
-				if (arrayBuffer) {
-					await this.app.vault.modifyBinary(file, arrayBuffer);
-				} else {
-					new Notice('Error: Failed to compress image.');
-				}
-			} else {
-				new Notice('Error: No format selected for conversion.');
-				return;
+			// 3. check if renaming is needed
+			let newName = await this.keepOrgName(file, activeFile);
+			if (this.settings.autoRename) {
+				newName = await this.generateNewName(file, activeFile);
 			}
-		} else {
-			// Bypass conversion and compression, keep original file
-			new Notice('Original file kept without any compression.');
+
+			// Store original values 
+			const sourcePath = activeFile.path;
+			const originName = file.name;
+			const linkText = this.makeLinkText(file, sourcePath);
+
+			// 4. Create all folders before the links! And make sure they exist before dealing with links! 
+			const generateNewPath = await this.createOutputFolders(newName, file, activeFile);
+			const newPath = normalizePath(generateNewPath); // Normalise new path. This helps us when dealing with paths generated by variables
+
+			// 5. Update file and document
+			await this.updateFileAndDocument(file, newPath, activeFile, sourcePath, linkText);
+
+			// Do not show renamed from -> to notice if auto-renaming is disabled 
+			if (this.settings.autoRename === true) {
+				this.showNotice(
+					`Renamed ${decodeURIComponent(originName)} to ${decodeURIComponent(newName)}`, 'rename');
+			}
+		} catch (error) {
+			console.error('Error processing file:', error);
+			new Notice(`Failed to process ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+			throw error;
+		}
+	}
+
+	private async processImage(file: TFile, binary: ArrayBuffer): Promise<Blob> {
+		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
+
+		// Handle special formats
+		if (file.extension === 'tif' || file.extension === 'tiff') {
+			imgBlob = await handleTiffImage(binary);
+		} else if (file.extension === 'heic') {
+			imgBlob = await handleHeicImage(file, binary, this.settings, this.app);
 		}
 
-		let newName = await this.keepOrgName(file, activeFile);
-		if (this.settings.autoRename) {
-			newName = await this.generateNewName(file, activeFile);
+		// Process compression if quality is not 100%
+		if (this.settings.quality !== 1) {
+			imgBlob = await this.convertImageFormat(imgBlob, file.extension);
 		}
-		const sourcePath = activeFile.path;
 
-		let newPath = '';
-		const getFilename = file.path;
-		// console.log(this.app.vault.getConfig("attachmentFolderPath"))
-		switch (this.settings.attachmentLocation) {
-			case 'disable':
-				newPath = getFilename.substring(0, getFilename.lastIndexOf('/'));
-				break;
-			case 'root':
-				newPath = '/';
-				break;
+		return imgBlob;
+	}
 
-			case 'specified':
-				newPath = this.settings.attachmentSpecifiedFolder;
-				break;
+	private async convertImageFormat(imgBlob: Blob, originalExtension: string): Promise<Blob> {
+		const format = this.settings.convertTo === 'disabled' ? originalExtension : this.settings.convertTo;
 
-			case 'current':
-				newPath = activeFile.path.substring(0, activeFile.path.lastIndexOf('/'));
-				break;
+		const conversionParams = {
+			quality: this.settings.quality,
+			resizeMode: this.settings.resizeMode,
+			desiredWidth: this.settings.desiredWidth,
+			desiredHeight: this.settings.desiredHeight,
+			desiredLength: this.settings.desiredLength
+		};
 
-			case 'subfolder':
-				let transAttachmentSubFolderName = this.settings.attachmentSubfolderName.replace(/\${filename}/g, activeFile.basename)
-				newPath = activeFile.path.substring(0, activeFile.path.lastIndexOf('/')) + '/' + transAttachmentSubFolderName;
+		let arrayBuffer: ArrayBuffer;
+
+		switch (format) {
+			case 'webp':
+				arrayBuffer = await convertToWebP(
+					imgBlob,
+					conversionParams.quality,
+					conversionParams.resizeMode,
+					conversionParams.desiredWidth,
+					conversionParams.desiredHeight,
+					conversionParams.desiredLength
+				);
+				break;
+			case 'jpg':
+				arrayBuffer = await convertToJPG(
+					imgBlob,
+					conversionParams.quality,
+					conversionParams.resizeMode,
+					conversionParams.desiredWidth,
+					conversionParams.desiredHeight,
+					conversionParams.desiredLength
+				);
+				break;
+			case 'png':
+				arrayBuffer = await convertToPNG(
+					imgBlob,
+					conversionParams.quality,
+					conversionParams.resizeMode,
+					conversionParams.desiredWidth,
+					conversionParams.desiredHeight,
+					conversionParams.desiredLength
+				);
 				break;
 			default:
-				newPath = '/';
+				return imgBlob;
+		}
+
+		return new Blob([arrayBuffer], { type: `image/${format}` });
+	}
+
+	private async createOutputFolders(newName: string, file: TFile, activeFile: TFile): Promise<string> {
+		let basePath: string;
+
+		switch (this.settings.attachmentLocation) {
+			case 'disable':
+				basePath = file.path.substring(0, file.path.lastIndexOf('/'));
 				break;
+			case 'root':
+				basePath = '/';
+				break;
+			case 'specified':
+				basePath = await this.processSubfolderVariables(
+					this.settings.attachmentSpecifiedFolder,
+					file,
+					activeFile
+				);
+				break;
+			case 'current':
+				basePath = activeFile.path.substring(0, activeFile.path.lastIndexOf('/'));
+				break;
+			case 'subfolder': {
+				const currentPath = activeFile.path.substring(0, activeFile.path.lastIndexOf('/'));
+				const processedSubfolder = await this.processSubfolderVariables(
+					this.settings.attachmentSubfolderName,
+					file,
+					activeFile
+				);
+				basePath = `${currentPath}/${processedSubfolder}`;
+				break;
+			}
+			case 'customOutput':
+				basePath = await this.processSubfolderVariables(
+					this.settings.customOutputPath,
+					file,
+					activeFile
+				);
+				break;
+			default:
+				basePath = '/';
 		}
 
-		// Check if the folder exists and create it if it doesn't
-		if (!(await this.app.vault.adapter.exists(newPath))) {
-			await this.app.vault.createFolder(newPath);
+		// Ensure directory exists
+		if (!(await this.app.vault.adapter.exists(basePath))) {
+			await this.app.vault.createFolder(basePath);
 		}
 
-		const originName = file.name;
+		return `${basePath}/${newName}`;
+	}
 
-		statusBarItemEl.setText('Image converted ✅');
-		new Notice(`Image: ${decodeURIComponent(originName)} converted`);
-		statusBarItemEl.setText('');
-
-		const linkText = this.makeLinkText(file, sourcePath);
-		newPath = `${newPath}/${newName}`;
-
+	private async updateFileAndDocument(file: TFile, newPath: string, activeFile: TFile, sourcePath: string, linkText: string): Promise<void> {
 		try {
 			const decodedNewPath = decodeURIComponent(newPath);
 			await this.app.vault.rename(file, decodedNewPath);
+
+			let newLinkText = this.makeLinkText(file, sourcePath);
+
+			// Add the size to the markdown link
+			if (this.settings.autoNonDestructiveResize === "customSize" || this.settings.autoNonDestructiveResize === "fitImage") {
+				let size;
+				if (this.settings.autoNonDestructiveResize === "customSize") {
+					size = this.settings.customSize;
+				} else if (this.settings.autoNonDestructiveResize === "fitImage") {
+					size = this.settings.customSizeLongestSide;
+				}
+				if (newLinkText.startsWith('![[')) {
+					// This is an internal link
+					newLinkText = newLinkText.replace(']]', `|${size}]]`);
+				}
+			}
+
+			// Get the editor
+			const editor = this.getActiveEditor(activeFile.path);
+			if (!editor) {
+				console.log("No active editor found");
+				return;
+			}
+
+
+			// PT1 of 2 Preserve the scroll position
+			const scrollInfo = editor.getScrollInfo() as { top: number; left: number };
+
+			// Multi-drop-rename
+			const cursor = editor.getCursor();
+			const currentLine = cursor.line;
+			const findText = this.escapeRegExp(linkText);
+			const replaceText = newLinkText;
+			const docContent = editor.getValue();
+			const regex = new RegExp(findText, 'g');
+			const newContent = docContent.replace(regex, replaceText);
+			editor.setValue(newContent);
+
+			// Restore the scroll position
+			editor.scrollTo(scrollInfo.left, scrollInfo.top);
+
+			// Scroll to the last image if rememberScrollPosition is disabled
+			if (!this.settings.rememberScrollPosition) {
+				const lastLine = newContent.split('\n').length - 1;
+				editor.scrollIntoView({ from: { line: lastLine, ch: 0 }, to: { line: lastLine, ch: 0 } });
+			}
+
+			// Set the cursor position based on the setting
+			/* ---------------------------------------------------------*/
+			const lineContent = newContent.split('\n')[currentLine];
+			let newCursorPos;
+			if (this.settings.cursorPosition === 'front') {
+				// Find the index of newLinkText in the current line, not the entire document
+				const linkIndex = lineContent.indexOf(newLinkText);
+				// If link is found in current line, position cursor before it
+				if (linkIndex !== -1) {
+					newCursorPos = { line: currentLine, ch: linkIndex };
+				} else {
+					// Fallback to beginning of line if link not found
+					newCursorPos = { line: currentLine, ch: 0 };
+				}
+			} else {
+				newCursorPos = { line: currentLine, ch: lineContent.length };
+			}
+
+			// Validate cursor position before setting
+			if (newCursorPos.line >= 0 &&
+				newCursorPos.line < editor.lineCount() &&
+				newCursorPos.ch >= 0 &&
+				newCursorPos.ch <= lineContent.length) {
+				editor.setCursor(newCursorPos);
+			} else {
+				console.warn('Invalid cursor position, defaulting to start of line');
+				editor.setCursor({ line: currentLine, ch: 0 });
+			}
+			/* ---------------------------------------------------------*/
+			/* ---------------------------------------------------------*/
+
+			// Ensure the current line is in a visible position
+			// editor.scrollIntoView({ from: { line: currentLine, ch: 0 }, to: { line: currentLine, ch: 0 } });
 		} catch (err) {
-			new Notice(`Failed to rename ${decodeURIComponent(newName)}: ${err}`);
+			console.error('Error during file update:', err);
+			new Notice(`Failed to update ${file.name}: ${err}`);
 			throw err;
 		}
+	}
 
-		let newLinkText = this.makeLinkText(file, sourcePath);
+	private escapeRegExp(string: string): string {
+		return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	}
+	/* ------------------------------------------------------------- */
+	/* ------------------------------------------------------------- */
 
-		// Add the size to the markdown link
-		if (this.settings.autoNonDestructiveResize === "customSize" || this.settings.autoNonDestructiveResize === "fitImage") {
-			let size;
-			if (this.settings.autoNonDestructiveResize === "customSize") {
-				size = this.settings.customSize;
-			} else if (this.settings.autoNonDestructiveResize === "fitImage") {
-				size = this.settings.customSizeLongestSide;
+	// Naming
+	/* ------------------------------------------------------------- */
+	async generateNewName(file: TFile, activeFile: TFile): Promise<string> {
+		let newName: string;
+
+		if (this.settings.useCustomRenaming) {
+			// Use custom template
+			newName = await this.processSubfolderVariables(
+				this.settings.customRenameTemplate,
+				file,
+				activeFile
+			);
+
+			// Ensure the name is safe for filesystem
+			newName = this.sanitizeFileName(newName);
+		} else {
+			// Use original naming scheme
+			newName = activeFile.basename + '-' + moment().format("YYYYMMDDHHmmssSSS");
+		}
+
+		// Handle file extension
+		let extension = file.extension;
+		if (this.settings.convertTo && this.settings.convertTo !== 'disabled') {
+			extension = this.settings.convertTo;
+		}
+
+		return `${newName}.${extension}`;
+	}
+
+	async processSubfolderVariables(template: string, file: TFile, activeFile: TFile): Promise<string> {
+		const moment = (window as any).moment;
+		let result = template;
+
+		// Handle {randomHex:X} pattern
+		const hexPattern = /{randomHex:(\d+)}/g;
+		let hexMatch;
+		while ((hexMatch = hexPattern.exec(template)) !== null) {
+			const size = parseInt(hexMatch[1]);
+			const randomHex = this.generateRandomHex(Math.ceil(size / 2)); // Since each byte gives 2 hex chars
+			// If odd length requested, trim one character
+			const finalHex = size % 2 === 0 ? randomHex : randomHex.slice(0, -1);
+			result = result.replace(hexMatch[0], finalHex);
+		}
+
+		// Allow user to specify what they want to hashe.g. filename, fodlerpaht , any name etc. 
+		// {MD5:filename} -> full MD5 hash of filename
+		// {MD5:filename:8} -> first 8 characters of MD5 hash
+		// {MD5:path} -> hash of file path
+		// {MD5:fullpath} -> hash of complete path including filename
+		// {MD5:parentfolder} -> hash of immediate parent folder name
+		// {MD5:rootfolder} -> hash of root folder name
+		// {MD5:extension} -> hash of file extension
+		// {MD5:notename} -> hash of current note name
+		// {MD5:notefolder} -> hash of current note's folder
+		// {MD5:notepath} -> hash of current note's full path
+		// {MD5:custom text} -> hash of custom text
+		const md5Pattern = /{MD5:([\w\-./]+?)(?::(\d+))?}/g;
+		let md5Match;
+		while ((md5Match = md5Pattern.exec(template)) !== null) {
+			const hashType = md5Match[1].toLowerCase();
+			const length = md5Match[2] ? parseInt(md5Match[2]) : undefined;
+			let textToHash = '';
+
+			switch (hashType) {
+				case 'filename':
+					textToHash = file.basename;
+					break;
+				case 'imagePath':
+					textToHash = file.path;
+					break;
+				case 'fullpath':
+					textToHash = file.parent ? `${file.parent.path}/${file.basename}` : file.basename;
+					break;
+				case 'parentfolder':
+					textToHash = file.parent?.name || '';
+					break;
+				case 'rootfolder':
+					textToHash = file.path.split('/')[0] || '';
+					break;
+				case 'extension':
+					textToHash = file.extension;
+					break;
+				case 'notename':
+					textToHash = activeFile.basename;
+					break;
+				case 'notefolder':
+					textToHash = activeFile.parent?.name || '';
+					break;
+				case 'notepath':
+					textToHash = activeFile.path;
+					break;
+				default:
+					textToHash = hashType; // hash the text itself
 			}
-			if (newLinkText.startsWith('![[')) {
-				// This is an internal link
-				newLinkText = newLinkText.replace(']]', `|${size}]]`);
+
+			let md5Hash = await this.generateMD5(textToHash);
+
+			// If length is specified, truncate the hash
+			if (length && length > 0 && length < md5Hash.length) {
+				md5Hash = md5Hash.substring(0, length);
 			}
-			// else if (newLinkText.startsWith('![')) {
-			//   // This is an external link
-			//   newLinkText = newLinkText.replace(']', `|${size}]`);
+
+			result = result.replace(md5Match[0], md5Hash);
+		}
+
+		// Counter pattern handling
+		const counterPattern = /{counter:(\d+)}/g;
+		let counterMatch;
+		while ((counterMatch = counterPattern.exec(template)) !== null) {
+			const padding = counterMatch[1].length;
+			const count = await this.getNextCounter(file.parent?.path || '');
+			const paddedCount = count.toString().padStart(padding, '0');
+			result = result.replace(counterMatch[0], paddedCount);
+		}
+
+		// Date pattern handling with moment.js
+		const datePattern = /{date:(.*?)}/g;
+		let dateMatch;
+		while ((dateMatch = datePattern.exec(template)) !== null) {
+			const format = dateMatch[1];
+			try {
+				const formattedDate = moment().format(format);
+				result = result.replace(dateMatch[0], formattedDate);
+			} catch (error) {
+				console.error(`Invalid date format: ${format}`);
+				result = result.replace(dateMatch[0], moment().format('YYYY-MM-DD'));
+			}
+		}
+
+		// Size pattern handling
+		const sizePattern = /{size:(MB|KB|B):(\d+)}/g;
+		let sizeMatch;
+		while ((sizeMatch = sizePattern.exec(template)) !== null) {
+			const unit = sizeMatch[1];
+			const decimals = parseInt(sizeMatch[2]);
+			const size = file.stat?.size || 0;
+			let formattedSize = '0';
+
+			switch (unit) {
+				case 'MB':
+					formattedSize = (size / (1024 * 1024)).toFixed(decimals);
+					break;
+				case 'KB':
+					formattedSize = (size / 1024).toFixed(decimals);
+					break;
+				case 'B':
+					formattedSize = size.toFixed(decimals);
+					break;
+			}
+			result = result.replace(sizeMatch[0], formattedSize);
+		}
+
+		// Basic file information
+		const replacements: Record<string, string> = {
+			'{imageName}': file.basename,
+			'{noteName}': activeFile.basename,
+			'{parentFolder}': activeFile.parent?.parent?.name || '',
+			'{pathDepth}': activeFile.path.split('/').length.toString(),
+			'{directory}': activeFile.parent?.path || '',
+			'{folderName}': activeFile.parent?.name || '',
+
+
+			'{fileType}': file.extension,
+			'{currentDate}': moment().format('YYYY-MM-DD'),
+			'{yyyy}': moment().format('YYYY'),
+			'{mm}': moment().format('MM'),
+			'{dd}': moment().format('DD'),
+			'{time}': moment().format('HH-mm-ss'),
+			'{HH}': moment().format('HH'),
+			'{timestamp}': Date.now().toString(),
+			'{weekday}': moment().format('dddd'),
+			'{month}': moment().format('MMMM'),
+			'{calendar}': moment().calendar(),
+			'{platform}': navigator.platform,
+			'{userAgent}': navigator.userAgent,
+			'{random}': Math.random().toString(36).substring(2, 8),
+			'{uuid}': crypto.randomUUID(),
+
+			// -  {randomHex:N} 
+			// - `{counter:000}` - Incremental counter with padding (e.g., 001, 002, 003)
+			// - `{date:YYYY-MM}` - Date using moment.js format (supports all moment.js patterns)
+			// - `{size:MB:2}` - File size with unit (MB/KB/B) and decimal places
+
+
+		};
+
+		// File stats based replacements
+		if (file.stat) {
+			const fileSizeB = file.stat.size;
+			const fileSizeKB = (fileSizeB / 1024).toFixed(2);
+			const fileSizeMB = (fileSizeB / (1024 * 1024)).toFixed(2);
+
+			Object.assign(replacements, {
+				'{creationDate}': moment(file.stat.ctime).format('YYYY-MM-DD'),
+				'{modifiedDate}': moment(file.stat.mtime).format('YYYY-MM-DD'),
+				// '{accessedDate}': moment(file.stat.atime).format('YYYY-MM-DD'),
+				'{sizeMB}': fileSizeMB + 'MB',
+				'{sizeB}': fileSizeB.toString(),
+				'{sizeKB}': fileSizeKB,
+			});
+		}
+
+		try {
+			// Try to get image dimensions and metadata
+			const binary = await this.app.vault.readBinary(file);
+			const blob = new Blob([binary], { type: `image/${file.extension}` });
+
+			// Get image dimensions
+			const img = new Image();
+			await new Promise((resolve, reject) => {
+				img.onload = resolve;
+				img.onerror = reject;
+				img.src = URL.createObjectURL(blob);
+			});
+
+			Object.assign(replacements, {
+				'{width}': img.width.toString(),
+				'{height}': img.height.toString(),
+				'{ratio}': (img.width / img.height).toFixed(2),
+				'{orientation}': img.width > img.height ? 'landscape' : 'portrait',
+				'{resolution}': `${img.width}x${img.height}`,
+				'{quality}': this.settings.quality.toString()
+			});
+
+			URL.revokeObjectURL(img.src);
+
+			// EXIF data handling
+			// try {
+			// 	const exifr = await import('exifr').then(module => module.default);
+			// 	const exifData = await exifr.parse(blob);
+			// 	if (exifData) {
+			// 		Object.assign(replacements, {
+			// 			'{dpi}': exifData.XResolution?.toString() || '',
+			// 			'{colorModel}': exifData.ColorSpace || '',
+			// 			'{compression}': exifData.Compression?.toString() || '',
+			// 			'{exif}': JSON.stringify(exifData).slice(0, 50),
+			// 		});
+			// 	}
+			// } catch (error) {
+			// 	console.debug('EXIF data extraction failed:', error);
 			// }
+		} catch (error) {
+			console.debug('Image processing failed:', error);
 		}
 
-
-		const editor = this.getActiveEditor(sourcePath);
-		if (!editor) {
-			new Notice(`Failed to rename ${newName}: no active editor`);
-			return;
+		// Replace all variables in the template
+		for (const [key, value] of Object.entries(replacements)) {
+			// Use a non-regex replacement first to avoid special characters issues
+			result = result.split(key).join(value);
 		}
-		const cursor = editor.getCursor();
 
+		// Clean up the path
+		// 1. Replace multiple slashes with single slash
+		result = result.replace(/\/+/g, '/');
+		// 2. Replace invalid characters with underscore, but preserve slashes
+		result = result.split('/').map(segment =>
+			segment.replace(/[<>:"\\|?*]/g, '_')
+		).join('/');
 
-		// Multi-drop-rename
-		const currentLine = cursor.line;
-		function escapeRegExp(string: string) {
-			return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& 表示整个匹配的字符串
+		// 3. Remove leading/trailing slashes
+		result = result.replace(/^\/+|\/+$/g, '');
+
+		return result;
+	}
+
+	public async generatePathPreview(template: string, file: TFile): Promise<string> {
+		return this.processSubfolderVariables(template, file, file);
+	}
+
+	makeLinkText(file: TFile, sourcePath: string, subpath?: string): string {
+		return this.app.fileManager.generateMarkdownLink(file, sourcePath, subpath);
+	}
+
+	private sanitizeFileName(fileName: string): string {
+		// Remove invalid filename characters
+		let safe = fileName.replace(/[<>:"/\\|?*]/g, '_');
+
+		// Prevent starting with dots (hidden files)
+		safe = safe.replace(/^\.+/, '');
+
+		// Limit length (filesystem dependent, using 255 as safe default)
+		if (safe.length > 255) {
+			safe = safe.slice(0, 255);
 		}
-		const findText = escapeRegExp(linkText);
-		const replaceText = newLinkText;
-		const docContent = editor.getValue();
-		const regex = new RegExp(findText, 'g');
-		const newContent = docContent.replace(regex, replaceText);
-		editor.setValue(newContent);
-		editor.setCursor({ line: currentLine, ch: 0 });
-		// Ensure the current line is in a visible position
-		editor.scrollIntoView({ from: { line: currentLine, ch: 0 }, to: { line: currentLine, ch: 0 } });
 
+		return safe;
+	}
 
-		// Do not show renamed from -> to notice if auto-renaming is disabled 
-		if (this.settings.autoRename === true) {
-			new Notice(`Renamed ${decodeURIComponent(originName)} to ${decodeURIComponent(newName)}`);
+	// Helper function to manage counters for renaming e.g. -001 002 003 etc. 
+	private async getNextCounter(folderPath: string): Promise<number> {
+		const counterKey = `counter-${folderPath}`;
+		let counter = this.counters.get(counterKey) || 0;
+		counter++;
+		this.counters.set(counterKey, counter);
+		return counter;
+	}
+
+	generateRandomHex(size: number) {
+		const array = new Uint8Array(size);
+		window.crypto.getRandomValues(array);
+		return Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
+	}
+
+	private async generateMD5(text: string): Promise<string> {
+		// Implementation of MD5 algorithm
+		function md5(string: string): string {
+			function rotateLeft(value: number, shift: number): number {
+				return (value << shift) | (value >>> (32 - shift));
+			}
+
+			function addUnsigned(lX: number, lY: number): number {
+				const lX8 = lX & 0x80000000;
+				const lY8 = lY & 0x80000000;
+				const lX4 = lX & 0x40000000;
+				const lY4 = lY & 0x40000000;
+				const lResult = (lX & 0x3FFFFFFF) + (lY & 0x3FFFFFFF);
+
+				if (lX4 & lY4) {
+					return lResult ^ 0x80000000 ^ lX8 ^ lY8;
+				}
+				if (lX4 | lY4) {
+					if (lResult & 0x40000000) {
+						return lResult ^ 0xC0000000 ^ lX8 ^ lY8;
+					} else {
+						return lResult ^ 0x40000000 ^ lX8 ^ lY8;
+					}
+				} else {
+					return lResult ^ lX8 ^ lY8;
+				}
+			}
+
+			function F(x: number, y: number, z: number): number {
+				return (x & y) | ((~x) & z);
+			}
+
+			function G(x: number, y: number, z: number): number {
+				return (x & z) | (y & (~z));
+			}
+
+			function H(x: number, y: number, z: number): number {
+				return x ^ y ^ z;
+			}
+
+			function I(x: number, y: number, z: number): number {
+				return y ^ (x | (~z));
+			}
+
+			function FF(a: number, b: number, c: number, d: number, x: number, s: number, ac: number): number {
+				a = addUnsigned(a, addUnsigned(addUnsigned(F(b, c, d), x), ac));
+				return addUnsigned(rotateLeft(a, s), b);
+			}
+
+			function GG(a: number, b: number, c: number, d: number, x: number, s: number, ac: number): number {
+				a = addUnsigned(a, addUnsigned(addUnsigned(G(b, c, d), x), ac));
+				return addUnsigned(rotateLeft(a, s), b);
+			}
+
+			function HH(a: number, b: number, c: number, d: number, x: number, s: number, ac: number): number {
+				a = addUnsigned(a, addUnsigned(addUnsigned(H(b, c, d), x), ac));
+				return addUnsigned(rotateLeft(a, s), b);
+			}
+
+			function II(a: number, b: number, c: number, d: number, x: number, s: number, ac: number): number {
+				a = addUnsigned(a, addUnsigned(addUnsigned(I(b, c, d), x), ac));
+				return addUnsigned(rotateLeft(a, s), b);
+			}
+
+			function convertToWordArray(string: string): number[] {
+				let lWordCount: number;
+				const lMessageLength = string.length;
+				const lNumberOfWordsTemp1 = lMessageLength + 8;
+				const lNumberOfWordsTemp2 = (lNumberOfWordsTemp1 - (lNumberOfWordsTemp1 % 64)) / 64;
+				const lNumberOfWords = (lNumberOfWordsTemp2 + 1) * 16;
+				const lWordArray = Array(lNumberOfWords - 1);
+				let lBytePosition = 0;
+				let lByteCount = 0;
+
+				while (lByteCount < lMessageLength) {
+					lWordCount = (lByteCount - (lByteCount % 4)) / 4;
+					lBytePosition = (lByteCount % 4) * 8;
+					lWordArray[lWordCount] = (lWordArray[lWordCount] || 0) | (string.charCodeAt(lByteCount) << lBytePosition);
+					lByteCount++;
+				}
+
+				lWordCount = (lByteCount - (lByteCount % 4)) / 4;
+				lBytePosition = (lByteCount % 4) * 8;
+				lWordArray[lWordCount] = lWordArray[lWordCount] | (0x80 << lBytePosition);
+				lWordArray[lNumberOfWords - 2] = lMessageLength << 3;
+				lWordArray[lNumberOfWords - 1] = lMessageLength >>> 29;
+
+				return lWordArray;
+			}
+
+			function wordToHex(lValue: number): string {
+				let WordToHexValue = "",
+					WordToHexValueTemp = "",
+					lByte, lCount;
+
+				for (lCount = 0; lCount <= 3; lCount++) {
+					lByte = (lValue >>> (lCount * 8)) & 255;
+					WordToHexValueTemp = "0" + lByte.toString(16);
+					WordToHexValue = WordToHexValue + WordToHexValueTemp.substr(WordToHexValueTemp.length - 2, 2);
+				}
+
+				return WordToHexValue;
+			}
+
+			const x = convertToWordArray(string);
+			let k, AA, BB, CC, DD, a, b, c, d;
+			const S11 = 7, S12 = 12, S13 = 17, S14 = 22;
+			const S21 = 5, S22 = 9, S23 = 14, S24 = 20;
+			const S31 = 4, S32 = 11, S33 = 16, S34 = 23;
+			const S41 = 6, S42 = 10, S43 = 15, S44 = 21;
+
+			a = 0x67452301;
+			b = 0xEFCDAB89;
+			c = 0x98BADCFE;
+			d = 0x10325476;
+
+			for (k = 0; k < x.length; k += 16) {
+				AA = a;
+				BB = b;
+				CC = c;
+				DD = d;
+
+				a = FF(a, b, c, d, x[k], S11, 0xD76AA478);
+				d = FF(d, a, b, c, x[k + 1], S12, 0xE8C7B756);
+				c = FF(c, d, a, b, x[k + 2], S13, 0x242070DB);
+				b = FF(b, c, d, a, x[k + 3], S14, 0xC1BDCEEE);
+				a = FF(a, b, c, d, x[k + 4], S11, 0xF57C0FAF);
+				d = FF(d, a, b, c, x[k + 5], S12, 0x4787C62A);
+				c = FF(c, d, a, b, x[k + 6], S13, 0xA8304613);
+				b = FF(b, c, d, a, x[k + 7], S14, 0xFD469501);
+				a = FF(a, b, c, d, x[k + 8], S11, 0x698098D8);
+				d = FF(d, a, b, c, x[k + 9], S12, 0x8B44F7AF);
+				c = FF(c, d, a, b, x[k + 10], S13, 0xFFFF5BB1);
+				b = FF(b, c, d, a, x[k + 11], S14, 0x895CD7BE);
+				a = FF(a, b, c, d, x[k + 12], S11, 0x6B901122);
+				d = FF(d, a, b, c, x[k + 13], S12, 0xFD987193);
+				c = FF(c, d, a, b, x[k + 14], S13, 0xA679438E);
+				b = FF(b, c, d, a, x[k + 15], S14, 0x49B40821);
+
+				a = GG(a, b, c, d, x[k + 1], S21, 0xF61E2562);
+				d = GG(d, a, b, c, x[k + 6], S22, 0xC040B340);
+				c = GG(c, d, a, b, x[k + 11], S23, 0x265E5A51);
+				b = GG(b, c, d, a, x[k], S24, 0xE9B6C7AA);
+				a = GG(a, b, c, d, x[k + 5], S21, 0xD62F105D);
+				d = GG(d, a, b, c, x[k + 10], S22, 0x2441453);
+				c = GG(c, d, a, b, x[k + 15], S23, 0xD8A1E681);
+				b = GG(b, c, d, a, x[k + 4], S24, 0xE7D3FBC8);
+				a = GG(a, b, c, d, x[k + 9], S21, 0x21E1CDE6);
+				d = GG(d, a, b, c, x[k + 14], S22, 0xC33707D6);
+				c = GG(c, d, a, b, x[k + 3], S23, 0xF4D50D87);
+				b = GG(b, c, d, a, x[k + 8], S24, 0x455A14ED);
+				a = GG(a, b, c, d, x[k + 13], S21, 0xA9E3E905);
+				d = GG(d, a, b, c, x[k + 2], S22, 0xFCEFA3F8);
+				c = GG(c, d, a, b, x[k + 7], S23, 0x676F02D9);
+				b = GG(b, c, d, a, x[k + 12], S24, 0x8D2A4C8A);
+
+				a = HH(a, b, c, d, x[k + 5], S31, 0xFFFA3942);
+				d = HH(d, a, b, c, x[k + 8], S32, 0x8771F681);
+				c = HH(c, d, a, b, x[k + 11], S33, 0x6D9D6122);
+				b = HH(b, c, d, a, x[k + 14], S34, 0xFDE5380C);
+				a = HH(a, b, c, d, x[k + 1], S31, 0xA4BEEA44);
+				d = HH(d, a, b, c, x[k + 4], S32, 0x4BDECFA9);
+				c = HH(c, d, a, b, x[k + 7], S33, 0xF6BB4B60);
+				b = HH(b, c, d, a, x[k + 10], S34, 0xBEBFBC70);
+				a = HH(a, b, c, d, x[k + 13], S31, 0x289B7EC6);
+				d = HH(d, a, b, c, x[k], S32, 0xEAA127FA);
+				c = HH(c, d, a, b, x[k + 3], S33, 0xD4EF3085);
+				b = HH(b, c, d, a, x[k + 6], S34, 0x4881D05);
+				a = HH(a, b, c, d, x[k + 9], S31, 0xD9D4D039);
+				d = HH(d, a, b, c, x[k + 12], S32, 0xE6DB99E5);
+				c = HH(c, d, a, b, x[k + 15], S33, 0x1FA27CF8);
+				b = HH(b, c, d, a, x[k + 2], S34, 0xC4AC5665);
+
+				a = II(a, b, c, d, x[k], S41, 0xF4292244);
+				d = II(d, a, b, c, x[k + 7], S42, 0x432AFF97);
+				c = II(c, d, a, b, x[k + 14], S43, 0xAB9423A7);
+				b = II(b, c, d, a, x[k + 5], S44, 0xFC93A039);
+				a = II(a, b, c, d, x[k + 12], S41, 0x655B59C3);
+				d = II(d, a, b, c, x[k + 3], S42, 0x8F0CCC92);
+				c = II(c, d, a, b, x[k + 10], S43, 0xFFEFF47D);
+				b = II(b, c, d, a, x[k + 1], S44, 0x85845DD1);
+				a = II(a, b, c, d, x[k + 8], S41, 0x6FA87E4F);
+				d = II(d, a, b, c, x[k + 15], S42, 0xFE2CE6E0);
+				c = II(c, d, a, b, x[k + 6], S43, 0xA3014314);
+				b = II(b, c, d, a, x[k + 13], S44, 0x4E0811A1);
+				a = II(a, b, c, d, x[k + 4], S41, 0xF7537E82);
+				d = II(d, a, b, c, x[k + 11], S42, 0xBD3AF235);
+				c = II(c, d, a, b, x[k + 2], S43, 0x2AD7D2BB);
+				b = II(b, c, d, a, x[k + 9], S44, 0xEB86D391);
+
+				a = addUnsigned(a, AA);
+				b = addUnsigned(b, BB);
+				c = addUnsigned(c, CC);
+				d = addUnsigned(d, DD);
+			}
+
+			const temp = wordToHex(a) + wordToHex(b) + wordToHex(c) + wordToHex(d);
+			return temp.toLowerCase();
+		}
+
+		try {
+			return md5(text);
+		} catch (error) {
+			console.error('MD5 generation failed:', error);
+			return 'error';
 		}
 	}
+
+	/* ------------------------------------------------------------- */
+	/* ------------------------------------------------------------- */
 
 	shouldProcessImage(image: TFile): boolean {
 		if (this.settings.ProcessAllVaultskipImagesInTargetFormat && image.extension === this.settings.ProcessAllVaultconvertTo) {
@@ -981,8 +1910,8 @@ export default class ImageConvertPLugin extends Plugin {
 		return true;
 	}
 
-	
 	//Process All Vault
+	/* ------------------------------------------------------------- */
 	async processAllVaultImages() {
 		const getallfiles = this.app.vault.getFiles();
 		const files = getallfiles.filter(file => file instanceof TFile && isImage(file) && this.shouldProcessImage(file));
@@ -997,11 +1926,12 @@ export default class ImageConvertPLugin extends Plugin {
 		for (const file of files) {
 			if (isImage(file)) {
 				imageCount++;
-				
+
 				// Log each file, this way the log will show files even if there is an error
 				console.log(`Processing image ${imageCount} of ${files.length}: ${file.name} ${file.path}`)
-				
+
 				await this.convertAllVault(file);
+
 				await refreshImagesInActiveNote();
 
 				// Calculate the elapsed time
@@ -1009,6 +1939,8 @@ export default class ImageConvertPLugin extends Plugin {
 
 				// Update the status bar item
 				statusBarItemEl.setText(`Processing image ${imageCount} of ${files.length}, elapsed time: ${elapsedTime} seconds`);
+				// Log each file, if there is delay, at least log will show corrupt file
+				console.log(`${imageCount} of ${files.length} ${file.name} ${file.path}  ${elapsedTime} seconds elapsed`);
 			}
 		}
 
@@ -1025,6 +1957,7 @@ export default class ImageConvertPLugin extends Plugin {
 			}, 5000); // 5000 milliseconds = 5 seconds
 		}
 	}
+
 	async convertAllVault(file: TFile) {
 		// Check if extension/format needs to be preserved
 		let extension = file.extension;
@@ -1038,39 +1971,17 @@ export default class ImageConvertPLugin extends Plugin {
 		const binary = await this.app.vault.readBinary(file);
 		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
 
+		// In your main code:
 		if (file.extension === 'tif' || file.extension === 'tiff') {
-			const binaryUint8Array = new Uint8Array(binary);
-			const ifds = UTIF.decode(binaryUint8Array);
-			UTIF.decodeImage(binaryUint8Array, ifds[0]);
-			const rgba = UTIF.toRGBA8(ifds[0]);
-			const canvas = document.createElement('canvas');
-			canvas.width = ifds[0].width;
-			canvas.height = ifds[0].height;
-			const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
-			const imageData = ctx.createImageData(canvas.width, canvas.height);
-			imageData.data.set(rgba);
-			ctx.putImageData(imageData, 0, 0);
-
-			imgBlob = await new Promise<Blob>((resolve, reject) => {
-				canvas.toBlob((blob) => {
-					if (blob) {
-						resolve(blob);
-					} else {
-						reject(new Error('Failed to convert canvas to Blob'));
-					}
-				});
-			});
-
+			imgBlob = await handleTiffImage(binary);
 		}
 
 		if (file.extension === 'heic') {
-			const binaryBuffer = Buffer.from(binary);
-			const outputBuffer = await heic({
-				buffer: binaryBuffer,
-				format: 'JPEG',
-				quality: Number(this.settings.ProcessAllVaultquality)
-			});
-			imgBlob = new Blob([outputBuffer], { type: 'image/jpeg' });
+			imgBlob = await convertHeicToFormat(
+				binary,
+				'JPEG',
+				Number(this.settings.ProcessAllVaultquality)
+			);
 		}
 
 		if (this.settings.ProcessAllVaultquality !== 1) {
@@ -1185,6 +2096,7 @@ export default class ImageConvertPLugin extends Plugin {
 		const newFilePath = file.path.replace(/\.[^/.]+$/, "." + extension);
 		await this.app.vault.rename(file, newFilePath);
 	}
+
 	async updateAllVaultLinks(file: TFile, newExtension: string) { // https://forum.obsidian.md/t/vault-rename-file-path-doesnt-trigger-link-update/32317
 		// Get the new file path
 		const newFilePath = file.path.replace(/\.[^/.]+$/, "." + newExtension);
@@ -1212,7 +2124,11 @@ export default class ImageConvertPLugin extends Plugin {
 		}
 	}
 
+	/* ------------------------------------------------------------- */
+	/* ------------------------------------------------------------- */
+
 	//Process Current Note
+	/* ------------------------------------------------------------- */
 	async processCurrentNoteImages(note: TFile) {
 		let imageCount = 0;
 		const statusBarItemEl = this.addStatusBarItem();
@@ -1250,6 +2166,7 @@ export default class ImageConvertPLugin extends Plugin {
 			}, 5000);
 		}
 	}
+
 	async convertCurrentNoteImages(file: TFile) {
 		const activeFile = this.getActiveFile();
 
@@ -1270,39 +2187,17 @@ export default class ImageConvertPLugin extends Plugin {
 		const binary = await this.app.vault.readBinary(file);
 		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
 
+		// In your main code:
 		if (file.extension === 'tif' || file.extension === 'tiff') {
-			const binaryUint8Array = new Uint8Array(binary);
-			const ifds = UTIF.decode(binaryUint8Array);
-			UTIF.decodeImage(binaryUint8Array, ifds[0]);
-			const rgba = UTIF.toRGBA8(ifds[0]);
-			const canvas = document.createElement('canvas');
-			canvas.width = ifds[0].width;
-			canvas.height = ifds[0].height;
-			const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
-			const imageData = ctx.createImageData(canvas.width, canvas.height);
-			imageData.data.set(rgba);
-			ctx.putImageData(imageData, 0, 0);
-
-			imgBlob = await new Promise<Blob>((resolve, reject) => {
-				canvas.toBlob((blob) => {
-					if (blob) {
-						resolve(blob);
-					} else {
-						reject(new Error('Failed to convert canvas to Blob'));
-					}
-				});
-			});
-
+			imgBlob = await handleTiffImage(binary);
 		}
 
 		if (file.extension === 'heic') {
-			const binaryBuffer = Buffer.from(binary);
-			const outputBuffer = await heic({
-				buffer: binaryBuffer,
-				format: 'JPEG',
-				quality: Number(this.settings.ProcessCurrentNotequality)
-			});
-			imgBlob = new Blob([outputBuffer], { type: 'image/jpeg' });
+			imgBlob = await convertHeicToFormat(
+				binary,
+				'JPEG',
+				Number(this.settings.ProcessCurrentNotequality)
+			);
 		}
 
 		if (this.settings.ProcessCurrentNotequality !== 1) { // Compression only works between 0-99
@@ -1417,6 +2312,7 @@ export default class ImageConvertPLugin extends Plugin {
 		const newFilePath = file.path.replace(/\.[^/.]+$/, "." + extension);
 		await this.app.vault.rename(file, newFilePath);
 	}
+
 	async updateCurrentNoteLinks(note: TFile, file: TFile, newExtension: string) {
 		// Get the new file path
 		const newFilePath = file.path.replace(/\.[^/.]+$/, "." + newExtension);
@@ -1438,24 +2334,8 @@ export default class ImageConvertPLugin extends Plugin {
 		await this.app.vault.modify(note, content);
 	}
 
-
-	generateRandomHex(size: number) {
-		const array = new Uint8Array(size);
-		window.crypto.getRandomValues(array);
-		return Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
-	}
-
-	makeLinkText(file: TFile, sourcePath: string, subpath?: string): string {
-		return this.app.fileManager.generateMarkdownLink(file, sourcePath, subpath);
-	}
-	async generateNewName(file: TFile, activeFile: TFile): Promise<string> {
-		const newName = this.settings.renameFormat == "date" ? activeFile.basename + '-' + moment().format("YYYYMMDDHHmmssSSS") : activeFile.basename + '-' + this.generateRandomHex(16);
-		let extension = file.extension;
-		if (this.settings.convertTo && this.settings.convertTo !== 'disabled') {
-			extension = this.settings.convertTo;
-		}
-		return `${newName}.${extension}`;
-	}
+	/* ------------------------------------------------------------- */
+	/* ------------------------------------------------------------- */
 
 	async keepOrgName(file: TFile, activeFile: TFile): Promise<string> {
 		let newName = file.basename;
@@ -1469,14 +2349,20 @@ export default class ImageConvertPLugin extends Plugin {
 
 		return `${newName}.${extension}`;
 	}
-	getActiveFile(): TFile | undefined {
-		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		const file = view?.file;
-		if (file) {
-			return file;
-		}
+
+	private getActiveFile(): TFile | undefined {
+		// Try getting from active markdown view first
+		const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (markdownView?.file) return markdownView.file;
+
+		// Try getting from active leaf if no markdown view
+		const activeFile = this.app.workspace.getActiveFile();
+		if (activeFile) return activeFile;
+
+		// If neither exists, return undefined and handle in calling code
 		return undefined;
 	}
+
 	getActiveEditor(sourcePath: string): Editor | null {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (view && view.file && view.file.path === sourcePath) {
@@ -1493,9 +2379,15 @@ export default class ImageConvertPLugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 }
+
 function isImage(file: TFile): boolean {
 	const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'tif', 'tiff', 'bmp', 'svg', 'gif', 'mov'];
 	return IMAGE_EXTS.includes(file.extension.toLowerCase());
+}
+
+function isBase64Image(src: string): boolean {
+	// Check if src starts with 'data:image'
+	return src.startsWith('data:image');
 }
 
 async function refreshImagesInActiveNote() {
@@ -1522,6 +2414,134 @@ async function refreshImagesInActiveNote() {
 				}
 			}
 		}
+	}
+}
+
+
+/* ------------------------------------------------------------- */
+async function handleTiffImage(binary: ArrayBuffer): Promise<Blob> {
+	try {
+		// Dynamically import UTIF only when needed
+		const UTIF = await import('./UTIF.js').then(module => module.default);
+
+		// Convert ArrayBuffer to Uint8Array
+		const binaryUint8Array = new Uint8Array(binary);
+
+		// Decode TIFF image
+		const ifds = UTIF.decode(binaryUint8Array);
+		UTIF.decodeImage(binaryUint8Array, ifds[0]);
+		const rgba = UTIF.toRGBA8(ifds[0]);
+
+		// Create canvas and draw image
+		const canvas = document.createElement('canvas');
+		canvas.width = ifds[0].width;
+		canvas.height = ifds[0].height;
+		const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+		const imageData = ctx.createImageData(canvas.width, canvas.height);
+		imageData.data.set(rgba);
+		ctx.putImageData(imageData, 0, 0);
+
+		// Convert canvas to Blob
+		return new Promise<Blob>((resolve, reject) => {
+			canvas.toBlob((blob) => {
+				if (blob) {
+					resolve(blob);
+				} else {
+					reject(new Error('Failed to convert canvas to Blob'));
+				}
+			});
+		});
+	} catch (error) {
+		console.error('Error processing TIFF image:', error);
+		throw new Error('Failed to process TIFF image');
+	}
+}
+
+async function convertHeicToFormat(
+	binary: ArrayBuffer,
+	format: 'JPEG' | 'PNG',
+	quality: number
+): Promise<Blob> {
+	try {
+		// Import heic-to for both platforms
+		const { heicTo } = await import('./heic-to.min.js');
+
+		// Convert ArrayBuffer to Blob
+		const blob = new Blob([binary], { type: 'image/heic' });
+
+		// Convert using heic-to
+		return await heicTo({
+			blob: blob,
+			type: `image/${format.toLowerCase()}`,
+			quality: quality
+		});
+	} catch (error) {
+		console.error('Error converting HEIC:', error);
+		throw new Error(`Failed to convert HEIC image: ${error.message}`);
+	}
+}
+
+async function handleHeicImage(
+	file: TFile,
+	binary: ArrayBuffer,
+	settings: ImageConvertSettings,
+	app: App
+): Promise<Blob> {
+	try {
+		if (settings.convertTo === 'disabled') {
+			new Notice('Original file kept without any compression or conversion.');
+			return new Blob([binary]);
+		}
+
+		// Convert to JPEG first regardless of platform
+		const imgBlob = await convertHeicToFormat(binary, 'JPEG', 1);
+
+		if (settings.convertTo !== 'disabled') {
+			let arrayBuffer;
+			switch (settings.convertTo) {
+				case 'webp':
+					arrayBuffer = await convertToWebP(
+						imgBlob,
+						Number(settings.quality),
+						settings.resizeMode,
+						settings.desiredWidth,
+						settings.desiredHeight,
+						settings.desiredLength
+					);
+					break;
+				case 'jpg':
+					arrayBuffer = await convertToJPG(
+						imgBlob,
+						Number(settings.quality),
+						settings.resizeMode,
+						settings.desiredWidth,
+						settings.desiredHeight,
+						settings.desiredLength
+					);
+					break;
+				case 'png':
+					arrayBuffer = await convertToPNG(
+						imgBlob,
+						Number(settings.quality),
+						settings.resizeMode,
+						settings.desiredWidth,
+						settings.desiredHeight,
+						settings.desiredLength
+					);
+					break;
+				default:
+					throw new Error('No format selected for conversion');
+			}
+
+			if (arrayBuffer) {
+				await app.vault.modifyBinary(file, arrayBuffer);
+			}
+		}
+
+		return imgBlob;
+	} catch (error) {
+		console.error('Error in handleHeicImage:', error);
+		throw error;
 	}
 }
 
@@ -1880,8 +2900,11 @@ function base64ToArrayBuffer(code: string): ArrayBuffer {
 	}
 	return uInt8Array.buffer;
 }
+/* ------------------------------------------------------------- */
+/* ------------------------------------------------------------- */
 
 function resizeImageScrollWheel(event: WheelEvent, img: HTMLImageElement | HTMLVideoElement) {
+
 	const delta = Math.sign(event.deltaY); // get the direction of the scroll
 	const scaleFactor = delta < 0 ? 1.1 : 0.9; // set the scale factor for resizing
 
@@ -1917,87 +2940,61 @@ function resizeImageScrollWheel(event: WheelEvent, img: HTMLImageElement | HTMLV
 	return { newWidth, newHeight, newLeft, newTop };
 }
 
-function isBase64Image(src: any) {
-	// Check if src starts with 'data:image'
-	return src.startsWith('data:image');
-}
+async function getImageWidthSide(binary: ArrayBuffer): Promise<number | null> {
+	try {
+		if (Platform.isMobile) {
+			// Fallback for mobile: create an image element and get dimensions
+			return new Promise((resolve, reject) => {
+				const blob = new Blob([binary]);
+				const url = URL.createObjectURL(blob);
+				const img = new Image();
 
-// async function getEXIF(file:TFile){
-//     // Image as a blob
-//     const binary = await this.app.vault.readBinary(file);
-//     const imgBlob = new Blob([binary], { type: `image/${file.extension}` });
+				img.onload = () => {
+					URL.revokeObjectURL(url);
+					resolve(Math.max(img.width));
+				};
 
-//     // Use blob to get image metadata
-//     const reader = new FileReader();
+				img.onerror = () => {
+					URL.revokeObjectURL(url);
+					resolve(null); // "Couldnt load an image"
+				};
 
-//     return new Promise((resolve, reject) => {
-//         reader.onloadend = async function() {
-//             if (reader.result) {
-//                 try {
-//                     const exif = await exifr.parse(reader.result);
-//                     // console.log(exif);
-//                     resolve(exif); // Resolve the promise with the exif data
-//                 } catch (error) {
-//                     reject(error); // Reject the promise with the error
-//                 }
-//             }
-//         };
-//         reader.readAsArrayBuffer(imgBlob);
-//     });
-// }
+				img.src = url;
+			});
+		} else {
+			// Desktop version using probe-image-size
+			const probe = await import('probe-image-size').then(module => module.default);
+			const buffer = Buffer.from(binary);
+			const result = probe.sync(buffer);
 
-// async function getLongestSide(binary: ArrayBuffer) {
-//     // console.log(binary);
-//     // Convert the binary data to a Buffer
-//     const buffer = Buffer.from(binary);
-//     // Get the image dimensions using probe-image-size
-//     const result = probe.sync(buffer);
-//     if (result) {
-//         // Return the longest side
-//         const longestSide = Math.max(result.width, result.height);
-//         // console.log("Longest Side of an image:", longestSide);
-//         return longestSide;
-//     } else {
-//         // console.log("Failed to get image dimensions");
-//         return null;
-//     }
-// }
+			if (result) {
+				return Math.max(result.width);
+			}
+		}
 
-
-async function getImageWidthSide(binary: ArrayBuffer) {
-	// console.log(binary);
-	// Convert the binary data to a Buffer
-	const buffer = Buffer.from(binary);
-	// Get the image dimensions using probe-image-size
-	const result = probe.sync(buffer);
-	if (result) {
-		// Return the longest side
-		const widthSide = Math.max(result.width);
-		// console.log("Longest Side of an image:", widthSide);
-		return widthSide;
-	} else {
 		console.log("Failed to get image dimensions");
+		return null;
+	} catch (error) {
+		console.error('Error getting image dimensions:', error);
+		// Instead of throwing, return null and handle it gracefully
 		return null;
 	}
 }
 
-function printEditorLineWidth(app: App) {
-	let editorLineWidth: string | number = '';
+function printEditorLineWidth(app: App): number {
 	const activeView = app.workspace.getActiveViewOfType(MarkdownView);
 	if (activeView) {
-		const editorElement = (activeView.editor as any).containerEl;
-		const style = getComputedStyle(editorElement);
-		editorLineWidth = style.getPropertyValue('--file-line-width');
-		// Remove 'px' from the end
-		editorLineWidth = editorLineWidth.slice(0, -2);
-		// Now convert it into a number
-		editorLineWidth = Number(editorLineWidth);
-
+		// Get the editor's DOM element
+		const editorElement = activeView.containerEl.querySelector('.cm-contentContainer');
+		if (editorElement) {
+			const width = (editorElement as HTMLElement).offsetWidth;
+			return Number(width)
+		} else {
+			console.error('Element not found');
+		}
 	}
-	return editorLineWidth; // Make sure to return or use the variable
+	return 0; // Default value if no editor is found
 }
-
-
 
 function getImageName(img: HTMLImageElement | HTMLVideoElement): string | null {
 	// Get the image name from an image element: `src`
@@ -2230,7 +3227,7 @@ function deleteMarkdownLink(activeView: MarkdownView, imageName: string | null) 
 		}
 	}
 }
-async function deleteImageFromVault(event: MouseEvent, app: any) {
+async function deleteImageFromVault(event: MouseEvent, app: App) {
 	// Get the image element and its src attribute
 	const img = event.target as HTMLImageElement;
 	const src = img.getAttribute('src');
@@ -2336,27 +3333,675 @@ async function deleteImageFromVault(event: MouseEvent, app: any) {
 
 // }
 
-class ImageConvertTab extends PluginSettingTab {
-	plugin: ImageConvertPLugin;
+// class ImageConvertTab extends PluginSettingTab {
+// 	plugin: ImageConvertPlugin;
+//     private previewText: TextComponent;
+//     private updatePreviewDebounced: () => void;
 
-	constructor(app: App, plugin: ImageConvertPLugin) {
+// 	constructor(app: App, plugin: ImageConvertPlugin) {
+// 		super(app, plugin);
+// 		this.plugin = plugin;
+// 		this.updatePreviewDebounced = debounce(this.updatePreview.bind(this), 500);
+// 	}
+
+
+//     async updatePreview() {
+//         if (!this.previewText) return;
+
+//         try {
+//             const activeFile = this.app.workspace.getActiveFile();
+//             const mockFile = activeFile || this.app.vault.getFiles()[0];
+//             if (!mockFile) return;
+
+//             let pathTemplate = '';
+//             switch (this.plugin.settings.attachmentLocation) {
+//                 case 'specified':
+//                     pathTemplate = this.plugin.settings.attachmentSpecifiedFolder;
+//                     break;
+//                 case 'subfolder':
+//                     pathTemplate = `${mockFile.parent?.path ?? ''}/${this.plugin.settings.attachmentSubfolderName}`;
+//                     break;
+//                 case 'customOutput':
+//                     pathTemplate = this.plugin.settings.customOutputPath;
+//                     break;
+//                 default:
+//                     this.previewText.setValue('Preview not available for this option');
+//                     return;
+//             }
+
+//             const previewPath = await this.plugin.generatePathPreview(pathTemplate, mockFile);
+//             this.previewText.setValue(previewPath);
+//         } catch (error) {
+//             console.error('Preview generation error:', error);
+//             this.previewText.setValue('Error generating preview');
+//         }
+//     }
+
+// 	display(): void {
+// 		const { containerEl } = this;
+// 		containerEl.empty();
+
+// 		const heading = containerEl.createEl('h1');
+// 		heading.textContent = 'Convert, compress and resize';
+
+// 		new Setting(containerEl)
+// 			.setName('Select format to convert images to')
+// 			.setDesc(`Turn this on to allow image conversion and compression on drag'n'drop or paste. "Same as original" - will keep original file format.`)
+// 			.addDropdown(dropdown =>
+// 				dropdown
+// 					.addOptions({ disabled: 'Same as original', webp: 'WebP', jpg: 'JPG', png: 'PNG' })
+// 					.setValue(this.plugin.settings.convertTo)
+// 					.onChange(async value => {
+// 						this.plugin.settings.convertTo = value;
+// 						await this.plugin.saveSettings();
+// 					})
+// 			);
+
+// 		new Setting(containerEl)
+// 			.setName('Quality')
+// 			.setDesc('0 - low quality, 99 - high quality, 100 - no compression; 75 - recommended')
+// 			.addText(text =>
+// 				text
+// 					.setPlaceholder('Enter quality (0-100)')
+// 					.setValue((this.plugin.settings.quality * 100).toString())
+// 					.onChange(async value => {
+// 						const quality = parseInt(value);
+
+// 						if (/^\d+$/.test(value) && quality >= 0 && quality <= 100) {
+// 							this.plugin.settings.quality = quality / 100;
+// 							await this.plugin.saveSettings();
+// 						}
+// 					})
+// 			);
+
+// 		new Setting(containerEl)
+// 			.setName('Image resize mode')
+// 			.setDesc('Select the mode to use when resizing the image. Resizing an image will further reduce file-size, but it will resize your actual file, which means that the original file will be modified, and the changes will be permanent.')
+// 			.addDropdown(dropdown =>
+// 				dropdown
+// 					.addOptions({ None: 'None', Fit: 'Fit', Fill: 'Fill', LongestEdge: 'Longest Edge', ShortestEdge: 'Shortest Edge', Width: 'Width', Height: 'Height' })
+// 					.setValue(this.plugin.settings.resizeMode)
+// 					.onChange(async value => {
+// 						this.plugin.settings.resizeMode = value;
+// 						await this.plugin.saveSettings();
+
+// 						if (value !== 'None') {
+// 							// Open the ResizeModal when an option is selected
+// 							const modal = new ResizeModal(this.plugin);
+// 							modal.open();
+// 						}
+// 					})
+// 			);
+
+// 		new Setting(containerEl)
+// 			.setName('File Renaming')
+// 			.setDesc('Choose how to rename dropped/pasted images')
+// 			.addDropdown(dropdown => dropdown
+// 				.addOptions({
+// 					'disabled': 'Keep original name',
+// 					'custom': 'Custom template'
+// 				})
+// 				.setValue(this.plugin.settings.autoRename ? 
+// 					(this.plugin.settings.useCustomRenaming ? 'custom' : 'disabled') : 
+// 					'disabled')
+// 				.onChange(async (value) => {
+// 					this.plugin.settings.autoRename = value !== 'disabled';
+// 					this.plugin.settings.useCustomRenaming = value === 'custom';
+// 					await this.plugin.saveSettings();
+// 					this.display();  // Refresh settings
+// 				}));
+
+
+// 		// Show template settings only when custom renaming is enabled
+// 		if (this.plugin.settings.autoRename && this.plugin.settings.useCustomRenaming) {
+// 			new Setting(containerEl)
+// 				.setName('Custom Rename Template')
+// 				.setDesc('Template for custom file names')
+// 				.setClass('settings-indent')
+// 				.addText(text => text
+// 					.setPlaceholder('{imageName}-{date:YYYYMMDDHHmmssSSS}')
+// 					.setValue(this.plugin.settings.customRenameTemplate)
+// 					.onChange(async (value) => {
+// 						this.plugin.settings.customRenameTemplate = value;
+// 						await this.plugin.saveSettings();
+// 					}))
+// 				.addButton(button => button
+// 					.setButtonText('Reset')
+// 					.onClick(async () => {
+// 						this.plugin.settings.customRenameTemplate = 
+// 							this.plugin.settings.customRenameDefaultTemplate;
+// 						await this.plugin.saveSettings();
+// 						this.display();
+// 					}));
+
+// 			// Add variables documentation indented under custom template
+// 			new Setting(containerEl)
+// 				.setName('Available Variables')
+// 				.setClass('settings-indent')
+// 				.setDesc(createFragment(el => {
+// 					el.createEl('p', {text: 'You can use these variables in your template:'});
+// 					[
+// 						'{imageName} - Original file name',
+// 						'{noteName} - Active note name',
+
+// 						'{date:YYYY-MM-DD} - Full moment.js support',
+
+// 						'{pathDepth}',
+// 						'{directory} - to be removed',
+// 						'{parentFolder} - to be removed',
+// 						'{folderName} - current folder name',
+
+// 						'{currentDate} - todays date in YYYY-MM-DD',
+// 						'{yyyy} - year e.g. 2024',
+// 						'{mm} - month e.g.: 12',
+// 						'{dd} - day e.g.: 24',
+// 						'{time} - 24h format e.g.',
+// 						'{HH} - hour',
+// 						'{timestamp}',
+// 						'{weekday} - e.g.: Monday, Tuesday, Wednesday',
+// 						'{month} - e.g.: October, September, December',
+// 						'{calendar} - e.g. Today at 9_25 PM',
+// 						'{creationDate} - creation date',
+
+// 						'{platform} - e.g. win32',
+// 						'{userAgent}',
+
+// 						'{counter:000} - Incremental counter with padding',
+// 						'{uuid} - Random UUID',
+// 						'{random} - rnadom string of characters e.g. 91c2q1, 09a5xb',
+// 						'{randomHex8} - generate random HEX string 8 values long',
+// 						'{randomHex16} - generate random HEX string 16 values long',
+
+// 						'{width} - Image width',
+// 						'{height} - Image height',
+// 						'{resolution} - Image resolution e.g. 1980x1980',
+// 						'{quality} - Conversion quality',
+// 						'{fileType} - Image filetype e.g. jpg, png , tif, webp, bmp etc.',
+
+// 						'{size:MB:2} - MB, KB, B - digit - specify decimal value',
+// 						'{sizeMB} - File size in MB',
+// 						'{sizeB}',
+// 						'{sizeKB}',
+// 						'{ratio} - image ratio',
+// 						'{orientation} - e.g. portrait or landscape',
+
+// 						// Add other variables you support
+// 					].forEach(item => {
+// 						el.createEl('p', {text: item});
+// 					});
+// 				}));
+// 		}
+
+// 		// OUTPUT
+// 		// Create the dropdown
+// 		new Setting(containerEl)
+// 			.setName("Output")
+// 			.setDesc("Select where to save converted images. Default - follow rules as defined by Obsidian in 'File & Links' > 'Default location for new attachments'")
+// 			.addDropdown((dropdown) => {
+// 				dropdown
+// 					.addOption("disable", "Default")
+// 					.addOption("root", "Root folder")
+// 					.addOption("specified", "In the folder specified below")
+// 					.addOption("current", "Same folder as current file")
+// 					.addOption("subfolder", "In subfolder under current folder [Beta]")
+// 					.addOption("customOutput", "Custom output path")
+// 					.setValue(this.plugin.settings.attachmentLocation)
+// 					.onChange(async (value: 'disable' | 'root' | 'specified' | 'current' | 'subfolder' | 'customOutput') => {
+// 						this.plugin.settings.attachmentLocation = value;
+// 						await this.plugin.saveSettings();
+// 						this.display(); // Refresh the settings display
+// 					});
+// 			});
+
+// 		// Add preview
+// 		const addPathPreview = (containerEl: HTMLElement) => {
+// 			const previewSetting = new Setting(containerEl)
+// 				.setName("Preview")
+// 				.setDesc("Preview of how your path will be resolved")
+// 				.setClass('settings-indent');
+
+// 			this.previewText = new TextComponent(previewSetting.controlEl)
+// 				.setDisabled(true)
+// 				.setValue('Loading preview...');
+
+// 			this.updatePreview();
+// 		};
+
+// 		// Add documentation for available patterns
+// 		const addVariablesDocumentation = (containerEl: HTMLElement) => {
+// 			new Setting(containerEl)
+// 				.setName("Available variables")
+// 				.setClass('settings-indent')
+// 				.setDesc(createFragment(el => {
+// 					el.createEl('p', {text: 'You can use these variables in your path:'});
+// 					el.createEl('p', {text: '{imageName} - Original image name'});
+// 					el.createEl('p', {text: '{noteName} - Current note name'});
+// 					el.createEl('p', {text: '{counter:000} - Incremental counter with padding'});
+// 					el.createEl('p', {text: '{date:YYYY-MM} - Date using moment.js format'});
+// 					el.createEl('p', {text: '{size:MB:2} - File size with decimal places'});
+// 					el.createEl('p', {text: '{yyyy}/{mm}/{dd} - Year/Month/Day folders'});
+// 					el.createEl('p', {text: '{folderName} - Current folder name'});
+// 					el.createEl('p', {text: '{parentFolder} - Parent folder name'});
+// 					el.createEl('a', {
+// 						text: 'Click here for moment.js date formats',
+// 						href: 'https://momentjs.com/docs/#/displaying/format/'
+// 					});
+// 				}));
+// 		};
+
+// 		// Then show the appropriate input field based on the selected option
+// 		if (this.plugin.settings.attachmentLocation === "specified") {
+// 			new Setting(containerEl)
+// 				.setName("Path to specific folder")
+// 				.setDesc('If you specify folder path as "/attachments/images" then all processed images will be saved inside "/attachments/images/" folder. If any of the folders do not exist, they will be created.')
+// 				.setClass('settings-indent')
+//                 .addText((text) => {
+//                     text.setPlaceholder('attachments/{yyyy}/{mm}')
+//                         .setValue(this.plugin.settings.attachmentSpecifiedFolder)
+//                         .onChange(async (value) => {
+//                             this.plugin.settings.attachmentSpecifiedFolder = value;
+//                             await this.plugin.saveSettings();
+//                             this.updatePreviewDebounced();
+//                         });
+//                 });
+// 			addPathPreview(containerEl);
+// 			addVariablesDocumentation(containerEl);
+// 		}
+
+// 		if (this.plugin.settings.attachmentLocation === "subfolder") {
+// 			new Setting(containerEl)
+// 				.setName("Subfolder name")
+// 				.setDesc('Name of the subfolder to create under the current note\'s folder')
+// 				.setClass('settings-indent')
+//                 .addText((text) => {
+//                     text.setPlaceholder('images/{yyyy}/{mm}')
+//                         .setValue(this.plugin.settings.attachmentSubfolderName)
+//                         .onChange(async (value) => {
+//                             this.plugin.settings.attachmentSubfolderName = value;
+//                             await this.plugin.saveSettings();
+//                             this.updatePreviewDebounced();
+//                         });
+//                 });
+// 			addPathPreview(containerEl);
+// 			addVariablesDocumentation(containerEl);
+// 		}
+
+//         if (this.plugin.settings.attachmentLocation === "customOutput") {
+//             new Setting(containerEl)
+//                 .setName("Custom output path")
+//                 .setDesc('Create your own path using variables')
+//                 .setClass('settings-indent')
+//                 .addText((text) => {
+//                     text.setPlaceholder('assets/{yyyy}/{mm}/{imageName}')
+//                         .setValue(this.plugin.settings.customOutputPath)
+//                         .onChange(async (value) => {
+//                             this.plugin.settings.customOutputPath = value;
+//                             await this.plugin.saveSettings();
+//                             this.updatePreviewDebounced();
+//                         });
+//                 });
+
+//             addPathPreview(containerEl);
+//             addVariablesDocumentation(containerEl);
+//         }
+
+
+// 		/////////////////////////////////////////////
+
+// 		const heading2 = containerEl.createEl("h2");
+// 		heading2.textContent = "Non-Destructive Image Resizing:";
+// 		const p = containerEl.createEl("p");
+// 		p.textContent = 'Below settings allow you to adjust image dimensions using the standard ObsidianMD method by modifying image links. For instance, to change the width of ![[Engelbart.jpg]], we add "| 100" at the end, resulting in ![[Engelbart.jpg | 100]].';
+// 		p.style.fontSize = "12px";
+
+// 		/////////////////////////////////////////////
+// 		// Create a function to update the custom size setting
+// 		// Update function to handle "Fit Image" option
+// 		const updateCustomSizeSetting = async (value: string) => {
+// 			if (value === "customSize") {
+// 				// If "customSize" is selected, show the "Custom size" field
+// 				customSizeSetting.settingEl.style.display = 'flex';
+// 			} else if (value === "fitImage") {
+// 				// If "fitImage" is selected, calculate the size based on the max width of the notes editor and longest side of an image
+// 				// const maxWidth = getEditorMaxWidth();
+// 				// const longestSide = this.plugin.longestSide; 
+// 				// if (longestSide !== null) {  // Check if longestSide is not null before using it
+// 				//     this.plugin.settings.customSizeLongestSide = Math.min(maxWidth, longestSide).toString();
+// 				// 	await this.plugin.saveSettings();
+// 				// }
+// 				customSizeSetting.settingEl.style.display = 'none';
+// 			} else {
+// 				// If neither "customSize" nor "fitImage" is selected, hide the "Custom size" field
+// 				customSizeSetting.settingEl.style.display = 'none';
+// 			}
+// 		};
+// 		// Function to get the max width of the notes editor
+// 		// const getEditorMaxWidth = () => {
+// 		// 	// Get the computed style of the root element
+// 		// 	const style = getComputedStyle(document.documentElement);
+// 		// 	// Get the value of the --file-line-width variable
+// 		// 	const maxWidth = style.getPropertyValue('--file-line-width');
+// 		// 	// Remove 'px' from the end and convert to a number
+// 		// 	return Number(maxWidth.slice(0, -2));
+// 		// };
+
+// 		// Add "Fit Image" option to the dropdown
+// 		new Setting(containerEl)
+// 			.setName("Non-destructive resize:")
+// 			.setDesc(`Automatically apply "|size" to dropped/pasted images.`)
+// 			.addDropdown((dropdown) =>
+// 				dropdown
+// 					.addOptions({ disabled: "None", fitImage: "Fit Image", customSize: "Custom", }) // Add "Fit Image" option
+// 					.setValue(this.plugin.settings.autoNonDestructiveResize)
+// 					.onChange(async (value) => {
+// 						this.plugin.settings.autoNonDestructiveResize = value;
+// 						await this.plugin.saveSettings();
+// 						updateCustomSizeSetting(value);
+// 					})
+// 			);
+
+
+// 		const customSizeSetting = new Setting(containerEl)
+// 			.setName('Custom Size:')
+// 			.setDesc(`Specify the default size which should be applied on all dropped/pasted images. For example, if you specify custom size as "250" then when you drop or paste an "image.jpg" it would become ![[image.jpg|250]]`)
+// 			.addText((text) => {
+// 				text.setValue(this.plugin.settings.customSize.toString());
+// 				text.onChange(async (value) => {
+// 					this.plugin.settings.customSize = value;
+// 					await this.plugin.saveSettings();
+// 				});
+// 			});
+
+// 		// Initially hide the custom size setting
+// 		updateCustomSizeSetting(this.plugin.settings.autoNonDestructiveResize);
+
+
+// 		/////////////////////////////////////////////
+
+// 		new Setting(containerEl)
+// 			.setName('Resize by dragging edge of an image')
+// 			.setDesc('Turn this on to allow resizing images by dragging the edge of an image.')
+// 			.addToggle(toggle =>
+// 				toggle
+// 					.setValue(this.plugin.settings.resizeByDragging)
+// 					.onChange(async value => {
+// 						this.plugin.settings.resizeByDragging = value;
+// 						await this.plugin.saveSettings();
+// 					})
+// 			);
+
+// 		new Setting(containerEl)
+// 			.setName('Resize with Shift + Scrollwheel')
+// 			.setDesc('Toggle this setting to allow resizing images using the Shift key combined with the scroll wheel.')
+// 			.addToggle(toggle =>
+// 				toggle
+// 					.setValue(this.plugin.settings.resizeWithShiftScrollwheel)
+// 					.onChange(async value => {
+// 						this.plugin.settings.resizeWithShiftScrollwheel = value;
+// 						await this.plugin.saveSettings();
+// 					})
+// 			);
+
+// 		/////////////////////////////////////////////
+// 		/////////////////////////////////////////////
+
+// 		const heading2_other = containerEl.createEl("h2");
+// 		heading2_other.textContent = "Other";
+
+// 		p.style.fontSize = "12px";
+// 		new Setting(containerEl)
+// 			.setName('Right-click context menu')
+// 			.setDesc('Toggle to enable or disable right-click context menu')
+// 			.addToggle(toggle =>
+// 				toggle
+// 					.setValue(this.plugin.settings.rightClickContextMenu)
+// 					.onChange(async value => {
+// 						this.plugin.settings.rightClickContextMenu = value;
+// 						await this.plugin.saveSettings();
+// 					})
+// 			);
+
+// 		new Setting(containerEl)
+//             .setName('Remember scroll position')
+//             .setDesc('Toggle ON to remember the scroll position when processing images. Toggle OFF to automatically scroll to the last image')
+//             .addToggle(toggle => toggle
+//                 .setValue(this.plugin.settings.rememberScrollPosition)
+//                 .onChange(async (value) => {
+//                     this.plugin.settings.rememberScrollPosition = value;
+//                     await this.plugin.saveSettings();
+//                 }));
+
+//         new Setting(containerEl)
+//             .setName('Cursor position')
+//             .setDesc('Choose the cursor position after processing the image. Front or back of the link.')
+//             .addDropdown(dropdown => dropdown
+//                 .addOption('front', 'Front')
+//                 .addOption('back', 'Back')
+//                 .setValue(this.plugin.settings.cursorPosition)
+//                 .onChange(async (value) => {
+//                     this.plugin.settings.cursorPosition = value as 'front' | 'back';
+//                     await this.plugin.saveSettings();
+//                 }));
+
+
+// 		new Setting(containerEl)
+// 			.setName('Notification: compression')
+// 			.setDesc('Show file size before and after compression')
+// 			.addToggle(toggle => toggle
+// 				.setValue(this.plugin.settings.showNoticeMessages)
+// 				.onChange(async (value) => {
+// 					this.plugin.settings.showNoticeMessages = value;
+// 					await this.plugin.saveSettings();
+// 				}));
+
+// 		new Setting(containerEl)
+// 			.setName('Notification: progress')
+// 			.setDesc('Show processing status report when multiple images were detected e.g.: When enabled it will show "Processing 1 of 20" ')
+// 			.addToggle(toggle => toggle
+// 				.setValue(this.plugin.settings.showProgress)
+// 				.onChange(async (value) => {
+// 					this.plugin.settings.showProgress = value;
+// 					await this.plugin.saveSettings();
+// 				}));
+
+// 		new Setting(containerEl)
+// 			.setName('Notification: summary')
+// 			.setDesc('Show summary after processing completes')
+// 			.addToggle(toggle => toggle
+// 				.setValue(this.plugin.settings.showSummary)
+// 				.onChange(async (value) => {
+// 					this.plugin.settings.showSummary = value;
+// 					await this.plugin.saveSettings();
+// 				}));
+
+// 		new Setting(containerEl)
+// 			.setName('Notification: rename')
+// 			.setDesc('Show notifiction when files are renamed')
+// 			.setClass('settings-indent') 
+// 			.addToggle(toggle =>
+// 				toggle
+// 					.setValue(this.plugin.settings.showRenameNotice)
+// 					.onChange(async value => {
+// 						this.plugin.settings.showRenameNotice = value;
+// 						await this.plugin.saveSettings();
+// 					})
+// 			);
+// 		/////////////////////////////////////////////
+
+// 		const heading2_queue = containerEl.createEl("h2");
+// 		heading2_queue.textContent = "Advanced:";
+// 		const p_queue = containerEl.createEl("p");
+// 		p_queue.textContent = 'Below settings allow you to specify how long Obsidian should wait before timing-out the image processing.\
+// 								E.g.: when file is extra large 100MB+ it might freeze Obsidian - Image Converter will try to do the \
+// 								best it can to process it - however if it takes too long it wil stop';
+// 		p_queue.style.fontSize = "12px";
+
+// 		new Setting(containerEl)
+// 			.setName('Base timeout (seconds)')
+// 			.setDesc('Base processing timeout for all images.')
+// 			.addText(text => text
+// 				.setValue((this.plugin.settings.baseTimeout / 1000).toString())
+// 				.onChange(async (value) => {
+// 					this.plugin.settings.baseTimeout = parseInt(value) * 1000;
+// 					await this.plugin.saveSettings();
+// 				}));
+
+// 		new Setting(containerEl)
+// 			.setName('Additional timeout per MB')
+// 			.setDesc('Additional processing time (in seconds) per MB of file size')
+// 			.addText(text => text
+// 				.setValue((this.plugin.settings.timeoutPerMB / 1000).toString())
+// 				.onChange(async (value) => {
+// 					this.plugin.settings.timeoutPerMB = parseInt(value) * 1000;
+// 					await this.plugin.saveSettings();
+// 				}));
+
+// 	}
+// }
+
+
+
+export class ImageConvertTab extends PluginSettingTab {
+	plugin: ImageConvertPlugin;
+	private previewText: TextComponent;
+	// private updatePreviewDebounced: () => void;
+	private activeTab = 'convert'; // Default tab
+	private tabContainer: HTMLElement;
+	private contentContainer: HTMLElement;
+	private previewEl: HTMLElement;
+	private folderSettingsContainer: HTMLElement;
+	private filenameSettingsContainer: HTMLElement;
+
+	// Define available tabs
+	private tabs: SettingsTab[] = [
+		{ id: 'convert', name: 'Convert', icon: 'image-plus' },
+		{ id: 'output', name: 'Output', icon: 'folder' },
+		{ id: 'settings', name: 'Settings', icon: 'settings' },
+		{ id: 'advanced', name: 'Advanced', icon: 'tool' }
+	];
+
+	constructor(app: App, plugin: ImageConvertPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
+		// this.updatePreviewDebounced = debounce(this.updatePreview.bind(this), 500);
+	}
+
+	async updatePreview() {
+		if (!this.previewText) return;
+
+		try {
+			const activeFile = this.app.workspace.getActiveFile();
+			const mockFile = activeFile || this.app.vault.getFiles()[0];
+			if (!mockFile) return;
+
+			let pathTemplate = '';
+			switch (this.plugin.settings.attachmentLocation) {
+				case 'specified':
+					pathTemplate = this.plugin.settings.attachmentSpecifiedFolder;
+					break;
+				case 'subfolder':
+					pathTemplate = `${mockFile.parent?.path ?? ''}/${this.plugin.settings.attachmentSubfolderName}`;
+					break;
+				case 'customOutput':
+					pathTemplate = this.plugin.settings.customOutputPath;
+					break;
+				default:
+					this.previewText.setValue('Preview not available for this option');
+					return;
+			}
+
+			const previewPath = await this.plugin.generatePathPreview(pathTemplate, mockFile);
+			this.previewText.setValue(previewPath);
+		} catch (error) {
+			console.error('Preview generation error:', error);
+			this.previewText.setValue('Error generating preview');
+		}
 	}
 
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		const heading = containerEl.createEl('h1');
-		heading.textContent = 'Convert, compress and resize';
+		// Create tab container with modern styling
+		this.tabContainer = containerEl.createDiv('nav-tabs-container');
+		this.tabContainer.addClasses(['nav-tabs', 'is-tabs']);
 
-		new Setting(containerEl)
-			.setName('Select format to convert images to')
-			.setDesc(`Turn this on to allow image conversion and compression on drag'n'drop or paste. "Same as original" - will keep original file format.`)
+		// Create content container
+		this.contentContainer = containerEl.createDiv('nav-content-container');
+
+		// Create tabs
+		this.createTabs();
+
+		// Display content for default/active tab
+		this.displayTabContent(this.activeTab);
+	}
+
+	private createTabs(): void {
+		const tabHeadersContainer = this.tabContainer.createDiv('nav-buttons-container');
+
+		this.tabs.forEach(tab => {
+			const tabButton = tabHeadersContainer.createDiv(`nav-button ${this.activeTab === tab.id ? 'is-active' : ''}`);
+
+			// Add icon if specified
+			if (tab.icon) {
+				tabButton.createSpan({
+					cls: `nav-button-icon ${tab.icon}`
+				});
+			}
+
+			const text = tabButton.createSpan('nav-button-title');
+			text.setText(tab.name);
+
+			tabButton.addEventListener('click', () => {
+				// Remove active class from all tabs
+				this.tabContainer.findAll('.nav-button').forEach(el =>
+					el.removeClass('is-active'));
+
+				// Add active class to clicked tab
+				tabButton.addClass('is-active');
+
+				// Update content
+				this.activeTab = tab.id;
+				this.displayTabContent(tab.id);
+			});
+		});
+	}
+
+	private displayTabContent(tabId: string): void {
+		this.contentContainer.empty();
+
+		switch (tabId) {
+			case 'convert':
+				this.displayConvertSettings();
+				break;
+			case 'output':
+				this.displayOutputSettings();
+				break;
+			case 'settings':
+				this.displayGeneralSettings();
+				break;
+			case 'advanced':
+				this.displayAdvancedSettings();
+				break;
+		}
+	}
+
+	// Convert to:
+	private displayConvertSettings(): void {
+		const container = this.contentContainer.createDiv('settings-container');
+
+		// Format Setting
+		new Setting(container)
+			.setName('Format')
+			.setDesc('Select format to convert images to')
 			.addDropdown(dropdown =>
 				dropdown
-					.addOptions({ disabled: 'Same as original', webp: 'WebP', jpg: 'JPG', png: 'PNG' })
+					.addOptions({
+						disabled: 'Same as original',
+						webp: 'WebP',
+						jpg: 'JPG',
+						png: 'PNG'
+					})
 					.setValue(this.plugin.settings.convertTo)
 					.onChange(async value => {
 						this.plugin.settings.convertTo = value;
@@ -2364,7 +4009,8 @@ class ImageConvertTab extends PluginSettingTab {
 					})
 			);
 
-		new Setting(containerEl)
+		// Quality Setting
+		new Setting(container)
 			.setName('Quality')
 			.setDesc('0 - low quality, 99 - high quality, 100 - no compression; 75 - recommended')
 			.addText(text =>
@@ -2373,7 +4019,6 @@ class ImageConvertTab extends PluginSettingTab {
 					.setValue((this.plugin.settings.quality * 100).toString())
 					.onChange(async value => {
 						const quality = parseInt(value);
-
 						if (/^\d+$/.test(value) && quality >= 0 && quality <= 100) {
 							this.plugin.settings.quality = quality / 100;
 							await this.plugin.saveSettings();
@@ -2381,202 +4026,440 @@ class ImageConvertTab extends PluginSettingTab {
 					})
 			);
 
-		new Setting(containerEl)
+		// Resize Mode Setting
+		new Setting(container)
 			.setName('Image resize mode')
-			.setDesc('Select the mode to use when resizing the image. Resizing an image will further reduce file-size, but it will resize your actual file, which means that the original file will be modified, and the changes will be permanent.')
+			.setDesc('Select the mode to use when resizing the image')
 			.addDropdown(dropdown =>
 				dropdown
-					.addOptions({ None: 'None', Fit: 'Fit', Fill: 'Fill', LongestEdge: 'Longest Edge', ShortestEdge: 'Shortest Edge', Width: 'Width', Height: 'Height' })
+					.addOptions({
+						None: 'None',
+						Fit: 'Fit',
+						Fill: 'Fill',
+						LongestEdge: 'Longest Edge',
+						ShortestEdge: 'Shortest Edge',
+						Width: 'Width',
+						Height: 'Height'
+					})
 					.setValue(this.plugin.settings.resizeMode)
 					.onChange(async value => {
 						this.plugin.settings.resizeMode = value;
 						await this.plugin.saveSettings();
-
 						if (value !== 'None') {
-							// Open the ResizeModal when an option is selected
 							const modal = new ResizeModal(this.plugin);
 							modal.open();
 						}
 					})
 			);
+	}
 
-		new Setting(containerEl)
-			.setName('Auto rename')
-			.setDesc(
-				`Automatically rename dropped image into current notes name + todays date (YYYYMMDDHHMMSSSSS). For instance, image "testImage.jpg" dropped into note "Howtotakenotes.md" becomes "Howtotakenotes-20230927164411.webp"`
-			)
-			.addToggle(toggle =>
-				toggle
-					.setValue(this.plugin.settings.autoRename)
-					.onChange(async value => {
-						this.plugin.settings.autoRename = value;
-						await this.plugin.saveSettings();
-					})
-			);
+	// Output
+	private displayOutputSettings(): void {
+		const container = this.contentContainer.createDiv('settings-container');
 
-		new Setting(containerEl)
-			.setName('Rename format')
-			.setDesc(
-				`Select a rename format. Date will append a date. Hex will append a random hexadecimal string.`
-			)
-			.addDropdown(dropdown => {
-				dropdown.addOption("date", "Date")
-					.addOption("hex", "Hex")
-					.setValue(this.plugin.settings.renameFormat)
-					.onChange(async (value) => {
-						this.plugin.settings.renameFormat = value;
-						await this.plugin.saveSettings();
-					});
-
-			});
-
-		// OUTPUT
-		// Update outputSetting name and description
-		const updateOutputSetting = (value: string) => {
-			if (value === "specified") {
-				outputSetting.setName("Path to specific folder:");
-				outputSetting.setDesc('If you specify folder path as "/attachments/images" then all processed images will be saved inside "/attachments/images/" folder. If any of the folders do not exist, they will be created.');
-			} else if (value === "subfolder") {
-				outputSetting.setName("Subfolder name:");
-				outputSetting.setDesc('Add processed images to a specified folder next to the note you added the image to.  If any of the folders do not exist, they will be created. For example, if your note is located in "00-HOME/Subfolder1/note.md", and I specify that i want to keep all images inside "images" subfolder, then the image will be saved in "00-HOME/Subfolder1/images/."');
-			}
-		};
-
-		// Create the dropdown
-		new Setting(this.containerEl)
-			.setName("Output")
-			.setDesc("Select where to save converted images. Default - follow rules as defined by Obsidian in 'File & Links' > 'Default location for new attachments'")
+		// Output Location Setting
+		new Setting(container)
+			.setName("Output Location")
+			.setDesc("Select where to save converted images")
 			.addDropdown((dropdown) => {
-				dropdown.addOption("disable", "Default")
+				dropdown
+					.addOption("disable", "Default")
 					.addOption("root", "Root folder")
-					.addOption("specified", "In the folder specified below")
+					.addOption("specified", "In specified folder")
 					.addOption("current", "Same folder as current file")
-					.addOption("subfolder", "In subfolder under current folder [Beta]")
+					.addOption("subfolder", "In subfolder")
+					.addOption("customOutput", "Custom output path")
 					.setValue(this.plugin.settings.attachmentLocation)
-					.onChange(async (value) => {
+					.onChange(async (value: 'disable' | 'root' | 'specified' | 'current' | 'subfolder' | 'customOutput') => {
 						this.plugin.settings.attachmentLocation = value;
-						updateOutputSetting(value);
-						outputSetting.settingEl.style.display = value === "specified" || value === "subfolder" ? 'flex' : 'none';
 						await this.plugin.saveSettings();
+						this.updateFolderSettings();
+						this.updateConsolidatedPreview();
 					});
 			});
 
-		const outputSetting = new Setting(this.containerEl)
-			.addText((text) => {
-				let value = "/";
-				if (this.plugin.settings.attachmentLocation === "specified" && this.plugin.settings.attachmentSpecifiedFolder) {
-					value = this.plugin.settings.attachmentSpecifiedFolder.toString();
-				} else if (this.plugin.settings.attachmentLocation === "subfolder" && this.plugin.settings.attachmentSubfolderName) {
-					value = this.plugin.settings.attachmentSubfolderName.toString();
-				}
-				text.setValue(value);
-				text.onChange(async (value) => {
-					if (this.plugin.settings.attachmentLocation === "specified") {
-						this.plugin.settings.attachmentSpecifiedFolder = value;
-					} else if (this.plugin.settings.attachmentLocation === "subfolder") {
-						this.plugin.settings.attachmentSubfolderName = value;
-					}
-					await this.plugin.saveSettings();
-				});
-			});
-
-		// Initially hide the output setting
-		outputSetting.settingEl.style.display = 'none';
-
-		// If the dropdown is already set to "specified" or "subfolder", show the output setting
-		if (this.plugin.settings.attachmentLocation === "specified" || this.plugin.settings.attachmentLocation === "subfolder") {
-			outputSetting.settingEl.style.display = 'flex';
-			updateOutputSetting(this.plugin.settings.attachmentLocation);
-		}
-
-		/////////////////////////////////////////////
-
-		const heading2 = containerEl.createEl("h2");
-		heading2.textContent = "Non-Destructive Image Resizing:";
-		const p = containerEl.createEl("p");
-		p.textContent = 'Below settings allow you to adjust image dimensions using the standard ObsidianMD method by modifying image links. For instance, to change the width of ![[Engelbart.jpg]], we add "| 100" at the end, resulting in ![[Engelbart.jpg | 100]].';
-		p.style.fontSize = "12px";
-
-		/////////////////////////////////////////////
-		// Create a function to update the custom size setting
-		// Update function to handle "Fit Image" option
-		const updateCustomSizeSetting = async (value: string) => {
-			if (value === "customSize") {
-				// If "customSize" is selected, show the "Custom size" field
-				customSizeSetting.settingEl.style.display = 'flex';
-			} else if (value === "fitImage") {
-				// If "fitImage" is selected, calculate the size based on the max width of the notes editor and longest side of an image
-				// const maxWidth = getEditorMaxWidth();
-				// const longestSide = this.plugin.longestSide; 
-				// if (longestSide !== null) {  // Check if longestSide is not null before using it
-				//     this.plugin.settings.customSizeLongestSide = Math.min(maxWidth, longestSide).toString();
-				// 	await this.plugin.saveSettings();
-				// }
-				customSizeSetting.settingEl.style.display = 'none';
-			} else {
-				// If neither "customSize" nor "fitImage" is selected, hide the "Custom size" field
-				customSizeSetting.settingEl.style.display = 'none';
-			}
-		};
-		// Function to get the max width of the notes editor
-		// const getEditorMaxWidth = () => {
-		// 	// Get the computed style of the root element
-		// 	const style = getComputedStyle(document.documentElement);
-		// 	// Get the value of the --file-line-width variable
-		// 	const maxWidth = style.getPropertyValue('--file-line-width');
-		// 	// Remove 'px' from the end and convert to a number
-		// 	return Number(maxWidth.slice(0, -2));
-		// };
-
-		// Add "Fit Image" option to the dropdown
-		new Setting(containerEl)
-			.setName("Non-destructive resize:")
-			.setDesc(`Automatically apply "|size" to dropped/pasted images.`)
-			.addDropdown((dropdown) =>
+		// Create containers for settings
+		this.folderSettingsContainer = container.createDiv('folder-settings');
+		
+		// File Naming Setting
+		new Setting(container)
+			.setName('File Naming')
+			.setDesc('Choose how to rename processed images')
+			.addDropdown(dropdown => 
 				dropdown
-					.addOptions({ disabled: "None", fitImage: "Fit Image", customSize: "Custom", }) // Add "Fit Image" option
-					.setValue(this.plugin.settings.autoNonDestructiveResize)
+					.addOptions({
+						'disabled': 'Keep original name',
+						'custom': 'Custom template'
+					})
+					.setValue(this.plugin.settings.autoRename ?
+						(this.plugin.settings.useCustomRenaming ? 'custom' : 'disabled') : 'disabled')
 					.onChange(async (value) => {
-						this.plugin.settings.autoNonDestructiveResize = value;
+						this.plugin.settings.autoRename = value !== 'disabled';
+						this.plugin.settings.useCustomRenaming = value === 'custom';
 						await this.plugin.saveSettings();
-						updateCustomSizeSetting(value);
-					})
-			);
+						this.updateFilenameSettings();
+						this.updateConsolidatedPreview();
+					}));
 
 
-		const customSizeSetting = new Setting(containerEl)
-			.setName('Custom Size:')
-			.setDesc(`Specify the default size which should be applied on all dropped/pasted images. For example, if you specify custom size as "250" then when you drop or paste an "image.jpg" it would become ![[image.jpg|250]]`)
+		this.filenameSettingsContainer = container.createDiv('filename-settings');
+
+		// Create preview element first
+		this.previewEl = container.createDiv('preview-container');
+
+
+
+		// Initialize settings
+		this.updateFolderSettings();
+		this.updateFilenameSettings();
+		this.updateConsolidatedPreview();
+	}
+
+	private createCustomOutputSettings(container: HTMLElement): void {
+		new Setting(container)
+			.setName("Custom output path")
+			.setDesc("Define custom path with variables (e.g., {date}, {title})")
 			.addText((text) => {
-				text.setValue(this.plugin.settings.customSize.toString());
-				text.onChange(async (value) => {
-					this.plugin.settings.customSize = value;
-					await this.plugin.saveSettings();
-				});
-			});
-
-		// Initially hide the custom size setting
-		updateCustomSizeSetting(this.plugin.settings.autoNonDestructiveResize);
-
-
-
-		/////////////////////////////////////////////
-
-		new Setting(containerEl)
-			.setName('Resize by dragging edge of an image')
-			.setDesc('Turn this on to allow resizing images by dragging the edge of an image.')
-			.addToggle(toggle =>
-				toggle
-					.setValue(this.plugin.settings.resizeByDragging)
-					.onChange(async value => {
-						this.plugin.settings.resizeByDragging = value;
+				text.setPlaceholder('custom/path/{yyyy}/{mm}')
+					.setValue(this.plugin.settings.customOutputPath)
+					.onChange(async (value) => {
+						this.plugin.settings.customOutputPath = value;
 						await this.plugin.saveSettings();
-					})
-			);
+						this.updateConsolidatedPreview();
+					});
+			});
+	}
 
-		new Setting(containerEl)
-			.setName('Resize with Shift + Scrollwheel')
-			.setDesc('Toggle this setting to allow resizing images using the Shift key combined with the scroll wheel.')
+	// Helper methods for conditional settings
+	private createSpecifiedFolderSettings(container: HTMLElement): void {
+		new Setting(container)
+			.setName("Specified folder path")
+			.setDesc('Path to save processed images (e.g., "attachments/images")')
+			.setClass('settings-indent')
+			.addText((text) => {
+				text.setPlaceholder('attachments/{yyyy}/{mm}')
+					.setValue(this.plugin.settings.attachmentSpecifiedFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.attachmentSpecifiedFolder = value;
+						await this.plugin.saveSettings();
+						this.updateConsolidatedPreview(); 
+					});
+			});
+	}
+
+	private createSubfolderSettings(container: HTMLElement): void {
+		new Setting(container)
+			.setName("Subfolder name")
+			.setDesc('Name of subfolder under current note\'s folder')
+			.setClass('settings-indent')
+			.addText((text) => {
+				text.setPlaceholder('images/{yyyy}/{mm}')
+					.setValue(this.plugin.settings.attachmentSubfolderName)
+					.onChange(async (value) => {
+						this.plugin.settings.attachmentSubfolderName = value;
+						await this.plugin.saveSettings();
+						this.updateConsolidatedPreview(); 
+					});
+			});
+	}
+
+	private updateFolderSettings(): void {
+		this.folderSettingsContainer.empty();
+
+		switch (this.plugin.settings.attachmentLocation) {
+			case "specified":
+				this.createSpecifiedFolderSettings(this.folderSettingsContainer);
+				break;
+			case "subfolder":
+				this.createSubfolderSettings(this.folderSettingsContainer);
+				break;
+			case "customOutput":
+				this.createCustomOutputSettings(this.folderSettingsContainer);
+				break;
+		}
+	}
+
+	private async updateConsolidatedPreview(): Promise<void> {
+		try {
+			const activeFile = this.app.workspace.getActiveFile();
+			const mockFile = activeFile || this.app.vault.getFiles()[0];
+			if (!mockFile) return;
+	
+			// Create preview sections
+			this.previewEl.empty();
+			
+			// Main preview showing just the final path
+			const previewContainer = this.previewEl.createDiv('preview-container');
+			previewContainer.createEl('div', { text: 'Preview:', cls: 'preview-label' });
+			
+			// Get path template based on settings
+			let pathTemplate = '';
+			switch (this.plugin.settings.attachmentLocation) {
+				case 'specified':
+					pathTemplate = this.plugin.settings.attachmentSpecifiedFolder;
+					break;
+				case 'subfolder':
+					pathTemplate = `${mockFile.parent?.path ?? ''}/${this.plugin.settings.attachmentSubfolderName}`;
+					break;
+				case 'customOutput':
+					pathTemplate = this.plugin.settings.customOutputPath;
+					break;
+				case 'root':
+					pathTemplate = '/';
+					break;
+				case 'current':
+					pathTemplate = mockFile.parent?.path ?? '';
+					break;
+				default:
+					pathTemplate = 'Using default location';
+			}
+	
+			// Get filename template
+			const filenameTemplate = this.plugin.settings.autoRename && this.plugin.settings.useCustomRenaming
+				? this.plugin.settings.customRenameTemplate
+				: '{imageName}';
+	
+			// Process variables
+			const fullTemplate = `${pathTemplate}/${filenameTemplate}.${this.plugin.settings.convertTo}`;
+			const processedPath = await this.plugin.processSubfolderVariables(fullTemplate, mockFile, mockFile);
+	
+			// Show the final processed path
+			previewContainer.createEl('div', { 
+				text: processedPath,
+				cls: 'preview-path' 
+			});
+	
+			// Show available variables only when relevant settings are selected
+			if (this.shouldShowVariables()) {
+				this.addVariablesHelper(previewContainer);
+			}
+	
+		} catch (error) {
+			console.error('Preview generation error:', error);
+			this.previewEl.empty();
+			this.previewEl.createEl('div', { text: 'Error generating preview', cls: 'preview-error' });
+		}
+	}
+
+	private shouldShowVariables(): boolean {
+		// Show variables only when custom path or custom filename is being used
+		return (
+			this.plugin.settings.attachmentLocation === 'customOutput' ||
+			this.plugin.settings.attachmentLocation === 'specified' ||
+			this.plugin.settings.attachmentLocation === 'subfolder' ||
+			(this.plugin.settings.autoRename && this.plugin.settings.useCustomRenaming)
+		);
+	}
+
+	private addVariablesHelper(container: HTMLElement): void {
+		const helperContainer = container.createDiv('variables-helper');
+		const toggleButton = helperContainer.createEl('button', {
+			text: 'Show available variables',
+			cls: 'variables-toggle'
+		});
+		
+		const variablesContent = helperContainer.createDiv('variables-content');
+		variablesContent.style.display = 'none';
+	
+		const variables = this.getRelevantVariables();
+		
+		if (variables.length > 0) {
+			const variablesList = variablesContent.createEl('div', { cls: 'variables-list' });
+			variables.forEach(variable => {
+				if (variable.startsWith('== ') && variable.endsWith(' ==')) {
+					// This is a category header
+					variablesList.createEl('h4', {
+						text: variable.replace(/==/g, '').trim(),
+						cls: 'variables-category-header'
+					});
+				} else if (variable) { // Skip empty strings
+					variablesList.createEl('div', {
+						text: variable,
+						cls: 'variable-item'
+					});
+				}
+			});
+		}
+	
+		toggleButton.addEventListener('click', () => {
+			const isHidden = variablesContent.style.display === 'none';
+			variablesContent.style.display = isHidden ? 'block' : 'none';
+			toggleButton.textContent = isHidden 
+				? 'Hide available variables' 
+				: 'Show available variables';
+		});
+	}
+	
+	private getRelevantVariables(): string[] {
+		const categories = {
+			'File & Note Information': [
+				'{imageName} - Original image name',
+				'{noteName} - Current note name',
+				'{fileType} - File extension',
+				'{parentFolder} - Parent folder name',
+				'{directory} - Current note directory path',
+				'{folderName} - Current folder name',
+				'{pathDepth} - Folder depth number'
+			],
+	
+			'Date & Time Variables': [
+				'{date:YYYY-MM-DD} - Custom date format (supports moment.js patterns)',
+				'{yyyy} - Current year',
+				'{mm} - Current month',
+				'{dd} - Current day',
+				'{time} - Current time (HH-mm-ss)',
+				'{HH} - Current hour',
+				'{timestamp} - Unix timestamp',
+				'{weekday} - Day of week',
+				'{month} - Month name',
+				'{calendar} - Natural language date'
+			],
+	
+			'Image Properties': [
+				'{width} - Image width in pixels',
+				'{height} - Image height in pixels',
+				'{ratio} - Width/height ratio',
+				'{resolution} - Full resolution (e.g., 1920x1080)',
+				'{orientation} - landscape or portrait',
+				'{quality} - Current conversion quality'
+			],
+	
+			'Size Variables': [
+				'{size:MB:2} - Size in MB with 2 decimal places',
+				'{size:KB:1} - Size in KB with 1 decimal place',
+				'{size:B:0} - Size in bytes with no decimals',
+				'{sizeMB} - Size in MB',
+				'{sizeKB} - Size in KB',
+				'{sizeB} - Size in bytes'
+			],
+	
+			'Unique Identifiers': [
+				'{MD5:filename} - MD5 hash of filename',
+				'{MD5:filename:8} - First 8 chars of filename MD5 hash',
+				'{MD5:path} - MD5 hash of file path',
+				'{MD5:fullpath} - MD5 hash of complete path',
+				'{MD5:parentfolder} - MD5 hash of parent folder name',
+				'{MD5:notename} - MD5 hash of current note name',
+				'{randomHex:6} - Random hex string of specified length',
+				'{counter:000} - Incremental counter with padding',
+				'{random} - Random alphanumeric string',
+				'{uuid} - Random UUID'
+			],
+	
+			'System Information': [
+				'{platform} - Operating system platform',
+				'{userAgent} - Browser user agent'
+			]
+		};
+	
+		// Modify the `addVariablesHelper` method to use these categories
+		return Object.entries(categories).flatMap(([category, vars]) => [
+			`== ${category} ==`,
+			...vars,
+			'' // Add empty string for spacing between categories
+		]);
+	}
+
+	// private createPreviewSection(container: HTMLElement, title: string, items: Record<string, string>): void {
+	// 	const section = container.createDiv('preview-section');
+	// 	section.createEl('h4', { text: title, cls: 'preview-section-header' });
+		
+	// 	const content = section.createDiv('preview-section-content');
+	// 	Object.entries(items).forEach(([key, value]) => {
+	// 		const item = content.createDiv('preview-item');
+	// 		item.createEl('strong', { text: `${key}: `, cls: 'preview-item-key' });
+	// 		item.createSpan({ text: value, cls: 'preview-item-value' });
+	// 	});
+	// }
+	
+	private updateFilenameSettings(): void {
+		this.filenameSettingsContainer.empty();
+	
+		if (this.plugin.settings.autoRename && this.plugin.settings.useCustomRenaming) {
+			new Setting(this.filenameSettingsContainer)
+				.setName("Filename template")
+				.setDesc("Use variables like {date}, {title}, {originalName}")
+				.setClass('settings-indent')  // Add this line for indentation
+				.addText((text) => {
+					text.setPlaceholder('{originalName}-{date}')
+						.setValue(this.plugin.settings.customRenameTemplate)
+						.onChange(async (value) => {
+							this.plugin.settings.customRenameTemplate = value;
+							await this.plugin.saveSettings();
+							this.updateConsolidatedPreview();  // Add this for real-time updates
+						});
+				});
+		}
+	}
+
+	// Settings / Extras
+	private displayGeneralSettings(): void {
+		// Clear the container first
+		const container = this.contentContainer;
+		container.empty();
+		
+		container.createDiv('settings-container', (settingsContainer) => {
+			// Image Resize Controls Group
+			settingsContainer.createEl('h3', { text: 'Image Resize Controls' });
+	
+			// Resize by dragging (main toggle)
+			new Setting(settingsContainer)
+				.setName('Resize by dragging')
+				.setDesc('Allow resizing images by dragging the edge')
+				.addToggle(toggle =>
+					toggle
+						.setValue(this.plugin.settings.resizeByDragging)
+						.onChange(async value => {
+							this.plugin.settings.resizeByDragging = value;
+							await this.plugin.saveSettings();
+							// Refresh the entire settings display
+							this.displayGeneralSettings();
+						})
+				);
+	
+			// Only show these settings if resizeByDragging is enabled
+			if (this.plugin.settings.resizeByDragging) {
+				// Non-destructive resize settings
+				new Setting(settingsContainer)
+					.setName("Non-destructive resize")
+					.setDesc("Automatically apply '|size' to dropped/pasted images")
+					.setClass('settings-indent')
+					.addDropdown((dropdown) =>
+						dropdown
+							.addOptions({
+								disabled: "None",
+								fitImage: "Fit Image",
+								customSize: "Custom"
+							})
+							.setValue(this.plugin.settings.autoNonDestructiveResize)
+							.onChange(async (value) => {
+								this.plugin.settings.autoNonDestructiveResize = value;
+								await this.plugin.saveSettings();
+								this.displayGeneralSettings();
+							})
+					);
+	
+				// Show custom size setting immediately after non-destructive resize if "Custom" is selected
+				if (this.plugin.settings.autoNonDestructiveResize === "customSize") {
+					new Setting(settingsContainer)
+						.setName("Custom size")
+						.setDesc("Enter custom size for non-destructive resize")
+						.setClass('settings-indent')
+						.addText((text) => {
+							text.setPlaceholder("800")
+								.setValue(this.plugin.settings.customSize)
+								.onChange(async (value) => {
+									this.plugin.settings.customSize = value;
+									await this.plugin.saveSettings();
+								});
+						});
+				}
+			}
+	
+			// Shift + Scrollwheel resize (only shown if resizeByDragging is enabled)
+			new Setting(settingsContainer)
+			.setName('Shift + Scrollwheel resize')
+			.setDesc('Allow resizing with Shift + Scrollwheel')
 			.addToggle(toggle =>
 				toggle
 					.setValue(this.plugin.settings.resizeWithShiftScrollwheel)
@@ -2585,26 +4468,127 @@ class ImageConvertTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					})
 			);
-
-		new Setting(containerEl)
-			.setName('Right-click context menu')
-			.setDesc('Toggle to enable or disable right-click context menu')
-			.addToggle(toggle =>
-				toggle
-					.setValue(this.plugin.settings.rightClickContextMenu)
-					.onChange(async value => {
-						this.plugin.settings.rightClickContextMenu = value;
+			// Editor Behavior Group
+			settingsContainer.createEl('h3', { text: 'Editor Behavior' });
+	
+			// Context Menu Setting
+			new Setting(settingsContainer)
+				.setName('Right-click menu')
+				.setDesc('Enable right-click context menu')
+				.addToggle(toggle =>
+					toggle
+						.setValue(this.plugin.settings.rightClickContextMenu)
+						.onChange(async value => {
+							this.plugin.settings.rightClickContextMenu = value;
+							await this.plugin.saveSettings();
+						})
+				);
+	
+			// Cursor Position Setting
+			new Setting(settingsContainer)
+				.setName('Cursor position')
+				.setDesc('Choose cursor position after processing the image: FRONT of the link or BACK')
+				.addDropdown(dropdown => dropdown
+					.addOption('front', 'Front')
+					.addOption('back', 'Back')
+					.setValue(this.plugin.settings.cursorPosition)
+					.onChange(async (value) => {
+						this.plugin.settings.cursorPosition = value as 'front' | 'back';
 						await this.plugin.saveSettings();
-					})
-			);
-
+					}));
+	
+			// Notifications Group
+			settingsContainer.createEl('h3', { text: 'Notifications' });
+			
+			new Setting(settingsContainer)
+				.setName('Show compression notification')
+				.setDesc('Show file size before and after compression')
+				.addToggle(toggle => toggle
+					.setValue(this.plugin.settings.showNoticeMessages)
+					.onChange(async (value) => {
+						this.plugin.settings.showNoticeMessages = value;
+						await this.plugin.saveSettings();
+					}));
+	
+			new Setting(settingsContainer)
+				.setName('Show progress notification')
+				.setDesc('Show processing status report when multiple images were detected e.g.: When enabled it will show "Processing 1 of 20" ')
+				.addToggle(toggle => toggle
+					.setValue(this.plugin.settings.showProgress)
+					.onChange(async (value) => {
+						this.plugin.settings.showProgress = value;
+						await this.plugin.saveSettings();
+					}));
+	
+			new Setting(settingsContainer)
+				.setName('Show summary notification')
+				.setDesc('Show summary after processing completes')
+				.addToggle(toggle => toggle
+					.setValue(this.plugin.settings.showSummary)
+					.onChange(async (value) => {
+						this.plugin.settings.showSummary = value;
+						await this.plugin.saveSettings();
+					}));
+	
+			new Setting(settingsContainer)
+				.setName('Show rename notification')
+				.setDesc('Show notification when files are renamed')
+				.addToggle(toggle => toggle
+					.setValue(this.plugin.settings.showRenameNotice)
+					.onChange(async value => {
+						this.plugin.settings.showRenameNotice = value;
+						await this.plugin.saveSettings();
+					}));
+		});
 	}
+
+	// Advanced
+	private displayAdvancedSettings(): void {
+		const container = this.contentContainer.createDiv('settings-container');
+
+		// Timeout Settings
+		new Setting(container)
+			.setName('Base timeout (seconds)')
+			.setDesc('Base processing timeout for all images')
+			.addText(text => text
+				.setValue((this.plugin.settings.baseTimeout / 1000).toString())
+				.onChange(async (value) => {
+					this.plugin.settings.baseTimeout = parseInt(value) * 1000;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(container)
+			.setName('Additional timeout per MB')
+			.setDesc('Additional processing time (seconds) per MB')
+			.addText(text => text
+				.setValue((this.plugin.settings.timeoutPerMB / 1000).toString())
+				.onChange(async (value) => {
+					this.plugin.settings.timeoutPerMB = parseInt(value) * 1000;
+					await this.plugin.saveSettings();
+				}));
+	}
+
 }
 
-class ResizeModal extends Modal {
-	plugin: ImageConvertPLugin;
+// function debounce<T extends (...args: any[]) => any>(
+// 	func: T,
+// 	wait: number
+// ): (...args: Parameters<T>) => void {
+// 	let timeout: NodeJS.Timeout;
+// 	return (...args: Parameters<T>) => {
+// 		const later = () => {
+// 			clearTimeout(timeout);
+// 			func(...args);
+// 		};
+// 		clearTimeout(timeout);
+// 		timeout = setTimeout(later, wait);
+// 	};
+// }
 
-	constructor(plugin: ImageConvertPLugin) {
+class ResizeModal extends Modal {
+	plugin: ImageConvertPlugin;
+
+	constructor(plugin: ImageConvertPlugin) {
 		super(plugin.app);
 		this.plugin = plugin;
 	}
@@ -2768,12 +4752,10 @@ class ResizeImageModal extends Modal {
 }
 
 
-
-
 class ProcessAllVault extends Modal {
-	plugin: ImageConvertPLugin;
+	plugin: ImageConvertPlugin;
 
-	constructor(plugin: ImageConvertPLugin) {
+	constructor(plugin: ImageConvertPlugin) {
 		super(plugin.app);
 		this.plugin = plugin;
 	}
@@ -2835,7 +4817,7 @@ class ProcessAllVault extends Modal {
 						}
 					})
 			);
-		
+
 		new Setting(contentEl)
 			.setName('Skip images in target format')
 			.setDesc('Selecting this will skip images that already are in the target format. This is useful if you have a very large library, and want to process images in batches.')
@@ -2860,9 +4842,9 @@ class ProcessAllVault extends Modal {
 	}
 }
 class ProcessAllVaultResizeModal extends Modal {
-	plugin: ImageConvertPLugin;
+	plugin: ImageConvertPlugin;
 
-	constructor(plugin: ImageConvertPLugin) {
+	constructor(plugin: ImageConvertPlugin) {
 		super(plugin.app);
 		this.plugin = plugin;
 	}
@@ -2962,9 +4944,9 @@ class ProcessAllVaultResizeModal extends Modal {
 }
 
 class ProcessCurrentNote extends Modal {
-	plugin: ImageConvertPLugin;
+	plugin: ImageConvertPlugin;
 
-	constructor(plugin: ImageConvertPLugin) {
+	constructor(plugin: ImageConvertPlugin) {
 		super(plugin.app);
 		this.plugin = plugin;
 	}
@@ -3072,9 +5054,9 @@ class ProcessCurrentNote extends Modal {
 	}
 }
 class ProcessCurrentNoteResizeModal extends Modal {
-	plugin: ImageConvertPLugin;
+	plugin: ImageConvertPlugin;
 
-	constructor(plugin: ImageConvertPLugin) {
+	constructor(plugin: ImageConvertPlugin) {
 		super(plugin.app);
 		this.plugin = plugin;
 	}
@@ -3172,3 +5154,4 @@ class ProcessCurrentNoteResizeModal extends Modal {
 		}
 	}
 }
+
