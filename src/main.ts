@@ -4079,7 +4079,7 @@ export class ImageConvertTab extends PluginSettingTab {
 		// Output Location Setting
 		new Setting(container)
 			.setName("Output Location")
-			.setDesc("Select where to save converted images")
+			.setDesc("Select where to save converted images. Default - follow rules as defined by Obsidian in 'File & Links' > 'Default location for new attachments'")
 			.addDropdown((dropdown) => {
 				dropdown
 					.addOption("disable", "Default")
@@ -4134,26 +4134,11 @@ export class ImageConvertTab extends PluginSettingTab {
 		this.updateConsolidatedPreview();
 	}
 
-	private createCustomOutputSettings(container: HTMLElement): void {
-		new Setting(container)
-			.setName("Custom output path")
-			.setDesc("Define custom path with variables (e.g., {date}, {title})")
-			.addText((text) => {
-				text.setPlaceholder('custom/path/{yyyy}/{mm}')
-					.setValue(this.plugin.settings.customOutputPath)
-					.onChange(async (value) => {
-						this.plugin.settings.customOutputPath = value;
-						await this.plugin.saveSettings();
-						this.updateConsolidatedPreview();
-					});
-			});
-	}
-
 	// Helper methods for conditional settings
 	private createSpecifiedFolderSettings(container: HTMLElement): void {
 		new Setting(container)
-			.setName("Specified folder path")
-			.setDesc('Path to save processed images (e.g., "attachments/images")')
+			.setName("Path to specific folder:")
+			.setDesc('If you specify folder path as "/attacments/images" then all processed images will be saved inside "/attacments/images" folder. If any of the folders do not exist, they will be created.')
 			.setClass('settings-indent')
 			.addText((text) => {
 				text.setPlaceholder('attachments/{yyyy}/{mm}')
@@ -4178,6 +4163,22 @@ export class ImageConvertTab extends PluginSettingTab {
 						this.plugin.settings.attachmentSubfolderName = value;
 						await this.plugin.saveSettings();
 						this.updateConsolidatedPreview(); 
+					});
+			});
+	}
+
+	private createCustomOutputSettings(container: HTMLElement): void {
+		new Setting(container)
+			.setName("Custom output path")
+			.setDesc("Define custom path with variables (e.g., {date}, {title})")
+			.setClass('settings-indent')
+			.addText((text) => {
+				text.setPlaceholder('custom/path/{yyyy}/{mm}')
+					.setValue(this.plugin.settings.customOutputPath)
+					.onChange(async (value) => {
+						this.plugin.settings.customOutputPath = value;
+						await this.plugin.saveSettings();
+						this.updateConsolidatedPreview();
 					});
 			});
 	}
@@ -4378,18 +4379,6 @@ export class ImageConvertTab extends PluginSettingTab {
 			'' // Add empty string for spacing between categories
 		]);
 	}
-
-	// private createPreviewSection(container: HTMLElement, title: string, items: Record<string, string>): void {
-	// 	const section = container.createDiv('preview-section');
-	// 	section.createEl('h4', { text: title, cls: 'preview-section-header' });
-		
-	// 	const content = section.createDiv('preview-section-content');
-	// 	Object.entries(items).forEach(([key, value]) => {
-	// 		const item = content.createDiv('preview-item');
-	// 		item.createEl('strong', { text: `${key}: `, cls: 'preview-item-key' });
-	// 		item.createSpan({ text: value, cls: 'preview-item-value' });
-	// 	});
-	// }
 	
 	private updateFilenameSettings(): void {
 		this.filenameSettingsContainer.empty();
@@ -4397,8 +4386,8 @@ export class ImageConvertTab extends PluginSettingTab {
 		if (this.plugin.settings.autoRename && this.plugin.settings.useCustomRenaming) {
 			new Setting(this.filenameSettingsContainer)
 				.setName("Filename template")
-				.setDesc("Use variables like {date}, {title}, {originalName}")
-				.setClass('settings-indent')  // Add this line for indentation
+				.setDesc("Use variables like {date}, {noteName}, {imageName}, {MD5} to create your own custom filenaming format")
+				.setClass('settings-indent')
 				.addText((text) => {
 					text.setPlaceholder('{originalName}-{date}')
 						.setValue(this.plugin.settings.customRenameTemplate)
@@ -4419,12 +4408,51 @@ export class ImageConvertTab extends PluginSettingTab {
 		
 		container.createDiv('settings-container', (settingsContainer) => {
 			// Image Resize Controls Group
-			settingsContainer.createEl('h3', { text: 'Image Resize Controls' });
-	
+			settingsContainer.createEl('h3', { text: 'Non-destructive image resizing' });
+			settingsContainer.createEl('p', { text: 'Below settings allow you to adjust image dimensions using the standard ObsidianMD\
+													method by modifying image links. For instance, to change the width of ![[Engelbart.jpg]],\
+													we add "| 100" at the end, resulting in ![[Engelbart.jpg | 100]]' });
+
+			// Non-destructive resize settings
+			new Setting(settingsContainer)
+			.setName("Non-destructive resize")
+			.setDesc("Automatically apply '|size' to dropped/pasted images")
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOptions({
+						disabled: "None",
+						fitImage: "Fit Image",
+						customSize: "Custom"
+					})
+					.setValue(this.plugin.settings.autoNonDestructiveResize)
+					.onChange(async (value) => {
+						this.plugin.settings.autoNonDestructiveResize = value;
+						await this.plugin.saveSettings();
+						this.displayGeneralSettings();
+					})
+			);
+
+			// Show custom size setting immediately after non-destructive resize if "Custom" is selected
+			if (this.plugin.settings.autoNonDestructiveResize === "customSize") {
+				new Setting(settingsContainer)
+					.setName("Custom size")
+					.setDesc("Specify the default size which should be applied on all dropped/pasted images. For example, if you specify \
+							custom size as '250' then when you drop or paste an 'image.jpg' it would become ![[image.jpg | 250]] ")
+					.setClass('settings-indent')
+					.addText((text) => {
+						text.setPlaceholder("800")
+							.setValue(this.plugin.settings.customSize)
+							.onChange(async (value) => {
+								this.plugin.settings.customSize = value;
+								await this.plugin.saveSettings();
+							});
+					});
+			}
+
 			// Resize by dragging (main toggle)
 			new Setting(settingsContainer)
-				.setName('Resize by dragging')
-				.setDesc('Allow resizing images by dragging the edge')
+				.setName('Resize by dragging edge of an image')
+				.setDesc('Turn this on to allow resizing images by dragging the edge of an image')
 				.addToggle(toggle =>
 					toggle
 						.setValue(this.plugin.settings.resizeByDragging)
@@ -4435,46 +4463,8 @@ export class ImageConvertTab extends PluginSettingTab {
 							this.displayGeneralSettings();
 						})
 				);
-	
-			// Only show these settings if resizeByDragging is enabled
-			if (this.plugin.settings.resizeByDragging) {
-				// Non-destructive resize settings
-				new Setting(settingsContainer)
-					.setName("Non-destructive resize")
-					.setDesc("Automatically apply '|size' to dropped/pasted images")
-					.setClass('settings-indent')
-					.addDropdown((dropdown) =>
-						dropdown
-							.addOptions({
-								disabled: "None",
-								fitImage: "Fit Image",
-								customSize: "Custom"
-							})
-							.setValue(this.plugin.settings.autoNonDestructiveResize)
-							.onChange(async (value) => {
-								this.plugin.settings.autoNonDestructiveResize = value;
-								await this.plugin.saveSettings();
-								this.displayGeneralSettings();
-							})
-					);
-	
-				// Show custom size setting immediately after non-destructive resize if "Custom" is selected
-				if (this.plugin.settings.autoNonDestructiveResize === "customSize") {
-					new Setting(settingsContainer)
-						.setName("Custom size")
-						.setDesc("Enter custom size for non-destructive resize")
-						.setClass('settings-indent')
-						.addText((text) => {
-							text.setPlaceholder("800")
-								.setValue(this.plugin.settings.customSize)
-								.onChange(async (value) => {
-									this.plugin.settings.customSize = value;
-									await this.plugin.saveSettings();
-								});
-						});
-				}
-			}
-	
+
+
 			// Shift + Scrollwheel resize (only shown if resizeByDragging is enabled)
 			new Setting(settingsContainer)
 			.setName('Shift + Scrollwheel resize')
@@ -4506,10 +4496,10 @@ export class ImageConvertTab extends PluginSettingTab {
 			// Cursor Position Setting
 			new Setting(settingsContainer)
 				.setName('Cursor position')
-				.setDesc('Choose cursor position after processing the image: FRONT of the link or BACK')
+				.setDesc('Choose cursor position after processing the image')
 				.addDropdown(dropdown => dropdown
-					.addOption('front', 'Front')
-					.addOption('back', 'Back')
+					.addOption('front', 'Front of the link')
+					.addOption('back', 'Back of the link')
 					.setValue(this.plugin.settings.cursorPosition)
 					.onChange(async (value) => {
 						this.plugin.settings.cursorPosition = value as 'front' | 'back';
@@ -4564,6 +4554,12 @@ export class ImageConvertTab extends PluginSettingTab {
 	// Advanced
 	private displayAdvancedSettings(): void {
 		const container = this.contentContainer.createDiv('settings-container');
+		container.createDiv('settings-container', (settingsContainer) => {
+		settingsContainer.createEl('p', { text: 'Below settings allow you to specify how long Obsidian should \
+												wait before timing-out the image processing. E.g.: when file is extra\
+												large 100MB+ it might freeze Obsidian - Image Converter will try to do\
+												the best it can to process it - however if it takes too long it will stop' });
+		})
 
 		// Timeout Settings
 		new Setting(container)
