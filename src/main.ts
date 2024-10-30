@@ -1,5 +1,5 @@
 // working 2
-import { App, MarkdownView, Notice, Plugin, TFile, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
+import { App, MarkdownView, Notice, Plugin, TFile, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath, View } from 'obsidian';
 import moment from 'moment';
 // import exifr from 'exifr'
 
@@ -25,11 +25,38 @@ interface Listener {
 	(this: Document, ev: Event): void;
 }
 
+// Update QueueItem interface
 interface QueueItem {
-	file: TFile;
-	attempts: number;
-	addedAt: number;
+    file: TFile;
+    addedAt: number;
+    viewType?: 'markdown' | 'canvas' | 'excalidraw';
+    parentFile?: TFile;
 }
+
+interface DropInfo {
+    totalExpectedFiles: number;
+    totalProcessedFiles: number;
+    batchId: string;
+    files: Array<{
+        name: string;
+        size: number;
+        type: string;
+    }>;  // Add tracking for individual files
+    timeoutId?: NodeJS.Timeout;  // Track the timeout
+}
+
+interface CanvasView extends View {
+    file: TFile;
+    canvas: {
+        editor: Editor;
+    };
+}
+
+interface ExcalidrawView extends View {
+    file: TFile;
+    excalidrawEditor: Editor;
+}
+
 interface ImageConvertSettings {
 	autoRename: boolean;
 	showRenameNotice: boolean;
@@ -46,7 +73,6 @@ interface ImageConvertSettings {
 	baseTimeout: number;
 	timeoutPerMB: number;
 
-	showNoticeMessages: boolean; // For processing notices
 	showProgress: boolean;
 	showSummary: boolean;
 
@@ -110,7 +136,6 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	baseTimeout: 20000,
 	timeoutPerMB: 1000,
 
-	showNoticeMessages: false,
 	showProgress: true,
 	showSummary: true,
 
@@ -161,22 +186,24 @@ export default class ImageConvertPlugin extends Plugin {
 	mouseOverHandler: (event: MouseEvent) => void;
 
 	// Queue
-	private fileQueue: QueueItem[] = [];
-	private isProcessingQueue = false;
-	private currentBatchTotal = 0;
-	private processedInCurrentBatch = 0;
-	private batchStarted = false;
-
-	private readonly MAX_ATTEMPTS = 3;
-	private readonly CONCURRENT_PROCESSING_LIMIT = 4;
-	private readonly BASE_TIMEOUT = 20000; // 20 seconds base timeout
+    private progressEl: HTMLElement | null = null;
+    private fileQueue: QueueItem[] = [];
+    private isProcessingQueue = false;
+    private currentBatchTotal = 0;
 	private readonly SIZE_FACTOR = 1024 * 1024; // 1MB
-	private readonly TIMEOUT_PER_MB = 1000; // Additional milliseconds per MB
+
+    private batchStarted = false;
+    private dropInfo: DropInfo | null = null;
+	private batchId = '';  // Track current batch
+
+	// Statistics tracking
+    private totalSizeBeforeBytes = 0;
+    private totalSizeAfterBytes = 0;
+    private processedFiles: { name: string; savedBytes: number }[] = [];
 
 	private statusBarItemEl: HTMLElement;
-	private mobileProgressEl: HTMLElement | null = null;
-
 	private counters: Map<string, number> = new Map();
+	private userAction = false;
 
 	async onload() {
 		await this.loadSettings();
@@ -186,17 +213,16 @@ export default class ImageConvertPlugin extends Plugin {
 		// This allows us to check if  file was created as a result of a user action (like dropping 
 		// or pasting an image into a note) rather than a git pull action.
 		// true when a user action is detected and false otherwise. 
-		let userAction = false;
+		// let userAction = false;
 		// set to true, then reset back to `false` after 100ms. This way, 'create' event handler should
 		// get triggered only if its an image and if image was created within 100ms of a 'paste/drop' event
 		// also if pasting, check if it is an External Link and wether to apply '| size' syntax to the link
 		this.pasteListener = (event: ClipboardEvent) => {
-			userAction = true;
+			this.userAction = true;
 
-			// Reset batch counter for new paste operation
 			this.currentBatchTotal = 0;
 			this.batchStarted = true;
-		
+
 			// Handle different types of paste data
 			const items = event.clipboardData?.items;
 			if (!items) return;
@@ -207,6 +233,7 @@ export default class ImageConvertPlugin extends Plugin {
 			);
 			
 			this.currentBatchTotal = imageItems.length;
+
 
 			// Get the clipboard data as HTML and parse it as Markdown LINK
 			const clipboardHTML = event.clipboardData?.getData('text/html') || '';
@@ -258,62 +285,159 @@ export default class ImageConvertPlugin extends Plugin {
 					}
 				}
 			}
+
+			// Timeout to reset the user action state
 			setTimeout(() => {
-				userAction = false;
+				this.userAction = false;
 				this.batchStarted = false;
 			}, 10000);
 		};
-
-		// Initialize Queue
-		this.updateQueueStatus();
 
 		this.dropListener = (event: DragEvent) => {
-			userAction = true;
-
-			// Reset batch counter at the start of new drop
-			// and then count all. This helps detecting images which were dropped in batches
-			this.currentBatchTotal = 0;
+			this.userAction = true;
 			this.batchStarted = true;
-
-			if (event.dataTransfer?.items) {
-				const imageFiles = Array.from(event.dataTransfer.items)
-					.filter(item => item.kind === 'file' && item.type.startsWith('image/'));
-				this.currentBatchTotal = imageFiles.length;
-			} else if (event.dataTransfer?.files) {
-				const imageFiles = Array.from(event.dataTransfer.files)
-					.filter(file => file.type.startsWith('image/'));
-				this.currentBatchTotal = imageFiles.length;
+		
+			// Reset counters
+			this.totalSizeBeforeBytes = 0;
+			this.totalSizeAfterBytes = 0;
+			this.processedFiles = [];
+			
+			// Clear any existing timeout
+			if (this.dropInfo?.timeoutId) {
+				clearTimeout(this.dropInfo.timeoutId);
 			}
-
-			setTimeout(() => {
-				userAction = false;
-				this.batchStarted = false;
-			}, 10000);
+		
+			this.batchId = Date.now().toString();
+		
+			// Enhanced file analysis
+			let imageFiles: Array<{name: string; size: number; type: string}> = [];
+			if (event.dataTransfer?.files) {
+				imageFiles = Array.from(event.dataTransfer.files)
+					.filter(file => file.type.startsWith('image/'))
+					.map(file => ({
+						name: file.name,
+						size: file.size,
+						type: file.type
+					}));
+			}
+		
+			
+			// Calculate adaptive timeout based on file types and sizes
+			const calculateTimeout = (files: typeof imageFiles) => {
+				const BASE_TIMEOUT = 10000;  // 10 seconds base
+				const SIZE_FACTOR = 1000;    // 1 second per MB
+				
+				let timeout = BASE_TIMEOUT;
+				
+				files.forEach(file => {
+					const sizeInMB = file.size / (1024 * 1024);
+					const fileTypeMultiplier = 
+						file.type === 'image/heic' ? 3 :  // HEIC takes longer
+						file.type === 'image/tiff' ? 2 :  // TIFF takes longer
+						file.type === 'image/png' ? 1.5 : // PNG takes bit longer
+						1;  // Default multiplier for other formats
+					
+					timeout += (sizeInMB * SIZE_FACTOR * fileTypeMultiplier);
+				});
+		
+				return Math.min(Math.max(timeout, 10000), 300000); // Between 10s and 5min
+			};
+		
+			const timeout = calculateTimeout(imageFiles);
+		
+			// Initialize new dropInfo
+			this.dropInfo = {
+				totalExpectedFiles: imageFiles.length,
+				totalProcessedFiles: 0,
+				batchId: this.batchId,
+				files: imageFiles,
+				timeoutId: setTimeout(() => {
+					if (this.dropInfo?.batchId === this.batchId) {
+						// Instead of resetting, check if processing is still ongoing
+						const incompleteBatch = this.fileQueue.length > 0;
+						if (incompleteBatch) {
+							// Extend timeout if files are still being processed
+							this.dropInfo.timeoutId = setTimeout(() => {
+								this.userAction = false;
+								this.batchStarted = false;
+								this.dropInfo = null;
+							}, calculateTimeout(this.dropInfo.files.slice(this.dropInfo.totalProcessedFiles)));
+						} else {
+							this.userAction = false;
+							this.batchStarted = false;
+							this.dropInfo = null;
+						}
+					}
+				}, timeout)
+			};
+		
+			if (this.settings.showProgress) {
+				this.updateProgressUI(0, imageFiles.length, 'Starting processing...');
+			}
 		};
 
+		// Wait for layout to be ready
 		this.app.workspace.onLayoutReady(() => {
-			const leaves = this.app.workspace.getLeavesOfType('markdown');
-			leaves.forEach(leaf => {
-				const doc = leaf.view.containerEl.ownerDocument;
-				doc.addEventListener("paste", this.pasteListener);
-				doc.addEventListener('drop', this.dropListener as EventListener);
+			// Register listeners for all supported view types
+			const supportedViewTypes = ['markdown', 'canvas', 'excalidraw'];
+			supportedViewTypes.forEach(viewType => {
+				const leaves = this.app.workspace.getLeavesOfType(viewType);
+				leaves.forEach(leaf => {
+					const doc = leaf.view.containerEl.ownerDocument;
+					doc.addEventListener("paste", this.pasteListener);
+					doc.addEventListener('drop', this.dropListener as EventListener);
+				});
 			});
-
+	
+			// Register the create event handler
 			this.registerEvent(this.app.vault.on('create', (file: TFile) => {
-				if (!(file instanceof TFile) || !isImage(file) || !userAction) return;
+				if (!(file instanceof TFile) || !isImage(file) || !this.userAction) return;
+	
+				// Get active view type
+				const activeView = this.app.workspace.activeLeaf?.view;
+				const viewType = activeView?.getViewType();
+	
+				// Enhanced view type handling
+				const isValidView = ['markdown', 'canvas', 'excalidraw'].includes(viewType || '');
+				if (!isValidView) return;
+	
+				// Handle single file drops
 				if (!this.batchStarted) {
 					this.currentBatchTotal = 1;
 				}
-				this.fileQueue.push({ file, attempts: 0, addedAt: Date.now() });
-				this.updateQueueStatus();
+	
+				// Add to queue with view context
+				this.fileQueue.push({ 
+					file,
+					addedAt: Date.now(),
+					viewType: viewType as 'markdown' | 'canvas' | 'excalidraw',
+					parentFile: viewType !== 'markdown' ? (activeView as any).file : undefined
+				});	
+				
 				this.processQueue();
 			}));
+	
+			// Listen for layout changes to register new leaves
+			this.registerEvent(
+				this.app.workspace.on('layout-change', () => {
+					supportedViewTypes.forEach(viewType => {
+						const leaves = this.app.workspace.getLeavesOfType(viewType);
+						leaves.forEach(leaf => {
+							const container = leaf.view.containerEl;
+							if (!container.hasAttribute('data-image-converter-registered')) {
+								container.setAttribute('data-image-converter-registered', 'true');
+								container.ownerDocument.addEventListener("paste", this.pasteListener);
+								container.ownerDocument.addEventListener('drop', this.dropListener as EventListener);
+							}
+						});
+					});
+				})
+			);
 		});
 
-		// Show progress bar on mobile
-		this.mobileProgressEl = document.body.createEl('div', {
-			cls: 'image-converter-mobile-progress'
-		});
+        // Create progress container
+        this.progressEl = document.body.createDiv('image-converter-progress');
+        this.progressEl.style.display = 'none';
 
 		// Check if edge of an image was clicked upon
 		this.register(
@@ -442,6 +566,7 @@ export default class ImageConvertPlugin extends Plugin {
 				}
 			)
 		);
+
 		// Custom event listener to handle cursor positioning after resizing
 		this.register(this.onElement(document, "mouseup", "img, video", (event: MouseEvent) => {
 			const img = event.target as HTMLImageElement | HTMLVideoElement;
@@ -471,6 +596,7 @@ export default class ImageConvertPlugin extends Plugin {
 				}
 			}
 		}));
+
 		// Create handle to resize image by dragging the edge of an image
 		this.register(
 			this.onElement(
@@ -600,6 +726,9 @@ export default class ImageConvertPlugin extends Plugin {
 							const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 							if (activeView) {
 								const imageName = getImageName(img);
+								const editor = activeView.editor;
+								const cursorPos = editor.getCursor();
+								const lineContent = editor.getLine(cursorPos.line);
 								if (imageName) { // Check if imageName is not null
 									if (isExternalLink(imageName)) {
 										// console.log("editing external link")
@@ -611,9 +740,17 @@ export default class ImageConvertPlugin extends Plugin {
 										// console.log("editing internal link")
 										updateMarkdownLink(activeView, img, imageName, newWidth, newHeight);
 									}
+									
+									let newCursorPos;
+									if (this.settings.cursorPosition === 'front') {
+										newCursorPos = { line: cursorPos.line, ch: Math.max(lineContent.indexOf(imageName) - 3, 0) };
+									} else {
+										const linkEnd = lineContent.indexOf(imageName) + imageName.length + 6;
+										newCursorPos = { line: cursorPos.line, ch: Math.min(linkEnd, lineContent.length) };
+									}
+									editor.setCursor(newCursorPos);
 								}
 							}
-
 						} catch (error) {
 							console.error('An error occurred:', error);
 						}
@@ -691,6 +828,8 @@ export default class ImageConvertPlugin extends Plugin {
 		if (this.statusBarItemEl) {
 			this.statusBarItemEl.remove();
 		}
+		this.progressEl?.remove();
+		this.hideProgressBar();
 	}
 
 	// Queue
@@ -706,242 +845,251 @@ export default class ImageConvertPlugin extends Plugin {
 	private async processQueue() {
 		if (this.isProcessingQueue) return;
 		this.isProcessingQueue = true;
-
-		const totalImages = this.currentBatchTotal;
-		this.processedInCurrentBatch = 0;
-		const failedItems: string[] = [];
-		const processedItems: string[] = [];
+		const currentBatchId = this.batchId;
 
 		try {
 			while (this.fileQueue.length > 0) {
-				const pendingItems = this.fileQueue.slice(0, this.CONCURRENT_PROCESSING_LIMIT);
-				const totalSizeMB = await this.calculateTotalSize(pendingItems);
-				const effectiveBatchSize = this.calculateEffectiveBatchSize(totalSizeMB);
-				const itemsToProcess = pendingItems.slice(0, effectiveBatchSize);
-
-				// Add longer delays for larger files
-				// Minimum is 100ms delay
-				// Maximum 2000ms = 2s
-				const delayBetweenFiles = Math.min(2000, Math.max(100, totalSizeMB * 100));
-				await new Promise(resolve => setTimeout(resolve, delayBetweenFiles));
-
-				// Show progress before processing each batch
-				itemsToProcess.forEach(item => {
-					this.processedInCurrentBatch++;
-					if (this.settings.showProgress) {
-						this.showProgress(item.file.name, this.processedInCurrentBatch, totalImages);
-					}
-				});
-
-				const processingPromises = itemsToProcess.map(item =>
-					this.processQueueItem(item)
-						.catch(error => {
-							console.error(`Error processing ${item.file.name}:`, error);
-							throw error; // Re-throw to be caught by Promise.allSettled
-						})
-				);
-
-				const results = await Promise.allSettled(processingPromises);
-
-				results.forEach((result, index) => {
-					const item = itemsToProcess[index];
-					if (result.status === 'rejected') {
-						item.attempts++;
-
-						if (item.attempts < this.MAX_ATTEMPTS) {
-							this.fileQueue.push(item);
-							if (this.settings.showProgress) {
-								new Notice(`Retrying ${item.file.name} (Attempt ${item.attempts + 1}/${this.MAX_ATTEMPTS})`);
-							}
-							failedItems.push(`${item.file.name} (Retry ${item.attempts + 1}/${this.MAX_ATTEMPTS})`);
-						} else {
-							if (this.settings.showProgress) {
-								new Notice(`Failed to process ${item.file.name} after ${this.MAX_ATTEMPTS} attempts`);
-							}
-							failedItems.push(`${item.file.name} (Failed after ${this.MAX_ATTEMPTS} attempts)`);
-						}
-					} else {
-						processedItems.push(item.file.name);
-					}
-				});
-
-				this.fileQueue = this.fileQueue.slice(itemsToProcess.length);
-				this.updateQueueStatus();
-
-				if (this.fileQueue.length > 0) {
-					const delay = Math.min(0, Math.max(10, totalSizeMB));
-					await new Promise(resolve => setTimeout(resolve, delay));
+				// Check if we're still processing the same batch
+				if (currentBatchId !== this.batchId) {
+					console.log('Batch ID changed, starting new batch');
+					break;
 				}
+	
+				const item = this.fileQueue[0];
+				let currentFileSize = 0;
+
+				// Extend timeout for large or complex files
+				if (this.dropInfo?.batchId === currentBatchId) {
+					const currentFileIndex = this.dropInfo.totalProcessedFiles;
+					const currentFile = this.dropInfo.files[currentFileIndex];
+					
+					if (currentFile) {
+						const isLargeFile = currentFile.size > 10 * 1024 * 1024; // 10MB
+						const isComplexFormat = ['image/heic', 'image/tiff', 'image/png'].includes(currentFile.type);
+						
+						if (isLargeFile || isComplexFormat) {
+							if (this.dropInfo.timeoutId) {
+								clearTimeout(this.dropInfo.timeoutId);
+							}
+							
+							// Calculate extended timeout based on file characteristics
+							const extensionTime = Math.max(
+								30000, // minimum 30 seconds
+								(currentFile.size / (1024 * 1024)) * 2000 // 2 seconds per MB
+							) * (isComplexFormat ? 1.5 : 1); // 50% more time for complex formats
+	
+							this.dropInfo.timeoutId = setTimeout(() => {
+								if (this.dropInfo?.batchId === currentBatchId) {
+									const remainingFiles = this.fileQueue.length;
+									if (remainingFiles > 0) {
+										console.log(`Extended processing time for remaining ${remainingFiles} files`);
+									} else {
+										this.userAction = false;
+										this.batchStarted = false;
+										this.dropInfo = null;
+									}
+								}
+							}, extensionTime);
+						}
+					}
+				}
+	
+				try {
+					// Update progress before processing
+					if (this.settings.showProgress) {
+						this.updateProgressUI(
+							this.dropInfo?.totalProcessedFiles || 0,
+							this.dropInfo?.totalExpectedFiles || this.fileQueue.length,
+							item.file.name
+						);
+					}
+	
+					// Get initial file stats
+					const initialStat = await this.app.vault.adapter.stat(item.file.path);
+					currentFileSize = initialStat?.size || 0;
+					this.totalSizeBeforeBytes += currentFileSize;
+
+					const initialSizeBytes = initialStat?.size || 0;
+	
+					// Calculate adaptive timeout based on file size and type
+					const fileExtension = item.file.extension.toLowerCase();
+					const isComplexFormat = ['heic', 'tiff', 'png'].includes(fileExtension);
+					const timeoutDuration = Math.max(
+						this.settings.baseTimeout,
+						(initialSizeBytes / this.SIZE_FACTOR * this.settings.timeoutPerMB) *
+						(isComplexFormat ? 2 : 1) // Double timeout for complex formats
+					);
+	
+					// Process the file with timeout and retry mechanism
+					let attempts = 0;
+					const maxAttempts = 3;
+					let success = false;
+	
+					while (attempts < maxAttempts && !success) {
+						try {
+							await Promise.race([
+								this.renameFile1(item.file),
+								new Promise((_, reject) =>
+									setTimeout(() => reject(new Error('Processing timeout')), timeoutDuration)
+								)
+							]);
+							success = true;
+						} catch (error) {
+							attempts++;
+							if (attempts === maxAttempts) {
+								throw error;
+							}
+							// Wait before retry
+							await new Promise(resolve => setTimeout(resolve, 1000));
+						}
+					}
+	
+					// Get final stats and calculate savings
+					const finalStat = await this.app.vault.adapter.stat(item.file.path);
+					const finalSizeBytes = finalStat?.size || 0;
+					const savedBytes = initialSizeBytes - finalSizeBytes;
+	
+					this.totalSizeAfterBytes += finalSizeBytes;
+					this.processedFiles.push({
+						name: item.file.name,
+						savedBytes: savedBytes
+					});
+	
+					// Update dropInfo counter after successful processing
+					if (this.dropInfo && this.dropInfo.batchId === currentBatchId) {
+						this.dropInfo.totalProcessedFiles++;
+					}
+	
+				} catch (error) {
+					console.error(`Error processing ${item.file.name}:`, error);
+					new Notice(`Failed to process ${item.file.name}: ${error.message}`);
+				}
+	
+				// Remove processed file from queue
+				this.fileQueue.shift();
+	
+				// Add small delay between files to prevent system overload
+				// Longer delay for large files
+				const delayTime = currentFileSize > 5 * 1024 * 1024 ? 500 : 100;
+				await new Promise(resolve => setTimeout(resolve, delayTime));
 			}
 		} finally {
-			this.isProcessingQueue = false;
-			this.updateQueueStatus();
+			// Only clean up if we're still on the same batch
+			if (currentBatchId === this.batchId) {
+				this.isProcessingQueue = false;
+	
+				// Show summary and cleanup only if batch is complete
+				if (this.dropInfo?.totalProcessedFiles === this.dropInfo?.totalExpectedFiles) {
+					if (this.settings.showSummary && this.processedFiles.length > 0) {
+						this.showBatchSummary();
+					}
+	
+					// Reset everything after showing summary
+					this.dropInfo = null;
+					this.totalSizeBeforeBytes = 0;
+					this.totalSizeAfterBytes = 0;
+					this.processedFiles = [];
+	
+					this.hideProgressBar();
+				}
 
-			if (this.settings.showSummary) {
-				this.showSummary(processedItems, failedItems, totalImages);
-				// Reset counters after showing summary
-				this.currentBatchTotal = 0;
-				this.processedInCurrentBatch = 0;
+				// Additional check for empty queue
+				if (this.fileQueue.length === 0) {
+					this.hideProgressBar();
+				}
+
+				// Trigger garbage collection hint
+				if (global.gc) {
+					global.gc();
+				}
 			}
 		}
 	}
 
-	private async calculateTotalSize(items: QueueItem[]): Promise<number> {
-		let totalSize = 0;
-		for (const item of items) {
-			const stat = await this.app.vault.adapter.stat(item.file.path);
-			if (stat) {
-				totalSize += stat.size / (1024 * 1024); // Convert to MB
-			}
+    private updateProgressUI(current: number, total: number, fileName: string) {
+        if (!this.progressEl) return;
+
+        // Use dropInfo if available for consistent counting
+        if (this.dropInfo) {
+            total = this.dropInfo.totalExpectedFiles;
+            current = this.dropInfo.totalProcessedFiles + 1; // +1 for current file
+        }
+
+        // Ensure we never show more processed than total
+        current = Math.min(current, total);
+
+        // Only show progress UI if there are items to process
+		if (total === 0) {
+			this.hideProgressBar();
+			return;
 		}
-		return totalSize;
+
+		this.showProgressBar();
+		this.progressEl.empty();
+
+        const progressText = this.progressEl.createDiv('progress-text');
+        progressText.setText(`Processing ${current} of ${total}`);
+        
+        const fileNameEl = this.progressEl.createDiv('file-name');
+        fileNameEl.setText(fileName);
+
+        const progressBar = this.progressEl.createDiv('progress-bar');
+        const progressFill = progressBar.createDiv('progress-fill');
+        const percentage = Math.min((current / total) * 100, 100);
+        progressFill.style.width = `${percentage}%`;
+
+		// Hide progress bar if processing is complete
+		if (current === total) {
+			// Add a small delay before hiding to show completion
+			setTimeout(() => this.hideProgressBar(), 1000);
+		}
+    }
+	
+	private hideProgressBar() {
+		if (this.progressEl) {
+			this.progressEl.style.display = 'none';
+			this.progressEl.empty();
+		}
 	}
-
-	private calculateEffectiveBatchSize(totalSizeMB: number): number {
-		// Adjust batch size based on total size
-		if (totalSizeMB > 15) return 1;  // Very large files
-		if (totalSizeMB > 8) return 2;  // large files
-		if (totalSizeMB > 4) return 3;  // Medium files
-		return this.CONCURRENT_PROCESSING_LIMIT;  // Normal case
-	}
-
-	private async processQueueItem(item: QueueItem): Promise<void> {
-		// Pre-check file existence and size
-		const stat = await this.app.vault.adapter.stat(item.file.path);
-		if (!stat) {
-			throw new Error(`Could not get file stats for ${item.file.name}`);
-		}
-
-		const initialSizeBytes = stat.size;
-		const initialSizeMB = (initialSizeBytes / (1024 * 1024)).toFixed(2);
-
-		// Optimize timeout calculation
-		const dynamicTimeout = Math.max(
-			this.BASE_TIMEOUT,
-			Math.min(
-				60000, // Max 60 seconds
-				this.BASE_TIMEOUT + (initialSizeBytes / this.SIZE_FACTOR) * this.TIMEOUT_PER_MB
-			)
-		);
-
-		// Only show notice for larger files
-		if (initialSizeBytes > 1024 * 1024) { // Only for files > 1MB
-			// console.log(`Processing ${item.file.name} (${initialSizeMB}MB) with ${Math.round(dynamicTimeout/1000)}s timeout`);
-			this.showNotice(`Processing ${item.file.name} (${initialSizeMB}MB)`, 'processing');
-		}
-
-		let timeoutId: number;
-
-		try {
-			await Promise.race([
-				new Promise<void>((resolve, reject) => {
-					const processFile = () => {
-						this.renameFile1(item.file)
-							.then(() => this.app.vault.adapter.stat(item.file.path))
-							.then(finalStat => {
-								if (!finalStat) {
-									throw new Error(`Could not get final file stats for ${item.file.name}`);
-								}
-								const finalSizeBytes = finalStat.size;
-								const finalSizeMB = (finalSizeBytes / (1024 * 1024)).toFixed(2);
-								const compressionRatio = ((1 - (finalSizeBytes / initialSizeBytes)) * 100).toFixed(1);
-
-								// Only show completion notice for significant compressions
-								if (initialSizeBytes > 1024 * 1024 || Number(compressionRatio) > 20) {
-									// console.log(`Completed ${item.file.name}: ${initialSizeMB}MB → ${finalSizeMB}MB (${compressionRatio}% reduction)`);
-									this.showNotice(`Completed ${item.file.name}: ${initialSizeMB}MB → ${finalSizeMB}MB (${compressionRatio}% reduction)`, 'processing');
-								}
-
-								window.clearTimeout(timeoutId);
-								resolve();
-							})
-							.catch(error => {
-								window.clearTimeout(timeoutId);
-								reject(error);
-							});
-					};
-
-					processFile();
-				}),
-				new Promise<void>((_, reject) => {
-					timeoutId = window.setTimeout(() => {
-						reject(new Error(`Processing timeout after ${Math.round(dynamicTimeout / 1000)}s`));
-					}, dynamicTimeout);
-				})
-			]);
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-			console.error(`Error processing ${item.file.name}: ${errorMessage}`);
-			this.showNotice(`Error processing ${item.file.name}: ${errorMessage}`, 'processing');
-			throw error;
+	
+	private showProgressBar() {
+		if (this.progressEl) {
+			this.progressEl.style.display = 'flex';
 		}
 	}
 
-	private updateQueueStatus() {
-		if (!this.settings.showProgress) return;
-
-		const statusText = this.fileQueue.length === 0 && !this.isProcessingQueue
-			? ''
-			: `Image: ${this.fileQueue.length} of ${this.currentBatchTotal} remaining${this.isProcessingQueue ? ' (Processing...)' : ''}`;
-
-		if (this.mobileProgressEl) {
-			if (statusText) {
-				this.mobileProgressEl.empty();
-				this.mobileProgressEl.createEl('span', { text: statusText });
-				this.mobileProgressEl.addClass('show');
-			} else {
-				this.mobileProgressEl.removeClass('show');
-			}
-		}
-	}
 	/////////////////////////////////
 
-	private showNotice(message: string, noticeType: 'rename' | 'processing') {
-		switch (noticeType) {
-			case 'rename':
-				if (this.settings.autoRename && this.settings.showRenameNotice) {
-					new Notice(message);
-				}
-				break;
-			case 'processing':
-				if (this.settings.showNoticeMessages) {
-					new Notice(message);
-				}
-				break;
-		}
-	}
+    private formatBytes(bytes: number): string {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+    }
 
-	private showProgress(fileName: string, current: number, total: number) {
-		const actualTotal = this.currentBatchTotal || total;
-		const progressText = `Processing ${current} of ${actualTotal}: ${fileName}`;
+    private showBatchSummary() {
+        if (this.processedFiles.length === 0) return;  // Don't show empty summary
 
-		if (this.mobileProgressEl) {
-			this.mobileProgressEl.empty();
-			this.mobileProgressEl.createEl('span', { text: progressText });
-			this.mobileProgressEl.addClass('show');
-		}
-	}
+        const totalSaved = this.totalSizeBeforeBytes - this.totalSizeAfterBytes;
+        const overallRatio = ((totalSaved / this.totalSizeBeforeBytes) * 100).toFixed(1);
+        
+        let summaryText = `📊 Image Converter Summary\n`;
+        summaryText += `Files Processed: ${this.processedFiles.length}\n`;
+        summaryText += `${this.formatBytes(this.totalSizeBeforeBytes)} -> ${this.formatBytes(this.totalSizeAfterBytes)} (${overallRatio}%)`;
+        // summaryText += `Total Size After: ${this.formatBytes(this.totalSizeAfterBytes)}\n`;
+        // summaryText += ` Saved: ${this.formatBytes(totalSaved)} \n`;
 
-	private showSummary(processedItems: string[], failedItems: string[], totalImages: number) {
-		if (processedItems.length === 0 && failedItems.length === 0) return;
+        // Show individual file savings if batch size is small
+        // if (this.processedFiles.length <= 5) {
+        //     summaryText += '\nPer file savings:\n';
+        //     this.processedFiles.forEach(file => {
+        //         summaryText += `${file.name}: ${this.formatBytes(file.savedBytes)}\n`;
+        //     });
+        // }
 
-		let summaryText = `📊 Image Converter Summary\n`;
-		summaryText += `Total Images detected: ${totalImages}\n`;
+        new Notice(summaryText, 10000);
+    }
 
-		if (processedItems.length > 0) {
-			summaryText += `✓ Successfully processed: ${processedItems.length}\n`;
-		}
 
-		if (failedItems.length > 0) {
-			summaryText += `❌ Failed: ${failedItems.length}\n`;
-			summaryText += 'Failed Items:\n';
-			failedItems.forEach(item => {
-				summaryText += `  • ${item}\n`;
-			});
-		}
-
-		new Notice(summaryText, 10000);
-	}
 	/* ------------------------------------------------------------- */
 	/* ------------------------------------------------------------- */
 
@@ -1183,8 +1331,7 @@ export default class ImageConvertPlugin extends Plugin {
 
 			// Do not show renamed from -> to notice if auto-renaming is disabled 
 			if (this.settings.autoRename === true) {
-				this.showNotice(
-					`Renamed ${decodeURIComponent(originName)} to ${decodeURIComponent(newName)}`, 'rename');
+				new Notice (`Renamed ${decodeURIComponent(originName)} to ${decodeURIComponent(newName)}`)
 			}
 		} catch (error) {
 			console.error('Error processing file:', error);
@@ -1394,7 +1541,7 @@ export default class ImageConvertPlugin extends Plugin {
 			/* ---------------------------------------------------------*/
 
 			// Ensure the current line is in a visible position
-			// editor.scrollIntoView({ from: { line: currentLine, ch: 0 }, to: { line: currentLine, ch: 0 } });
+			editor.scrollIntoView({ from: { line: currentLine, ch: 0 }, to: { line: currentLine, ch: 0 } });
 		} catch (err) {
 			console.error('Error during file update:', err);
 			new Notice(`Failed to update ${file.name}: ${err}`);
@@ -1922,13 +2069,6 @@ export default class ImageConvertPlugin extends Plugin {
 	/* ------------------------------------------------------------- */
 	/* ------------------------------------------------------------- */
 
-	shouldProcessImage(image: TFile): boolean {
-		if (this.settings.ProcessAllVaultskipImagesInTargetFormat && image.extension === this.settings.ProcessAllVaultconvertTo) {
-			return false;
-		}
-		return true;
-	}
-
 	//Process All Vault
 	/* ------------------------------------------------------------- */
 	async processAllVaultImages() {
@@ -2141,6 +2281,13 @@ export default class ImageConvertPlugin extends Plugin {
 			// Write the updated content back to the file
 			await this.app.vault.modify(markdownFile, content);
 		}
+	}
+
+	shouldProcessImage(image: TFile): boolean {
+		if (this.settings.ProcessAllVaultskipImagesInTargetFormat && image.extension === this.settings.ProcessAllVaultconvertTo) {
+			return false;
+		}
+		return true;
 	}
 
 	/* ------------------------------------------------------------- */
@@ -2370,24 +2517,54 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
 	private getActiveFile(): TFile | undefined {
-		// Try getting from active markdown view first
-		const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (markdownView?.file) return markdownView.file;
-
+		// Add Canvas and Excalidraw support
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (view?.file) return view.file;
+	
 		// Try getting from active leaf if no markdown view
 		const activeFile = this.app.workspace.getActiveFile();
 		if (activeFile) return activeFile;
-
-		// If neither exists, return undefined and handle in calling code
+	
+		// If in Canvas or Excalidraw, try to get the parent file
+		const activeLeaf = this.app.workspace.activeLeaf;
+		if (activeLeaf?.view) {
+			if (activeLeaf.view.getViewType() === 'canvas') {
+				return (activeLeaf.view as any).file;
+			}
+			if (activeLeaf.view.getViewType() === 'excalidraw') {
+				return (activeLeaf.view as any).file;
+			}
+		}
+	
 		return undefined;
 	}
 
 	getActiveEditor(sourcePath: string): Editor | null {
-		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (view && view.file && view.file.path === sourcePath) {
-			return view.editor;
+		const activeLeaf = this.app.workspace.activeLeaf;
+		if (!activeLeaf?.view) return null;
+	
+		const view = activeLeaf.view;
+		let editor: Editor | null = null;
+		const viewType = view.getViewType();
+	
+		if (viewType === 'markdown') {
+			const mdView = view as MarkdownView;
+			if (mdView.file?.path === sourcePath) {
+				editor = mdView.editor;
+			}
+		} else if (viewType === 'canvas') {
+			const canvasView = view as unknown as CanvasView;
+			if (canvasView.file?.path === sourcePath) {
+				editor = canvasView.canvas?.editor || null;
+			}
+		} else if (viewType === 'excalidraw') {
+			const excalidrawView = view as unknown as ExcalidrawView;
+			if (excalidrawView.file?.path === sourcePath) {
+				editor = excalidrawView.excalidrawEditor || null;
+			}
 		}
-		return null;
+	
+		return editor;
 	}
 
 	async loadSettings() {
@@ -3090,28 +3267,6 @@ function resizeImageDrag(event: MouseEvent, img: HTMLImageElement | HTMLVideoEle
 	return { newWidth, newHeight };
 }
 
-// function isLinkInPercentage(activeView: MarkdownView, imageName: string): boolean {
-//     const editor = activeView.editor;
-//     const doc = editor.getDoc();
-//     const lineCount = doc.lineCount();
-
-//     // Iterate over each line in the document
-//     for (let i = 0; i < lineCount; i++) {
-//         const line = doc.getLine(i);
-
-//         // Check if the line contains the image name
-//         if (line.includes(imageName)) {
-//             // Extract the size from the markdown link
-//             const match = line.match(/!\[\[.*\|(.*)\]\]/);
-//             if (match && match[1] && match[1].endsWith('%')) {
-//                 return true;
-//             }
-//         }
-//     }
-
-//     return false;
-// }
-
 function updateMarkdownLink(activeView: MarkdownView, img: HTMLImageElement | HTMLVideoElement, imageName: string | null, newWidth: number, newHeight: number) {
 	const editor = activeView.editor;
 	const doc = editor.getDoc();
@@ -3341,549 +3496,8 @@ async function deleteImageFromVault(event: MouseEvent, app: App) {
 	}
 }
 
-// async function customSizeFitImageSize(){
-// 	// Get the computed style of the root element
-// 	const style = getComputedStyle(document.documentElement);
-// 	// Get the value of the --file-line-width variable
-// 	const maxWidth = style.getPropertyValue('--file-line-width');
-// 	// Remove 'px' from the end and convert to a number
-// 	const maxWidth = Number(maxWidth.slice(0, -2));
-// 	const longestSide = this.plugin.longestSide; 
-
-// }
-
-// class ImageConvertTab extends PluginSettingTab {
-// 	plugin: ImageConvertPlugin;
-//     private previewText: TextComponent;
-//     private updatePreviewDebounced: () => void;
-
-// 	constructor(app: App, plugin: ImageConvertPlugin) {
-// 		super(app, plugin);
-// 		this.plugin = plugin;
-// 		this.updatePreviewDebounced = debounce(this.updatePreview.bind(this), 500);
-// 	}
-
-
-//     async updatePreview() {
-//         if (!this.previewText) return;
-
-//         try {
-//             const activeFile = this.app.workspace.getActiveFile();
-//             const mockFile = activeFile || this.app.vault.getFiles()[0];
-//             if (!mockFile) return;
-
-//             let pathTemplate = '';
-//             switch (this.plugin.settings.attachmentLocation) {
-//                 case 'specified':
-//                     pathTemplate = this.plugin.settings.attachmentSpecifiedFolder;
-//                     break;
-//                 case 'subfolder':
-//                     pathTemplate = `${mockFile.parent?.path ?? ''}/${this.plugin.settings.attachmentSubfolderName}`;
-//                     break;
-//                 case 'customOutput':
-//                     pathTemplate = this.plugin.settings.customOutputPath;
-//                     break;
-//                 default:
-//                     this.previewText.setValue('Preview not available for this option');
-//                     return;
-//             }
-
-//             const previewPath = await this.plugin.generatePathPreview(pathTemplate, mockFile);
-//             this.previewText.setValue(previewPath);
-//         } catch (error) {
-//             console.error('Preview generation error:', error);
-//             this.previewText.setValue('Error generating preview');
-//         }
-//     }
-
-// 	display(): void {
-// 		const { containerEl } = this;
-// 		containerEl.empty();
-
-// 		const heading = containerEl.createEl('h1');
-// 		heading.textContent = 'Convert, compress and resize';
-
-// 		new Setting(containerEl)
-// 			.setName('Select format to convert images to')
-// 			.setDesc(`Turn this on to allow image conversion and compression on drag'n'drop or paste. "Same as original" - will keep original file format.`)
-// 			.addDropdown(dropdown =>
-// 				dropdown
-// 					.addOptions({ disabled: 'Same as original', webp: 'WebP', jpg: 'JPG', png: 'PNG' })
-// 					.setValue(this.plugin.settings.convertTo)
-// 					.onChange(async value => {
-// 						this.plugin.settings.convertTo = value;
-// 						await this.plugin.saveSettings();
-// 					})
-// 			);
-
-// 		new Setting(containerEl)
-// 			.setName('Quality')
-// 			.setDesc('0 - low quality, 99 - high quality, 100 - no compression; 75 - recommended')
-// 			.addText(text =>
-// 				text
-// 					.setPlaceholder('Enter quality (0-100)')
-// 					.setValue((this.plugin.settings.quality * 100).toString())
-// 					.onChange(async value => {
-// 						const quality = parseInt(value);
-
-// 						if (/^\d+$/.test(value) && quality >= 0 && quality <= 100) {
-// 							this.plugin.settings.quality = quality / 100;
-// 							await this.plugin.saveSettings();
-// 						}
-// 					})
-// 			);
-
-// 		new Setting(containerEl)
-// 			.setName('Image resize mode')
-// 			.setDesc('Select the mode to use when resizing the image. Resizing an image will further reduce file-size, but it will resize your actual file, which means that the original file will be modified, and the changes will be permanent.')
-// 			.addDropdown(dropdown =>
-// 				dropdown
-// 					.addOptions({ None: 'None', Fit: 'Fit', Fill: 'Fill', LongestEdge: 'Longest Edge', ShortestEdge: 'Shortest Edge', Width: 'Width', Height: 'Height' })
-// 					.setValue(this.plugin.settings.resizeMode)
-// 					.onChange(async value => {
-// 						this.plugin.settings.resizeMode = value;
-// 						await this.plugin.saveSettings();
-
-// 						if (value !== 'None') {
-// 							// Open the ResizeModal when an option is selected
-// 							const modal = new ResizeModal(this.plugin);
-// 							modal.open();
-// 						}
-// 					})
-// 			);
-
-// 		new Setting(containerEl)
-// 			.setName('File Renaming')
-// 			.setDesc('Choose how to rename dropped/pasted images')
-// 			.addDropdown(dropdown => dropdown
-// 				.addOptions({
-// 					'disabled': 'Keep original name',
-// 					'custom': 'Custom template'
-// 				})
-// 				.setValue(this.plugin.settings.autoRename ? 
-// 					(this.plugin.settings.useCustomRenaming ? 'custom' : 'disabled') : 
-// 					'disabled')
-// 				.onChange(async (value) => {
-// 					this.plugin.settings.autoRename = value !== 'disabled';
-// 					this.plugin.settings.useCustomRenaming = value === 'custom';
-// 					await this.plugin.saveSettings();
-// 					this.display();  // Refresh settings
-// 				}));
-
-
-// 		// Show template settings only when custom renaming is enabled
-// 		if (this.plugin.settings.autoRename && this.plugin.settings.useCustomRenaming) {
-// 			new Setting(containerEl)
-// 				.setName('Custom Rename Template')
-// 				.setDesc('Template for custom file names')
-// 				.setClass('settings-indent')
-// 				.addText(text => text
-// 					.setPlaceholder('{imageName}-{date:YYYYMMDDHHmmssSSS}')
-// 					.setValue(this.plugin.settings.customRenameTemplate)
-// 					.onChange(async (value) => {
-// 						this.plugin.settings.customRenameTemplate = value;
-// 						await this.plugin.saveSettings();
-// 					}))
-// 				.addButton(button => button
-// 					.setButtonText('Reset')
-// 					.onClick(async () => {
-// 						this.plugin.settings.customRenameTemplate = 
-// 							this.plugin.settings.customRenameDefaultTemplate;
-// 						await this.plugin.saveSettings();
-// 						this.display();
-// 					}));
-
-// 			// Add variables documentation indented under custom template
-// 			new Setting(containerEl)
-// 				.setName('Available Variables')
-// 				.setClass('settings-indent')
-// 				.setDesc(createFragment(el => {
-// 					el.createEl('p', {text: 'You can use these variables in your template:'});
-// 					[
-// 						'{imageName} - Original file name',
-// 						'{noteName} - Active note name',
-
-// 						'{date:YYYY-MM-DD} - Full moment.js support',
-
-// 						'{pathDepth}',
-// 						'{directory} - to be removed',
-// 						'{parentFolder} - to be removed',
-// 						'{folderName} - current folder name',
-
-// 						'{currentDate} - todays date in YYYY-MM-DD',
-// 						'{yyyy} - year e.g. 2024',
-// 						'{mm} - month e.g.: 12',
-// 						'{dd} - day e.g.: 24',
-// 						'{time} - 24h format e.g.',
-// 						'{HH} - hour',
-// 						'{timestamp}',
-// 						'{weekday} - e.g.: Monday, Tuesday, Wednesday',
-// 						'{month} - e.g.: October, September, December',
-// 						'{calendar} - e.g. Today at 9_25 PM',
-// 						'{creationDate} - creation date',
-
-// 						'{platform} - e.g. win32',
-// 						'{userAgent}',
-
-// 						'{counter:000} - Incremental counter with padding',
-// 						'{uuid} - Random UUID',
-// 						'{random} - rnadom string of characters e.g. 91c2q1, 09a5xb',
-// 						'{randomHex8} - generate random HEX string 8 values long',
-// 						'{randomHex16} - generate random HEX string 16 values long',
-
-// 						'{width} - Image width',
-// 						'{height} - Image height',
-// 						'{resolution} - Image resolution e.g. 1980x1980',
-// 						'{quality} - Conversion quality',
-// 						'{fileType} - Image filetype e.g. jpg, png , tif, webp, bmp etc.',
-
-// 						'{size:MB:2} - MB, KB, B - digit - specify decimal value',
-// 						'{sizeMB} - File size in MB',
-// 						'{sizeB}',
-// 						'{sizeKB}',
-// 						'{ratio} - image ratio',
-// 						'{orientation} - e.g. portrait or landscape',
-
-// 						// Add other variables you support
-// 					].forEach(item => {
-// 						el.createEl('p', {text: item});
-// 					});
-// 				}));
-// 		}
-
-// 		// OUTPUT
-// 		// Create the dropdown
-// 		new Setting(containerEl)
-// 			.setName("Output")
-// 			.setDesc("Select where to save converted images. Default - follow rules as defined by Obsidian in 'File & Links' > 'Default location for new attachments'")
-// 			.addDropdown((dropdown) => {
-// 				dropdown
-// 					.addOption("disable", "Default")
-// 					.addOption("root", "Root folder")
-// 					.addOption("specified", "In the folder specified below")
-// 					.addOption("current", "Same folder as current file")
-// 					.addOption("subfolder", "In subfolder under current folder [Beta]")
-// 					.addOption("customOutput", "Custom output path")
-// 					.setValue(this.plugin.settings.attachmentLocation)
-// 					.onChange(async (value: 'disable' | 'root' | 'specified' | 'current' | 'subfolder' | 'customOutput') => {
-// 						this.plugin.settings.attachmentLocation = value;
-// 						await this.plugin.saveSettings();
-// 						this.display(); // Refresh the settings display
-// 					});
-// 			});
-
-// 		// Add preview
-// 		const addPathPreview = (containerEl: HTMLElement) => {
-// 			const previewSetting = new Setting(containerEl)
-// 				.setName("Preview")
-// 				.setDesc("Preview of how your path will be resolved")
-// 				.setClass('settings-indent');
-
-// 			this.previewText = new TextComponent(previewSetting.controlEl)
-// 				.setDisabled(true)
-// 				.setValue('Loading preview...');
-
-// 			this.updatePreview();
-// 		};
-
-// 		// Add documentation for available patterns
-// 		const addVariablesDocumentation = (containerEl: HTMLElement) => {
-// 			new Setting(containerEl)
-// 				.setName("Available variables")
-// 				.setClass('settings-indent')
-// 				.setDesc(createFragment(el => {
-// 					el.createEl('p', {text: 'You can use these variables in your path:'});
-// 					el.createEl('p', {text: '{imageName} - Original image name'});
-// 					el.createEl('p', {text: '{noteName} - Current note name'});
-// 					el.createEl('p', {text: '{counter:000} - Incremental counter with padding'});
-// 					el.createEl('p', {text: '{date:YYYY-MM} - Date using moment.js format'});
-// 					el.createEl('p', {text: '{size:MB:2} - File size with decimal places'});
-// 					el.createEl('p', {text: '{yyyy}/{mm}/{dd} - Year/Month/Day folders'});
-// 					el.createEl('p', {text: '{folderName} - Current folder name'});
-// 					el.createEl('p', {text: '{parentFolder} - Parent folder name'});
-// 					el.createEl('a', {
-// 						text: 'Click here for moment.js date formats',
-// 						href: 'https://momentjs.com/docs/#/displaying/format/'
-// 					});
-// 				}));
-// 		};
-
-// 		// Then show the appropriate input field based on the selected option
-// 		if (this.plugin.settings.attachmentLocation === "specified") {
-// 			new Setting(containerEl)
-// 				.setName("Path to specific folder")
-// 				.setDesc('If you specify folder path as "/attachments/images" then all processed images will be saved inside "/attachments/images/" folder. If any of the folders do not exist, they will be created.')
-// 				.setClass('settings-indent')
-//                 .addText((text) => {
-//                     text.setPlaceholder('attachments/{yyyy}/{mm}')
-//                         .setValue(this.plugin.settings.attachmentSpecifiedFolder)
-//                         .onChange(async (value) => {
-//                             this.plugin.settings.attachmentSpecifiedFolder = value;
-//                             await this.plugin.saveSettings();
-//                             this.updatePreviewDebounced();
-//                         });
-//                 });
-// 			addPathPreview(containerEl);
-// 			addVariablesDocumentation(containerEl);
-// 		}
-
-// 		if (this.plugin.settings.attachmentLocation === "subfolder") {
-// 			new Setting(containerEl)
-// 				.setName("Subfolder name")
-// 				.setDesc('Name of the subfolder to create under the current note\'s folder')
-// 				.setClass('settings-indent')
-//                 .addText((text) => {
-//                     text.setPlaceholder('images/{yyyy}/{mm}')
-//                         .setValue(this.plugin.settings.attachmentSubfolderName)
-//                         .onChange(async (value) => {
-//                             this.plugin.settings.attachmentSubfolderName = value;
-//                             await this.plugin.saveSettings();
-//                             this.updatePreviewDebounced();
-//                         });
-//                 });
-// 			addPathPreview(containerEl);
-// 			addVariablesDocumentation(containerEl);
-// 		}
-
-//         if (this.plugin.settings.attachmentLocation === "customOutput") {
-//             new Setting(containerEl)
-//                 .setName("Custom output path")
-//                 .setDesc('Create your own path using variables')
-//                 .setClass('settings-indent')
-//                 .addText((text) => {
-//                     text.setPlaceholder('assets/{yyyy}/{mm}/{imageName}')
-//                         .setValue(this.plugin.settings.customOutputPath)
-//                         .onChange(async (value) => {
-//                             this.plugin.settings.customOutputPath = value;
-//                             await this.plugin.saveSettings();
-//                             this.updatePreviewDebounced();
-//                         });
-//                 });
-
-//             addPathPreview(containerEl);
-//             addVariablesDocumentation(containerEl);
-//         }
-
-
-// 		/////////////////////////////////////////////
-
-// 		const heading2 = containerEl.createEl("h2");
-// 		heading2.textContent = "Non-Destructive Image Resizing:";
-// 		const p = containerEl.createEl("p");
-// 		p.textContent = 'Below settings allow you to adjust image dimensions using the standard ObsidianMD method by modifying image links. For instance, to change the width of ![[Engelbart.jpg]], we add "| 100" at the end, resulting in ![[Engelbart.jpg | 100]].';
-// 		p.style.fontSize = "12px";
-
-// 		/////////////////////////////////////////////
-// 		// Create a function to update the custom size setting
-// 		// Update function to handle "Fit Image" option
-// 		const updateCustomSizeSetting = async (value: string) => {
-// 			if (value === "customSize") {
-// 				// If "customSize" is selected, show the "Custom size" field
-// 				customSizeSetting.settingEl.style.display = 'flex';
-// 			} else if (value === "fitImage") {
-// 				// If "fitImage" is selected, calculate the size based on the max width of the notes editor and longest side of an image
-// 				// const maxWidth = getEditorMaxWidth();
-// 				// const longestSide = this.plugin.longestSide; 
-// 				// if (longestSide !== null) {  // Check if longestSide is not null before using it
-// 				//     this.plugin.settings.customSizeLongestSide = Math.min(maxWidth, longestSide).toString();
-// 				// 	await this.plugin.saveSettings();
-// 				// }
-// 				customSizeSetting.settingEl.style.display = 'none';
-// 			} else {
-// 				// If neither "customSize" nor "fitImage" is selected, hide the "Custom size" field
-// 				customSizeSetting.settingEl.style.display = 'none';
-// 			}
-// 		};
-// 		// Function to get the max width of the notes editor
-// 		// const getEditorMaxWidth = () => {
-// 		// 	// Get the computed style of the root element
-// 		// 	const style = getComputedStyle(document.documentElement);
-// 		// 	// Get the value of the --file-line-width variable
-// 		// 	const maxWidth = style.getPropertyValue('--file-line-width');
-// 		// 	// Remove 'px' from the end and convert to a number
-// 		// 	return Number(maxWidth.slice(0, -2));
-// 		// };
-
-// 		// Add "Fit Image" option to the dropdown
-// 		new Setting(containerEl)
-// 			.setName("Non-destructive resize:")
-// 			.setDesc(`Automatically apply "|size" to dropped/pasted images.`)
-// 			.addDropdown((dropdown) =>
-// 				dropdown
-// 					.addOptions({ disabled: "None", fitImage: "Fit Image", customSize: "Custom", }) // Add "Fit Image" option
-// 					.setValue(this.plugin.settings.autoNonDestructiveResize)
-// 					.onChange(async (value) => {
-// 						this.plugin.settings.autoNonDestructiveResize = value;
-// 						await this.plugin.saveSettings();
-// 						updateCustomSizeSetting(value);
-// 					})
-// 			);
-
-
-// 		const customSizeSetting = new Setting(containerEl)
-// 			.setName('Custom Size:')
-// 			.setDesc(`Specify the default size which should be applied on all dropped/pasted images. For example, if you specify custom size as "250" then when you drop or paste an "image.jpg" it would become ![[image.jpg|250]]`)
-// 			.addText((text) => {
-// 				text.setValue(this.plugin.settings.customSize.toString());
-// 				text.onChange(async (value) => {
-// 					this.plugin.settings.customSize = value;
-// 					await this.plugin.saveSettings();
-// 				});
-// 			});
-
-// 		// Initially hide the custom size setting
-// 		updateCustomSizeSetting(this.plugin.settings.autoNonDestructiveResize);
-
-
-// 		/////////////////////////////////////////////
-
-// 		new Setting(containerEl)
-// 			.setName('Resize by dragging edge of an image')
-// 			.setDesc('Turn this on to allow resizing images by dragging the edge of an image.')
-// 			.addToggle(toggle =>
-// 				toggle
-// 					.setValue(this.plugin.settings.resizeByDragging)
-// 					.onChange(async value => {
-// 						this.plugin.settings.resizeByDragging = value;
-// 						await this.plugin.saveSettings();
-// 					})
-// 			);
-
-// 		new Setting(containerEl)
-// 			.setName('Resize with Shift + Scrollwheel')
-// 			.setDesc('Toggle this setting to allow resizing images using the Shift key combined with the scroll wheel.')
-// 			.addToggle(toggle =>
-// 				toggle
-// 					.setValue(this.plugin.settings.resizeWithShiftScrollwheel)
-// 					.onChange(async value => {
-// 						this.plugin.settings.resizeWithShiftScrollwheel = value;
-// 						await this.plugin.saveSettings();
-// 					})
-// 			);
-
-// 		/////////////////////////////////////////////
-// 		/////////////////////////////////////////////
-
-// 		const heading2_other = containerEl.createEl("h2");
-// 		heading2_other.textContent = "Other";
-
-// 		p.style.fontSize = "12px";
-// 		new Setting(containerEl)
-// 			.setName('Right-click context menu')
-// 			.setDesc('Toggle to enable or disable right-click context menu')
-// 			.addToggle(toggle =>
-// 				toggle
-// 					.setValue(this.plugin.settings.rightClickContextMenu)
-// 					.onChange(async value => {
-// 						this.plugin.settings.rightClickContextMenu = value;
-// 						await this.plugin.saveSettings();
-// 					})
-// 			);
-
-// 		new Setting(containerEl)
-//             .setName('Remember scroll position')
-//             .setDesc('Toggle ON to remember the scroll position when processing images. Toggle OFF to automatically scroll to the last image')
-//             .addToggle(toggle => toggle
-//                 .setValue(this.plugin.settings.rememberScrollPosition)
-//                 .onChange(async (value) => {
-//                     this.plugin.settings.rememberScrollPosition = value;
-//                     await this.plugin.saveSettings();
-//                 }));
-
-//         new Setting(containerEl)
-//             .setName('Cursor position')
-//             .setDesc('Choose the cursor position after processing the image. Front or back of the link.')
-//             .addDropdown(dropdown => dropdown
-//                 .addOption('front', 'Front')
-//                 .addOption('back', 'Back')
-//                 .setValue(this.plugin.settings.cursorPosition)
-//                 .onChange(async (value) => {
-//                     this.plugin.settings.cursorPosition = value as 'front' | 'back';
-//                     await this.plugin.saveSettings();
-//                 }));
-
-
-// 		new Setting(containerEl)
-// 			.setName('Notification: compression')
-// 			.setDesc('Show file size before and after compression')
-// 			.addToggle(toggle => toggle
-// 				.setValue(this.plugin.settings.showNoticeMessages)
-// 				.onChange(async (value) => {
-// 					this.plugin.settings.showNoticeMessages = value;
-// 					await this.plugin.saveSettings();
-// 				}));
-
-// 		new Setting(containerEl)
-// 			.setName('Notification: progress')
-// 			.setDesc('Show processing status report when multiple images were detected e.g.: When enabled it will show "Processing 1 of 20" ')
-// 			.addToggle(toggle => toggle
-// 				.setValue(this.plugin.settings.showProgress)
-// 				.onChange(async (value) => {
-// 					this.plugin.settings.showProgress = value;
-// 					await this.plugin.saveSettings();
-// 				}));
-
-// 		new Setting(containerEl)
-// 			.setName('Notification: summary')
-// 			.setDesc('Show summary after processing completes')
-// 			.addToggle(toggle => toggle
-// 				.setValue(this.plugin.settings.showSummary)
-// 				.onChange(async (value) => {
-// 					this.plugin.settings.showSummary = value;
-// 					await this.plugin.saveSettings();
-// 				}));
-
-// 		new Setting(containerEl)
-// 			.setName('Notification: rename')
-// 			.setDesc('Show notifiction when files are renamed')
-// 			.setClass('settings-indent') 
-// 			.addToggle(toggle =>
-// 				toggle
-// 					.setValue(this.plugin.settings.showRenameNotice)
-// 					.onChange(async value => {
-// 						this.plugin.settings.showRenameNotice = value;
-// 						await this.plugin.saveSettings();
-// 					})
-// 			);
-// 		/////////////////////////////////////////////
-
-// 		const heading2_queue = containerEl.createEl("h2");
-// 		heading2_queue.textContent = "Advanced:";
-// 		const p_queue = containerEl.createEl("p");
-// 		p_queue.textContent = 'Below settings allow you to specify how long Obsidian should wait before timing-out the image processing.\
-// 								E.g.: when file is extra large 100MB+ it might freeze Obsidian - Image Converter will try to do the \
-// 								best it can to process it - however if it takes too long it wil stop';
-// 		p_queue.style.fontSize = "12px";
-
-// 		new Setting(containerEl)
-// 			.setName('Base timeout (seconds)')
-// 			.setDesc('Base processing timeout for all images.')
-// 			.addText(text => text
-// 				.setValue((this.plugin.settings.baseTimeout / 1000).toString())
-// 				.onChange(async (value) => {
-// 					this.plugin.settings.baseTimeout = parseInt(value) * 1000;
-// 					await this.plugin.saveSettings();
-// 				}));
-
-// 		new Setting(containerEl)
-// 			.setName('Additional timeout per MB')
-// 			.setDesc('Additional processing time (in seconds) per MB of file size')
-// 			.addText(text => text
-// 				.setValue((this.plugin.settings.timeoutPerMB / 1000).toString())
-// 				.onChange(async (value) => {
-// 					this.plugin.settings.timeoutPerMB = parseInt(value) * 1000;
-// 					await this.plugin.saveSettings();
-// 				}));
-
-// 	}
-// }
-
-
-
 export class ImageConvertTab extends PluginSettingTab {
 	plugin: ImageConvertPlugin;
-	private previewText: TextComponent;
-	// private updatePreviewDebounced: () => void;
 	private activeTab = 'convert'; // Default tab
 	private tabContainer: HTMLElement;
 	private contentContainer: HTMLElement;
@@ -3902,41 +3516,8 @@ export class ImageConvertTab extends PluginSettingTab {
 	constructor(app: App, plugin: ImageConvertPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
-		// this.updatePreviewDebounced = debounce(this.updatePreview.bind(this), 500);
 	}
-
-	async updatePreview() {
-		if (!this.previewText) return;
-
-		try {
-			const activeFile = this.app.workspace.getActiveFile();
-			const mockFile = activeFile || this.app.vault.getFiles()[0];
-			if (!mockFile) return;
-
-			let pathTemplate = '';
-			switch (this.plugin.settings.attachmentLocation) {
-				case 'specified':
-					pathTemplate = this.plugin.settings.attachmentSpecifiedFolder;
-					break;
-				case 'subfolder':
-					pathTemplate = `${mockFile.parent?.path ?? ''}/${this.plugin.settings.attachmentSubfolderName}`;
-					break;
-				case 'customOutput':
-					pathTemplate = this.plugin.settings.customOutputPath;
-					break;
-				default:
-					this.previewText.setValue('Preview not available for this option');
-					return;
-			}
-
-			const previewPath = await this.plugin.generatePathPreview(pathTemplate, mockFile);
-			this.previewText.setValue(previewPath);
-		} catch (error) {
-			console.error('Preview generation error:', error);
-			this.previewText.setValue('Error generating preview');
-		}
-	}
-
+	
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
@@ -4389,7 +3970,7 @@ export class ImageConvertTab extends PluginSettingTab {
 				.setDesc("Use variables like {date}, {noteName}, {imageName}, {MD5} to create your own custom filenaming format")
 				.setClass('settings-indent')
 				.addText((text) => {
-					text.setPlaceholder('{originalName}-{date}')
+					text.setPlaceholder('{noteName}-{date}')
 						.setValue(this.plugin.settings.customRenameTemplate)
 						.onChange(async (value) => {
 							this.plugin.settings.customRenameTemplate = value;
@@ -4492,7 +4073,19 @@ export class ImageConvertTab extends PluginSettingTab {
 							await this.plugin.saveSettings();
 						})
 				);
-	
+
+			new Setting(settingsContainer)
+				.setName('Remember scroll position')
+				.setDesc('Toggle ON to remember the scroll position when processing images. Toggle OFF to automatically scroll to the last image')
+				.addToggle(toggle => {
+					toggle.setValue(this.plugin.settings.rememberScrollPosition)
+						.onChange(async (value) => {
+							this.plugin.settings.rememberScrollPosition = value;
+							await this.plugin.saveSettings();
+						})
+				});
+			
+					
 			// Cursor Position Setting
 			new Setting(settingsContainer)
 				.setName('Cursor position')
@@ -4506,19 +4099,11 @@ export class ImageConvertTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					}));
 	
+
+
 			// Notifications Group
 			settingsContainer.createEl('h3', { text: 'Notifications' });
-			
-			new Setting(settingsContainer)
-				.setName('Show compression notification')
-				.setDesc('Show file size before and after compression')
-				.addToggle(toggle => toggle
-					.setValue(this.plugin.settings.showNoticeMessages)
-					.onChange(async (value) => {
-						this.plugin.settings.showNoticeMessages = value;
-						await this.plugin.saveSettings();
-					}));
-	
+				
 			new Setting(settingsContainer)
 				.setName('Show progress notification')
 				.setDesc('Show processing status report when multiple images were detected e.g.: When enabled it will show "Processing 1 of 20" ')
@@ -4584,21 +4169,6 @@ export class ImageConvertTab extends PluginSettingTab {
 	}
 
 }
-
-// function debounce<T extends (...args: any[]) => any>(
-// 	func: T,
-// 	wait: number
-// ): (...args: Parameters<T>) => void {
-// 	let timeout: NodeJS.Timeout;
-// 	return (...args: Parameters<T>) => {
-// 		const later = () => {
-// 			clearTimeout(timeout);
-// 			func(...args);
-// 		};
-// 		clearTimeout(timeout);
-// 		timeout = setTimeout(later, wait);
-// 	};
-// }
 
 class ResizeModal extends Modal {
 	plugin: ImageConvertPlugin;
