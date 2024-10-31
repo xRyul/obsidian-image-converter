@@ -46,6 +46,7 @@ interface QueueItem {
 	originalName?: string; // Track original file name, which prevents the same file from being processed multiple times
 	originalPath?: string;  // Track the original file path
 	newPath?: string;
+	isMobileAttachment?: boolean;
 }
 
 interface DropInfo {
@@ -401,69 +402,101 @@ export default class ImageConvertPlugin extends Plugin {
 	
 			// Register the create event handler
 			this.registerEvent(this.app.vault.on('create', async (file: TFile) => {
-				if (!(file instanceof TFile) || !isImage(file) || !this.userAction) return;
+				// Check if we're on mobile
+				const isMobile = Platform.isMobile;
+            
+				// For mobile, we don't need to check userAction
+				if (isMobile) {
+					if (!(file instanceof TFile) || !isImage(file)) return;
+					
+					// Set batch parameters for single file processing
+					this.currentBatchTotal = 1;
+					this.batchStarted = true;
+					this.userAction = true; // Force userAction to true for mobile
 	
-				// Generate hash first
-				const sourceHash = await this.generateSourceHash(file);
+					// Add to queue with mobile-specific context
+					this.fileQueue.push({ 
+						file,
+						addedAt: Date.now(),
+						viewType: 'markdown', // Mobile attachments are typically in markdown
+						originalName: file.name,
+						originalPath: file.path,
+						processed: false,
+						isMobileAttachment: true
+					});
+					
+					await this.processQueue();
+					
+					// Reset state after processing
+					setTimeout(() => {
+						this.userAction = false;
+						this.batchStarted = false;
+					}, 1000);
+				} else {
+					if (!(file instanceof TFile) || !isImage(file) || !this.userAction) return;
+		
+					// Generate hash first
+					const sourceHash = await this.generateSourceHash(file);
 
-				// If we've seen this hash before, check user settings
-				if (this.fileHashes.has(sourceHash)) {
-					// console.log('Duplicate file content detected:', file.name);
+					// If we've seen this hash before, check user settings
+					if (this.fileHashes.has(sourceHash)) {
+						// console.log('Duplicate file content detected:', file.name);
 
-					// Check the user setting for duplicate handling
-					const duplicateHandling = this.settings.manage_duplicate_filename;
+						// Check the user setting for duplicate handling
+						const duplicateHandling = this.settings.manage_duplicate_filename;
 
-					if (duplicateHandling === "duplicate_replace") {
-						// Log and continue processing, treating it as a new entry
-						// console.log('Replacing the existing file:', file.name);
-						// No need to skip, just proceed
-					} else if (duplicateHandling === "duplicate_rename") {
-						// Log and rename the file
-						// console.log('Renaming the existing file:', file.name);
-						await this.renameFile1(file); // Call a method to rename the file
-						// Add hash to our set since we're continuing processing
+						if (duplicateHandling === "duplicate_replace") {
+							// Log and continue processing, treating it as a new entry
+							// console.log('Replacing the existing file:', file.name);
+							// No need to skip, just proceed
+						} else if (duplicateHandling === "duplicate_rename") {
+							// Log and rename the file
+							// console.log('Renaming the existing file:', file.name);
+							await this.renameFile1(file); // Call a method to rename the file
+							// Add hash to our set since we're continuing processing
+						} else {
+							// If neither option is selected, you can choose to skip or handle accordingly
+							return;
+						}
 					} else {
-						// If neither option is selected, you can choose to skip or handle accordingly
+						// Add hash to our set since it's a new file
+						this.fileHashes.add(sourceHash);
+					}
+
+					// Check if this file was already processed based on its full name (basename + extension)
+					const originalNameWithExt = file.name; // This includes both the basename and extension
+					if (this.fileQueue.some(item => item.originalName === originalNameWithExt)) {
 						return;
 					}
-				} else {
-					// Add hash to our set since it's a new file
-					this.fileHashes.add(sourceHash);
+
+					// Get active view type
+					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView)
+						|| this.app.workspace.getLeavesOfType("canvas").find(leaf => leaf.view)?.view
+						|| this.app.workspace.getLeavesOfType("excalidraw").find(leaf => leaf.view)?.view;
+
+					const viewType = activeView?.getViewType();
+					const isValidView = ['markdown', 'canvas', 'excalidraw'].includes(viewType || '');
+
+					if (!isValidView) return;
+
+					// Handle single file drops
+					if (!this.batchStarted) {
+						this.currentBatchTotal = 1;
+					}
+		
+					// Add to queue with minimal necessary information
+					this.fileQueue.push({ 
+						file,
+						addedAt: Date.now(),
+						viewType: viewType as 'markdown' | 'canvas' | 'excalidraw',
+						parentFile: viewType !== 'markdown' ? (activeView as any).file : undefined,
+						originalName: originalNameWithExt,
+						originalPath: file.path,
+						processed: false
+					});
+					
+					this.processQueue();
 				}
-
-				// Check if this file was already processed based on its full name (basename + extension)
-				const originalNameWithExt = file.name; // This includes both the basename and extension
-				if (this.fileQueue.some(item => item.originalName === originalNameWithExt)) {
-					return;
-				}
-
-				// Get active view type
-				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView)
-					|| this.app.workspace.getLeavesOfType("canvas").find(leaf => leaf.view)?.view
-					|| this.app.workspace.getLeavesOfType("excalidraw").find(leaf => leaf.view)?.view;
-
-				const viewType = activeView?.getViewType();
-				const isValidView = ['markdown', 'canvas', 'excalidraw'].includes(viewType || '');
-
-				if (!isValidView) return;
-
-				// Handle single file drops
-				if (!this.batchStarted) {
-					this.currentBatchTotal = 1;
-				}
-	
-				// Add to queue with minimal necessary information
-				this.fileQueue.push({ 
-					file,
-					addedAt: Date.now(),
-					viewType: viewType as 'markdown' | 'canvas' | 'excalidraw',
-					parentFile: viewType !== 'markdown' ? (activeView as any).file : undefined,
-					originalName: originalNameWithExt,
-					originalPath: file.path,
-					processed: false
-				});
-				
-				this.processQueue();
 			}));
 	
 			// Listen for layout changes to register new leaves
@@ -1544,66 +1577,64 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
 	private async createOutputFolders(newName: string, file: TFile, activeFile: TFile): Promise<string> {
-		let basePath: string;
+		const basePath = await this.getBasePath(activeFile, file);
+		await this.ensureFolderExists(basePath); // Add this line
 		
-		switch (this.settings.attachmentLocation) {
-			// case 'disable':
-			// 	// console.log(this.app.vault.getConfig("attachmentFolderPath"))
-			// 	basePath = this.app.vault.getConfig("attachmentFolderPath")
-			// 	break;
-			case 'root':
-				basePath = '/';
-				break;
-			// case 'specified':
-			// 	basePath = await this.processSubfolderVariables(
-			// 		this.settings.attachmentSpecifiedFolder,
-			// 		file,
-			// 		activeFile
-			// 	);
-			// 	break;
-			case 'current':
-				basePath = activeFile.path.substring(0, activeFile.path.lastIndexOf('/'));
-				break;
-			case 'subfolder': {
-				const currentPath = activeFile.path.substring(0, activeFile.path.lastIndexOf('/'));
-				const processedSubfolder = await this.processSubfolderVariables(
-					this.settings.attachmentSubfolderName,
-					file,
-					activeFile
-				);
-				basePath = `${currentPath}/${processedSubfolder}`;
-				break;
+		// Split the path and handle each component
+		const pathComponents = normalizePath(basePath).split('/').filter(Boolean);
+		let currentPath = '';
+	
+		for (const component of pathComponents) {
+			const nextPath = currentPath ? `${currentPath}/${component}` : component;
+			
+			// Check if a folder exists with any case
+			const existingFolder = await this.getFolderWithAnyCase(nextPath);
+			
+			if (existingFolder) {
+				// Use the existing folder's case
+				currentPath = existingFolder;
+			} else {
+				// Create new folder with original case
+				await this.app.vault.createFolder(nextPath);
+				currentPath = nextPath;
 			}
-			case 'customOutput':
-				basePath = await this.processSubfolderVariables(
-					this.settings.customOutputPath,
-					file,
-					activeFile
-				);
-				break;
-			default:
-				basePath = '/';
 		}
+	
+		return `${currentPath}/${newName}`;
+	}
 
-		// Ensure directory exists, normalize path to handle case sensitivity
-		const normalizedBasePath = this.normalizePath(basePath);
-		if (!(await this.app.vault.adapter.exists(normalizedBasePath))) {
-			await this.app.vault.createFolder(normalizedBasePath);
+	private async getFolderWithAnyCase(path: string): Promise<string | null> {
+		const components = path.split('/');
+		const folderName = components.pop();
+		const parentPath = components.join('/');
+	
+		try {
+			const parentContents = await this.app.vault.adapter.list(parentPath);
+			const matchingFolder = parentContents.folders.find(f => 
+				f.split('/').pop()?.toLowerCase() === folderName?.toLowerCase()
+			);
+			return matchingFolder || null;
+		} catch {
+			return null;
 		}
-
-		return `${normalizedBasePath}/${newName}`;
 	}
 
 	private async updateFileAndDocument(file: TFile, newPath: string, activeFile: TFile, sourcePath: string, linkText: string): Promise<void> {
 		try {
 			const decodedNewPath = decodeURIComponent(newPath);
-			const normalizedNewPath = this.normalizePath(decodedNewPath);
+			const normalizedNewPath = normalizePath(decodedNewPath);
+
+			// Add case conflict check
+			await this.checkForCaseConflicts(normalizedNewPath);
+			
+			// Get the actual case-sensitive path that exists on the filesystem
+			const actualPath = await this.getActualCasePath(normalizedNewPath);
+			let finalPath = actualPath || normalizedNewPath; // Use actual path if exists, otherwise use normalized
 
 			// Check if the Destination Image File already exists if it does then add -1 etc.
-			let finalPath = normalizedNewPath;
-			// Simple duplicate handling - just add a suffix if needed
+			// Handle duplicates
 			if (this.settings.manage_duplicate_filename === 'duplicate_replace') {
-				if (await this.app.vault.adapter.exists(finalPath)) {
+				if (await this.fileExistsWithAnyCase(finalPath)) {
 					const existingFile = await this.app.vault.getAbstractFileByPath(finalPath);
 					if (existingFile instanceof TFile) {
 						await this.app.vault.delete(existingFile);
@@ -1611,18 +1642,22 @@ export default class ImageConvertPlugin extends Plugin {
 				}
 			} else if (this.settings.manage_duplicate_filename === 'duplicate_rename') {
 				let suffix = 1;
-				while (await this.app.vault.adapter.exists(finalPath)) {
-					const extensionIndex = normalizedNewPath.lastIndexOf('.');
+				while (await this.fileExistsWithAnyCase(finalPath)) {
+					const extensionIndex = finalPath.lastIndexOf('.');
 					if (extensionIndex !== -1) {
-						finalPath = `${normalizedNewPath.substring(0, extensionIndex)}-${suffix}${normalizedNewPath.substring(extensionIndex)}`;
+						finalPath = `${finalPath.substring(0, extensionIndex)}-${suffix}${finalPath.substring(extensionIndex)}`;
 					} else {
-						finalPath = `${normalizedNewPath}-${suffix}`;
+						finalPath = `${finalPath}-${suffix}`;
 					}
 					suffix++;
 				}
 			}
 
-			await this.app.vault.rename(file, finalPath);
+			// Perform the rename
+			// Only perform rename if paths are different (case-insensitive comparison)
+			if (!this.pathsAreEqual(file.path, finalPath)) {
+				await this.app.vault.rename(file, finalPath);
+			}
 			let newLinkText = this.makeLinkText(file, sourcePath);
 
 			// Add the size to the markdown link
@@ -1710,6 +1745,145 @@ export default class ImageConvertPlugin extends Plugin {
 		}
 	}
 
+	// ///////////// Helper for output management
+	private async fileExistsWithAnyCase(path: string): Promise<boolean> {
+		// Split the path into components
+		const pathComponents = path.split('/').filter(Boolean);
+		const fileName = pathComponents.pop(); // Get the last component (file name)
+		let currentPath = '';
+	
+		// Check each folder level
+		for (const component of pathComponents) {
+			const files = await this.app.vault.adapter.list(currentPath);
+			const matchingFolder = files.folders.find(f => 
+				f.split('/').pop()?.toLowerCase() === component.toLowerCase()
+			);
+			
+			if (!matchingFolder) {
+				return false;
+			}
+			currentPath = matchingFolder;
+		}
+	
+		// Finally check the file name
+		const files = await this.app.vault.adapter.list(currentPath);
+		return files.files.some(f => 
+			f.split('/').pop()?.toLowerCase() === fileName?.toLowerCase()
+		);
+	}
+
+	private async getActualCasePath(path: string): Promise<string | null> {
+		const components = path.split('/').filter(Boolean);
+		let currentPath = '';
+	
+		for (const component of components) {
+			try {
+				const list = await this.app.vault.adapter.list(currentPath);
+				
+				// Check both files and folders
+				const match = [...list.files, ...list.folders].find(p => 
+					p.split('/').pop()?.toLowerCase() === component.toLowerCase()
+				);
+				
+				if (match) {
+					currentPath = match;
+				} else {
+					return null; // Path doesn't exist
+				}
+			} catch {
+				return null;
+			}
+		}
+	
+		return currentPath;
+	}
+
+	private async ensureFolderExists(path: string): Promise<void> {
+		const normalizedPath = normalizePath(path);
+		if (!(await this.app.vault.adapter.exists(normalizedPath))) {
+			const folders = normalizedPath.split('/').filter(Boolean);
+			let currentPath = '';
+			
+			for (const folder of folders) {
+				currentPath += (currentPath ? '/' : '') + folder;
+				if (!(await this.app.vault.adapter.exists(currentPath))) {
+					await this.app.vault.createFolder(currentPath);
+				} else {
+					// Get the actual case of the existing folder
+					const existingFolder = await this.app.vault.getAbstractFileByPath(currentPath);
+					if (existingFolder && existingFolder.name !== folder) {
+						// Use the existing case
+						currentPath = currentPath.substring(0, currentPath.lastIndexOf('/')) + '/' + existingFolder.name;
+					}
+				}
+			}
+		}
+	}
+
+	private async checkForCaseConflicts(path: string): Promise<void> {
+		const folder = path.substring(0, path.lastIndexOf('/'));
+		const fileName = path.substring(path.lastIndexOf('/') + 1);
+		
+		const files = await this.app.vault.adapter.list(folder);
+		const conflictingFiles = files.files.filter(f => 
+			f.toLowerCase() === path.toLowerCase() && f !== path
+		);
+		
+		if (conflictingFiles.length > 0) {
+			console.warn(`Case conflict detected for ${path}. Existing files: ${conflictingFiles.join(', ')}`);
+		}
+	}
+
+	private pathsAreEqual(path1: string, path2: string): boolean {
+		// Option1 obsidian noralize path
+		// return normalizePath(path1).toLowerCase() === normalizePath(path2).toLowerCase();
+
+		// Option2 
+		// Normalize paths before comparison
+		const normalize = (p: string) => {
+			// Remove leading/trailing slashes and normalize multiple slashes
+			return p.replace(/^\/+|\/+$/g, '')
+					.replace(/\/+/g, '/')
+					.toLowerCase();
+		};
+		
+		return normalize(path1) === normalize(path2);
+	}
+
+	private async getBasePath(activeFile: TFile, file: TFile): Promise<string> {
+		let basePath: string;
+	
+		switch (this.settings.attachmentLocation) {
+			case 'root':
+				basePath = '/';
+				break;
+			case 'current':
+				basePath = activeFile.path.substring(0, activeFile.path.lastIndexOf('/'));
+				break;
+			case 'subfolder': {
+				const currentPath = activeFile.path.substring(0, activeFile.path.lastIndexOf('/'));
+				const processedSubfolder = await this.processSubfolderVariables(
+					this.settings.attachmentSubfolderName,
+					file,
+					activeFile
+				);
+				basePath = `${currentPath}/${processedSubfolder}`;
+				break;
+			}
+			case 'customOutput':
+				basePath = await this.processSubfolderVariables(
+					this.settings.customOutputPath,
+					file,
+					activeFile
+				);
+				break;
+			default:
+				basePath = '/';
+		}
+	
+		return normalizePath(basePath);
+	}
+	
 	private escapeRegExp(string: string): string {
 		return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 	}
@@ -1759,33 +1933,22 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 	
 	makeLinkText(file: TFile, sourcePath: string, subpath?: string): string {
-		// // Generate the initial link text
-		// let linkText = 
-	
-		// // Check if the link text includes the specified folder and strip it out
-		// if (this.settings.attachmentLocation === 'specified' && this.settings.attachmentSpecifiedFolder) {
-		// 	const specifiedFolder = normalizePath(this.settings.attachmentSpecifiedFolder);
+		// Store the original case of the filename
+		const originalName = file.basename + '.' + file.extension;
+		const link = this.app.fileManager.generateMarkdownLink(file, sourcePath, subpath);
+		
+		// Ensure the link uses the original case
+		return link.replace(/\[\[(.*?)\]\]/, (match, p1) => {
+			const linkPath = p1.split('|')[0];
+			const displayText = p1.split('|')[1] || '';
 			
-		// 	// If the path includes the specified folder, remove it
-		// 	if (linkText.includes(`${specifiedFolder}/`)) {
-		// 		linkText = linkText.replace(`${specifiedFolder}/`, '');
-		// 	}
-		// }
-	
-		// // Remove the whole path, keeping only the file name
-		// const fileName = file.basename; // This gets the file name without path and extension
-		// const extension = file.extension; // This gets the file extension
-		// linkText = `![[${fileName}.${extension}]]`; // Generate link text with just the file name
-	
-		// // Remove duplicate file extensions
-		// linkText = linkText.replace(/(\.[^.]+)\1+$/, '$1'); // This regex captures the last extension and removes duplicates
-	
-		return this.app.fileManager.generateMarkdownLink(file, sourcePath, subpath);
+			if (linkPath.toLowerCase() === originalName.toLowerCase()) {
+				return `[[${originalName}${displayText ? '|' + displayText : ''}]]`;
+			}
+			return match;
+		});
 	}
 	
-	
-	
-
 	private sanitizeFileName(fileName: string): string {
 		// Remove invalid filename characters
 		let safe = fileName.replace(/[<>:"/\\|?*]/g, '_');
@@ -2019,8 +2182,9 @@ export default class ImageConvertPlugin extends Plugin {
 
 		// Replace all variables in the template
 		for (const [key, value] of Object.entries(replacements)) {
+			const regex = new RegExp(this.escapeRegExp(key), 'i');
 			// Use a non-regex replacement first to avoid special characters issues
-			result = result.split(key).join(value);
+			result = result.replace(regex, value);
 		}
 
 		// Clean up the path
@@ -2041,9 +2205,9 @@ export default class ImageConvertPlugin extends Plugin {
 		return this.processSubfolderVariables(template, file, file);
 	}
 
-	private normalizePath(path: string): string {
-		return path.toLowerCase();
-	}
+	// private normalizePath(path: string): string {
+	// 	return path.toLowerCase();
+	// }
 
 	// Helper function to manage counters for renaming e.g. -001 002 003 etc. 
 	private async getNextCounter(folderPath: string): Promise<number> {
