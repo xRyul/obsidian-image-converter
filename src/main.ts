@@ -1,6 +1,6 @@
 // working 2
-import { App, MarkdownView, Notice, Plugin, TFile, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath, View } from 'obsidian';
-import moment from 'moment';
+import { App, MarkdownView, Notice, Plugin, TFile, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
+// import moment from 'moment';
 // import exifr from 'exifr'
 
 /*
@@ -20,6 +20,17 @@ if (!Platform.isMobile) {
 
 */
 
+// declare module "obsidian" {
+//     interface Vault {
+//         getConfig(key: string): any;
+//     }
+// }
+
+declare module "obsidian" {
+    interface Vault {
+        getConfig(key: string): any;
+    }
+}
 
 interface Listener {
 	(this: Document, ev: Event): void;
@@ -31,6 +42,10 @@ interface QueueItem {
     addedAt: number;
     viewType?: 'markdown' | 'canvas' | 'excalidraw';
     parentFile?: TFile;
+    processed: boolean;    // Track processing status
+	originalName?: string; // Track original file name, which prevents the same file from being processed multiple times
+	originalPath?: string;  // Track the original file path
+	newPath?: string;
 }
 
 interface DropInfo {
@@ -45,23 +60,11 @@ interface DropInfo {
     timeoutId?: NodeJS.Timeout;  // Track the timeout
 }
 
-interface CanvasView extends View {
-    file: TFile;
-    canvas: {
-        editor: Editor;
-    };
-}
-
-interface ExcalidrawView extends View {
-    file: TFile;
-    excalidrawEditor: Editor;
-}
-
 interface ImageConvertSettings {
-	autoRename: boolean;
-	showRenameNotice: boolean;
+	autoRename: boolean; // Controls whether files should be automatically renamed
+	showRenameNotice: boolean; // Controls whether notifications should be shown for renames
 	useCustomRenaming: boolean;
-	customRenameTemplate: string;
+	customRenameTemplate: string; // Renaming structure specified by the user
 	customRenameDefaultTemplate: string; // For reset functionality
 
 	convertToWEBP: boolean;
@@ -91,11 +94,12 @@ interface ImageConvertSettings {
 	ProcessCurrentNoteresizeModaldesiredHeight: number;
 	ProcessCurrentNoteresizeModaldesiredLength: number;
 
-	attachmentLocation: 'disable' | 'root' | 'specified' | 'current' | 'subfolder' | 'customOutput';
-	attachmentSpecifiedFolder: string;
+	attachmentLocation: 'root' | 'current' | 'subfolder' | 'customOutput';
+	// attachmentSpecifiedFolder: string;
 	attachmentSubfolderName: string;
 	customOutputPath: string;
 	previewPath: string;
+	manage_duplicate_filename: string;
 
 	resizeMode: string;
 	autoNonDestructiveResize: string,
@@ -124,8 +128,8 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	autoRename: true,
 	showRenameNotice: false,
 	useCustomRenaming: false,
-	customRenameTemplate: '{imageName}-{date:YYYYMMDDHHmmssSSS}',
-	customRenameDefaultTemplate: '{imageName}-{date:YYYYMMDDHHmmssSSS}',
+	customRenameTemplate: '{noteName}-{date:YYYYMMDDHHmmssSSS}',
+	customRenameDefaultTemplate: '{noteName}-{date:YYYYMMDDHHmmssSSS}',
 
 	convertToWEBP: true,
 	convertToJPG: false,
@@ -154,11 +158,12 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	ProcessCurrentNoteresizeModaldesiredHeight: 800,
 	ProcessCurrentNoteresizeModaldesiredLength: 800,
 
-	attachmentLocation: 'disable',
-	attachmentSpecifiedFolder: '',
+	attachmentLocation: 'root',
+	// attachmentSpecifiedFolder: '',
 	attachmentSubfolderName: '',
 	customOutputPath: '',
 	previewPath: '',
+	manage_duplicate_filename: 'duplicate_rename',
 
 	resizeMode: 'None',
 	autoNonDestructiveResize: "disabled",
@@ -186,6 +191,7 @@ export default class ImageConvertPlugin extends Plugin {
 	mouseOverHandler: (event: MouseEvent) => void;
 
 	// Queue
+	private fileHashes = new Set<string>();
     private progressEl: HTMLElement | null = null;
     private fileQueue: QueueItem[] = [];
     private isProcessingQueue = false;
@@ -296,7 +302,10 @@ export default class ImageConvertPlugin extends Plugin {
 		this.dropListener = (event: DragEvent) => {
 			this.userAction = true;
 			this.batchStarted = true;
-		
+
+			// Clear previous batch hashes
+			this.fileHashes.clear();
+
 			// Reset counters
 			this.totalSizeBeforeBytes = 0;
 			this.totalSizeAfterBytes = 0;
@@ -377,6 +386,7 @@ export default class ImageConvertPlugin extends Plugin {
 		};
 
 		// Wait for layout to be ready
+		// Wait for layout to be ready
 		this.app.workspace.onLayoutReady(() => {
 			// Register listeners for all supported view types
 			const supportedViewTypes = ['markdown', 'canvas', 'excalidraw'];
@@ -390,29 +400,68 @@ export default class ImageConvertPlugin extends Plugin {
 			});
 	
 			// Register the create event handler
-			this.registerEvent(this.app.vault.on('create', (file: TFile) => {
+			this.registerEvent(this.app.vault.on('create', async (file: TFile) => {
 				if (!(file instanceof TFile) || !isImage(file) || !this.userAction) return;
 	
+				// Generate hash first
+				const sourceHash = await this.generateSourceHash(file);
+
+				// If we've seen this hash before, check user settings
+				if (this.fileHashes.has(sourceHash)) {
+					// console.log('Duplicate file content detected:', file.name);
+
+					// Check the user setting for duplicate handling
+					const duplicateHandling = this.settings.manage_duplicate_filename;
+
+					if (duplicateHandling === "duplicate_replace") {
+						// Log and continue processing, treating it as a new entry
+						// console.log('Replacing the existing file:', file.name);
+						// No need to skip, just proceed
+					} else if (duplicateHandling === "duplicate_rename") {
+						// Log and rename the file
+						// console.log('Renaming the existing file:', file.name);
+						await this.renameFile1(file); // Call a method to rename the file
+						// Add hash to our set since we're continuing processing
+					} else {
+						// If neither option is selected, you can choose to skip or handle accordingly
+						return;
+					}
+				} else {
+					// Add hash to our set since it's a new file
+					this.fileHashes.add(sourceHash);
+				}
+
+				// Check if this file was already processed based on its full name (basename + extension)
+				const originalNameWithExt = file.name; // This includes both the basename and extension
+				if (this.fileQueue.some(item => item.originalName === originalNameWithExt)) {
+					return;
+				}
+
 				// Get active view type
-				const activeView = this.app.workspace.activeLeaf?.view;
+				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView)
+					|| this.app.workspace.getLeavesOfType("canvas").find(leaf => leaf.view)?.view
+					|| this.app.workspace.getLeavesOfType("excalidraw").find(leaf => leaf.view)?.view;
+
 				const viewType = activeView?.getViewType();
-	
-				// Enhanced view type handling
 				const isValidView = ['markdown', 'canvas', 'excalidraw'].includes(viewType || '');
+
 				if (!isValidView) return;
-	
+
 				// Handle single file drops
 				if (!this.batchStarted) {
 					this.currentBatchTotal = 1;
 				}
 	
-				// Add to queue with view context
+				// Add to queue with minimal necessary information
 				this.fileQueue.push({ 
 					file,
 					addedAt: Date.now(),
 					viewType: viewType as 'markdown' | 'canvas' | 'excalidraw',
-					parentFile: viewType !== 'markdown' ? (activeView as any).file : undefined
-				});	
+					parentFile: viewType !== 'markdown' ? (activeView as any).file : undefined,
+					originalName: originalNameWithExt,
+					originalPath: file.path,
+					processed: false
+				});
 				
 				this.processQueue();
 			}));
@@ -830,6 +879,8 @@ export default class ImageConvertPlugin extends Plugin {
 		}
 		this.progressEl?.remove();
 		this.hideProgressBar();
+		this.fileQueue = [];
+        this.dropInfo = null;
 	}
 
 	// Queue
@@ -839,7 +890,7 @@ export default class ImageConvertPlugin extends Plugin {
 	//		- Larger files = smaller batches
 	// 		- Smaller files = larger batches
 	// - Add delay between batches to not overload Obsidian
-	// - Retry MAX=3 times for failed conversions
+	// - Retry MAX=X times for failed conversions
 	// - Timeout. Prevents hanging on problematic files via timeout for extra large files, or when it takes too long to process the image
 	/* ------------------------------------------------------------- */
 	private async processQueue() {
@@ -857,6 +908,12 @@ export default class ImageConvertPlugin extends Plugin {
 	
 				const item = this.fileQueue[0];
 				let currentFileSize = 0;
+
+				// Skip if already processed
+				if (item.processed) {
+					this.fileQueue.shift();
+					continue;
+				}
 
 				// Extend timeout for large or complex files
 				if (this.dropInfo?.batchId === currentBatchId) {
@@ -922,7 +979,7 @@ export default class ImageConvertPlugin extends Plugin {
 	
 					// Process the file with timeout and retry mechanism
 					let attempts = 0;
-					const maxAttempts = 3;
+					const maxAttempts = 1;
 					let success = false;
 	
 					while (attempts < maxAttempts && !success) {
@@ -966,6 +1023,7 @@ export default class ImageConvertPlugin extends Plugin {
 				}
 	
 				// Remove processed file from queue
+				item.processed = true; // Mark as processed before removing from queue
 				this.fileQueue.shift();
 	
 				// Add small delay between files to prevent system overload
@@ -1005,6 +1063,66 @@ export default class ImageConvertPlugin extends Plugin {
 			}
 		}
 	}
+
+	// async processQueue() {
+	// 	if (this.isProcessingQueue) return;
+	// 	this.isProcessingQueue = true;
+	
+	// 	const currentBatchId = this.batchId;
+	// 	console.log('Starting queue processing:', this.fileQueue);
+	
+	// 	try {
+	// 		while (this.fileQueue.length > 0) {
+	// 			console.log('Queue length:', this.fileQueue.length);
+	
+	// 			// Check if we're still processing the same batch
+	// 			if (currentBatchId !== this.batchId) {
+	// 				console.log('Batch ID changed, starting new batch');
+	// 				break;
+	// 			}
+	
+	// 			const item = this.fileQueue[0];
+	
+	// 			// Skip if already processed
+	// 			if (item.processed) {
+	// 				this.fileQueue.shift();
+	// 				continue;
+	// 			}
+	
+	// 			// Update progress before processing
+	// 			if (this.settings.showProgress) {
+	// 				this.updateProgressUI(
+	// 					this.dropInfo?.totalProcessedFiles || 0,
+	// 					this.dropInfo?.totalExpectedFiles || this.fileQueue.length,
+	// 					item.file.name
+	// 				);
+	// 			}
+	
+	// 			try {
+	// 				// Process the file and get the new path
+	// 				await this.renameFile1(item.file);
+					
+	// 				// Mark the item as processed
+	// 				item.processed = true;
+	// 				// item.newPath = newPath;
+					
+	// 				// Remove the processed item from the queue
+	// 				this.fileQueue.shift();
+	// 			} catch (error) {
+	// 				console.error('Error processing item:', error);
+	// 				this.fileQueue.shift(); // Remove the problematic item to avoid infinite loop
+	// 			}
+	// 		}
+	// 	} catch (error) {
+	// 		console.error('Error processing queue:', error);
+	// 	} finally {
+	// 		this.isProcessingQueue = false;
+	// 		console.log('Queue processing complete');
+	// 	}
+	// }
+	
+
+
 
     private updateProgressUI(current: number, total: number, fileName: string) {
         if (!this.progressEl) return;
@@ -1057,6 +1175,17 @@ export default class ImageConvertPlugin extends Plugin {
 			this.progressEl.style.display = 'flex';
 		}
 	}
+
+    private async generateSourceHash(file: TFile): Promise<string> {
+        const binary = await this.app.vault.readBinary(file);
+
+        // Use a better hashing algorithm like SHA-256 for better collision resistance
+        const hashBuffer = await crypto.subtle.digest('SHA-256', binary);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+        return hashHex; // Return the hexadecimal string of the hash
+    }
 
 	/////////////////////////////////
 
@@ -1278,66 +1407,71 @@ export default class ImageConvertPlugin extends Plugin {
 
 	// Work on the file
 	/* ------------------------------------------------------------- */
-	async renameFile1(file: TFile): Promise<void> {
+	async renameFile1(file: TFile): Promise<string> {	
 		const activeFile = this.getActiveFile();
 		if (!activeFile) {
 			throw new Error('No active file found');
 		}
 
-		try {
-			// 1. Process the image and save it
-			const binary = await this.app.vault.readBinary(file);
-			const imgBlob = await this.processImage(file, binary);
+		// Store original values 
+		const originalName = file.name;
 
-			if (imgBlob instanceof Blob) {
-				const arrayBuffer = await imgBlob.arrayBuffer();
-				await this.app.vault.modifyBinary(file, arrayBuffer);
-			}
+		// 1. Process the image and save it
+		const binary = await this.app.vault.readBinary(file);
+		const imgBlob = await this.processImage(file, binary);
 
-
-			// 2. while we are here - reading the image, lets check its width too. 
-			// So we could later pass it into custom sizing options etc. 
-			// Only check it if the setting for customSize or fitImage is enabled  as there are the only options currently need it
-			if (this.settings.autoNonDestructiveResize === "customSize" || this.settings.autoNonDestructiveResize === "fitImage") {
-				try {
-					this.widthSide = await getImageWidthSide(binary);
-					const maxWidth = printEditorLineWidth(this.app);
-					if (this.widthSide !== null && typeof maxWidth === 'number') {
-						this.settings.customSizeLongestSide = (this.widthSide < maxWidth ? this.widthSide : maxWidth).toString();
-						await this.saveSettings();
-					}
-				} catch (error) {
-					console.error('Could not determine image dimensions, using default settings');
-				}
-			}
-
-			// 3. check if renaming is needed
-			let newName = await this.keepOrgName(file, activeFile);
-			if (this.settings.autoRename) {
-				newName = await this.generateNewName(file, activeFile);
-			}
-
-			// Store original values 
-			const sourcePath = activeFile.path;
-			const originName = file.name;
-			const linkText = this.makeLinkText(file, sourcePath);
-
-			// 4. Create all folders before the links! And make sure they exist before dealing with links! 
-			const generateNewPath = await this.createOutputFolders(newName, file, activeFile);
-			const newPath = normalizePath(generateNewPath); // Normalise new path. This helps us when dealing with paths generated by variables
-
-			// 5. Update file and document
-			await this.updateFileAndDocument(file, newPath, activeFile, sourcePath, linkText);
-
-			// Do not show renamed from -> to notice if auto-renaming is disabled 
-			if (this.settings.autoRename === true) {
-				new Notice (`Renamed ${decodeURIComponent(originName)} to ${decodeURIComponent(newName)}`)
-			}
-		} catch (error) {
-			console.error('Error processing file:', error);
-			new Notice(`Failed to process ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-			throw error;
+		if (imgBlob instanceof Blob) {
+			const arrayBuffer = await imgBlob.arrayBuffer();
+			await this.app.vault.modifyBinary(file, arrayBuffer);
 		}
+
+
+		// 2. while we are here - reading the image, lets check its width too. 
+		// So we could later pass it into custom sizing options etc. 
+		// Only check it if the setting for customSize or fitImage is enabled  as there are the only options currently need it
+		if (this.settings.autoNonDestructiveResize === "customSize" || this.settings.autoNonDestructiveResize === "fitImage") {
+			try {
+				this.widthSide = await getImageWidthSide(binary);
+				const maxWidth = printEditorLineWidth(this.app);
+				if (this.widthSide !== null && typeof maxWidth === 'number') {
+					this.settings.customSizeLongestSide = (this.widthSide < maxWidth ? this.widthSide : maxWidth).toString();
+					await this.saveSettings();
+				}
+			} catch (error) {
+				console.error('Could not determine image dimensions, using default settings');
+			}
+		}
+
+		// 3. check if renaming is needed
+		let newName: string;
+		if (this.settings.autoRename) {
+			newName = await this.generateNewName(file, activeFile);
+		} else {
+			newName = await this.keepOrgName(file, activeFile);
+		}
+
+		// Store original values 
+		const sourcePath = activeFile.path;
+		const linkText = this.makeLinkText(file, sourcePath);
+
+
+		// 4. Create all folders before the links! And make sure they exist before dealing with links! 
+		const generateNewPath = await this.createOutputFolders(newName, file, activeFile);
+		const newPath = normalizePath(generateNewPath); // Normalise new path. This helps us when dealing with paths generated by variables
+
+
+		// 5. Update file and document
+		// Only rename if the path actually changed
+	
+		await this.updateFileAndDocument(file, newPath, activeFile, sourcePath, linkText);
+		
+		// Show notification only if enabled AND the file was actually renamed
+		if (this.settings.showRenameNotice) {
+			new Notice(`Renamed: ${decodeURIComponent(originalName)} → ${decodeURIComponent(newName)}`);
+		}
+
+
+		return newPath;
 	}
 
 	private async processImage(file: TFile, binary: ArrayBuffer): Promise<Blob> {
@@ -1411,21 +1545,22 @@ export default class ImageConvertPlugin extends Plugin {
 
 	private async createOutputFolders(newName: string, file: TFile, activeFile: TFile): Promise<string> {
 		let basePath: string;
-
+		
 		switch (this.settings.attachmentLocation) {
-			case 'disable':
-				basePath = file.path.substring(0, file.path.lastIndexOf('/'));
-				break;
+			// case 'disable':
+			// 	// console.log(this.app.vault.getConfig("attachmentFolderPath"))
+			// 	basePath = this.app.vault.getConfig("attachmentFolderPath")
+			// 	break;
 			case 'root':
 				basePath = '/';
 				break;
-			case 'specified':
-				basePath = await this.processSubfolderVariables(
-					this.settings.attachmentSpecifiedFolder,
-					file,
-					activeFile
-				);
-				break;
+			// case 'specified':
+			// 	basePath = await this.processSubfolderVariables(
+			// 		this.settings.attachmentSpecifiedFolder,
+			// 		file,
+			// 		activeFile
+			// 	);
+			// 	break;
 			case 'current':
 				basePath = activeFile.path.substring(0, activeFile.path.lastIndexOf('/'));
 				break;
@@ -1450,19 +1585,44 @@ export default class ImageConvertPlugin extends Plugin {
 				basePath = '/';
 		}
 
-		// Ensure directory exists
-		if (!(await this.app.vault.adapter.exists(basePath))) {
-			await this.app.vault.createFolder(basePath);
+		// Ensure directory exists, normalize path to handle case sensitivity
+		const normalizedBasePath = this.normalizePath(basePath);
+		if (!(await this.app.vault.adapter.exists(normalizedBasePath))) {
+			await this.app.vault.createFolder(normalizedBasePath);
 		}
 
-		return `${basePath}/${newName}`;
+		return `${normalizedBasePath}/${newName}`;
 	}
 
 	private async updateFileAndDocument(file: TFile, newPath: string, activeFile: TFile, sourcePath: string, linkText: string): Promise<void> {
 		try {
 			const decodedNewPath = decodeURIComponent(newPath);
-			await this.app.vault.rename(file, decodedNewPath);
+			const normalizedNewPath = this.normalizePath(decodedNewPath);
 
+			// Check if the Destination Image File already exists if it does then add -1 etc.
+			let finalPath = normalizedNewPath;
+			// Simple duplicate handling - just add a suffix if needed
+			if (this.settings.manage_duplicate_filename === 'duplicate_replace') {
+				if (await this.app.vault.adapter.exists(finalPath)) {
+					const existingFile = await this.app.vault.getAbstractFileByPath(finalPath);
+					if (existingFile instanceof TFile) {
+						await this.app.vault.delete(existingFile);
+					}
+				}
+			} else if (this.settings.manage_duplicate_filename === 'duplicate_rename') {
+				let suffix = 1;
+				while (await this.app.vault.adapter.exists(finalPath)) {
+					const extensionIndex = normalizedNewPath.lastIndexOf('.');
+					if (extensionIndex !== -1) {
+						finalPath = `${normalizedNewPath.substring(0, extensionIndex)}-${suffix}${normalizedNewPath.substring(extensionIndex)}`;
+					} else {
+						finalPath = `${normalizedNewPath}-${suffix}`;
+					}
+					suffix++;
+				}
+			}
+
+			await this.app.vault.rename(file, finalPath);
 			let newLinkText = this.makeLinkText(file, sourcePath);
 
 			// Add the size to the markdown link
@@ -1485,7 +1645,6 @@ export default class ImageConvertPlugin extends Plugin {
 				console.log("No active editor found");
 				return;
 			}
-
 
 			// PT1 of 2 Preserve the scroll position
 			const scrollInfo = editor.getScrollInfo() as { top: number; left: number };
@@ -1544,7 +1703,9 @@ export default class ImageConvertPlugin extends Plugin {
 			editor.scrollIntoView({ from: { line: currentLine, ch: 0 }, to: { line: currentLine, ch: 0 } });
 		} catch (err) {
 			console.error('Error during file update:', err);
-			new Notice(`Failed to update ${file.name}: ${err}`);
+			// if (this.settings.showRenameNotice) {
+			// 	new Notice(`Failed to update ${file.name}: ${err}`);
+			// }
 			throw err;
 		}
 	}
@@ -1571,8 +1732,7 @@ export default class ImageConvertPlugin extends Plugin {
 			// Ensure the name is safe for filesystem
 			newName = this.sanitizeFileName(newName);
 		} else {
-			// Use original naming scheme
-			newName = activeFile.basename + '-' + moment().format("YYYYMMDDHHmmssSSS");
+			newName = await this.keepOrgName(file, activeFile);
 		}
 
 		// Handle file extension
@@ -1582,6 +1742,63 @@ export default class ImageConvertPlugin extends Plugin {
 		}
 
 		return `${newName}.${extension}`;
+	}
+
+	async keepOrgName(file: TFile, activeFile: TFile): Promise<string> {
+		let newName = file.basename;
+
+		// Ensure the name is safe for filesystem
+		newName = this.sanitizeFileName(newName);
+
+		let extension = file.extension;
+		if (this.settings.convertTo && this.settings.convertTo !== 'disabled') {
+			extension = this.settings.convertTo;
+		}
+
+		return `${newName}.${extension}`;
+	}
+	
+	makeLinkText(file: TFile, sourcePath: string, subpath?: string): string {
+		// // Generate the initial link text
+		// let linkText = 
+	
+		// // Check if the link text includes the specified folder and strip it out
+		// if (this.settings.attachmentLocation === 'specified' && this.settings.attachmentSpecifiedFolder) {
+		// 	const specifiedFolder = normalizePath(this.settings.attachmentSpecifiedFolder);
+			
+		// 	// If the path includes the specified folder, remove it
+		// 	if (linkText.includes(`${specifiedFolder}/`)) {
+		// 		linkText = linkText.replace(`${specifiedFolder}/`, '');
+		// 	}
+		// }
+	
+		// // Remove the whole path, keeping only the file name
+		// const fileName = file.basename; // This gets the file name without path and extension
+		// const extension = file.extension; // This gets the file extension
+		// linkText = `![[${fileName}.${extension}]]`; // Generate link text with just the file name
+	
+		// // Remove duplicate file extensions
+		// linkText = linkText.replace(/(\.[^.]+)\1+$/, '$1'); // This regex captures the last extension and removes duplicates
+	
+		return this.app.fileManager.generateMarkdownLink(file, sourcePath, subpath);
+	}
+	
+	
+	
+
+	private sanitizeFileName(fileName: string): string {
+		// Remove invalid filename characters
+		let safe = fileName.replace(/[<>:"/\\|?*]/g, '_');
+
+		// Prevent starting with dots (hidden files)
+		safe = safe.replace(/^\.+/, '');
+
+		// Limit length (filesystem dependent, using 255 as safe default)
+		if (safe.length > 255) {
+			safe = safe.slice(0, 255);
+		}
+
+		return safe;
 	}
 
 	async processSubfolderVariables(template: string, file: TFile, activeFile: TFile): Promise<string> {
@@ -1824,23 +2041,8 @@ export default class ImageConvertPlugin extends Plugin {
 		return this.processSubfolderVariables(template, file, file);
 	}
 
-	makeLinkText(file: TFile, sourcePath: string, subpath?: string): string {
-		return this.app.fileManager.generateMarkdownLink(file, sourcePath, subpath);
-	}
-
-	private sanitizeFileName(fileName: string): string {
-		// Remove invalid filename characters
-		let safe = fileName.replace(/[<>:"/\\|?*]/g, '_');
-
-		// Prevent starting with dots (hidden files)
-		safe = safe.replace(/^\.+/, '');
-
-		// Limit length (filesystem dependent, using 255 as safe default)
-		if (safe.length > 255) {
-			safe = safe.slice(0, 255);
-		}
-
-		return safe;
+	private normalizePath(path: string): string {
+		return path.toLowerCase();
 	}
 
 	// Helper function to manage counters for renaming e.g. -001 002 003 etc. 
@@ -2503,69 +2705,41 @@ export default class ImageConvertPlugin extends Plugin {
 	/* ------------------------------------------------------------- */
 	/* ------------------------------------------------------------- */
 
-	async keepOrgName(file: TFile, activeFile: TFile): Promise<string> {
-		let newName = file.basename;
-		let extension = file.extension;
-		if (this.settings.convertTo && this.settings.convertTo !== 'disabled') {
-			extension = this.settings.convertTo;
-		}
-
-		// Encode or decode special characters in the file name
-		newName = encodeURIComponent(newName);
-
-		return `${newName}.${extension}`;
-	}
-
 	private getActiveFile(): TFile | undefined {
-		// Add Canvas and Excalidraw support
-		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (view?.file) return view.file;
+		const markdownFile = this.app.workspace.getActiveViewOfType(MarkdownView)?.file;
+		if (markdownFile) return markdownFile;
 	
-		// Try getting from active leaf if no markdown view
-		const activeFile = this.app.workspace.getActiveFile();
-		if (activeFile) return activeFile;
+		const canvasLeaf = this.app.workspace.getLeavesOfType("canvas").find(leaf => (leaf.view as any)?.file);
+		if (canvasLeaf) return (canvasLeaf.view as any).file;
 	
-		// If in Canvas or Excalidraw, try to get the parent file
-		const activeLeaf = this.app.workspace.activeLeaf;
-		if (activeLeaf?.view) {
-			if (activeLeaf.view.getViewType() === 'canvas') {
-				return (activeLeaf.view as any).file;
-			}
-			if (activeLeaf.view.getViewType() === 'excalidraw') {
-				return (activeLeaf.view as any).file;
-			}
-		}
+		const excalidrawLeaf = this.app.workspace.getLeavesOfType("excalidraw").find(leaf => (leaf.view as any)?.file);
+		if (excalidrawLeaf) return (excalidrawLeaf.view as any).file;
 	
 		return undefined;
 	}
+	
 
 	getActiveEditor(sourcePath: string): Editor | null {
-		const activeLeaf = this.app.workspace.activeLeaf;
-		if (!activeLeaf?.view) return null;
-	
-		const view = activeLeaf.view;
 		let editor: Editor | null = null;
-		const viewType = view.getViewType();
 	
-		if (viewType === 'markdown') {
-			const mdView = view as MarkdownView;
-			if (mdView.file?.path === sourcePath) {
-				editor = mdView.editor;
-			}
-		} else if (viewType === 'canvas') {
-			const canvasView = view as unknown as CanvasView;
-			if (canvasView.file?.path === sourcePath) {
-				editor = canvasView.canvas?.editor || null;
-			}
-		} else if (viewType === 'excalidraw') {
-			const excalidrawView = view as unknown as ExcalidrawView;
-			if (excalidrawView.file?.path === sourcePath) {
-				editor = excalidrawView.excalidrawEditor || null;
-			}
+		const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (mdView?.file?.path === sourcePath) {
+			editor = mdView.editor;
+		}
+	
+		const canvasLeaf = this.app.workspace.getLeavesOfType("canvas").find(leaf => (leaf.view as any)?.file?.path === sourcePath);
+		if (canvasLeaf) {
+			editor = (canvasLeaf.view as any).canvas?.editor || null;
+		}
+	
+		const excalidrawLeaf = this.app.workspace.getLeavesOfType("excalidraw").find(leaf => (leaf.view as any)?.file?.path === sourcePath);
+		if (excalidrawLeaf) {
+			editor = (excalidrawLeaf.view as any).excalidrawEditor || null;
 		}
 	
 		return editor;
 	}
+	
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -3660,17 +3834,17 @@ export class ImageConvertTab extends PluginSettingTab {
 		// Output Location Setting
 		new Setting(container)
 			.setName("Output Location")
-			.setDesc("Select where to save converted images. Default - follow rules as defined by Obsidian in 'File & Links' > 'Default location for new attachments'")
+			.setDesc("Select where to save converted images. ")
 			.addDropdown((dropdown) => {
 				dropdown
-					.addOption("disable", "Default")
+					// .addOption("disable", "Default")
 					.addOption("root", "Root folder")
-					.addOption("specified", "In specified folder")
+					// .addOption("specified", "In specified folder")
 					.addOption("current", "Same folder as current file")
 					.addOption("subfolder", "In subfolder")
 					.addOption("customOutput", "Custom output path")
 					.setValue(this.plugin.settings.attachmentLocation)
-					.onChange(async (value: 'disable' | 'root' | 'specified' | 'current' | 'subfolder' | 'customOutput') => {
+					.onChange(async (value: 'root' | 'current' | 'subfolder' | 'customOutput') => {
 						this.plugin.settings.attachmentLocation = value;
 						await this.plugin.saveSettings();
 						this.updateFolderSettings();
@@ -3702,35 +3876,54 @@ export class ImageConvertTab extends PluginSettingTab {
 					}));
 
 
+
 		this.filenameSettingsContainer = container.createDiv('filename-settings');
 
+		new Setting(container)
+			.setName("If an output file already exists")
+			.setDesc("Replace - to replace already existing file in the destination with a new file.\
+				Rename - automatically add '-1, -2 -3 etc.' suffix to the end of file")
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOptions({
+						duplicate_replace: "Replace",
+						duplicate_rename: "Rename"
+					})
+					.setValue(this.plugin.settings.manage_duplicate_filename)
+					.onChange(async (value) => {
+						this.plugin.settings.manage_duplicate_filename = value;
+						await this.plugin.saveSettings();
+						this.updateFilenameSettings();
+						this.updateConsolidatedPreview();
+					})
+			);
 		// Create preview element first
 		this.previewEl = container.createDiv('preview-container');
-
 
 
 		// Initialize settings
 		this.updateFolderSettings();
 		this.updateFilenameSettings();
 		this.updateConsolidatedPreview();
+
 	}
 
 	// Helper methods for conditional settings
-	private createSpecifiedFolderSettings(container: HTMLElement): void {
-		new Setting(container)
-			.setName("Path to specific folder:")
-			.setDesc('If you specify folder path as "/attacments/images" then all processed images will be saved inside "/attacments/images" folder. If any of the folders do not exist, they will be created.')
-			.setClass('settings-indent')
-			.addText((text) => {
-				text.setPlaceholder('attachments/{yyyy}/{mm}')
-					.setValue(this.plugin.settings.attachmentSpecifiedFolder)
-					.onChange(async (value) => {
-						this.plugin.settings.attachmentSpecifiedFolder = value;
-						await this.plugin.saveSettings();
-						this.updateConsolidatedPreview(); 
-					});
-			});
-	}
+	// private createSpecifiedFolderSettings(container: HTMLElement): void {
+	// 	new Setting(container)
+	// 		.setName("Path to specific folder:")
+	// 		.setDesc('If you specify folder path as "/attacments/images" then all processed images will be saved inside "/attacments/images" folder. If any of the folders do not exist, they will be created.')
+	// 		.setClass('settings-indent')
+	// 		.addText((text) => {
+	// 			text.setPlaceholder('attachments/{yyyy}/{mm}')
+	// 				.setValue(this.plugin.settings.attachmentSpecifiedFolder)
+	// 				.onChange(async (value) => {
+	// 					this.plugin.settings.attachmentSpecifiedFolder = value;
+	// 					await this.plugin.saveSettings();
+	// 					this.updateConsolidatedPreview(); 
+	// 				});
+	// 		});
+	// }
 
 	private createSubfolderSettings(container: HTMLElement): void {
 		new Setting(container)
@@ -3768,9 +3961,9 @@ export class ImageConvertTab extends PluginSettingTab {
 		this.folderSettingsContainer.empty();
 
 		switch (this.plugin.settings.attachmentLocation) {
-			case "specified":
-				this.createSpecifiedFolderSettings(this.folderSettingsContainer);
-				break;
+			// case "specified":
+			// 	this.createSpecifiedFolderSettings(this.folderSettingsContainer);
+			// 	break;
 			case "subfolder":
 				this.createSubfolderSettings(this.folderSettingsContainer);
 				break;
@@ -3796,9 +3989,9 @@ export class ImageConvertTab extends PluginSettingTab {
 			// Get path template based on settings
 			let pathTemplate = '';
 			switch (this.plugin.settings.attachmentLocation) {
-				case 'specified':
-					pathTemplate = this.plugin.settings.attachmentSpecifiedFolder;
-					break;
+				// case 'specified':
+				// 	pathTemplate = this.plugin.settings.attachmentSpecifiedFolder;
+				// 	break;
 				case 'subfolder':
 					pathTemplate = `${mockFile.parent?.path ?? ''}/${this.plugin.settings.attachmentSubfolderName}`;
 					break;
@@ -3812,7 +4005,7 @@ export class ImageConvertTab extends PluginSettingTab {
 					pathTemplate = mockFile.parent?.path ?? '';
 					break;
 				default:
-					pathTemplate = 'Using default location';
+					pathTemplate = '{Default Obsidian Settings}';
 			}
 	
 			// Get filename template
@@ -3846,7 +4039,7 @@ export class ImageConvertTab extends PluginSettingTab {
 		// Show variables only when custom path or custom filename is being used
 		return (
 			this.plugin.settings.attachmentLocation === 'customOutput' ||
-			this.plugin.settings.attachmentLocation === 'specified' ||
+			// this.plugin.settings.attachmentLocation === 'specified' ||
 			this.plugin.settings.attachmentLocation === 'subfolder' ||
 			(this.plugin.settings.autoRename && this.plugin.settings.useCustomRenaming)
 		);
@@ -3981,6 +4174,7 @@ export class ImageConvertTab extends PluginSettingTab {
 		}
 	}
 
+	
 	// Settings / Extras
 	private displayGeneralSettings(): void {
 		// Clear the container first
@@ -3996,22 +4190,22 @@ export class ImageConvertTab extends PluginSettingTab {
 
 			// Non-destructive resize settings
 			new Setting(settingsContainer)
-			.setName("Non-destructive resize")
-			.setDesc("Automatically apply '|size' to dropped/pasted images")
-			.addDropdown((dropdown) =>
-				dropdown
-					.addOptions({
-						disabled: "None",
-						fitImage: "Fit Image",
-						customSize: "Custom"
-					})
-					.setValue(this.plugin.settings.autoNonDestructiveResize)
-					.onChange(async (value) => {
-						this.plugin.settings.autoNonDestructiveResize = value;
-						await this.plugin.saveSettings();
-						this.displayGeneralSettings();
-					})
-			);
+				.setName("Non-destructive resize")
+				.setDesc("Automatically apply '|size' to dropped/pasted images")
+				.addDropdown((dropdown) =>
+					dropdown
+						.addOptions({
+							disabled: "None",
+							fitImage: "Fit Image",
+							customSize: "Custom"
+						})
+						.setValue(this.plugin.settings.autoNonDestructiveResize)
+						.onChange(async (value) => {
+							this.plugin.settings.autoNonDestructiveResize = value;
+							await this.plugin.saveSettings();
+							this.displayGeneralSettings();
+						})
+				);
 
 			// Show custom size setting immediately after non-destructive resize if "Custom" is selected
 			if (this.plugin.settings.autoNonDestructiveResize === "customSize") {
