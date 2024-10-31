@@ -887,6 +887,15 @@ export default class ImageConvertPlugin extends Plugin {
 			})
 		);
 
+		// Add command to open Image Converter settings
+		this.addCommand({
+			id: 'open-image-converter-settings',
+			name: 'Open Image Converter Settings',
+			callback: () => {
+				this.openSettingsTab();
+			}
+		});
+
 	}
 
 	async onunload() {
@@ -1437,6 +1446,15 @@ export default class ImageConvertPlugin extends Plugin {
 
 	}
 
+    async openSettingsTab() {
+        const setting = (this.app as any).setting;
+        if (setting) {
+            await setting.open();
+            setting.openTabById(this.manifest.id);
+        } else {
+            new Notice('Unable to open settings. Please check if the settings plugin is enabled.');
+        }
+    }
 
 	// Work on the file
 	/* ------------------------------------------------------------- */
@@ -2092,10 +2110,53 @@ export default class ImageConvertPlugin extends Plugin {
 			'{imageName}': file.basename,
 			'{noteName}': activeFile.basename,
 			'{parentFolder}': activeFile.parent?.parent?.name || '',
-			'{pathDepth}': activeFile.path.split('/').length.toString(),
 			'{directory}': activeFile.parent?.path || '',
 			'{folderName}': activeFile.parent?.name || '',
+			
+			'{depth}': (file.path.match(/\//g) || []).length.toString(),
+			'{vaultName}': this.app.vault.getName(),
+			'{vaultPath}': (this.app.vault.adapter as any).getBasePath?.() || '',
 
+			'{timezone}': Intl.DateTimeFormat().resolvedOptions().timeZone,
+			'{locale}': navigator.language,
+
+			// Basic date formats
+			'{today}': moment().format('YYYY-MM-DD'),
+			'{YYYY-MM-DD}': moment().format('YYYY-MM-DD'),
+			'{tomorrow}': moment().add(1, 'day').format('YYYY-MM-DD'),
+			'{yesterday}': moment().subtract(1, 'day').format('YYYY-MM-DD'),
+
+			// Time units
+			'{startOfWeek}': moment().startOf('week').format('YYYY-MM-DD'),
+			'{endOfWeek}': moment().endOf('week').format('YYYY-MM-DD'),
+			'{startOfMonth}': moment().startOf('month').format('YYYY-MM-DD'),
+			'{endOfMonth}': moment().endOf('month').format('YYYY-MM-DD'),
+			
+			// Relative dates
+			'{nextWeek}': moment().add(1, 'week').format('YYYY-MM-DD'),
+			'{lastWeek}': moment().subtract(1, 'week').format('YYYY-MM-DD'),
+			'{nextMonth}': moment().add(1, 'month').format('YYYY-MM-DD'),
+			'{lastMonth}': moment().subtract(1, 'month').format('YYYY-MM-DD'),
+
+			// Natural language time differences
+			'{daysInMonth}': moment().daysInMonth().toString(),
+			'{weekOfYear}': moment().week().toString(),
+			'{quarterOfYear}': moment().quarter().toString(),
+
+			'{week}': moment().format('w'),
+			'{w}': moment().format('w'),
+			'{quarter}': moment().format('Q'),
+			'{Q}': moment().format('Q'),
+			'{dayOfYear}': moment().format('DDD'),
+			'{DDD}': moment().format('DDD'),
+
+			'{monthName}': moment().format('MMMM'),
+			'{MMMM}': moment().format('MMMM'),
+			'{dayName}': moment().format('dddd'),
+			'{dddd}': moment().format('dddd'),
+			'{dateOrdinal}': moment().format('Do'),
+			'{Do}': moment().format('Do'),
+			'{relativeTime}': moment().fromNow(),
 
 			'{fileType}': file.extension,
 			'{currentDate}': moment().format('YYYY-MM-DD'),
@@ -2150,13 +2211,62 @@ export default class ImageConvertPlugin extends Plugin {
 				img.src = URL.createObjectURL(blob);
 			});
 
+			// Calculate additional properties
+			const aspectRatio = img.width / img.height;
+			const isSquare = Math.abs(aspectRatio - 1) < 0.01;
+			const pixelCount = img.width * img.height;
+			const fileSizeInBytes = binary.byteLength;
+
 			Object.assign(replacements, {
+				// Existing properties
 				'{width}': img.width.toString(),
 				'{height}': img.height.toString(),
-				'{ratio}': (img.width / img.height).toFixed(2),
-				'{orientation}': img.width > img.height ? 'landscape' : 'portrait',
+				'{ratio}': aspectRatio.toFixed(2),
+				'{aspectRatio}': aspectRatio.toFixed(3),
+				'{orientation}': img.width > img.height ? 'landscape' : (img.width < img.height ? 'portrait' : 'square'),
+				'{quality}': this.settings.quality.toString(),
 				'{resolution}': `${img.width}x${img.height}`,
-				'{quality}': this.settings.quality.toString()
+				'{megapixels}': (pixelCount / 1000000).toFixed(2),
+
+				// New properties
+				'{isSquare}': isSquare.toString(),
+				'{pixelCount}': pixelCount.toString(),
+				'{aspectRatioType}': (() => {
+					if (isSquare) return '1:1';
+					if (Math.abs(aspectRatio - 1.33) < 0.1) return '4:3';
+					if (Math.abs(aspectRatio - 1.78) < 0.1) return '16:9';
+					if (Math.abs(aspectRatio - 1.6) < 0.1) return '16:10';
+					return 'custom';
+				})(),
+				'{sizeCategory}': (() => {
+					if (pixelCount < 100000) return 'tiny';
+					if (pixelCount < 500000) return 'small';
+					if (pixelCount < 2000000) return 'medium';
+					if (pixelCount < 8000000) return 'large';
+					return 'very-large';
+				})(),
+				'{dominantDimension}': img.width > img.height ? 'width' : (img.width < img.height ? 'height' : 'equal'),
+				'{dimensionDifference}': Math.abs(img.width - img.height).toString(),
+				'{bytesPerPixel}': (fileSizeInBytes / pixelCount).toFixed(2),
+				'{compressionRatio}': (fileSizeInBytes / (pixelCount * 3)).toFixed(2), // Assuming RGB
+				'{maxDimension}': Math.max(img.width, img.height).toString(),
+				'{minDimension}': Math.min(img.width, img.height).toString(),
+				'{diagonalPixels}': Math.sqrt(img.width * img.width + img.height * img.height).toFixed(0),
+				'{aspectRatioSimplified}': (() => {
+					const gcd = (a: number, b: number): number => b ? gcd(b, a % b) : a;
+					const w = img.width;
+					const h = img.height;
+					const divisor = gcd(w, h);
+					return `${w/divisor}:${h/divisor}`;
+				})(),
+				'{screenFitCategory}': (() => {
+					const standardWidth = 1920;
+					const standardHeight = 1080;
+					if (img.width <= standardWidth && img.height <= standardHeight) return 'fits-1080p';
+					if (img.width <= 2560 && img.height <= 1440) return 'fits-1440p';
+					if (img.width <= 3840 && img.height <= 2160) return 'fits-4k';
+					return 'above-4k';
+				})(),
 			});
 
 			URL.revokeObjectURL(img.src);
@@ -4257,29 +4367,80 @@ export class ImageConvertTab extends PluginSettingTab {
 				'{parentFolder} - Parent folder name',
 				'{directory} - Current note directory path',
 				'{folderName} - Current folder name',
-				'{pathDepth} - Folder depth number'
+				'{depth} - Number of subfolder levels',
+				'{vaultName} - Obsidian vault name',
+				'{vaultPath} - Full vault path'
 			],
 	
-			'Date & Time Variables': [
+			'Date & Time Formats': [
 				'{date:YYYY-MM-DD} - Custom date format (supports moment.js patterns)',
+				'{today} - Current date (YYYY-MM-DD)',
+				'{tomorrow} - Tomorrow\'s date',
+				'{yesterday} - Yesterday\'s date',
+				'{YYYY-MM-DD} - Current date formatted',
 				'{yyyy} - Current year',
-				'{mm} - Current month',
-				'{dd} - Current day',
+				'{mm} - Current month number',
+				'{dd} - Current day number',
 				'{time} - Current time (HH-mm-ss)',
 				'{HH} - Current hour',
-				'{timestamp} - Unix timestamp',
-				'{weekday} - Day of week',
-				'{month} - Month name',
-				'{calendar} - Natural language date'
+				'{timestamp} - Unix timestamp'
+			],
+	
+			'Natural Language Dates': [
+				'{monthName} - Full month name (e.g., January)',
+				'{MMMM} - Full month name (moment.js format)',
+				'{dayName} - Full day name (e.g., Monday)',
+				'{dddd} - Full day name (moment.js format)',
+				'{dateOrdinal} - Day with ordinal (e.g., 1st, 2nd)',
+				'{Do} - Day with ordinal (moment.js format)',
+				'{relativeTime} - Relative time (e.g., 2 hours ago)',
+				'{calendar} - Natural calendar format'
+			],
+	
+			'Time Periods': [
+				'{startOfWeek} - First day of current week',
+				'{endOfWeek} - Last day of current week',
+				'{startOfMonth} - First day of current month',
+				'{endOfMonth} - Last day of current month',
+				'{nextWeek} - Same day next week',
+				'{lastWeek} - Same day last week',
+				'{nextMonth} - Same day next month',
+				'{lastMonth} - Same day last month'
+			],
+	
+			'Time Units': [
+				'{daysInMonth} - Number of days in current month',
+				'{weekOfYear} - Current week number',
+				'{week} - Week number (short)',
+				'{w} - Week number (shortest)',
+				'{quarter} - Current quarter',
+				'{Q} - Quarter (shortest)',
+				'{dayOfYear} - Day of year (1-365)',
+				'{DDD} - Day of year (moment.js format)'
 			],
 	
 			'Image Properties': [
 				'{width} - Image width in pixels',
 				'{height} - Image height in pixels',
-				'{ratio} - Width/height ratio',
+				'{ratio} - Width/height ratio (2 decimals)',
+				'{aspectRatio} - Width/height ratio (3 decimals)',
 				'{resolution} - Full resolution (e.g., 1920x1080)',
-				'{orientation} - landscape or portrait',
-				'{quality} - Current conversion quality'
+				'{orientation} - landscape, portrait, or square',
+				'{quality} - Current conversion quality',
+				'{megapixels} - Image megapixels',
+				'{isSquare} - Whether image is square (true/false)',
+				'{pixelCount} - Total number of pixels',
+				'{aspectRatioType} - Common ratio (16:9, 4:3, etc.)',
+				'{sizeCategory} - tiny, small, medium, large, very-large',
+				'{dominantDimension} - width, height, or equal',
+				'{dimensionDifference} - Pixel difference between width/height',
+				'{bytesPerPixel} - Average bytes per pixel',
+				'{compressionRatio} - Image compression ratio',
+				'{maxDimension} - Larger dimension in pixels',
+				'{minDimension} - Smaller dimension in pixels',
+				'{diagonalPixels} - Diagonal resolution',
+				'{aspectRatioSimplified} - Simplified ratio (e.g., 16:9)',
+				'{screenFitCategory} - fits-1080p, fits-1440p, fits-4k, above-4k'
 			],
 	
 			'Size Variables': [
@@ -4291,26 +4452,37 @@ export class ImageConvertTab extends PluginSettingTab {
 				'{sizeB} - Size in bytes'
 			],
 	
+			'File Statistics': [
+				'{creationDate} - File creation date',
+				'{modifiedDate} - Last modified date'
+			],
+	
+			'System Information': [
+				'{timezone} - System timezone',
+				'{locale} - System locale',
+				'{platform} - Operating system platform',
+				'{userAgent} - Browser user agent'
+			],
+	
 			'Unique Identifiers': [
 				'{MD5:filename} - MD5 hash of filename',
 				'{MD5:filename:8} - First 8 chars of filename MD5 hash',
 				'{MD5:path} - MD5 hash of file path',
 				'{MD5:fullpath} - MD5 hash of complete path',
 				'{MD5:parentfolder} - MD5 hash of parent folder name',
+				'{MD5:rootfolder} - MD5 hash of root folder name',
+				'{MD5:extension} - MD5 hash of file extension',
 				'{MD5:notename} - MD5 hash of current note name',
+				'{MD5:notefolder} - MD5 hash of current note\'s folder',
+				'{MD5:notepath} - MD5 hash of current note\'s path',
+				'{MD5:custom text} - MD5 hash of custom text',
 				'{randomHex:6} - Random hex string of specified length',
 				'{counter:000} - Incremental counter with padding',
 				'{random} - Random alphanumeric string',
 				'{uuid} - Random UUID'
-			],
-	
-			'System Information': [
-				'{platform} - Operating system platform',
-				'{userAgent} - Browser user agent'
 			]
 		};
 	
-		// Modify the `addVariablesHelper` method to use these categories
 		return Object.entries(categories).flatMap(([category, vars]) => [
 			`== ${category} ==`,
 			...vars,
