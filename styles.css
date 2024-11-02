@@ -1054,3 +1054,26 @@
 .variables-toggle {
     margin-bottom: 1em;
 }
+
+/* /////////////////////////// Image edge resize */
+/* Target images and videos in markdown preview */
+
+/* /////////////////////////////////////////////////////// */
+/* Base styles for images and videos */
+/* Base style */
+.markdown-preview-view img,
+.markdown-preview-view video {
+    box-sizing: border-box !important;
+}
+
+/* Edge hover style */
+[data-resize-edge="true"] {
+    outline: 10px solid rgba(223, 176, 242, 0.51) !important;
+    cursor: nwse-resize !important;
+}
+
+/* Active resize style */
+[data-resize-active="true"] {
+    outline: 2px solid var(--interactive-accent) !important;
+    cursor: nwse-resize !important;
+}

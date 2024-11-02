@@ -1,7 +1,9 @@
 // working 2
 import { App, MarkdownView, Notice, Plugin, TFile, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
-// import moment from 'moment';
-// import exifr from 'exifr'
+
+// Browsers use the MIME type, not the file extension this module allows 
+// us to be more precise when default MIME checking options fail
+import mime from "./mime.min.js"
 
 /*
 
@@ -19,18 +21,6 @@ if (!Platform.isMobile) {
 }
 
 */
-
-// declare module "obsidian" {
-//     interface Vault {
-//         getConfig(key: string): any;
-//     }
-// }
-
-declare module "obsidian" {
-    interface Vault {
-        getConfig(key: string): any;
-    }
-}
 
 interface Listener {
 	(this: Document, ev: Event): void;
@@ -95,7 +85,7 @@ interface ImageConvertSettings {
 	ProcessCurrentNoteresizeModaldesiredHeight: number;
 	ProcessCurrentNoteresizeModaldesiredLength: number;
 
-	attachmentLocation: 'root' | 'current' | 'subfolder' | 'customOutput';
+	attachmentLocation: 'default' | 'root' | 'current' | 'subfolder' | 'customOutput';
 	// attachmentSpecifiedFolder: string;
 	attachmentSubfolderName: string;
 	customOutputPath: string;
@@ -124,6 +114,15 @@ interface SettingsTab {
 	icon?: string; // Optional icon for the tab
 }
 
+interface LinkUpdateOptions {
+    activeView: MarkdownView;
+    element: HTMLImageElement | HTMLVideoElement;
+    newWidth: number;
+    newHeight: number;
+    settings: {
+        cursorPosition: string;
+    };
+}
 
 const DEFAULT_SETTINGS: ImageConvertSettings = {
 	autoRename: true,
@@ -159,7 +158,7 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	ProcessCurrentNoteresizeModaldesiredHeight: 800,
 	ProcessCurrentNoteresizeModaldesiredLength: 800,
 
-	attachmentLocation: 'root',
+	attachmentLocation: 'default',
 	// attachmentSpecifiedFolder: '',
 	attachmentSubfolderName: '',
 	customOutputPath: '',
@@ -185,7 +184,8 @@ export default class ImageConvertPlugin extends Plugin {
 	settings: ImageConvertSettings;
 	longestSide: number | null = null;
 	widthSide: number | null = null;
-
+	storedImageName: string | null = null; // get imagename for comparison
+	
 	// Declare the properties
 	pasteListener: (event: ClipboardEvent) => void;
 	dropListener: (event: DragEvent) => void;
@@ -208,13 +208,38 @@ export default class ImageConvertPlugin extends Plugin {
     private totalSizeAfterBytes = 0;
     private processedFiles: { name: string; savedBytes: number }[] = [];
 
-	private statusBarItemEl: HTMLElement;
+	private statusBarItemEl: HTMLElement | null = null;
 	private counters: Map<string, number> = new Map();
 	private userAction = false;
+
+	// Pause/Resume
+	private isConversionPaused = false; // track the status, paused?
+	private isConversionPaused_statusTimeout: number | null = null; // hide status 
+
+	// Drag Resize
+    private resizeState: {
+        isResizing: boolean;
+        startX: number;
+        startY: number;
+        startWidth: number;
+        startHeight: number;
+        element: HTMLImageElement | HTMLVideoElement | null;
+    } = {
+        isResizing: false,
+        startX: 0,
+        startY: 0,
+        startWidth: 0,
+        startHeight: 0,
+        element: null
+    };
 
 	async onload() {
 		await this.loadSettings();
 		this.addSettingTab(new ImageConvertTab(this.app, this));
+
+		// Create progress container
+        this.progressEl = document.body.createDiv('image-converter-progress');
+        this.progressEl.style.display = 'none';
 
 		// Add evenet listeners on paste and drop to prevent filerenaming during `sync` or `git pull`
 		// This allows us to check if  file was created as a result of a user action (like dropping 
@@ -225,23 +250,91 @@ export default class ImageConvertPlugin extends Plugin {
 		// get triggered only if its an image and if image was created within 100ms of a 'paste/drop' event
 		// also if pasting, check if it is an External Link and wether to apply '| size' syntax to the link
 		this.pasteListener = (event: ClipboardEvent) => {
+			if (this.isConversionPaused) return; // check if paused
+
 			this.userAction = true;
-
-			this.currentBatchTotal = 0;
 			this.batchStarted = true;
-
-			// Handle different types of paste data
+		
+			// Clear previous batch hashes
+			this.fileHashes.clear();
+		
+			// Reset statistics
+			this.totalSizeBeforeBytes = 0;
+			this.totalSizeAfterBytes = 0;
+			this.processedFiles = [];
+		
+			// Generate new batch ID
+			this.batchId = Date.now().toString();
+		
+			// Analyze clipboard items
 			const items = event.clipboardData?.items;
 			if (!items) return;
 		
-			// Count potential images in clipboard
-			const imageItems = Array.from(items).filter(item => 
-				item.kind === 'file' && item.type.startsWith('image/')
-			);
-			
-			this.currentBatchTotal = imageItems.length;
-
-
+			// Get image items and their details
+			const imageItems = Array.from(items)
+				.filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+				.map(item => {
+					const file = item.getAsFile();
+					return {
+						name: file?.name || 'clipboard-image',
+						size: file?.size || 0,
+						type: item.type
+					};
+				});
+		
+			// Calculate adaptive timeout based on files
+			const calculateTimeout = (files: typeof imageItems) => {
+				const BASE_TIMEOUT = 10000;  // 10 seconds base
+				const SIZE_FACTOR = 1000;    // 1 second per MB
+		
+				let timeout = BASE_TIMEOUT;
+				
+				files.forEach(file => {
+					const sizeInMB = file.size / (1024 * 1024);
+					const fileTypeMultiplier = 
+						file.type === 'image/heic' ? 3 :
+						file.type === 'image/tiff' ? 2 :
+						file.type === 'image/png' ? 1.5 :
+						1;
+					
+					timeout += (sizeInMB * SIZE_FACTOR * fileTypeMultiplier);
+				});
+		
+				return Math.min(Math.max(timeout, 10000), 300000);
+			};
+		
+			const timeout = calculateTimeout(imageItems);
+		
+			// Initialize dropInfo for paste operation
+			this.dropInfo = {
+				totalExpectedFiles: imageItems.length,
+				totalProcessedFiles: 0,
+				batchId: this.batchId,
+				files: imageItems,
+				timeoutId: setTimeout(() => {
+					if (this.dropInfo?.batchId === this.batchId) {
+						const incompleteBatch = this.fileQueue.length > 0;
+						if (incompleteBatch) {
+							this.dropInfo.timeoutId = setTimeout(() => {
+								this.userAction = false;
+								this.batchStarted = false;
+								this.dropInfo = null;
+							}, calculateTimeout(this.dropInfo.files.slice(this.dropInfo.totalProcessedFiles)));
+						} else {
+							this.userAction = false;
+							this.batchStarted = false;
+							this.dropInfo = null;
+						}
+					}
+				}, timeout)
+			};
+		
+			if (this.settings.showProgress) {
+				this.updateProgressUI(0, imageItems.length, 'Starting processing...');
+			}
+		
+			// Handle external link resizing if needed
+			/* ----------------------------------------------------------------------------*/
 			// Get the clipboard data as HTML and parse it as Markdown LINK
 			const clipboardHTML = event.clipboardData?.getData('text/html') || '';
 			const parser = new DOMParser();
@@ -293,14 +386,12 @@ export default class ImageConvertPlugin extends Plugin {
 				}
 			}
 
-			// Timeout to reset the user action state
-			setTimeout(() => {
-				this.userAction = false;
-				this.batchStarted = false;
-			}, 10000);
+			/* ----------------------------------------------------------------------------*/
+			/* ----------------------------------------------------------------------------*/
 		};
 
 		this.dropListener = (event: DragEvent) => {
+			if (this.isConversionPaused) return; // check if paused
 			this.userAction = true;
 			this.batchStarted = true;
 
@@ -323,35 +414,43 @@ export default class ImageConvertPlugin extends Plugin {
 			let imageFiles: Array<{name: string; size: number; type: string}> = [];
 			if (event.dataTransfer?.files) {
 				imageFiles = Array.from(event.dataTransfer.files)
-					.filter(file => file.type.startsWith('image/'))
-					.map(file => ({
-						name: file.name,
-						size: file.size,
-						type: file.type
-					}));
+					.map(file => {
+						const mimeType = mime.getType(file.name) || file.type;
+						return {
+							name: file.name,
+							size: file.size,
+							type: mimeType
+						};
+					});
 			}
 		
 			
 			// Calculate adaptive timeout based on file types and sizes
-			const calculateTimeout = (files: typeof imageFiles) => {
+			const calculateTimeout = (files: Array<{ name: string; size: number; type: string }>) => {
 				const BASE_TIMEOUT = 10000;  // 10 seconds base
 				const SIZE_FACTOR = 1000;    // 1 second per MB
 				
 				let timeout = BASE_TIMEOUT;
-				
+			
 				files.forEach(file => {
-					const sizeInMB = file.size / (1024 * 1024);
+					// Get the MIME type using mime package if available
+					const mimeType = mime.getType(file.name) || file.type;
+					
+					// Calculate multiplier based on MIME type
 					const fileTypeMultiplier = 
-						file.type === 'image/heic' ? 3 :  // HEIC takes longer
-						file.type === 'image/tiff' ? 2 :  // TIFF takes longer
-						file.type === 'image/png' ? 1.5 : // PNG takes bit longer
+						mimeType === 'image/heic' ? 3 :  // HEIC takes longer
+						mimeType === 'image/tiff' ? 2 :  // TIFF takes longer
+						mimeType === 'image/png' ? 1.5 : // PNG takes a bit longer
 						1;  // Default multiplier for other formats
 					
+					// Add to the base timeout
+					const sizeInMB = file.size / (1024 * 1024);
 					timeout += (sizeInMB * SIZE_FACTOR * fileTypeMultiplier);
 				});
-		
+			
 				return Math.min(Math.max(timeout, 10000), 300000); // Between 10s and 5min
 			};
+			
 		
 			const timeout = calculateTimeout(imageFiles);
 		
@@ -387,7 +486,6 @@ export default class ImageConvertPlugin extends Plugin {
 		};
 
 		// Wait for layout to be ready
-		// Wait for layout to be ready
 		this.app.workspace.onLayoutReady(() => {
 			// Register listeners for all supported view types
 			const supportedViewTypes = ['markdown', 'canvas', 'excalidraw'];
@@ -400,8 +498,13 @@ export default class ImageConvertPlugin extends Plugin {
 				});
 			});
 	
+			// Initialize drag resize functionality
+			this.initializeDragResize();
+
 			// Register the create event handler
 			this.registerEvent(this.app.vault.on('create', async (file: TFile) => {
+				// Check if conversion is paused first
+				if (this.isConversionPaused) return;
 				// Check if we're on mobile
 				const isMobile = Platform.isMobile;
             
@@ -508,241 +611,21 @@ export default class ImageConvertPlugin extends Plugin {
 							const container = leaf.view.containerEl;
 							if (!container.hasAttribute('data-image-converter-registered')) {
 								container.setAttribute('data-image-converter-registered', 'true');
-								container.ownerDocument.addEventListener("paste", this.pasteListener);
+								container.ownerDocument.addEventListener("paste", this.pasteListener );
 								container.ownerDocument.addEventListener('drop', this.dropListener as EventListener);
 							}
 						});
 					});
+					// Reinitialize drag resize on layout changes
+					this.initializeDragResize();
 				})
 			);
 		});
-
-        // Create progress container
-        this.progressEl = document.body.createDiv('image-converter-progress');
-        this.progressEl.style.display = 'none';
-
-		// Check if edge of an image was clicked upon
-		this.register(
-			this.onElement(
-				document,
-				"mousedown",
-				"img, video",
-				(event: MouseEvent) => {
-					if (!this.settings.resizeByDragging) return;
-
-					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-					if (!activeView) return; // Ensure the active view is a Markdown note
-					// Check if the image is within the markdown view container
-					const markdownContainer = activeView.containerEl;
-					const target = event.target as HTMLElement;
-					if (!markdownContainer.contains(target)) return;
-
-					// Only prevent default if left mouse button is pressed
-					if (event.button === 0) {
-						// Fix the behaviour, where image gets duplicated because of the move on drag,
-						// disabling the defaults which locks the image (alhtough, links are still movable)
-						event.preventDefault();
-					}
-
-					const img = event.target as HTMLImageElement | HTMLVideoElement;
-
-					const rect = img.getBoundingClientRect();
-
-					const x = event.clientX - rect.left;
-					const y = event.clientY - rect.top;
-					const edgeSize = 30; // size of the edge in pixels
-
-					if ((x >= rect.width - edgeSize || x <= edgeSize) || (y >= rect.height - edgeSize || y <= edgeSize)) {
-						// user clicked on any of the edges of the image
-						// Cursor must be active only on the image or the img markdown link
-						// Otherwise resized image will get copied to the active line 
-						const startX = event.clientX;
-						const startY = event.clientY;
-						const startWidth = img.clientWidth;
-						const startHeight = img.clientHeight;
-						let lastUpdateX = startX;
-						let lastUpdateY = startY;
-						const updateThreshold = 5; // The mouse must move at least 5 pixels before an update
-
-						const onMouseMove = (event: MouseEvent) => {
-
-							const { newWidth, newHeight } = resizeImageDrag(event, img, startX, startY, startWidth, startHeight);
-							// Apply the new dimensions to the image or video
-							if (img instanceof HTMLImageElement) {
-								img.style.border = 'solid';
-								img.style.borderWidth = '2px';
-								// img.style.borderColor = 'blue';
-								img.style.boxSizing = 'border-box';
-								img.style.width = `${newWidth}px`;
-								img.style.height = `${newHeight}px`;
-							} else if (img instanceof HTMLVideoElement) {
-								img.style.border = 'solid';
-								img.style.borderWidth = '2px';
-								// img.style.borderColor = 'blue';
-								img.style.boxSizing = 'border-box';
-								// Check if img.parentElement is not null before trying to access its clientWidth property
-								if (img.parentElement) {
-									const containerWidth = img.parentElement.clientWidth;
-									const newWidthPercentage = (newWidth / containerWidth) * 100;
-									img.style.width = `${newWidthPercentage}%`;
-								}
-							}
-
-							// Check if the mouse has moved more than the update threshold
-							if (Math.abs(event.clientX - lastUpdateX) > updateThreshold || Math.abs(event.clientY - lastUpdateY) > updateThreshold) {
-								const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-								if (activeView) {
-									const imageName = getImageName(img);
-
-									if (imageName) { // Check if imageName is not null
-
-										if (isExternalLink(imageName)) {
-											// console.log("editing external link")
-											updateExternalLink(activeView, img, newWidth, newHeight);
-										} else if (isBase64Image(imageName)) {
-											// console.log("editing base64 image")
-											resizeBase64Drag(activeView, imageName, newWidth)
-										} else {
-											// console.log("editing internal link")
-											updateMarkdownLink(activeView, img, imageName, newWidth, newHeight);
-										}
-									}
-								}
-
-								// Update the last update coordinates
-								lastUpdateX = event.clientX;
-								lastUpdateY = event.clientY;
-							}
-						};
-
-						const onMouseUp = () => {
-							document.removeEventListener("mousemove", onMouseMove);
-							document.removeEventListener("mouseup", onMouseUp);
-
-							// Add a slight delay before setting the cursor position
-							setTimeout(() => {
-								// Set the cursor position based on the setting
-								const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-								if (activeView) {
-									const editor = activeView.editor;
-									const cursorPos = editor.getCursor();
-									const lineContent = editor.getLine(cursorPos.line);
-									const imageName = getImageName(img);
-
-									if (imageName) {
-										let newCursorPos;
-										if (this.settings.cursorPosition === 'front') {
-											newCursorPos = { line: cursorPos.line, ch: Math.max(lineContent.indexOf(imageName) - 3, 0) };
-										} else {
-											const linkEnd = lineContent.indexOf(imageName) + imageName.length + 6;
-											newCursorPos = { line: cursorPos.line, ch: Math.min(linkEnd, lineContent.length) };
-										}
-										editor.setCursor(newCursorPos);
-									}
-								}
-							}, 100); // Adjust the delay as needed
-						};
-						document.addEventListener("mousemove", onMouseMove);
-						document.addEventListener("mouseup", onMouseUp);
-					}
-				}
-			)
-		);
-
-		// Custom event listener to handle cursor positioning after resizing
-		this.register(this.onElement(document, "mouseup", "img, video", (event: MouseEvent) => {
-			const img = event.target as HTMLImageElement | HTMLVideoElement;
-
-			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-			if (!activeView) return; // Ensure the active view is a Markdown note
-			// Check if the image is within the markdown view container
-			const markdownContainer = activeView.containerEl;
-			const target = event.target as HTMLElement;
-			if (!markdownContainer.contains(target)) return;
-
-			if (activeView) {
-				const editor = activeView.editor;
-				const cursorPos = editor.getCursor();
-				const lineContent = editor.getLine(cursorPos.line);
-				const imageName = getImageName(img);
-
-				if (imageName) {
-					let newCursorPos;
-					if (this.settings.cursorPosition === 'front') {
-						newCursorPos = { line: cursorPos.line, ch: Math.max(lineContent.indexOf(imageName) - 3, 0) };
-					} else {
-						const linkEnd = lineContent.indexOf(imageName) + imageName.length + 6;
-						newCursorPos = { line: cursorPos.line, ch: Math.min(linkEnd, lineContent.length) };
-					}
-					editor.setCursor(newCursorPos);
-				}
-			}
-		}));
-
-		// Create handle to resize image by dragging the edge of an image
-		this.register(
-			this.onElement(
-				document,
-				"mouseover",
-				"img, video",
-				(event: MouseEvent) => {
-					if (!this.settings.resizeByDragging) return;
-					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-					if (!activeView) return; // Ensure the active view is a Markdown note
-					// Check if the image is within the markdown view container
-					const markdownContainer = activeView.containerEl;
-					const target = event.target as HTMLElement;
-					if (!markdownContainer.contains(target)) return;
-
-					const img = event.target as HTMLImageElement | HTMLVideoElement;
-					const rect = img.getBoundingClientRect(); // Cache this
-					const edgeSize = 30; // size of the edge in pixels
-
-					// Throttle mousemove events
-					let lastMove = 0;
-					const mouseOverHandler = (event: MouseEvent) => {
-						const now = Date.now();
-						if (now - lastMove < 100) return; // Only execute once every 100ms
-						lastMove = now;
-
-						const x = event.clientX - rect.left;
-						const y = event.clientY - rect.top;
-
-						if ((x >= rect.width - edgeSize || x <= edgeSize) || (y >= rect.height - edgeSize || y <= edgeSize)) {
-							img.style.cursor = 'nwse-resize';
-							img.style.outline = 'solid';
-							img.style.outlineWidth = '10px';
-							img.style.outlineColor = '#dfb0f283';
-						} else {
-							img.style.cursor = 'default';
-							img.style.outline = 'none';
-						}
-					};
-					this.registerDomEvent(img, 'mousemove', mouseOverHandler);
-				}
-			)
-		);
-
-		// Reset border/outline when finished resizing
-		this.register(
-			this.onElement(
-				document,
-				"mouseout",
-				"img, video",
-				(event: MouseEvent) => {
-					if (!this.settings.resizeByDragging) return;
-					const img = event.target as HTMLImageElement | HTMLVideoElement;
-					img.style.borderStyle = 'none';
-					img.style.outline = 'none';
-				}
-			)
-		);
 
 		// Allow resizing with SHIFT + Scrollwheel
 		// Fix a bug which on when hover on external images it would replace 1 image link with another
 		// Sometimes it would replace image1 with image2 because there is no way to find linenumber
 		// for external links. Linenumber gets shown only for internal images.
-		let storedImageName: string | null = null; // get imagename for comparison
 		this.register(
 			this.onElement(
 				document,
@@ -761,7 +644,7 @@ export default class ImageConvertPlugin extends Plugin {
 					}
 
 					const img = event.target as HTMLImageElement | HTMLVideoElement;
-					storedImageName = getImageName(img);
+					this.storedImageName = getImageName(img);
 				}
 			)
 		);
@@ -774,74 +657,61 @@ export default class ImageConvertPlugin extends Plugin {
 					if (!this.settings.resizeWithShiftScrollwheel) return;
 					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 					if (!activeView) return; // Ensure the active view is a Markdown note
-					// Check if the image is within the markdown view container
+					
 					const markdownContainer = activeView.containerEl;
 					const target = event.target as HTMLElement;
 					if (!markdownContainer.contains(target)) return;
 					if (event.shiftKey) { // check if the shift key is pressed
-
 						try {
 							const img = event.target as HTMLImageElement | HTMLVideoElement;
-
-							// get the image under the cursor
 							const imageName = getImageName(img)
-
-							// if the image under the cursor is not the same as the event target, return
-							if (imageName !== storedImageName) {
-								// console.log('Started scrolling over a new image');
+		
+							if (imageName !== this.storedImageName) {
 								return;
 							}
-
+		
 							const { newWidth, newHeight, newLeft, newTop } = resizeImageScrollWheel(event, img);
 							if (img instanceof HTMLImageElement) {
 								img.style.width = `${newWidth}px`;
 								img.style.height = `${newHeight}px`;
 								img.style.left = `${newLeft}px`;
 								img.style.top = `${newTop}px`;
-
 							} else if (img instanceof HTMLVideoElement) {
 								img.style.width = `${newWidth}%`;
-								// img.style.height = 'auto'; // Maintain the aspect ratio
 							}
-
-
-							const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-							if (activeView) {
-								const imageName = getImageName(img);
-								const editor = activeView.editor;
-								const cursorPos = editor.getCursor();
-								const lineContent = editor.getLine(cursorPos.line);
-								if (imageName) { // Check if imageName is not null
-									if (isExternalLink(imageName)) {
-										// console.log("editing external link")
-										updateExternalLink(activeView, img, newWidth, newHeight);
-									} else if (isBase64Image(imageName)) {
-										// console.log("editing base64 image")
-										resizeBase64Drag(activeView, imageName, newWidth)
-									} else {
-										// console.log("editing internal link")
-										updateMarkdownLink(activeView, img, imageName, newWidth, newHeight);
-									}
-									
-									let newCursorPos;
-									if (this.settings.cursorPosition === 'front') {
-										newCursorPos = { line: cursorPos.line, ch: Math.max(lineContent.indexOf(imageName) - 3, 0) };
-									} else {
-										const linkEnd = lineContent.indexOf(imageName) + imageName.length + 6;
-										newCursorPos = { line: cursorPos.line, ch: Math.min(linkEnd, lineContent.length) };
-									}
-									editor.setCursor(newCursorPos);
+		
+							const editor = activeView.editor;
+							updateImageLink({
+								activeView,
+								element: img,
+								newWidth,
+								newHeight,
+								settings: this.settings
+							});
+							
+							// Handle cursor position after update
+							const cursorPos = editor.getCursor();
+							const lineContent = editor.getLine(cursorPos.line);
+							if (imageName) {
+								let newCursorPos;
+								if (this.settings.cursorPosition === 'front') {
+									const linkStart = Math.max(lineContent.indexOf('![['), lineContent.indexOf('!['));
+									newCursorPos = { line: cursorPos.line, ch: Math.max(linkStart, 0) };
+								} else {
+									const linkEnd = lineContent.indexOf(']]') !== -1 ? 
+										lineContent.indexOf(']]') + 2 : 
+										lineContent.indexOf(')') + 1;
+									newCursorPos = { line: cursorPos.line, ch: Math.min(linkEnd, lineContent.length) };
 								}
+								editor.setCursor(newCursorPos);
 							}
 						} catch (error) {
 							console.error('An error occurred:', error);
 						}
-
 					}
 				}
 			)
 		);
-
 
 		// Context Menu
 		// Add event listener for contextmenu event on image elements
@@ -896,33 +766,53 @@ export default class ImageConvertPlugin extends Plugin {
 			}
 		});
 
+		// Add commmand to Pause/Continue image
+		this.addCommand({
+            id: 'toggle-image-conversion',
+            name: 'Toggle Image Conversion (Pause/Resume)',
+            callback: () => {
+                this.toggleConversion();
+            }
+        });
 	}
 
 	async onunload() {
-		// Remove event listener for contextmenu event on image elements
-		// Remove the event listeners when the plugin is unloaded
-		const leaves = this.app.workspace.getLeavesOfType('markdown');
-		leaves.forEach(leaf => {
-			const doc = leaf.view.containerEl.ownerDocument;
-			doc.removeEventListener("paste", this.pasteListener);
-			doc.removeEventListener("drop", this.dropListener as EventListener);
+		// Remove event listeners for all supported view types
+		const supportedViewTypes = ['markdown', 'canvas', 'excalidraw'];
+		supportedViewTypes.forEach(viewType => {
+			const leaves = this.app.workspace.getLeavesOfType(viewType);
+			leaves.forEach(leaf => {
+				const doc = leaf.view.containerEl.ownerDocument;
+				doc.removeEventListener("paste", this.pasteListener);
+				doc.removeEventListener("drop", this.dropListener as EventListener);
+			});
 		});
-		// Unload border for resizing image
-		document.querySelectorAll("img").forEach((img) => {
-			img.removeEventListener("mousemove", this.mouseOverHandler);
-			// Reset the styles
-			img.style.cursor = "default";
-			img.style.outline = "none";
-		});
+	
+		// Remove drag resize event listeners
+		document.removeEventListener('mousedown', this.dragResize_handleMouseDown);
+		document.removeEventListener('mousemove', this.dragResize_handleMouseMove);
+		document.removeEventListener('mouseup', this.dragResize_handleMouseUp);
+		document.removeEventListener('mouseout', this.dragResize_handleMouseOut);
+	
+		// Remove the resize class from workspace
+		this.app.workspace.containerEl.removeClass('image-resize-enabled');
+	
+		// Your existing cleanup code
 		this.fileQueue = [];
 		this.isProcessingQueue = false;
+		if (this.isConversionPaused_statusTimeout) {
+			clearTimeout(this.isConversionPaused_statusTimeout);
+			this.isConversionPaused_statusTimeout = null;
+		}
+		
 		if (this.statusBarItemEl) {
 			this.statusBarItemEl.remove();
+			this.statusBarItemEl = null;
 		}
 		this.progressEl?.remove();
 		this.hideProgressBar();
 		this.fileQueue = [];
-        this.dropInfo = null;
+		this.dropInfo = null;
 	}
 
 	// Queue
@@ -961,22 +851,26 @@ export default class ImageConvertPlugin extends Plugin {
 				if (this.dropInfo?.batchId === currentBatchId) {
 					const currentFileIndex = this.dropInfo.totalProcessedFiles;
 					const currentFile = this.dropInfo.files[currentFileIndex];
-					
+
 					if (currentFile) {
+						// Get the MIME type using mime package if available
+						const mimeType = mime.getType(currentFile.name) || currentFile.type;
+
+						// Check if the file is large or a complex format
 						const isLargeFile = currentFile.size > 10 * 1024 * 1024; // 10MB
-						const isComplexFormat = ['image/heic', 'image/tiff', 'image/png'].includes(currentFile.type);
-						
+						const isComplexFormat = ['image/heic', 'image/tiff', 'image/png'].includes(mimeType);
+
 						if (isLargeFile || isComplexFormat) {
 							if (this.dropInfo.timeoutId) {
 								clearTimeout(this.dropInfo.timeoutId);
 							}
-							
+
 							// Calculate extended timeout based on file characteristics
 							const extensionTime = Math.max(
 								30000, // minimum 30 seconds
 								(currentFile.size / (1024 * 1024)) * 2000 // 2 seconds per MB
 							) * (isComplexFormat ? 1.5 : 1); // 50% more time for complex formats
-	
+
 							this.dropInfo.timeoutId = setTimeout(() => {
 								if (this.dropInfo?.batchId === currentBatchId) {
 									const remainingFiles = this.fileQueue.length;
@@ -992,6 +886,7 @@ export default class ImageConvertPlugin extends Plugin {
 						}
 					}
 				}
+
 	
 				try {
 					// Update progress before processing
@@ -1009,10 +904,11 @@ export default class ImageConvertPlugin extends Plugin {
 					this.totalSizeBeforeBytes += currentFileSize;
 
 					const initialSizeBytes = initialStat?.size || 0;
-	
+			
 					// Calculate adaptive timeout based on file size and type
-					const fileExtension = item.file.extension.toLowerCase();
-					const isComplexFormat = ['heic', 'tiff', 'png'].includes(fileExtension);
+					const mimeType = mime.getType(item.file.extension.toLowerCase()) || `image/${item.file.extension.toLowerCase()}`;
+					const isComplexFormat = ['image/heic', 'image/tiff', 'image/png'].includes(mimeType);
+
 					const timeoutDuration = Math.max(
 						this.settings.baseTimeout,
 						(initialSizeBytes / this.SIZE_FACTOR * this.settings.timeoutPerMB) *
@@ -1105,65 +1001,6 @@ export default class ImageConvertPlugin extends Plugin {
 			}
 		}
 	}
-
-	// async processQueue() {
-	// 	if (this.isProcessingQueue) return;
-	// 	this.isProcessingQueue = true;
-	
-	// 	const currentBatchId = this.batchId;
-	// 	console.log('Starting queue processing:', this.fileQueue);
-	
-	// 	try {
-	// 		while (this.fileQueue.length > 0) {
-	// 			console.log('Queue length:', this.fileQueue.length);
-	
-	// 			// Check if we're still processing the same batch
-	// 			if (currentBatchId !== this.batchId) {
-	// 				console.log('Batch ID changed, starting new batch');
-	// 				break;
-	// 			}
-	
-	// 			const item = this.fileQueue[0];
-	
-	// 			// Skip if already processed
-	// 			if (item.processed) {
-	// 				this.fileQueue.shift();
-	// 				continue;
-	// 			}
-	
-	// 			// Update progress before processing
-	// 			if (this.settings.showProgress) {
-	// 				this.updateProgressUI(
-	// 					this.dropInfo?.totalProcessedFiles || 0,
-	// 					this.dropInfo?.totalExpectedFiles || this.fileQueue.length,
-	// 					item.file.name
-	// 				);
-	// 			}
-	
-	// 			try {
-	// 				// Process the file and get the new path
-	// 				await this.renameFile1(item.file);
-					
-	// 				// Mark the item as processed
-	// 				item.processed = true;
-	// 				// item.newPath = newPath;
-					
-	// 				// Remove the processed item from the queue
-	// 				this.fileQueue.shift();
-	// 			} catch (error) {
-	// 				console.error('Error processing item:', error);
-	// 				this.fileQueue.shift(); // Remove the problematic item to avoid infinite loop
-	// 			}
-	// 		}
-	// 	} catch (error) {
-	// 		console.error('Error processing queue:', error);
-	// 	} finally {
-	// 		this.isProcessingQueue = false;
-	// 		console.log('Queue processing complete');
-	// 	}
-	// }
-	
-
 
 
     private updateProgressUI(current: number, total: number, fileName: string) {
@@ -1446,6 +1283,245 @@ export default class ImageConvertPlugin extends Plugin {
 
 	}
 
+	/* Drag Resize */
+	/* ------------------------------------------------------------- */
+	private initializeDragResize() {
+		this.registerDomEvent(document, 'mousedown', this.dragResize_handleMouseDown.bind(this));
+		this.registerDomEvent(document, 'mousemove', this.dragResize_handleMouseMove.bind(this));
+		this.registerDomEvent(document, 'mouseup', this.dragResize_handleMouseUp.bind(this));
+		this.registerDomEvent(document, 'mouseout', this.dragResize_handleMouseOut.bind(this));
+	
+		// Add the base CSS class to workspace
+		this.app.workspace.containerEl.addClass('image-resize-enabled');
+	
+		// Also reinitialize on layout changes
+		this.registerEvent(
+			this.app.workspace.on('layout-change', () => {
+				// You might want to remove and reapply the class
+				this.app.workspace.containerEl.removeClass('image-resize-enabled');
+				this.app.workspace.containerEl.addClass('image-resize-enabled');
+			})
+		);
+	}
+
+    private dragResize_isValidTarget(element: HTMLElement): element is HTMLImageElement | HTMLVideoElement {
+        if (!(element instanceof HTMLImageElement || element instanceof HTMLVideoElement)) {
+            return false;
+        }
+
+        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+        return !!(activeView && activeView.containerEl.contains(element));
+    }
+
+	private dragResize_handleMouseDown(event: MouseEvent) {
+		if (!this.settings.resizeByDragging) return;
+	
+		const target = event.target as HTMLElement;
+		if (!this.dragResize_isValidTarget(target)) return;
+	
+		const rect = target.getBoundingClientRect();
+		const x = event.clientX - rect.left;
+		const y = event.clientY - rect.top;
+		const edgeSize = 30;
+	
+		if ((x >= rect.width - edgeSize || x <= edgeSize) || 
+			(y >= rect.height - edgeSize || y <= edgeSize)) {
+			
+			event.preventDefault();
+			
+			// Set active resize state
+			target.setAttribute('data-resize-active', 'true');
+			
+			this.resizeState = {
+				isResizing: true,
+				startX: event.clientX,
+				startY: event.clientY,
+				startWidth: target.clientWidth,
+				startHeight: target.clientHeight,
+				element: target
+			};
+		}
+	}
+
+	private dragResize_handleMouseMove(event: MouseEvent) {
+		const target = event.target as HTMLElement;
+		
+		if (this.resizeState.isResizing && this.resizeState.element) {
+			const { newWidth, newHeight } = this.dragResize_calculateNewDimensions(event);
+			this.dragResize_updateElementSize(newWidth, newHeight);
+			this.dragResize_updateMarkdownContent(newWidth, newHeight);
+		} else if (this.dragResize_isValidTarget(target)) {
+			const rect = target.getBoundingClientRect();
+			const x = event.clientX - rect.left;
+			const y = event.clientY - rect.top;
+			const edgeSize = 30;
+	
+			if ((x >= rect.width - edgeSize || x <= edgeSize) || 
+				(y >= rect.height - edgeSize || y <= edgeSize)) {
+				target.setAttribute('data-resize-edge', 'true');
+			} else {
+				target.removeAttribute('data-resize-edge');
+			}
+		}
+	}
+
+	private dragResize_handleMouseUp() {
+		if (this.resizeState.element) {
+			// Clean up all resize-related attributes
+			this.resizeState.element.removeAttribute('data-resize-edge');
+			this.resizeState.element.removeAttribute('data-resize-active');
+			this.dragResize_updateCursorPosition();
+		}
+	
+		this.resizeState = {
+			isResizing: false,
+			startX: 0,
+			startY: 0,
+			startWidth: 0,
+			startHeight: 0,
+			element: null
+		};
+	}
+
+	private dragResize_handleMouseOut = (event: MouseEvent) => {
+		const target = event.target as HTMLElement;
+		if (this.dragResize_isValidTarget(target) && !this.resizeState.isResizing) {
+			target.removeAttribute('data-resize-edge');
+		}
+	}
+
+    private dragResize_updateElementSize(newWidth: number, newHeight: number) {
+        if (!this.resizeState.element) return;
+
+        if (this.resizeState.element instanceof HTMLImageElement) {
+            this.resizeState.element.style.width = `${newWidth}px`;
+            this.resizeState.element.style.height = `${newHeight}px`;
+        } else if (this.resizeState.element instanceof HTMLVideoElement) {
+            const containerWidth = this.resizeState.element.parentElement?.clientWidth ?? 0;
+            const newWidthPercentage = (newWidth / containerWidth) * 100;
+            this.resizeState.element.style.width = `${newWidthPercentage}%`;
+        }
+    }
+
+    private dragResize_calculateNewDimensions(event: MouseEvent) {
+        const deltaX = event.clientX - this.resizeState.startX;
+        const aspectRatio = this.resizeState.startWidth / this.resizeState.startHeight;
+        
+        const newWidth = Math.max(this.resizeState.startWidth + deltaX, 50);
+        const newHeight = newWidth / aspectRatio;
+
+        return {
+            newWidth: Math.round(newWidth),
+            newHeight: Math.round(newHeight)
+        };
+    }
+
+	private dragResize_updateMarkdownContent(newWidth: number, newHeight: number) {
+		if (!this.resizeState.element) return;
+	
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!activeView) return;
+	
+		// Store the current element being resized
+		const currentElement = this.resizeState.element;
+		const currentImageName = getImageName(currentElement);
+		
+		if (!currentImageName) return;
+	
+		updateImageLink({
+			activeView,
+			element: currentElement,
+			newWidth,
+			newHeight,
+			settings: this.settings
+		});
+	}
+
+	private async dragResize_updateCursorPosition() {
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!activeView || !this.resizeState.element) return;
+	
+		const editor = activeView.editor;
+		const cursorPos = editor.getCursor();
+		const lineContent = editor.getLine(cursorPos.line);
+		
+		// Get src attribute safely
+		const currentSrc = this.resizeState.element.getAttribute("src");
+		if (!currentSrc) return;
+	
+		// Get image name safely
+		const imageName = getImageName(this.resizeState.element);
+		if (!imageName) return;
+	
+		// Ensure we have valid content to work with
+		if (!lineContent.includes(imageName)) return;
+	
+		setTimeout(() => {
+			let newCursorPos;
+			if (this.settings.cursorPosition === 'front') {
+				// Find the actual start of the image markdown
+				const imageStart = lineContent.indexOf(imageName);
+				if (imageStart === -1) return;
+				
+				// Move cursor to start of image markdown
+				newCursorPos = { 
+					line: cursorPos.line, 
+					ch: Math.max(imageStart - 3, 0) 
+				};
+			} else {
+				// Find the end of the image markdown
+				const imageEnd = lineContent.indexOf(imageName) + imageName.length;
+				if (imageEnd === -1) return;
+				
+				// Move cursor after the image markdown
+				newCursorPos = { 
+					line: cursorPos.line, 
+					ch: Math.min(imageEnd + 6, lineContent.length) 
+				};
+			}
+	
+			editor.setCursor(newCursorPos);
+		}, 100);
+	}
+	
+	/* ------------------------------------------------------------- */
+	/* ------------------------------------------------------------- */
+
+	// Toogle to Pause / Continue image conversion
+	private toggleConversion(): void {
+		this.isConversionPaused = !this.isConversionPaused;
+		
+		// Clear any existing timeout for status bar removal
+		if (this.isConversionPaused_statusTimeout) {
+			clearTimeout(this.isConversionPaused_statusTimeout);
+			this.isConversionPaused_statusTimeout = null;
+		}
+		
+		// Create status bar item if it doesn't exist
+		if (!this.statusBarItemEl) {
+			this.statusBarItemEl = this.addStatusBarItem();
+		}
+		
+		if (this.isConversionPaused) {
+			this.statusBarItemEl.setText('Image Conversion: Paused ⏸️');
+			new Notice('Image conversion paused');
+			// Clear current queue if any
+			this.fileQueue = [];
+			this.isProcessingQueue = false;
+			this.hideProgressBar();
+		} else {
+			this.statusBarItemEl.setText('Image Conversion: Active ▶️');
+			new Notice('Image conversion resumed');
+			// Remove status bar item after 5 seconds
+			this.isConversionPaused_statusTimeout = window.setTimeout(() => {
+				if (this.statusBarItemEl) {
+					this.statusBarItemEl.remove();
+					this.statusBarItemEl = null;
+				}
+			}, 5000);
+		}
+	}
+
     async openSettingsTab() {
         const setting = (this.app as any).setting;
         if (setting) {
@@ -1476,7 +1552,6 @@ export default class ImageConvertPlugin extends Plugin {
 			await this.app.vault.modifyBinary(file, arrayBuffer);
 		}
 
-
 		// 2. while we are here - reading the image, lets check its width too. 
 		// So we could later pass it into custom sizing options etc. 
 		// Only check it if the setting for customSize or fitImage is enabled  as there are the only options currently need it
@@ -1498,10 +1573,11 @@ export default class ImageConvertPlugin extends Plugin {
 		if (this.settings.autoRename) {
 			newName = await this.generateNewName(file, activeFile);
 		} else {
-			newName = await this.keepOrgName(file, activeFile);
+			newName = await this.keepOrgName(file);
 		}
 
 		// Store original values 
+		// sourcePath indicates path of a note
 		const sourcePath = activeFile.path;
 		const linkText = this.makeLinkText(file, sourcePath);
 
@@ -1526,20 +1602,23 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
 	private async processImage(file: TFile, binary: ArrayBuffer): Promise<Blob> {
-		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
-
-		// Handle special formats
-		if (file.extension === 'tif' || file.extension === 'tiff') {
+		// Determine the MIME type using the mime module
+		const mimeType = mime.getType(file.extension) || `image/${file.extension}`;
+	
+		let imgBlob = new Blob([binary], { type: mimeType });
+	
+		// Handle special formats based on MIME type
+		if (mimeType === 'image/tiff') {
 			imgBlob = await handleTiffImage(binary);
-		} else if (file.extension === 'heic') {
+		} else if (mimeType === 'image/heic') {
 			imgBlob = await handleHeicImage(file, binary, this.settings, this.app);
 		}
-
+	
 		// Process compression if quality is not 100%
 		if (this.settings.quality !== 1) {
 			imgBlob = await this.convertImageFormat(imgBlob, file.extension);
 		}
-
+	
 		return imgBlob;
 	}
 
@@ -1595,6 +1674,7 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
 	private async createOutputFolders(newName: string, file: TFile, activeFile: TFile): Promise<string> {
+		
 		const basePath = await this.getBasePath(activeFile, file);
 		await this.ensureFolderExists(basePath); // Add this line
 		
@@ -1686,12 +1766,23 @@ export default class ImageConvertPlugin extends Plugin {
 				} else if (this.settings.autoNonDestructiveResize === "fitImage") {
 					size = this.settings.customSizeLongestSide;
 				}
+	
+				// Handle all three types of links
 				if (newLinkText.startsWith('![[')) {
-					// This is an internal link
+					// Wiki-style internal link
 					newLinkText = newLinkText.replace(']]', `|${size}]]`);
+				} else if (newLinkText.startsWith('![')) {
+					// Standard markdown link
+					const altTextMatch = newLinkText.match(/!\[(.*?)\]/);
+					const urlMatch = newLinkText.match(/\((.*?)\)/);
+					
+					if (altTextMatch && urlMatch) {
+						const altText = altTextMatch[1].replace(/\|.*$/, ''); // Remove any existing size
+						const url = urlMatch[1];
+						newLinkText = `![${altText}|${size}](${url})`;
+					}
 				}
 			}
-
 			// Get the editor
 			const editor = this.getActiveEditor(activeFile.path);
 			if (!editor) {
@@ -1840,7 +1931,7 @@ export default class ImageConvertPlugin extends Plugin {
 
 	private async checkForCaseConflicts(path: string): Promise<void> {
 		const folder = path.substring(0, path.lastIndexOf('/'));
-		const fileName = path.substring(path.lastIndexOf('/') + 1);
+		// const fileName = path.substring(path.lastIndexOf('/') + 1);
 		
 		const files = await this.app.vault.adapter.list(folder);
 		const conflictingFiles = files.files.filter(f => 
@@ -1872,6 +1963,9 @@ export default class ImageConvertPlugin extends Plugin {
 		let basePath: string;
 	
 		switch (this.settings.attachmentLocation) {
+			case 'default':
+				basePath = file.path.substring(0, file.path.lastIndexOf('/'));
+				break;
 			case 'root':
 				basePath = '/';
 				break;
@@ -1924,7 +2018,7 @@ export default class ImageConvertPlugin extends Plugin {
 			// Ensure the name is safe for filesystem
 			newName = this.sanitizeFileName(newName);
 		} else {
-			newName = await this.keepOrgName(file, activeFile);
+			newName = await this.keepOrgName(file);
 		}
 
 		// Handle file extension
@@ -1933,10 +2027,14 @@ export default class ImageConvertPlugin extends Plugin {
 			extension = this.settings.convertTo;
 		}
 
-		return `${newName}.${extension}`;
+		if (!newName.endsWith(`.${extension}`)) {
+			return `${newName}.${extension}`;
+		}
+	
+		return newName;
 	}
 
-	async keepOrgName(file: TFile, activeFile: TFile): Promise<string> {
+	async keepOrgName(file: TFile): Promise<string> {
 		let newName = file.basename;
 
 		// Ensure the name is safe for filesystem
@@ -1947,7 +2045,12 @@ export default class ImageConvertPlugin extends Plugin {
 			extension = this.settings.convertTo;
 		}
 
-		return `${newName}.${extension}`;
+		// Avoid double extension: check if newName already includes an extension
+		if (!newName.endsWith(`.${extension}`)) {
+			return `${newName}.${extension}`;
+		}
+
+		return newName;
 	}
 	
 	makeLinkText(file: TFile, sourcePath: string, subpath?: string): string {
@@ -2238,12 +2341,21 @@ export default class ImageConvertPlugin extends Plugin {
 					if (Math.abs(aspectRatio - 1.6) < 0.1) return '16:10';
 					return 'custom';
 				})(),
-				'{sizeCategory}': (() => {
-					if (pixelCount < 100000) return 'tiny';
-					if (pixelCount < 500000) return 'small';
-					if (pixelCount < 2000000) return 'medium';
-					if (pixelCount < 8000000) return 'large';
-					return 'very-large';
+				'{resolutionCategory}': (() => {
+					if (pixelCount < 100000) return 'tiny';      // < 0.1MP  (e.g., 316x316 or smaller)
+					if (pixelCount < 500000) return 'small';     // < 0.5MP  (e.g., 707x707 or smaller)
+					if (pixelCount < 2000000) return 'medium';   // < 2MP    (e.g., 1414x1414 or smaller)
+					if (pixelCount < 8000000) return 'large';    // < 8MP    (e.g., 2828x2828 or smaller)
+					return 'very-large';                         // >= 8MP   (e.g., larger than 2828x2828)
+				})(),
+				'{fileSizeCategory}': (() => {
+					const sizeInBytes = fileSizeInBytes;
+					if (sizeInBytes < 50 * 1024) return '0-50KB';
+					if (sizeInBytes < 200 * 1024) return '51-200KB';
+					if (sizeInBytes < 1024 * 1024) return '201-1024KB';
+					if (sizeInBytes < 5 * 1024 * 1024) return '1025KB-5MB';
+					if (sizeInBytes < 10 * 1024 * 1024) return '5MB-10MB';
+					return '10MB+';                                  
 				})(),
 				'{dominantDimension}': img.width > img.height ? 'width' : (img.width < img.height ? 'height' : 'equal'),
 				'{dimensionDifference}': Math.abs(img.width - img.height).toString(),
@@ -3025,8 +3137,8 @@ export default class ImageConvertPlugin extends Plugin {
 }
 
 function isImage(file: TFile): boolean {
-	const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'tif', 'tiff', 'bmp', 'svg', 'gif', 'mov'];
-	return IMAGE_EXTS.includes(file.extension.toLowerCase());
+    const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'avif', 'tif', 'tiff', 'bmp', 'svg', 'gif', 'mov'];
+    return IMAGE_EXTS.includes(file.extension.toLowerCase());
 }
 
 function isBase64Image(src: string): boolean {
@@ -3102,27 +3214,30 @@ async function handleTiffImage(binary: ArrayBuffer): Promise<Blob> {
 }
 
 async function convertHeicToFormat(
-	binary: ArrayBuffer,
-	format: 'JPEG' | 'PNG',
-	quality: number
+    binary: ArrayBuffer,
+    format: 'JPEG' | 'PNG',
+    quality: number
 ): Promise<Blob> {
-	try {
-		// Import heic-to for both platforms
-		const { heicTo } = await import('./heic-to.min.js');
+    try {
+        // Import heic-to for both platforms
+        const { heicTo } = await import('./heic-to.min.js');
 
-		// Convert ArrayBuffer to Blob
-		const blob = new Blob([binary], { type: 'image/heic' });
+        // Convert ArrayBuffer to Blob
+        const blob = new Blob([binary], { type: 'image/heic' });
 
-		// Convert using heic-to
-		return await heicTo({
-			blob: blob,
-			type: `image/${format.toLowerCase()}`,
-			quality: quality
-		});
-	} catch (error) {
-		console.error('Error converting HEIC:', error);
-		throw new Error(`Failed to convert HEIC image: ${error.message}`);
-	}
+        // Determine MIME type for the conversion format
+        const outputMimeType = mime.getType(format.toLowerCase()) || `image/${format.toLowerCase()}`;
+
+        // Convert using heic-to
+        return await heicTo({
+            blob: blob,
+            type: outputMimeType,
+            quality: quality
+        });
+    } catch (error) {
+        console.error('Error converting HEIC:', error);
+        throw new Error(`Failed to convert HEIC image: ${error.message}`);
+    }
 }
 
 async function handleHeicImage(
@@ -3640,308 +3755,554 @@ function printEditorLineWidth(app: App): number {
 	return 0; // Default value if no editor is found
 }
 
-function getImageName(img: HTMLImageElement | HTMLVideoElement): string | null {
-	// Get the image name from an image element: `src`
-	let imageName = img.getAttribute("src");
 
-	// Check if the image name exists
-	if (imageName) {
-		// Check if the image is a base64 image
-		if (isBase64Image(imageName)) {
-			// If it's a base64 image, return the entire `src` attribute
-			return imageName;
-		} else if (!isExternalLink(imageName)) {
-			// If it's not an external link, extract the file name
-			const parts = imageName.split("/");
-			const lastPart = parts.pop();
-			if (lastPart) {
-				imageName = lastPart.split("?")[0];
-				imageName = decodeURIComponent(imageName);
-			}
-		}
-	}
-	return imageName;
+
+// function updateExternalLink(activeView: MarkdownView, img: HTMLImageElement | HTMLVideoElement, newWidth: number, newHeight: number): void {
+// 	// Get the current link and alt text
+// 	const currentLink = img.getAttribute("src");
+// 	let altText = img.getAttribute("alt");
+// 	const editor = activeView.editor;
+
+// 	// Round newWidth to the nearest whole number
+// 	const longestSide = Math.round(Math.max(newWidth, newHeight));
+
+// 	if (altText) {
+// 		altText = altText.replace(/\|\d+(\|\d+)?/g, ''); // remove any sizing info from alt text
+// 	}
+
+// 	// Construct the new markdown with the updated width
+// 	const newMarkdown = `![${altText}|${longestSide}](${currentLink})`;
+
+// 	// Get the line number of the current cursor position
+// 	const lineNumber = editor.getCursor().line;
+
+// 	// Get the content of the current line
+// 	const lineContent = editor.getLine(lineNumber);
+
+// 	// Replace the old markdown with the new one in the current line
+// 	// If there is no sizing then add
+// 	// If there is sizing then make sure it is the only one and there are no duplicate e.g. | size | size
+// 	const updatedLineContent = lineContent.replace(/!\[(.*?)(\|\d+(\|\d+)?)?\]\((.*?)\)/, newMarkdown);
+
+// 	// Update only the current line in the editor
+// 	editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
+// }
+// function updateMarkdownLink(activeView: MarkdownView, img: HTMLImageElement | HTMLVideoElement, imageName: string | null, newWidth: number, newHeight: number) {
+// 	if (!imageName) return;
+
+// 	const editor = activeView.editor;
+// 	const doc = editor.getDoc();
+// 	const lineCount = doc.lineCount();
+
+// 	// Find the line containing the image's markdown link
+// 	let lineIndex: number | undefined;
+// 	for (let i = 0; i < lineCount; i++) {
+// 		const line = doc.getLine(i);
+
+// 		// Get the full image path from the markdown link
+// 		const wikiLinkMatch = line.match(/!\[\[(.*?)(?:\|.*?)?\]\]/);
+// 		if (wikiLinkMatch) {
+// 			const fullPath = wikiLinkMatch[1];
+// 			// Check if the line contains our image name at the end of the path
+// 			if (fullPath.endsWith(imageName)) {
+// 				lineIndex = i;
+// 				break;
+// 			}
+// 		}
+// 	}
+
+// 	if (lineIndex !== undefined) {
+// 		editor.setCursor({ line: lineIndex, ch: 0 });
+// 		const cursor = editor.getCursor();
+// 		const line = editor.getLine(cursor.line);
+
+// 		// Calculate the longest side
+// 		let longestSide;
+// 		if (img instanceof HTMLImageElement) {
+// 			const percentageIndex = line.indexOf('%', line.indexOf('|'));
+// 			if (percentageIndex !== -1 && percentageIndex < line.indexOf(']]')) {
+// 				newWidth = Math.round((newWidth / img.naturalWidth) * 100);
+// 				newWidth = Math.min(newWidth, 100);
+// 				longestSide = `${newWidth}%`;
+// 			} else {
+// 				longestSide = Math.round(Math.max(newWidth, newHeight));
+// 			}
+// 		} else if (img instanceof HTMLVideoElement) {
+// 			const percentageIndex = line.indexOf('%', line.indexOf('|'));
+// 			if (percentageIndex !== -1 && percentageIndex < line.indexOf(']]')) {
+// 				newWidth = Math.min(newWidth, 100);
+// 				longestSide = `${newWidth}%`;
+// 			} else {
+// 				longestSide = Math.round(newWidth);
+// 			}
+// 		}
+
+// 		// Extract the full path and any existing size information
+// 		const match = line.match(/!\[\[(.*?)(?:\|(\d+%?))?\]\]/);
+// 		if (match) {
+// 			const fullPath = match[1];
+// 			const startPos = line.indexOf('![[');
+// 			const endPos = line.indexOf(']]', startPos) + 2;
+
+// 			// Preserve the full path and update only the size
+// 			editor.replaceRange(`![[${fullPath}|${longestSide}]]`,
+// 				{ line: cursor.line, ch: startPos },
+// 				{ line: cursor.line, ch: endPos });
+// 		}
+// 	}
+// }
+// function resizeBase64Drag(activeView: MarkdownView, imageName: string | null, newWidth: number) {
+// 	// When the user starts resizing the image, find and store the line number of the image
+// 	// Get the current line content
+
+// 	const editor = activeView.editor;
+// 	const doc = editor.getDoc();
+// 	const lineCount = doc.lineCount();
+// 	let imageLine: number | null = null;
+
+// 	if (imageName !== null) {
+// 		for (let i = 0; i < lineCount; i++) {
+// 			const line = doc.getLine(i);
+// 			if (line.includes(imageName)) {
+// 				imageLine = i;
+// 				break;
+// 			}
+// 		}
+// 	}
+
+// 	const lineNumber = imageLine;
+// 	if (lineNumber !== null) {
+// 		const lineContent = editor.getLine(lineNumber);
+// 		// Construct a new width attribute
+// 		const newWidthAttribute = `width="${newWidth}"`;
+
+// 		// Replace the old img tag with the new one in the current line
+// 		let updatedLineContent = lineContent.replace(/width="[^"]*"/, newWidthAttribute);
+
+// 		// If there was no width attribute in the original tag, add it to the new tag
+// 		if (!updatedLineContent.includes(newWidthAttribute)) {
+// 			updatedLineContent = updatedLineContent.replace('<img ', `<img ${newWidthAttribute} `);
+// 		}
+
+// 		// Update only the current line in the editor
+// 		editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
+// 	}
+// }
+
+function updateImageLink({ activeView, element, newWidth, newHeight, settings }: LinkUpdateOptions): void {
+    const editor = activeView.editor;
+    const imageName = getImageName(element);
+    if (!imageName) return;
+
+    // Find the correct line containing our image
+    const doc = editor.getDoc();
+    const lineCount = doc.lineCount();
+    let targetLine = -1;
+    let targetLineContent = '';
+    
+    const currentLine = editor.getCursor().line;
+    const currentLineContent = editor.getLine(currentLine);
+    
+    // Helper function to decode URL components for comparison
+    const normalizeForComparison = (path: string) => {
+        try {
+            return decodeURIComponent(path).replace(/\\/g, '/');
+        } catch {
+            return path.replace(/\\/g, '/');
+        }
+    };
+
+    if (isExternalLink(imageName)) {
+        if (currentLineContent.includes(imageName)) {
+            targetLine = currentLine;
+            targetLineContent = currentLineContent;
+        }
+    } else {
+        // Search through document looking for both exact matches and URL-encoded matches
+        const normalizedImageName = normalizeForComparison(imageName);
+        for (let i = 0; i < lineCount; i++) {
+            const line = editor.getLine(i);
+            const normalizedLine = normalizeForComparison(line);
+            if (normalizedLine.includes(normalizedImageName)) {
+                targetLine = i;
+                targetLineContent = line;
+                break;
+            }
+        }
+    }
+
+    if (targetLine === -1) return;
+
+    const longestSide = Math.round(Math.max(newWidth, newHeight));
+
+    let updatedContent = targetLineContent;
+    let startCh = 0;
+    let endCh = targetLineContent.length;
+
+    // Updated pattern to handle both cases:
+    // ![|242](path) and ![alttext|242](path)
+    const markdownPattern = /!\[([^\]]*?)(?:\|\d+(?:\|\d+)?)?\]\(([^)]+)\)/g;
+    const wikiLinkPattern = /!\[\[([^\]]+?)(?:\|\d+(?:\|\d+)?)?\]\]/g;
+
+    let match;
+    while ((match = markdownPattern.exec(targetLineContent)) !== null) {
+        const fullMatch = match[0];
+        const altText = match[1];
+        const path = match[2];
+        
+        const normalizedPath = normalizeForComparison(path);
+        const normalizedImageName = normalizeForComparison(imageName);
+        
+        if (normalizedPath.includes(normalizedImageName)) {
+            // Preserve alt text if it exists, otherwise keep empty
+            const newAltText = altText.replace(/\|\d+(\|\d+)?/g, '');
+            const newMarkdown = `![${newAltText}|${longestSide}](${path})`;
+            startCh = match.index;
+            endCh = startCh + fullMatch.length;
+            updatedContent = newMarkdown;
+            break;
+        }
+    }
+
+    // Only try wiki link pattern if markdown pattern didn't match
+    if (startCh === 0 && endCh === targetLineContent.length) {
+        while ((match = wikiLinkPattern.exec(targetLineContent)) !== null) {
+            const fullMatch = match[0];
+            const path = match[1].split('|')[0];
+            
+            const normalizedPath = normalizeForComparison(path);
+            const normalizedImageName = normalizeForComparison(imageName);
+            
+            if (normalizedPath.includes(normalizedImageName)) {
+                const newMarkdown = `![[${path}|${longestSide}]]`;
+                startCh = match.index;
+                endCh = startCh + fullMatch.length;
+                updatedContent = newMarkdown;
+                break;
+            }
+        }
+    }
+
+    // Update the content and maintain cursor position
+    editor.replaceRange(
+        updatedContent,
+        { line: targetLine, ch: startCh },
+        { line: targetLine, ch: endCh }
+    );
+
+    // Set cursor position more accurately
+    let finalCursorPos;
+    if (settings.cursorPosition === 'front') {
+        finalCursorPos = {
+            line: targetLine,
+            ch: startCh
+        };
+    } else {
+        // Get the updated line content after replacement
+        const updatedLineContent = editor.getLine(targetLine);
+        
+        // Find the end of the link in the updated content
+        const endOfLink = (() => {
+            const mdMatch = updatedLineContent.slice(startCh).match(/!\[.*?\)\s*/);
+            const wikiMatch = updatedLineContent.slice(startCh).match(/!\[\[.*?\]\]\s*/);
+            
+            if (mdMatch) {
+                return startCh + mdMatch[0].length;
+            } else if (wikiMatch) {
+                return startCh + wikiMatch[0].length;
+            }
+            return endCh;
+        })();
+
+        finalCursorPos = {
+            line: targetLine,
+            ch: endOfLink
+        };
+    }
+
+    editor.setCursor(finalCursorPos);
+}
+function getImageName(img: HTMLImageElement | HTMLVideoElement): string | null {
+    let imageName = img.getAttribute("src");
+    
+    if (!imageName) return null;
+
+    // Handle base64 images
+    if (isBase64Image(imageName)) {
+        return imageName;
+    }
+    
+    // Handle external links
+    if (isExternalLink(imageName)) {
+        return imageName;
+    }
+
+    try {
+        // Decode URI components to handle spaces and special characters
+        imageName = decodeURIComponent(imageName);
+        
+        // Split on forward or backward slashes
+        const parts = imageName.split(/[/\\]/);
+        
+        // Get the filename (last part)
+        const fileName = parts[parts.length - 1].split('?')[0];
+        
+        // Return the full filename including any spaces
+        return fileName;
+    } catch (error) {
+        console.error('Error processing image path:', error);
+        return null;
+    }
 }
 function isExternalLink(imageName: string): boolean {
 	// This is a simple check that assumes any link starting with 'http' is an external link.
-	return imageName.startsWith('http');
-}
-function updateExternalLink(activeView: MarkdownView, img: HTMLImageElement | HTMLVideoElement, newWidth: number, newHeight: number): void {
-	// Get the current link and alt text
-	const currentLink = img.getAttribute("src");
-	let altText = img.getAttribute("alt");
-	const editor = activeView.editor;
-
-	// Round newWidth to the nearest whole number
-	const longestSide = Math.round(Math.max(newWidth, newHeight));
-
-	if (altText) {
-		altText = altText.replace(/\|\d+(\|\d+)?/g, ''); // remove any sizing info from alt text
-	}
-
-	// Construct the new markdown with the updated width
-	const newMarkdown = `![${altText}|${longestSide}](${currentLink})`;
-
-	// Get the line number of the current cursor position
-	const lineNumber = editor.getCursor().line;
-
-	// Get the content of the current line
-	const lineContent = editor.getLine(lineNumber);
-
-	// Replace the old markdown with the new one in the current line
-	// If there is no sizing then add
-	// If there is sizing then make sure it is the only one and there are no duplicate e.g. | size | size
-	const updatedLineContent = lineContent.replace(/!\[(.*?)(\|\d+(\|\d+)?)?\]\((.*?)\)/, newMarkdown);
-
-	// Update only the current line in the editor
-	editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
-}
-function resizeImageDrag(event: MouseEvent, img: HTMLImageElement | HTMLVideoElement, startX: number, startY: number, startWidth: number, startHeight: number) {
-	const currentX = event.clientX;
-	const aspectRatio = startWidth / startHeight;
-
-	let newWidth = startWidth;
-	newWidth = startWidth + (currentX - startX);
-	// Ensure the image doesn't get too small
-	newWidth = Math.max(newWidth, 50);
-
-
-	let newHeight = newWidth / aspectRatio;
-
-	// Round the values to the nearest whole number
-	newWidth = Math.round(newWidth);
-	newHeight = Math.round(newHeight);
-
-	return { newWidth, newHeight };
+	return imageName.startsWith('http://') || imageName.startsWith('https://');
 }
 
-function updateMarkdownLink(activeView: MarkdownView, img: HTMLImageElement | HTMLVideoElement, imageName: string | null, newWidth: number, newHeight: number) {
-	const editor = activeView.editor;
-	const doc = editor.getDoc();
-	const lineCount = doc.lineCount();
 
-	// find the line containing the image's markdown link
-	let lineIndex: number | undefined;
-	for (let i = 0; i < lineCount; i++) {
-		const line = doc.getLine(i);
-		if (line.includes(`![[${imageName}`)) {
-			lineIndex = i;
-			break;
+function getFullImagePath(activeView: MarkdownView | null, file: TFile): string | null {
+    if (!activeView) return null;
+
+    const editor = activeView.editor;
+    const doc = editor.getDoc();
+    const lineCount = doc.lineCount();
+
+    // Helper function to normalize paths for comparison
+    const normalizeForComparison = (path: string) => {
+        return path.replace(/\\/g, '/')
+            .replace(/%20/g, ' ')
+            .split('?')[0]
+            .toLowerCase()
+            .trim();
+    };
+
+    const normalizedFileName = normalizeForComparison(file.name);
+    const normalizedFilePath = normalizeForComparison(file.path);
+
+    // Search for the full image path in the document
+    for (let i = 0; i < lineCount; i++) {
+        const line = doc.getLine(i);
+        
+        // Check for wiki-style links with dimensions
+        const wikiLinkMatch = line.match(/!\[\[(.*?)(?:\|.*?)?\]\]/);
+        if (wikiLinkMatch) {
+            const linkPath = wikiLinkMatch[1].split('|')[0];
+            const normalizedLinkPath = normalizeForComparison(linkPath);
+            if (normalizedLinkPath.endsWith(normalizedFileName) || 
+                normalizedLinkPath === normalizedFilePath) {
+                return linkPath;
+            }
+        }
+        
+        // Check for standard markdown links with dimensions
+        const mdLinkMatch = line.match(/!\[([^\]]*?)(?:\|\d+(?:\|\d+)?)?\]\(([^)]+)\)/);
+        if (mdLinkMatch) {
+            const linkPath = mdLinkMatch[2];
+            const normalizedLinkPath = normalizeForComparison(linkPath);
+            if (normalizedLinkPath.endsWith(normalizedFileName) || 
+                normalizedLinkPath === normalizedFilePath) {
+                return linkPath;
+            }
+        }
+    }
+
+    // If no exact match found, return the file path as fallback
+    return file.path;
+}
+function deleteMarkdownLink(activeView: MarkdownView, imagePath: string | null) {
+    if (!imagePath) return;
+
+    const editor = activeView.editor;
+    const doc = editor.getDoc();
+    const lineCount = doc.lineCount();
+
+    // Helper function to normalize paths for comparison
+	const normalizeForComparison = (path: string) => {
+		try {
+			return decodeURIComponent(path)
+				.replace(/\\/g, '/')
+				.replace(/%20/g, ' ')
+				.split('?')[0]  // Remove any query parameters
+				.toLowerCase()
+				.trim();
+		} catch {
+			return path
+				.replace(/\\/g, '/')
+				.replace(/%20/g, ' ')
+				.split('?')[0]  // Remove any query parameters
+				.toLowerCase()
+				.trim();
 		}
-	}
+	};
 
-	if (lineIndex !== undefined) {
-		// move cursor to the line containing the image's markdown link
-		editor.setCursor({ line: lineIndex, ch: 0 });
-		const cursor = editor.getCursor();
-		const line = editor.getLine(cursor.line);
-		// calculate the longest side of the image
-		let longestSide;
-		if (img instanceof HTMLImageElement) {
-			const percentageIndex = line.indexOf('%', line.indexOf(`![[${imageName}`));
-			if (percentageIndex !== -1 && percentageIndex < line.indexOf(']]')) {
-				// If the original link contains a percentage, calculate the new width as a percentage of the original size
-				newWidth = Math.round((newWidth / img.naturalWidth) * 100);
-				newWidth = Math.min(newWidth, 100);
-				longestSide = `${newWidth}%`;
+    const normalizedImagePath = normalizeForComparison(imagePath);
 
-			} else {
-				// If the original link contains a pixel value, continue resizing in pixels
-				longestSide = Math.round(Math.max(newWidth, newHeight));
-			}
-		} else if (img instanceof HTMLVideoElement) {
-			// Check if the link already includes a width in percentages
-			const percentageIndex = line.indexOf('%', line.indexOf(`![[${imageName}`));
-			if (percentageIndex !== -1 && percentageIndex < line.indexOf(']]')) {
-				// If it does, continue resizing in percentages
-				newWidth = Math.min(newWidth, 100);
-				longestSide = `${newWidth}%`;
-			} else {
-				// If it doesn't, continue resizing in pixels
-				longestSide = Math.round(newWidth);
-			}
-		}
-		// find the start and end position of the image link in the line
-		const startPos = line.indexOf(`![[${imageName}`);
-		const endPos = line.indexOf(']]', startPos) + 2;
+    // Find the line containing the image
+    let lineIndex: number | undefined;
+    for (let i = 0; i < lineCount; i++) {
+        const line = doc.getLine(i);
+        
+        // Handle base64 images
+        if (line.includes('data:image') && imagePath.startsWith('data:image')) {
+            if (line.includes(imagePath)) {
+                lineIndex = i;
+                break;
+            }
+            continue;
+        }
 
-		// update the size value in the image's markdown link
-		if (startPos !== -1 && endPos !== -1) {
-			editor.replaceRange(`![[${imageName}|${longestSide}]]`, { line: cursor.line, ch: startPos }, { line: cursor.line, ch: endPos });
-		}
-	}
-}
-function resizeBase64Drag(activeView: MarkdownView, imageName: string | null, newWidth: number) {
-	// When the user starts resizing the image, find and store the line number of the image
-	// Get the current line content
+        // Handle external links
+        if (isExternalLink(imagePath)) {
+            if (line.includes(imagePath)) {
+                lineIndex = i;
+                break;
+            }
+            continue;
+        }
 
-	const editor = activeView.editor;
-	const doc = editor.getDoc();
-	const lineCount = doc.lineCount();
-	let imageLine: number | null = null;
+        // Handle both wiki-style and standard markdown links
+        const wikiLinkMatch = line.match(/!\[\[(.*?)(?:\|.*?)?\]\]/);
+        const markdownLinkMatch = line.match(/!\[([^\]]*?)(?:\|\d+(?:\|\d+)?)?\]\(([^)]+)\)/);
 
-	if (imageName !== null) {
-		for (let i = 0; i < lineCount; i++) {
-			const line = doc.getLine(i);
-			if (line.includes(imageName)) {
-				imageLine = i;
+        if (wikiLinkMatch) {
+            const normalizedWikiPath = normalizeForComparison(wikiLinkMatch[1].split('|')[0]);
+            if (normalizedWikiPath === normalizedImagePath) {
+                lineIndex = i;
+                break;
+            }
+        }
+
+		if (markdownLinkMatch) {
+			const normalizedMdPath = normalizeForComparison(markdownLinkMatch[2]);
+			const normalizedTargetPath = normalizeForComparison(imagePath);
+			
+			// Check if either path contains the other
+			if (normalizedMdPath.includes(normalizedTargetPath) || 
+				normalizedTargetPath.includes(normalizedMdPath)) {
+				lineIndex = i;
 				break;
 			}
 		}
-	}
+    }
 
-	const lineNumber = imageLine;
-	if (lineNumber !== null) {
-		const lineContent = editor.getLine(lineNumber);
-		// Construct a new width attribute
-		const newWidthAttribute = `width="${newWidth}"`;
+    if (lineIndex !== undefined) {
+        editor.setCursor({ line: lineIndex, ch: 0 });
+        const cursor = editor.getCursor();
+        const line = editor.getLine(cursor.line);
 
-		// Replace the old img tag with the new one in the current line
-		let updatedLineContent = lineContent.replace(/width="[^"]*"/, newWidthAttribute);
+        // Find the full markdown link
+        let startPos: number;
+        let endPos: number;
 
-		// If there was no width attribute in the original tag, add it to the new tag
-		if (!updatedLineContent.includes(newWidthAttribute)) {
-			updatedLineContent = updatedLineContent.replace('<img ', `<img ${newWidthAttribute} `);
-		}
-
-		// Update only the current line in the editor
-		editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
-	}
-}
-function deleteMarkdownLink(activeView: MarkdownView, imageName: string | null) {
-	const editor = activeView.editor;
-	const doc = editor.getDoc();
-	const lineCount = doc.lineCount();
-
-	// find the line containing the image's markdown link
-	let lineIndex: number | undefined;
-	for (let i = 0; i < lineCount; i++) {
-		const line = doc.getLine(i);
-		if (line.includes(`![[${imageName}`) || line.includes(`<img`) && line.includes(`src="${imageName}"`)) {
-			lineIndex = i;
-			break;
-		}
-	}
-
-	if (lineIndex !== undefined) {
-		// move cursor to the line containing the image's markdown link
-		editor.setCursor({ line: lineIndex, ch: 0 });
-		const cursor = editor.getCursor();
-		const line = editor.getLine(cursor.line);
-
-		// find the start and end position of the image link in the line
-		let startPos = line.indexOf(`![[${imageName}`);
-		let endPos = line.indexOf(']]', startPos) + 2;
-
-		// if it's not a wikilink, check if it's an HTML img tag e.g.: base64 encoded image
-		if (startPos === -1 || endPos === -1) {
-			const imgTagRegex = /<img[^>]*src="[^"]*"[^>]*>/;
-			const match = imgTagRegex.exec(line);
-			if (match) {
-				startPos = match.index;
-				endPos = startPos + match[0].length;
+        if (line.includes('data:image')) {
+            // Handle base64 images
+            const imgTagRegex = /<img[^>]*src="[^"]*"[^>]*>/;
+            const match = imgTagRegex.exec(line);
+            if (match) {
+                startPos = match.index;
+                endPos = startPos + match[0].length;
+            } else {
+                return;
+            }
+		} else {
+			// Handle all three link types
+			// 1. Wiki-style links
+			const wikiLinkMatch = line.match(/!\[\[.*?\]\]/);
+			if (wikiLinkMatch) {
+				startPos = line.indexOf('![[');
+				endPos = line.indexOf(']]', startPos) + 2;
+			} else {
+				// 2. Standard markdown links with or without alt text
+				const mdLinkMatch = line.match(/!\[([^\]]*?)(?:\|\d+)*\]\(([^)]+)\)/);
+				
+				if (mdLinkMatch) {
+					startPos = line.indexOf('![');
+					endPos = line.indexOf(')', startPos) + 1;
+				} else {
+					// console.log("No markdown match found");
+					return;
+				}
 			}
 		}
 
-		// delete the image's markdown link
-		if (startPos !== -1 && endPos !== -1) {
-			editor.replaceRange('', { line: cursor.line, ch: startPos }, { line: cursor.line, ch: endPos });
+		// Delete the markdown link and any trailing whitespace
+		let trailingWhitespace = 0;
+		while (line[endPos + trailingWhitespace] === ' ' ||
+			line[endPos + trailingWhitespace] === '\t') {
+			trailingWhitespace++;
 		}
+		if (line[endPos + trailingWhitespace] === '\n') {
+			trailingWhitespace++;
+		}
+
+		editor.replaceRange('',
+			{ line: cursor.line, ch: startPos },
+			{ line: cursor.line, ch: endPos + trailingWhitespace }
+		);
 	}
 }
 async function deleteImageFromVault(event: MouseEvent, app: App) {
-	// Get the image element and its src attribute
-	const img = event.target as HTMLImageElement;
-	const src = img.getAttribute('src');
-	if (src) {
-		// Check if the src is a Base64 encoded image
-		if (src.startsWith('data:image')) {
-			// Handle Base64 encoded image
-			// Delete the image element from the DOM
-			img.parentNode?.removeChild(img);
-			// Delete the link
-			const activeView = app.workspace.getActiveViewOfType(MarkdownView);
-			if (activeView) {
-				deleteMarkdownLink(activeView, src);
-			}
-			new Notice('Base64 encoded image deleted from the note');
-		} else if (src.startsWith('http') || src.startsWith('https')) {
-			// Handle external image link
-			// Delete the image element from the DOM
-			img.parentNode?.removeChild(img);
-			// Delete the link
-			const activeView = app.workspace.getActiveViewOfType(MarkdownView);
-			if (activeView) {
-				deleteMarkdownLink(activeView, src);
-			}
-			new Notice('External image link deleted from the note');
-		} else {
-			// Delete image
-			// Get Vault Name
-			const rootFolder = app.vault.getName();
-			const activeView = app.workspace.getActiveViewOfType(MarkdownView);
+    const img = event.target as HTMLImageElement;
+    const src = img.getAttribute('src');
+    if (!src) return;
 
-			if (activeView) {
-				// Grab full path of an src, it will return full path including Drive letter etc.
-				// thus we need to get rid of anything what is not part of the vault
-				let imagePath = img.getAttribute('src');
-				if (imagePath) {
-					// Decode the URL for cases where vault name might have spaces
-					imagePath = decodeURIComponent(imagePath);
-					// Find the position of the root folder in the path
-					const rootFolderIndex = imagePath.indexOf(rootFolder);
+    const activeView = app.workspace.getActiveViewOfType(MarkdownView);
 
-					// Remove everything before the root folder
-					if (rootFolderIndex !== -1) {
-						imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
-					}
+    try {
+        if (src.startsWith('data:image')) {
+            // Handle Base64 image
+            img.parentNode?.removeChild(img);
+            if (activeView) {
+                deleteMarkdownLink(activeView, src);
+            }
+            new Notice('Base64 encoded image deleted from the note');
+            return;
+        }
 
-					// Remove the query string
-					imagePath = imagePath.split('?')[0];
-					// Decode percent-encoded characters
-					const decodedPath = decodeURIComponent(imagePath);
+        if (src.startsWith('http') || src.startsWith('https')) {
+            // Handle external image
+            img.parentNode?.removeChild(img);
+            if (activeView) {
+                deleteMarkdownLink(activeView, src);
+            }
+            new Notice('External image link deleted from the note');
+            return;
+        }
 
-					const file = app.vault.getAbstractFileByPath(decodedPath);
-					if (file instanceof TFile && isImage(file)) {
-						// Delete the image
-						await app.vault.delete(file);
-						// Delete the link
-						deleteMarkdownLink(activeView, file.basename);
-						new Notice(`Image: ${file.basename} deleted from: ${file.path}`);
-					}
-				}
-			} else {
-				// ELSE image is not in the note.
-				// Grab full path of an src, it will return full path including Drive letter etc.
-				// thus we need to get rid of anything what is not part of the vault
-				let imagePath = img.getAttribute('src');
-				if (imagePath) {
-					// Decode the URL for cases where vault name might have spaces
-					imagePath = decodeURIComponent(imagePath);
-					// Find the position of the root folder in the path
-					const rootFolderIndex = imagePath.indexOf(rootFolder);
+        // Handle internal vault images
+        const rootFolder = app.vault.getName();
+        let imagePath = decodeURIComponent(src);
 
-					// Remove everything before the root folder
-					if (rootFolderIndex !== -1) {
-						imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
-					}
 
-					// Remove the query string
-					imagePath = imagePath.split('?')[0];
-					// Decode percent-encoded characters
-					const decodedPath = decodeURIComponent(imagePath);
+        // Clean up the path
+        const rootFolderIndex = imagePath.indexOf(rootFolder);
+        if (rootFolderIndex !== -1) {
+            imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
+        }
+        imagePath = imagePath.split('?')[0];
 
-					const file = app.vault.getAbstractFileByPath(decodedPath);
-					if (file instanceof TFile && isImage(file)) {
-						// Delete the image
-						await app.vault.delete(file);
 
-						new Notice(`Image: ${file.basename} deleted from: ${file.path}`);
-					}
-				}
-			}
-		}
-	}
+        // Get the file from vault
+        const file = app.vault.getAbstractFileByPath(imagePath);
+        if (file instanceof TFile && isImage(file)) {
+
+            // Get the full markdown line for deletion
+            const fullPath = getFullImagePath(activeView, file);
+
+            // Delete the file from vault
+            await app.vault.delete(file);
+
+            // Delete the markdown link if we're in a note
+            if (activeView && fullPath) {
+                deleteMarkdownLink(activeView, fullPath);
+            }
+
+            new Notice(`Image deleted: ${file.path}`);
+        }
+    } catch (error) {
+        console.error('Error deleting image:', error);
+        new Notice('Failed to delete image. Check console for details.');
+    }
 }
 
 export class ImageConvertTab extends PluginSettingTab {
@@ -4111,14 +4472,14 @@ export class ImageConvertTab extends PluginSettingTab {
 			.setDesc("Select where to save converted images. ")
 			.addDropdown((dropdown) => {
 				dropdown
-					// .addOption("disable", "Default")
+					.addOption("default", "Default")
 					.addOption("root", "Root folder")
 					// .addOption("specified", "In specified folder")
 					.addOption("current", "Same folder as current file")
 					.addOption("subfolder", "In subfolder")
 					.addOption("customOutput", "Custom output path")
 					.setValue(this.plugin.settings.attachmentLocation)
-					.onChange(async (value: 'root' | 'current' | 'subfolder' | 'customOutput') => {
+					.onChange(async (value: 'default' | 'root' | 'current' | 'subfolder' | 'customOutput') => {
 						this.plugin.settings.attachmentLocation = value;
 						await this.plugin.saveSettings();
 						this.updateFolderSettings();
@@ -4431,7 +4792,8 @@ export class ImageConvertTab extends PluginSettingTab {
 				'{isSquare} - Whether image is square (true/false)',
 				'{pixelCount} - Total number of pixels',
 				'{aspectRatioType} - Common ratio (16:9, 4:3, etc.)',
-				'{sizeCategory} - tiny, small, medium, large, very-large',
+				'{resolutionCategory} - tiny (316x316), small, medium, large, very-large (2828x2828++)',
+				'{fileSizeCategory} - returns 1 of the 6 file size categories: 0-50KB, 51-200KB, 201-1024KB, 1025KB-5MB, 5MB-10MB, 10MB+',
 				'{dominantDimension} - width, height, or equal',
 				'{dimensionDifference} - Pixel difference between width/height',
 				'{bytesPerPixel} - Average bytes per pixel',
@@ -4578,16 +4940,16 @@ export class ImageConvertTab extends PluginSettingTab {
 
 			// Shift + Scrollwheel resize (only shown if resizeByDragging is enabled)
 			new Setting(settingsContainer)
-			.setName('Shift + Scrollwheel resize')
-			.setDesc('Allow resizing with Shift + Scrollwheel')
-			.addToggle(toggle =>
-				toggle
-					.setValue(this.plugin.settings.resizeWithShiftScrollwheel)
-					.onChange(async value => {
-						this.plugin.settings.resizeWithShiftScrollwheel = value;
-						await this.plugin.saveSettings();
-					})
-			);
+				.setName('Shift + Scrollwheel resize')
+				.setDesc('Allow resizing with Shift + Scrollwheel')
+				.addToggle(toggle =>
+					toggle
+						.setValue(this.plugin.settings.resizeWithShiftScrollwheel)
+						.onChange(async value => {
+							this.plugin.settings.resizeWithShiftScrollwheel = value;
+							await this.plugin.saveSettings();
+						})
+				);
 			// Editor Behavior Group
 			settingsContainer.createEl('h3', { text: 'Editor Behavior' });
 	
@@ -4606,9 +4968,10 @@ export class ImageConvertTab extends PluginSettingTab {
 
 			new Setting(settingsContainer)
 				.setName('Remember scroll position')
-				.setDesc('Toggle ON to remember the scroll position when processing images. Toggle OFF to automatically scroll to the last image')
+				.setDesc('This is work in progress. Toggle ON to remember the scroll position when processing images. Toggle OFF to automatically scroll to the last image')
 				.addToggle(toggle => {
 					toggle.setValue(this.plugin.settings.rememberScrollPosition)
+						.setDisabled(true)
 						.onChange(async (value) => {
 							this.plugin.settings.rememberScrollPosition = value;
 							await this.plugin.saveSettings();
