@@ -1,6 +1,5 @@
 // working 2
 import { App, MarkdownView, Notice, Plugin, TFile, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
-
 // Browsers use the MIME type, not the file extension this module allows 
 // us to be more precise when default MIME checking options fail
 import mime from "./mime.min.js"
@@ -21,6 +20,13 @@ if (!Platform.isMobile) {
 }
 
 */
+
+// For the sake of build
+declare module 'obsidian' {
+    interface Vault {
+        getConfig(key: string): any;
+    }
+}
 
 interface Listener {
 	(this: Document, ev: Event): void;
@@ -50,6 +56,9 @@ interface DropInfo {
     }>;  // Add tracking for individual files
     timeoutId?: NodeJS.Timeout;  // Track the timeout
 }
+
+// Define possible modifier keys
+type ModifierKey = 'Shift' | 'Control' | 'Alt' | 'Meta' | 'None';
 
 interface ImageConvertSettings {
 	autoRename: boolean; // Controls whether files should be automatically renamed
@@ -99,13 +108,19 @@ interface ImageConvertSettings {
 	desiredWidth: number;
 	desiredHeight: number;
 	desiredLength: number;
+
 	resizeByDragging: boolean;
-	resizeWithShiftScrollwheel: boolean;
+    resizeWithScrollwheel: boolean;
+	scrollwheelModifier: ModifierKey;
+	allowResizeInReadingMode: boolean;
+
 	rightClickContextMenu: boolean;
 
 	rememberScrollPosition: boolean;
 	cursorPosition: 'front' | 'back';
 
+	useMdLinks: boolean;
+	useRelativePath: boolean;
 }
 
 interface SettingsTab {
@@ -172,12 +187,18 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	desiredWidth: 600,
 	desiredHeight: 800,
 	desiredLength: 800,
+
 	resizeByDragging: true,
-	resizeWithShiftScrollwheel: true,
+    resizeWithScrollwheel: true,
+	scrollwheelModifier: 'Shift',
+	allowResizeInReadingMode: false,
 	rightClickContextMenu: true,
 
 	rememberScrollPosition: true,
-	cursorPosition: 'back'
+	cursorPosition: 'back',
+
+	useMdLinks: false,
+	useRelativePath: false
 }
 
 export default class ImageConvertPlugin extends Plugin {
@@ -281,7 +302,7 @@ export default class ImageConvertPlugin extends Plugin {
 						type: item.type
 					};
 				});
-		
+			
 			// Calculate adaptive timeout based on files
 			const calculateTimeout = (files: typeof imageItems) => {
 				const BASE_TIMEOUT = 10000;  // 10 seconds base
@@ -424,7 +445,6 @@ export default class ImageConvertPlugin extends Plugin {
 					});
 			}
 		
-			
 			// Calculate adaptive timeout based on file types and sizes
 			const calculateTimeout = (files: Array<{ name: string; size: number; type: string }>) => {
 				const BASE_TIMEOUT = 10000;  // 10 seconds base
@@ -500,6 +520,8 @@ export default class ImageConvertPlugin extends Plugin {
 	
 			// Initialize drag resize functionality
 			this.initializeDragResize();
+			this.registerScrollWheelResize();
+			this.scrollwheelresize_registerMouseoverHandler();
 
 			// Register the create event handler
 			this.registerEvent(this.app.vault.on('create', async (file: TFile) => {
@@ -586,7 +608,7 @@ export default class ImageConvertPlugin extends Plugin {
 					if (!this.batchStarted) {
 						this.currentBatchTotal = 1;
 					}
-		
+					
 					// Add to queue with minimal necessary information
 					this.fileQueue.push({ 
 						file,
@@ -621,97 +643,6 @@ export default class ImageConvertPlugin extends Plugin {
 				})
 			);
 		});
-
-		// Allow resizing with SHIFT + Scrollwheel
-		// Fix a bug which on when hover on external images it would replace 1 image link with another
-		// Sometimes it would replace image1 with image2 because there is no way to find linenumber
-		// for external links. Linenumber gets shown only for internal images.
-		this.register(
-			this.onElement(
-				document,
-				"mouseover",
-				"img, video",
-				(event: MouseEvent) => {
-					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-					if (!activeView) return; // Ensure the active view is a Markdown note
-					// Check if the image is within the markdown view container
-					const markdownContainer = activeView.containerEl;
-					const target = event.target as HTMLElement;
-					if (!markdownContainer.contains(target)) return;
-					if (event.shiftKey) { // check if the shift key is pressed
-						// console.log('Shift key is pressed. Mouseover event will not fire.');
-						return;
-					}
-
-					const img = event.target as HTMLImageElement | HTMLVideoElement;
-					this.storedImageName = getImageName(img);
-				}
-			)
-		);
-		this.register(
-			this.onElement(
-				document,
-				"wheel",
-				"img, video",
-				(event: WheelEvent) => {
-					if (!this.settings.resizeWithShiftScrollwheel) return;
-					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-					if (!activeView) return; // Ensure the active view is a Markdown note
-					
-					const markdownContainer = activeView.containerEl;
-					const target = event.target as HTMLElement;
-					if (!markdownContainer.contains(target)) return;
-					if (event.shiftKey) { // check if the shift key is pressed
-						try {
-							const img = event.target as HTMLImageElement | HTMLVideoElement;
-							const imageName = getImageName(img)
-		
-							if (imageName !== this.storedImageName) {
-								return;
-							}
-		
-							const { newWidth, newHeight, newLeft, newTop } = resizeImageScrollWheel(event, img);
-							if (img instanceof HTMLImageElement) {
-								img.style.width = `${newWidth}px`;
-								img.style.height = `${newHeight}px`;
-								img.style.left = `${newLeft}px`;
-								img.style.top = `${newTop}px`;
-							} else if (img instanceof HTMLVideoElement) {
-								img.style.width = `${newWidth}%`;
-							}
-		
-							const editor = activeView.editor;
-							updateImageLink({
-								activeView,
-								element: img,
-								newWidth,
-								newHeight,
-								settings: this.settings
-							});
-							
-							// Handle cursor position after update
-							const cursorPos = editor.getCursor();
-							const lineContent = editor.getLine(cursorPos.line);
-							if (imageName) {
-								let newCursorPos;
-								if (this.settings.cursorPosition === 'front') {
-									const linkStart = Math.max(lineContent.indexOf('![['), lineContent.indexOf('!['));
-									newCursorPos = { line: cursorPos.line, ch: Math.max(linkStart, 0) };
-								} else {
-									const linkEnd = lineContent.indexOf(']]') !== -1 ? 
-										lineContent.indexOf(']]') + 2 : 
-										lineContent.indexOf(')') + 1;
-									newCursorPos = { line: cursorPos.line, ch: Math.min(linkEnd, lineContent.length) };
-								}
-								editor.setCursor(newCursorPos);
-							}
-						} catch (error) {
-							console.error('An error occurred:', error);
-						}
-					}
-				}
-			)
-		);
 
 		// Context Menu
 		// Add event listener for contextmenu event on image elements
@@ -809,6 +740,7 @@ export default class ImageConvertPlugin extends Plugin {
 			this.statusBarItemEl.remove();
 			this.statusBarItemEl = null;
 		}
+		this.dragResize_cleanupResizeAttributes();
 		this.progressEl?.remove();
 		this.hideProgressBar();
 		this.fileQueue = [];
@@ -1001,7 +933,6 @@ export default class ImageConvertPlugin extends Plugin {
 			}
 		}
 	}
-
 
     private updateProgressUI(current: number, total: number, fileName: string) {
         if (!this.progressEl) return;
@@ -1283,6 +1214,8 @@ export default class ImageConvertPlugin extends Plugin {
 
 	}
 
+
+
 	/* Drag Resize */
 	/* ------------------------------------------------------------- */
 	private initializeDragResize() {
@@ -1304,19 +1237,37 @@ export default class ImageConvertPlugin extends Plugin {
 		);
 	}
 
-    private dragResize_isValidTarget(element: HTMLElement): element is HTMLImageElement | HTMLVideoElement {
-        if (!(element instanceof HTMLImageElement || element instanceof HTMLVideoElement)) {
-            return false;
-        }
-
-        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-        return !!(activeView && activeView.containerEl.contains(element));
-    }
+	private dragResize_isValidTarget(element: HTMLElement): element is HTMLImageElement | HTMLVideoElement {
+		if (!this.settings.resizeByDragging) return false;
+		
+		// Check if we're in reading mode and if it's allowed
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!activeView) return false;
+		
+		if (activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode) {
+			return false;
+		}
+	
+		// Check if element is valid image/video
+		if (!(element instanceof HTMLImageElement || element instanceof HTMLVideoElement)) {
+			return false;
+		}
+	
+		// Check if element is in the active view
+		return activeView.containerEl.contains(element);
+	}
 
 	private dragResize_handleMouseDown(event: MouseEvent) {
 		if (!this.settings.resizeByDragging) return;
-	
+
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		const target = event.target as HTMLElement;
+		// Early return if disabled or in reading mode without permission
+		if (!this.settings.resizeByDragging || 
+			!activeView || 
+			(activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode)) {
+			return;
+		}
 		if (!this.dragResize_isValidTarget(target)) return;
 	
 		const rect = target.getBoundingClientRect();
@@ -1344,6 +1295,14 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
 	private dragResize_handleMouseMove(event: MouseEvent) {
+		if (!this.settings.resizeByDragging) return;
+
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!activeView || 
+			(activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode)) {
+			return;
+		}
+
 		const target = event.target as HTMLElement;
 		
 		if (this.resizeState.isResizing && this.resizeState.element) {
@@ -1384,6 +1343,7 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
 	private dragResize_handleMouseOut = (event: MouseEvent) => {
+		if (!this.settings.resizeByDragging) return;
 		const target = event.target as HTMLElement;
 		if (this.dragResize_isValidTarget(target) && !this.resizeState.isResizing) {
 			target.removeAttribute('data-resize-edge');
@@ -1437,7 +1397,7 @@ export default class ImageConvertPlugin extends Plugin {
 		});
 	}
 
-	private async dragResize_updateCursorPosition() {
+	private dragResize_updateCursorPosition() {
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!activeView || !this.resizeState.element) return;
 	
@@ -1445,10 +1405,6 @@ export default class ImageConvertPlugin extends Plugin {
 		const cursorPos = editor.getCursor();
 		const lineContent = editor.getLine(cursorPos.line);
 		
-		// Get src attribute safely
-		const currentSrc = this.resizeState.element.getAttribute("src");
-		if (!currentSrc) return;
-	
 		// Get image name safely
 		const imageName = getImageName(this.resizeState.element);
 		if (!imageName) return;
@@ -1456,36 +1412,185 @@ export default class ImageConvertPlugin extends Plugin {
 		// Ensure we have valid content to work with
 		if (!lineContent.includes(imageName)) return;
 	
-		setTimeout(() => {
-			let newCursorPos;
-			if (this.settings.cursorPosition === 'front') {
-				// Find the actual start of the image markdown
-				const imageStart = lineContent.indexOf(imageName);
-				if (imageStart === -1) return;
-				
-				// Move cursor to start of image markdown
-				newCursorPos = { 
-					line: cursorPos.line, 
-					ch: Math.max(imageStart - 3, 0) 
-				};
-			} else {
-				// Find the end of the image markdown
-				const imageEnd = lineContent.indexOf(imageName) + imageName.length;
-				if (imageEnd === -1) return;
-				
-				// Move cursor after the image markdown
-				newCursorPos = { 
-					line: cursorPos.line, 
-					ch: Math.min(imageEnd + 6, lineContent.length) 
-				};
-			}
+		let newCursorPos;
+		if (this.settings.cursorPosition === 'front') {
+			// Look for both internal and external link syntax
+			const linkStart = Math.max(lineContent.indexOf('![['), lineContent.indexOf('!['));
+			newCursorPos = { line: cursorPos.line, ch: Math.max(linkStart, 0) };
+		} else {
+			// Handle both internal and external link endings
+			const linkEnd = lineContent.indexOf(']]') !== -1 ? 
+				lineContent.indexOf(']]') + 2 : 
+				lineContent.indexOf(')') + 1;
+			newCursorPos = { line: cursorPos.line, ch: Math.min(linkEnd, lineContent.length) };
+		}
 	
-			editor.setCursor(newCursorPos);
-		}, 100);
+		// Set cursor position immediately without setTimeout
+		editor.setCursor(newCursorPos);
+	}
+	
+	// Add cleanup method to remove any lingering attributes
+	private dragResize_cleanupResizeAttributes() {
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!activeView) return;
+
+		// Clean up any images/videos with resize attributes
+		activeView.containerEl.querySelectorAll('img, video').forEach(element => {
+			element.removeAttribute('data-resize-edge');
+			element.removeAttribute('data-resize-active');
+		});
 	}
 	
 	/* ------------------------------------------------------------- */
 	/* ------------------------------------------------------------- */
+
+
+
+
+	/* Scrolwheel resize*/
+	/* ------------------------------------------------------------- */
+	// Allow resizing with SHIFT + Scrollwheel
+	// Fix a bug which on when hover on external images it would replace 1 image link with another
+	// Sometimes it would replace image1 with image2 because there is no way to find linenumber
+	// for external links. Linenumber gets shown only for internal images.
+	private scrollwheelresize_checkModifierKey(event: WheelEvent): boolean {
+		switch (this.settings.scrollwheelModifier) {
+			case 'Shift':
+				return event.shiftKey;
+			case 'Control':
+				return event.ctrlKey;
+			case 'Alt':
+				return event.altKey;
+			case 'Meta':
+				return event.metaKey;
+			case 'None':
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	private registerScrollWheelResize() {
+		this.register(
+			this.onElement(
+				document,
+				"wheel",
+				"img, video",
+				(event: WheelEvent) => {
+					if (!this.settings.resizeWithScrollwheel) return;
+					
+					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+					if (!activeView) return;
+					// Check if resizing is enabled for Reading Mode
+					if (!activeView || 
+						(activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode)) {
+						return;
+					}
+					const markdownContainer = activeView.containerEl;
+					const target = event.target as HTMLElement;
+					if (!markdownContainer.contains(target)) return;
+	
+					// Check for the configured modifier key
+					if (!this.scrollwheelresize_checkModifierKey(event)) return;
+	
+					try {
+						const img = event.target as HTMLImageElement | HTMLVideoElement;
+						const imageName = getImageName(img);
+	
+                        if (!imageName || imageName !== this.storedImageName) {
+                            return;
+                        }
+	
+						// Prevent default scrolling behavior when using modifier
+						event.preventDefault();
+	
+						const { newWidth, newHeight, newLeft, newTop } = 
+							resizeImageScrollWheel(event, img);
+						
+						if (img instanceof HTMLImageElement) {
+							img.style.width = `${newWidth}px`;
+							img.style.height = `${newHeight}px`;
+							img.style.left = `${newLeft}px`;
+							img.style.top = `${newTop}px`;
+						} else if (img instanceof HTMLVideoElement) {
+							img.style.width = `${newWidth}%`;
+						}
+	
+						const editor = activeView.editor;
+						updateImageLink({
+							activeView,
+							element: img,
+							newWidth,
+							newHeight,
+							settings: this.settings
+						});
+						
+						// Handle cursor position after update
+						this.scrollwheelresize_updateCursorPosition(editor, imageName);
+	
+					} catch (error) {
+						console.error('An error occurred:', error);
+					}
+				}
+			)
+		);
+	}
+
+	private scrollwheelresize_registerMouseoverHandler() {
+		this.register(
+			this.onElement(
+				document,
+				"mouseover",
+				"img, video",
+				(event: MouseEvent) => {
+					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+					if (!activeView) return;
+					// Check if resizing is enabled for Reading Mode
+					if (!activeView || 
+						(activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode)) {
+						return;
+					}
+					const markdownContainer = activeView.containerEl;
+					const target = event.target as HTMLElement;
+					if (!markdownContainer.contains(target)) return;
+	
+					// Check if the current modifier is pressed
+					const modifierPressed = this.settings.scrollwheelModifier === 'None' ? false :
+						event[`${this.settings.scrollwheelModifier.toLowerCase()}Key` as keyof MouseEvent];
+					
+					if (modifierPressed) return;
+	
+					const img = event.target as HTMLImageElement | HTMLVideoElement;
+					this.storedImageName = getImageName(img);
+				}
+			)
+		);
+	}
+
+    private scrollwheelresize_updateCursorPosition(editor: Editor, imageName: string | null) {
+        if (!imageName) return;  // Early return if imageName is null
+
+        const cursorPos = editor.getCursor();
+        const lineContent = editor.getLine(cursorPos.line);
+        
+        let newCursorPos;
+        if (this.settings.cursorPosition === 'front') {
+            const linkStart = Math.max(lineContent.indexOf('![['), lineContent.indexOf('!['));
+            newCursorPos = { line: cursorPos.line, ch: Math.max(linkStart, 0) };
+        } else {
+            const linkEnd = lineContent.indexOf(']]') !== -1 ? 
+                lineContent.indexOf(']]') + 2 : 
+                lineContent.indexOf(')') + 1;
+            newCursorPos = { line: cursorPos.line, ch: Math.min(linkEnd, lineContent.length) };
+        }
+        editor.setCursor(newCursorPos);
+    }
+
+	/* ------------------------------------------------------------- */
+	/* ------------------------------------------------------------- */
+
+
+
 
 	// Toogle to Pause / Continue image conversion
 	private toggleConversion(): void {
@@ -1756,33 +1861,34 @@ export default class ImageConvertPlugin extends Plugin {
 			if (!this.pathsAreEqual(file.path, finalPath)) {
 				await this.app.vault.rename(file, finalPath);
 			}
-			let newLinkText = this.makeLinkText(file, sourcePath);
+			// Create MARKDOWN link or WIKI link
+			const newLinkText = this.createImageLink(this.makeLinkText(file, sourcePath));
 
 			// Add the size to the markdown link
-			if (this.settings.autoNonDestructiveResize === "customSize" || this.settings.autoNonDestructiveResize === "fitImage") {
-				let size;
-				if (this.settings.autoNonDestructiveResize === "customSize") {
-					size = this.settings.customSize;
-				} else if (this.settings.autoNonDestructiveResize === "fitImage") {
-					size = this.settings.customSizeLongestSide;
-				}
+			// if (this.settings.autoNonDestructiveResize === "customSize" || this.settings.autoNonDestructiveResize === "fitImage") {
+			// 	let size;
+			// 	if (this.settings.autoNonDestructiveResize === "customSize") {
+			// 		size = this.settings.customSize;
+			// 	} else if (this.settings.autoNonDestructiveResize === "fitImage") {
+			// 		size = this.settings.customSizeLongestSide;
+			// 	}
 	
-				// Handle all three types of links
-				if (newLinkText.startsWith('![[')) {
-					// Wiki-style internal link
-					newLinkText = newLinkText.replace(']]', `|${size}]]`);
-				} else if (newLinkText.startsWith('![')) {
-					// Standard markdown link
-					const altTextMatch = newLinkText.match(/!\[(.*?)\]/);
-					const urlMatch = newLinkText.match(/\((.*?)\)/);
+			// 	// Handle all three types of links
+			// 	if (newLinkText.startsWith('![[')) {
+			// 		// Wiki-style internal link
+			// 		newLinkText = newLinkText.replace(']]', `|${size}]]`);
+			// 	} else if (newLinkText.startsWith('![')) {
+			// 		// Standard markdown link
+			// 		const altTextMatch = newLinkText.match(/!\[(.*?)\]/);
+			// 		const urlMatch = newLinkText.match(/\((.*?)\)/);
 					
-					if (altTextMatch && urlMatch) {
-						const altText = altTextMatch[1].replace(/\|.*$/, ''); // Remove any existing size
-						const url = urlMatch[1];
-						newLinkText = `![${altText}|${size}](${url})`;
-					}
-				}
-			}
+			// 		if (altTextMatch && urlMatch) {
+			// 			const altText = altTextMatch[1].replace(/\|.*$/, ''); // Remove any existing size
+			// 			const url = urlMatch[1];
+			// 			newLinkText = `![${altText}|${size}](${url})`;
+			// 		}
+			// 	}
+			// }
 			// Get the editor
 			const editor = this.getActiveEditor(activeFile.path);
 			if (!editor) {
@@ -1853,7 +1959,7 @@ export default class ImageConvertPlugin extends Plugin {
 			throw err;
 		}
 	}
-
+	
 	// ///////////// Helper for output management
 	private async fileExistsWithAnyCase(path: string): Promise<boolean> {
 		// Split the path into components
@@ -2052,7 +2158,7 @@ export default class ImageConvertPlugin extends Plugin {
 
 		return newName;
 	}
-	
+
 	makeLinkText(file: TFile, sourcePath: string, subpath?: string): string {
 		// Store the original case of the filename
 		const originalName = file.basename + '.' + file.extension;
@@ -2069,7 +2175,59 @@ export default class ImageConvertPlugin extends Plugin {
 			return match;
 		});
 	}
+
+	// WIKI or MD links
+	private createImageLink(path: string): string {
+		// Remove any existing Markdown or Wikilink structures from the path
+		let cleanPath = path.trim();
 	
+		// Remove existing Markdown image link structure (e.g., ![](path))
+		if (cleanPath.startsWith('![') && cleanPath.includes('](')) {
+			cleanPath = cleanPath.replace(/!\[.*?\]\((.*?)\)/, '$1');
+		}
+	
+		// Remove existing Wikilink structure (e.g., ![[path]])
+		cleanPath = cleanPath.replace(/!?\[\[|\]\]/g, '');
+	
+		// Add './' if MD links is enabled and user wants ./ specifically to append it nad if it is already not at the start
+		if (this.settings.useRelativePath && this.settings.useMdLinks && !cleanPath.startsWith('./')) {
+			if (!cleanPath.startsWith('../')) {
+				cleanPath = `../${cleanPath}`;
+			}
+		}
+	
+		// Check user default settings whether their default is set for WIKI or Markdown links
+		// - when it is set to default WIKI links, then all URL encoding for relative/shortest/absolute paths e.g. for empty spaces is already  handled by Obsidian itself
+		// - but if it is disabled and we use Markdown links throughout ALL vault, we need to encode links ourselves
+		// Get Obsidian's link settings
+		const useMarkdownLinks = this.app.vault.getConfig('useMarkdownLinks');
+		// Encode path if Obsidian is set to use Wiki links + OUR pLUGIN setting is turned ON + path contains spaces or special chars
+		if (!useMarkdownLinks && this.settings.useMdLinks && /[\s!@#$%^&*()+=[\]{};:'",<>?|\\]/.test(cleanPath)) {
+			// Split the path to encode each segment separately
+			const pathSegments = cleanPath.split('/');
+			cleanPath = pathSegments
+				.map(segment => encodeURIComponent(segment))
+				.join('/');
+		}
+	
+		// Create the link based on plugin settings
+		if (this.settings.useMdLinks) {
+			const size = this.settings.autoNonDestructiveResize === "customSize" ? 
+				this.settings.customSize : 
+				this.settings.autoNonDestructiveResize === "fitImage" ? 
+				this.settings.customSizeLongestSide : '';
+			
+			return size ? `![|${size}](${cleanPath})` : `![](${cleanPath})`;
+		} else {
+			const size = this.settings.autoNonDestructiveResize === "customSize" ? 
+				this.settings.customSize : 
+				this.settings.autoNonDestructiveResize === "fitImage" ? 
+				this.settings.customSizeLongestSide : '';
+	
+			return size ? `![[${cleanPath}|${size}]]` : `![[${cleanPath}]]`;
+		}
+	}
+
 	private sanitizeFileName(fileName: string): string {
 		// Remove invalid filename characters
 		let safe = fileName.replace(/[<>:"/\\|?*]/g, '_');
@@ -4464,17 +4622,45 @@ export class ImageConvertTab extends PluginSettingTab {
 
 	// Output
 	private displayOutputSettings(): void {
+		// Clear the container to prevent duplication
+		this.contentContainer.empty();
+	
 		const container = this.contentContainer.createDiv('settings-container');
-
+	
+		new Setting(container)
+			.setName('Use Markdown links')
+			.setDesc('Auto generate Markdown links for dropped/pasted images')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.useMdLinks)
+				.setTooltip('Toggle between Markdown and Wiki links')
+				.onChange(async (value) => {
+					this.plugin.settings.useMdLinks = value;
+					await this.plugin.saveSettings();
+					new Notice(`Image links will now be in ${value ? 'Markdown' : 'Wiki'} format`);
+					
+					// Update the settings display to reflect the changes
+					this.displayOutputSettings();
+				}));
+	
+		if (this.plugin.settings.useMdLinks) {
+			new Setting(container)
+				.setName('Prepend paths with "./" for relative linking')
+				.addToggle(toggle => toggle
+					.setValue(this.plugin.settings.useRelativePath)
+					.onChange(async (value) => {
+						this.plugin.settings.useRelativePath = value;
+						await this.plugin.saveSettings();
+					}));
+		}
+	
 		// Output Location Setting
 		new Setting(container)
 			.setName("Output Location")
-			.setDesc("Select where to save converted images. ")
+			.setDesc("Select where to save converted images.")
 			.addDropdown((dropdown) => {
 				dropdown
 					.addOption("default", "Default")
 					.addOption("root", "Root folder")
-					// .addOption("specified", "In specified folder")
 					.addOption("current", "Same folder as current file")
 					.addOption("subfolder", "In subfolder")
 					.addOption("customOutput", "Custom output path")
@@ -4486,10 +4672,10 @@ export class ImageConvertTab extends PluginSettingTab {
 						this.updateConsolidatedPreview();
 					});
 			});
-
+	
 		// Create containers for settings
 		this.folderSettingsContainer = container.createDiv('folder-settings');
-		
+	
 		// File Naming Setting
 		new Setting(container)
 			.setName('File Naming')
@@ -4509,11 +4695,9 @@ export class ImageConvertTab extends PluginSettingTab {
 						this.updateFilenameSettings();
 						this.updateConsolidatedPreview();
 					}));
-
-
-
+	
 		this.filenameSettingsContainer = container.createDiv('filename-settings');
-
+	
 		new Setting(container)
 			.setName("If an output file already exists")
 			.setDesc("Replace - to replace already existing file in the destination with a new file.\
@@ -4532,33 +4716,28 @@ export class ImageConvertTab extends PluginSettingTab {
 						this.updateConsolidatedPreview();
 					})
 			);
+	
 		// Create preview element first
 		this.previewEl = container.createDiv('preview-container');
-
-
+	
 		// Initialize settings
 		this.updateFolderSettings();
 		this.updateFilenameSettings();
 		this.updateConsolidatedPreview();
-
 	}
 
-	// Helper methods for conditional settings
-	// private createSpecifiedFolderSettings(container: HTMLElement): void {
-	// 	new Setting(container)
-	// 		.setName("Path to specific folder:")
-	// 		.setDesc('If you specify folder path as "/attacments/images" then all processed images will be saved inside "/attacments/images" folder. If any of the folders do not exist, they will be created.')
-	// 		.setClass('settings-indent')
-	// 		.addText((text) => {
-	// 			text.setPlaceholder('attachments/{yyyy}/{mm}')
-	// 				.setValue(this.plugin.settings.attachmentSpecifiedFolder)
-	// 				.onChange(async (value) => {
-	// 					this.plugin.settings.attachmentSpecifiedFolder = value;
-	// 					await this.plugin.saveSettings();
-	// 					this.updateConsolidatedPreview(); 
-	// 				});
-	// 		});
-	// }
+	private updateFolderSettings(): void {
+		this.folderSettingsContainer.empty();
+
+		switch (this.plugin.settings.attachmentLocation) {
+			case "subfolder":
+				this.createSubfolderSettings(this.folderSettingsContainer);
+				break;
+			case "customOutput":
+				this.createCustomOutputSettings(this.folderSettingsContainer);
+				break;
+		}
+	}
 
 	private createSubfolderSettings(container: HTMLElement): void {
 		new Setting(container)
@@ -4592,22 +4771,6 @@ export class ImageConvertTab extends PluginSettingTab {
 			});
 	}
 
-	private updateFolderSettings(): void {
-		this.folderSettingsContainer.empty();
-
-		switch (this.plugin.settings.attachmentLocation) {
-			// case "specified":
-			// 	this.createSpecifiedFolderSettings(this.folderSettingsContainer);
-			// 	break;
-			case "subfolder":
-				this.createSubfolderSettings(this.folderSettingsContainer);
-				break;
-			case "customOutput":
-				this.createCustomOutputSettings(this.folderSettingsContainer);
-				break;
-		}
-	}
-
 	private async updateConsolidatedPreview(): Promise<void> {
 		try {
 			const activeFile = this.app.workspace.getActiveFile();
@@ -4624,9 +4787,6 @@ export class ImageConvertTab extends PluginSettingTab {
 			// Get path template based on settings
 			let pathTemplate = '';
 			switch (this.plugin.settings.attachmentLocation) {
-				// case 'specified':
-				// 	pathTemplate = this.plugin.settings.attachmentSpecifiedFolder;
-				// 	break;
 				case 'subfolder':
 					pathTemplate = `${mockFile.parent?.path ?? ''}/${this.plugin.settings.attachmentSubfolderName}`;
 					break;
@@ -4937,48 +5097,58 @@ export class ImageConvertTab extends PluginSettingTab {
 						})
 				);
 
-
 			// Shift + Scrollwheel resize (only shown if resizeByDragging is enabled)
 			new Setting(settingsContainer)
-				.setName('Shift + Scrollwheel resize')
-				.setDesc('Allow resizing with Shift + Scrollwheel')
-				.addToggle(toggle =>
-					toggle
-						.setValue(this.plugin.settings.resizeWithShiftScrollwheel)
-						.onChange(async value => {
-							this.plugin.settings.resizeWithShiftScrollwheel = value;
-							await this.plugin.saveSettings();
-						})
-				);
+				.setName('Enable scrollwheel resize')
+				.setDesc('Allow resizing images using the scrollwheel')
+				.addToggle(toggle => toggle
+					.setValue(this.plugin.settings.resizeWithScrollwheel)
+					.onChange(async (value) => {
+						this.plugin.settings.resizeWithScrollwheel = value;
+						await this.plugin.saveSettings();
+						// Refresh the modifier dropdown state
+						this.display();
+					}));
+
+			// Only show modifier selection if scrollwheel resize is enabled
+			if (this.plugin.settings.resizeWithScrollwheel) {
+				new Setting(settingsContainer)
+					.setName('Scrollwheel modifier key')
+					.setDesc('Choose which modifier key to hold while using the scrollwheel to resize')
+					.addDropdown(dropdown => {
+						dropdown
+							.addOptions({
+								'Shift': 'Shift',
+								'Control': 'Control/Command',
+								'Alt': 'Alt/Option',
+								'Meta': 'Windows/Command',
+								'None': 'No modifier'
+							})
+							.setValue(this.plugin.settings.scrollwheelModifier)
+							.onChange(async (value: ModifierKey) => {
+								this.plugin.settings.scrollwheelModifier = value;
+								await this.plugin.saveSettings();
+							});
+					});
+			}
+			
+			// Add new setting
+			new Setting(settingsContainer)
+				.setName('Allow drag resize in Reading mode')
+				.setDesc('Non-destructive resizing in Reading Mode is only visual, thus if it is too distractive you can disable it')
+				.addToggle(toggle => toggle
+					.setValue(this.plugin.settings.allowResizeInReadingMode)
+					.onChange(async (value) => {
+						this.plugin.settings.allowResizeInReadingMode = value;
+						await this.plugin.saveSettings();
+						// Refresh the entire settings display
+						this.displayGeneralSettings();
+					}))
+				.setDisabled(!this.plugin.settings.resizeByDragging); // Disable if drag resize is off
+
 			// Editor Behavior Group
 			settingsContainer.createEl('h3', { text: 'Editor Behavior' });
 	
-			// Context Menu Setting
-			new Setting(settingsContainer)
-				.setName('Right-click menu')
-				.setDesc('Enable right-click context menu')
-				.addToggle(toggle =>
-					toggle
-						.setValue(this.plugin.settings.rightClickContextMenu)
-						.onChange(async value => {
-							this.plugin.settings.rightClickContextMenu = value;
-							await this.plugin.saveSettings();
-						})
-				);
-
-			new Setting(settingsContainer)
-				.setName('Remember scroll position')
-				.setDesc('This is work in progress. Toggle ON to remember the scroll position when processing images. Toggle OFF to automatically scroll to the last image')
-				.addToggle(toggle => {
-					toggle.setValue(this.plugin.settings.rememberScrollPosition)
-						.setDisabled(true)
-						.onChange(async (value) => {
-							this.plugin.settings.rememberScrollPosition = value;
-							await this.plugin.saveSettings();
-						})
-				});
-			
-					
 			// Cursor Position Setting
 			new Setting(settingsContainer)
 				.setName('Cursor position')
@@ -4991,8 +5161,33 @@ export class ImageConvertTab extends PluginSettingTab {
 						this.plugin.settings.cursorPosition = value as 'front' | 'back';
 						await this.plugin.saveSettings();
 					}));
-	
 
+
+			new Setting(settingsContainer)
+				.setName('Remember scroll position')
+				.setDesc('This is work in progress. Toggle ON to remember the scroll position when processing images. Toggle OFF to automatically scroll to the last image')
+				.addToggle(toggle => {
+					toggle.setValue(this.plugin.settings.rememberScrollPosition)
+						.setDisabled(true)
+						.onChange(async (value) => {
+							this.plugin.settings.rememberScrollPosition = value;
+							await this.plugin.saveSettings();
+						})
+				});
+
+			// Context Menu Setting
+			new Setting(settingsContainer)
+				.setName('Right-click menu')
+				.setDesc('Enable right-click context menu')
+				.addToggle(toggle =>
+					toggle
+						.setValue(this.plugin.settings.rightClickContextMenu)
+						.onChange(async value => {
+							this.plugin.settings.rightClickContextMenu = value;
+							await this.plugin.saveSettings();
+						})
+				);
+				
 
 			// Notifications Group
 			settingsContainer.createEl('h3', { text: 'Notifications' });
