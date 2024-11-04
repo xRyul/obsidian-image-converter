@@ -2,10 +2,18 @@
 https://github.com/xRyul/obsidian-image-converter/assets/47340038/63a0646b-29ec-4055-abfc-55d31e07b2f7
 
 ## Features
-- Automatically convert dropped/pasted image into WEBP, JPG or PNG. 
-- Automatically convert HEIC and TIF files into WEBP, JPG, or PNG. 
-- Reduce file size of an image by specifying desired Quality value between 1-100
-- Auto-rename converted image.  
+Supported image formats: WEBP, JPG, PNG, HEIC, TIF
+
+- Image conversion: Automatically convert dropped/pasted images into WEBP, JPG or PNG. 
+- Image compression: Reduce file size of an image by specifying desired Quality value between 1-100
+- Renaming: Auto-rename converted image with Variables e.g. {noteName} {fileName} and more. [List of Supported Variables](<Examples/Variables Reference Guide.md>)
+- Custom output folders: Create custom Output folders with Variables e.g. {noteName} {fileName} and more. [List of Supported Variables](<Examples/Variables Reference Guide.md>)
+- Attachments: Option to keep image files separate from all other attachments
+- Links: Markdown Links and Wiki links. 
+	- For example, create Markdown links for images, and WIKi links for all other attachments.
+- Resize image by dragging edge of an image
+	-  <img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/5724c6e9-19d4-4eaf-a559-1168f6557a14" width="600px"> 
+- Resize image via MOD+mouse scrollwheel e.g. CMD+Scrollwheel or Shift+Scrollwheel or any other modifier key as defined by the user.
 - Auto-resize image based on 6 modes: Fit, Fill, Longest Side, Shortest Side, Height, Width
 	- Image resize by the Longest Side
 
@@ -16,11 +24,8 @@ https://github.com/xRyul/obsidian-image-converter/assets/47340038/63a0646b-29ec-
 
 - Ability to resize original image via right click context menu
 	- <img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/3367b41c-63fa-4a1c-a616-8561e467eef7" width="600px">
-- Ability to resize image by dragging edge of an image
-	-  <img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/5724c6e9-19d4-4eaf-a559-1168f6557a14" width="600px"> 
-- Ability to resize image by holding shift + mouse scroll wheel
 
-Supported image formats: WEBP, JPG, PNG, HEIC, TIF
+
 
 ## Quick Summary for Image Compression
 
@@ -109,7 +114,7 @@ Below is the table which shows how much quality we lose with each conversion. Th
 
 ## How to install
 
-1. Downlaod `main.js`, `styles.css`, `manifest.json` files from this repo.
+1. Downlaod `main.js`, `styles.css`, `manifest.json` files from the latest release page.
 2. Creane new folder inside `VaultFolder/.obsidian/plugins/` named  `obsidian-image-converter` . If plugins folder doesn't exist, then create it manually. 
 3. Move downloaded files into `/obsidian-image-converter` folder. 
 4. Enable the plugin in ObsidianMD. 
