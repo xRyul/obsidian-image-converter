@@ -121,6 +121,7 @@ interface ImageConvertSettings {
 
 	useMdLinks: boolean;
 	useRelativePath: boolean;
+	
 }
 
 interface SettingsTab {
@@ -254,10 +255,19 @@ export default class ImageConvertPlugin extends Plugin {
         element: null
     };
 
+	// Escape key to stop conversion
+	private isKillSwitchActive = false;
+
 	async onload() {
 		await this.loadSettings();
 		this.addSettingTab(new ImageConvertTab(this.app, this));
 
+		// Escape key to stop conversion
+		this.registerDomEvent(document, 'keydown', (evt: KeyboardEvent) => {
+			if (evt.key === 'Escape' && this.isProcessingQueue) {  // Only activate ESCAPE if actually processing
+				this.activateKillSwitch();
+			}
+		});
 		// Create progress container
         this.progressEl = document.body.createDiv('image-converter-progress');
         this.progressEl.style.display = 'none';
@@ -764,6 +774,11 @@ export default class ImageConvertPlugin extends Plugin {
 
 		try {
 			while (this.fileQueue.length > 0) {
+				// Kill switch check aka escape
+				if (this.isKillSwitchActive) {
+					console.log('Processing killed by user (ESC pressed)');
+					break;
+				}
 				// Check if we're still processing the same batch
 				if (currentBatchId !== this.batchId) {
 					console.log('Batch ID changed, starting new batch');
@@ -821,6 +836,10 @@ export default class ImageConvertPlugin extends Plugin {
 
 	
 				try {
+					// Kill switch check before processing each file
+					if (this.isKillSwitchActive) {
+						break;
+					}
 					// Update progress before processing
 					if (this.settings.showProgress) {
 						this.updateProgressUI(
@@ -907,7 +926,7 @@ export default class ImageConvertPlugin extends Plugin {
 				this.isProcessingQueue = false;
 	
 				// Show summary and cleanup only if batch is complete
-				if (this.dropInfo?.totalProcessedFiles === this.dropInfo?.totalExpectedFiles) {
+				if (!this.isKillSwitchActive && this.dropInfo?.totalProcessedFiles === this.dropInfo?.totalExpectedFiles) {
 					if (this.settings.showSummary && this.processedFiles.length > 0) {
 						this.showBatchSummary();
 					}
@@ -1214,7 +1233,34 @@ export default class ImageConvertPlugin extends Plugin {
 
 	}
 
-
+	private activateKillSwitch() {
+		this.isKillSwitchActive = true;
+		this.isProcessingQueue = false;
+		this.userAction = false;
+		this.batchStarted = false;
+		
+		// Clear the file queue
+		this.fileQueue = [];
+		
+		// Clear any existing timeouts
+		if (this.dropInfo?.timeoutId) {
+			clearTimeout(this.dropInfo.timeoutId);
+		}
+		
+		// Reset dropInfo
+		this.dropInfo = null;
+		
+		// Hide progress UI
+		this.hideProgressBar();
+		
+		// Show notice to user
+		new Notice('Image processing cancelled');
+		
+		// Reset kill switch after cleanup
+		setTimeout(() => {
+			this.isKillSwitchActive = false;
+		}, 1000);
+	}
 
 	/* Drag Resize */
 	/* ------------------------------------------------------------- */
@@ -1502,7 +1548,7 @@ export default class ImageConvertPlugin extends Plugin {
                         }
 	
 						// Prevent default scrolling behavior when using modifier
-						event.preventDefault();
+						// event.preventDefault();
 	
 						const { newWidth, newHeight, newLeft, newTop } = 
 							resizeImageScrollWheel(event, img);
@@ -1639,8 +1685,8 @@ export default class ImageConvertPlugin extends Plugin {
 
 	// Work on the file
 	/* ------------------------------------------------------------- */
-	async renameFile1(file: TFile): Promise<string> {	
-		const activeFile = this.getActiveFile();
+	async renameFile1(file: TFile, parentFile?: TFile): Promise<string> {   
+		const activeFile = parentFile || this.getActiveFile();
 		if (!activeFile) {
 			throw new Error('No active file found');
 		}
@@ -3250,7 +3296,24 @@ export default class ImageConvertPlugin extends Plugin {
 	/* ------------------------------------------------------------- */
 
 	private getActiveFile(): TFile | undefined {
-		const markdownFile = this.app.workspace.getActiveViewOfType(MarkdownView)?.file;
+		// Get the actual active leaf
+		const activeLeaf = this.app.workspace.activeLeaf;
+		if (!activeLeaf) return undefined;
+	
+		const viewType = activeLeaf.view.getViewType();
+	
+		// Handle direct active view cases
+		if (viewType === 'markdown') {
+			const file = (activeLeaf.view as MarkdownView).file;
+			return file ?? undefined;  // Convert null to undefined
+		}
+		
+		if (viewType === 'canvas' || viewType === 'excalidraw') {
+			return (activeLeaf.view as any).file;
+		}
+	
+		// Fallback approach for other cases
+		const markdownFile = this.app.workspace.getActiveViewOfType(MarkdownView)?.file ?? undefined;
 		if (markdownFile) return markdownFile;
 	
 		const canvasLeaf = this.app.workspace.getLeavesOfType("canvas").find(leaf => (leaf.view as any)?.file);

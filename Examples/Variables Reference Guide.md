@@ -207,8 +207,8 @@ Inside  `/all-vault-images`, a new subfolder is automatically created for each d
 
 ### Example 3 - Natural Language Date Organization - Journaling, Daily Logs etc.
 
-**Folder**: `/{yyyy}/{monthName}/Week {weekOfYear} ({startOfWeek} to {endOfWeek})/{dayName} {dateOrdinal}/`
-**File naming**: `{time}-{imageName}`
+- **Folder**: `/{yyyy}/{monthName}/Week {weekOfYear} ({startOfWeek} to {endOfWeek})/{dayName} {dateOrdinal}/`
+- **File naming**: `{time}-{imageName}`
 
 Example output is a path reads like natural language:
 
@@ -219,8 +219,8 @@ Example output is a path reads like natural language:
 
 ### Example 4 - keeping vault size small
 
-**Folder**: `/attachments/all-vault-images/{fileSizeCategory}/
-**File naming**: `{noteName}-{imageName}-{size:MB:2}MB_{date:YYYYMMDD}`
+- **Folder**: `/attachments/all-vault-images/{fileSizeCategory}/
+- **File naming**: `{noteName}-{imageName}-{size:MB:2}MB_{date:YYYYMMDD}`
 
 This would allow you to keep all images in 1 place categorised into subfolders based on converted image file size:
 
