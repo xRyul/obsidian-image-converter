@@ -4627,32 +4627,6 @@ export class ImageConvertTab extends PluginSettingTab {
 	
 		const container = this.contentContainer.createDiv('settings-container');
 	
-		new Setting(container)
-			.setName('Use Markdown links')
-			.setDesc('Auto generate Markdown links for dropped/pasted images')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.useMdLinks)
-				.setTooltip('Toggle between Markdown and Wiki links')
-				.onChange(async (value) => {
-					this.plugin.settings.useMdLinks = value;
-					await this.plugin.saveSettings();
-					new Notice(`Image links will now be in ${value ? 'Markdown' : 'Wiki'} format`);
-					
-					// Update the settings display to reflect the changes
-					this.displayOutputSettings();
-				}));
-	
-		if (this.plugin.settings.useMdLinks) {
-			new Setting(container)
-				.setName('Prepend paths with "./" for relative linking')
-				.addToggle(toggle => toggle
-					.setValue(this.plugin.settings.useRelativePath)
-					.onChange(async (value) => {
-						this.plugin.settings.useRelativePath = value;
-						await this.plugin.saveSettings();
-					}));
-		}
-	
 		// Output Location Setting
 		new Setting(container)
 			.setName("Output Location")
@@ -4717,6 +4691,32 @@ export class ImageConvertTab extends PluginSettingTab {
 					})
 			);
 	
+		new Setting(container)
+			.setName('Use Markdown links')
+			.setDesc('Auto generate Markdown links for dropped/pasted images')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.useMdLinks)
+				.setTooltip('Toggle between Markdown and Wiki links')
+				.onChange(async (value) => {
+					this.plugin.settings.useMdLinks = value;
+					await this.plugin.saveSettings();
+					new Notice(`Image links will now be in ${value ? 'Markdown' : 'Wiki'} format`);
+					
+					// Update the settings display to reflect the changes
+					this.displayOutputSettings();
+				}));
+	
+		if (this.plugin.settings.useMdLinks) {
+			new Setting(container)
+				.setName('Prepend paths with "./" for relative linking')
+				.addToggle(toggle => toggle
+					.setValue(this.plugin.settings.useRelativePath)
+					.onChange(async (value) => {
+						this.plugin.settings.useRelativePath = value;
+						await this.plugin.saveSettings();
+					}));
+		}
+		
 		// Create preview element first
 		this.previewEl = container.createDiv('preview-container');
 	
