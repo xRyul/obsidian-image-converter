@@ -1,10 +1,11 @@
 {
 	"id": "image-converter",
 	"name": "Image Converter",
-	"version": "1.2.1",
+	"version": "1.2.2",
 	"minAppVersion": "0.15.0",
 	"description": "Convert, compress and resize images from one format to another by dragging and dropping or pasting into the note. HEIC, TIF, JPG, WEBP, PNG.",
 	"author": "xRyul",
 	"authorUrl": "https://github.com/xryul",
-	"isDesktopOnly": false
+	"isDesktopOnly": false,
+	"fundingUrl": "https://ko-fi.com/xryul"
 }

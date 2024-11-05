@@ -1961,14 +1961,11 @@ export default class ImageConvertPlugin extends Plugin {
 					}
 				}
 			} else if (this.settings.manage_duplicate_filename === 'duplicate_rename') {
+				const originalPath = finalPath; // Save the original path before entering the loop
 				let suffix = 1;
+			
 				while (await this.fileExistsWithAnyCase(finalPath)) {
-					const extensionIndex = finalPath.lastIndexOf('.');
-					if (extensionIndex !== -1) {
-						finalPath = `${finalPath.substring(0, extensionIndex)}-${suffix}${finalPath.substring(extensionIndex)}`;
-					} else {
-						finalPath = `${finalPath}-${suffix}`;
-					}
+					finalPath = this.generateNewNameWithSuffix(originalPath, suffix); // Use the original path to generate new names
 					suffix++;
 				}
 			}
@@ -2194,6 +2191,16 @@ export default class ImageConvertPlugin extends Plugin {
 		return normalizePath(basePath);
 	}
 	
+	// Helper function to generate a new filename with a numeric suffix
+	private generateNewNameWithSuffix(filePath: string, suffix: number): string {
+		const extensionIndex = filePath.lastIndexOf('.');
+		if (extensionIndex !== -1) {
+			return `${filePath.substring(0, extensionIndex)}-${suffix}${filePath.substring(extensionIndex)}`;
+		} else {
+			return `${filePath}-${suffix}`;
+		}
+	}
+
 	private escapeRegExp(string: string): string {
 		return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 	}
