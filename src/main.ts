@@ -510,6 +510,73 @@ export default class ImageConvertPlugin extends Plugin {
 				}, timeout)
 			};
 		
+			// Handle external link resizing if needed
+			/* ----------------------------------------------------------------------------*/
+			// Get the clipboard data as HTML and parse it as Markdown LINK
+			if (event.dataTransfer) {
+				// Try HTML first as it preserves more formatting
+				const htmlData = event.dataTransfer.getData('text/html');
+				
+				let markdownImageFromDrop = '';
+				
+				if (htmlData) {
+					const parser = new DOMParser();
+					const doc = parser.parseFromString(htmlData, 'text/html');
+					const img = doc.querySelector('img');
+					
+					if (img) {
+						const altText = img.alt;
+						const src = img.src;
+						markdownImageFromDrop = `![${altText}](${src})`;
+					}
+				}
+
+				if (markdownImageFromDrop && 
+					(this.settings.autoNonDestructiveResize === "customSize" || 
+					this.settings.autoNonDestructiveResize === "fitImage")) {
+					
+					const linkPattern = /!\[(.*?)\]\((.*?)\)/;
+					const match = markdownImageFromDrop.match(linkPattern);
+					
+					if (match) {
+						let altText = match[1];
+						const currentLink = match[2];
+						const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+						
+						if (activeView) {
+							const editor = activeView.editor;
+							let longestSide;
+							
+							if (this.settings.autoNonDestructiveResize === "customSize") {
+								longestSide = this.settings.customSize;
+							} else if (this.settings.autoNonDestructiveResize === "fitImage") {
+								longestSide = this.settings.customSizeLongestSide;
+							}
+							
+							altText = altText.replace(/\|\d+(\|\d+)?/g, '');
+							const newMarkdown = `![${altText}|${longestSide}](${currentLink})`;
+							
+							const cursor = editor.getCursor();
+							const lineContent = editor.getLine(cursor.line);
+							
+							const startPos = lineContent.indexOf(`![${altText}`);
+							const endPos = lineContent.indexOf(')', startPos) + 1;
+							
+							if (startPos !== -1 && endPos !== -1) {
+								editor.replaceRange(
+									newMarkdown,
+									{ line: cursor.line, ch: startPos },
+									{ line: cursor.line, ch: endPos }
+								);
+							}
+						}
+					}
+				}
+			}
+			/* ----------------------------------------------------------------------------*/
+			/* ----------------------------------------------------------------------------*/
+
+			
 			if (this.settings.showProgress) {
 				this.updateProgressUI(0, imageFiles.length, 'Starting processing...');
 			}
@@ -776,12 +843,12 @@ export default class ImageConvertPlugin extends Plugin {
 			while (this.fileQueue.length > 0) {
 				// Kill switch check aka escape
 				if (this.isKillSwitchActive) {
-					console.log('Processing killed by user (ESC pressed)');
+					// console.log('Processing killed by user (ESC pressed)');
 					break;
 				}
 				// Check if we're still processing the same batch
 				if (currentBatchId !== this.batchId) {
-					console.log('Batch ID changed, starting new batch');
+					// console.log('Batch ID changed, starting new batch');
 					break;
 				}
 	
@@ -1683,6 +1750,8 @@ export default class ImageConvertPlugin extends Plugin {
         }
     }
 
+
+
 	// Work on the file
 	/* ------------------------------------------------------------- */
 	async renameFile1(file: TFile, parentFile?: TFile): Promise<string> {   
@@ -1910,31 +1979,6 @@ export default class ImageConvertPlugin extends Plugin {
 			// Create MARKDOWN link or WIKI link
 			const newLinkText = this.createImageLink(this.makeLinkText(file, sourcePath));
 
-			// Add the size to the markdown link
-			// if (this.settings.autoNonDestructiveResize === "customSize" || this.settings.autoNonDestructiveResize === "fitImage") {
-			// 	let size;
-			// 	if (this.settings.autoNonDestructiveResize === "customSize") {
-			// 		size = this.settings.customSize;
-			// 	} else if (this.settings.autoNonDestructiveResize === "fitImage") {
-			// 		size = this.settings.customSizeLongestSide;
-			// 	}
-	
-			// 	// Handle all three types of links
-			// 	if (newLinkText.startsWith('![[')) {
-			// 		// Wiki-style internal link
-			// 		newLinkText = newLinkText.replace(']]', `|${size}]]`);
-			// 	} else if (newLinkText.startsWith('![')) {
-			// 		// Standard markdown link
-			// 		const altTextMatch = newLinkText.match(/!\[(.*?)\]/);
-			// 		const urlMatch = newLinkText.match(/\((.*?)\)/);
-					
-			// 		if (altTextMatch && urlMatch) {
-			// 			const altText = altTextMatch[1].replace(/\|.*$/, ''); // Remove any existing size
-			// 			const url = urlMatch[1];
-			// 			newLinkText = `![${altText}|${size}](${url})`;
-			// 		}
-			// 	}
-			// }
 			// Get the editor
 			const editor = this.getActiveEditor(activeFile.path);
 			if (!editor) {
@@ -2153,6 +2197,8 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 	/* ------------------------------------------------------------- */
 	/* ------------------------------------------------------------- */
+
+
 
 	// Naming
 	/* ------------------------------------------------------------- */
@@ -2861,6 +2907,8 @@ export default class ImageConvertPlugin extends Plugin {
 	/* ------------------------------------------------------------- */
 	/* ------------------------------------------------------------- */
 
+
+
 	//Process All Vault
 	/* ------------------------------------------------------------- */
 	async processAllVaultImages() {
@@ -3085,6 +3133,8 @@ export default class ImageConvertPlugin extends Plugin {
 	/* ------------------------------------------------------------- */
 	/* ------------------------------------------------------------- */
 
+
+
 	//Process Current Note
 	/* ------------------------------------------------------------- */
 	async processCurrentNoteImages(note: TFile) {
@@ -3292,6 +3342,8 @@ export default class ImageConvertPlugin extends Plugin {
 		await this.app.vault.modify(note, content);
 	}
 
+
+	
 	/* ------------------------------------------------------------- */
 	/* ------------------------------------------------------------- */
 
@@ -3883,42 +3935,6 @@ function base64ToArrayBuffer(code: string): ArrayBuffer {
 /* ------------------------------------------------------------- */
 /* ------------------------------------------------------------- */
 
-function resizeImageScrollWheel(event: WheelEvent, img: HTMLImageElement | HTMLVideoElement) {
-
-	const delta = Math.sign(event.deltaY); // get the direction of the scroll
-	const scaleFactor = delta < 0 ? 1.1 : 0.9; // set the scale factor for resizing
-
-	let newWidth;
-	if (img instanceof HTMLVideoElement && img.style.width.endsWith('%')) {
-		// If the element is a video and the width is in percentages, calculate the new width in percentages
-		newWidth = parseFloat(img.style.width) * scaleFactor;
-		// Ensure the width is within the range 1% - 100%
-		newWidth = Math.max(1, Math.min(newWidth, 100));
-	} else {
-		// If the element is an image or the width is in pixels, calculate the new width in pixels
-		newWidth = img.clientWidth * scaleFactor;
-		// Ensure the image doesn't get too small
-		newWidth = Math.max(newWidth, 50);
-	}
-
-	// Calculate the new height while maintaining the aspect ratio
-	const aspectRatio = img.clientWidth / img.clientHeight;
-	let newHeight = newWidth / aspectRatio;
-	newHeight = Math.max(newHeight, 50); // Ensure the image doesn't get too small
-
-	// Round the values to the nearest whole number
-	newWidth = Math.round(newWidth);
-	newHeight = Math.round(newHeight);
-
-	// Calculate the new position of the image so that it zooms towards the mouse pointer
-	const rect = img.getBoundingClientRect();
-	const dx = event.clientX - rect.left; // horizontal distance from left edge of image to mouse pointer
-	const dy = event.clientY - rect.top; // vertical distance from top edge of image to mouse pointer
-	const newLeft = rect.left - dx * (newWidth / img.clientWidth - 1);
-	const newTop = rect.top - dy * (newHeight / img.clientHeight - 1);
-
-	return { newWidth, newHeight, newLeft, newTop };
-}
 
 async function getImageWidthSide(binary: ArrayBuffer): Promise<number | null> {
 	try {
@@ -3977,139 +3993,8 @@ function printEditorLineWidth(app: App): number {
 }
 
 
-
-// function updateExternalLink(activeView: MarkdownView, img: HTMLImageElement | HTMLVideoElement, newWidth: number, newHeight: number): void {
-// 	// Get the current link and alt text
-// 	const currentLink = img.getAttribute("src");
-// 	let altText = img.getAttribute("alt");
-// 	const editor = activeView.editor;
-
-// 	// Round newWidth to the nearest whole number
-// 	const longestSide = Math.round(Math.max(newWidth, newHeight));
-
-// 	if (altText) {
-// 		altText = altText.replace(/\|\d+(\|\d+)?/g, ''); // remove any sizing info from alt text
-// 	}
-
-// 	// Construct the new markdown with the updated width
-// 	const newMarkdown = `![${altText}|${longestSide}](${currentLink})`;
-
-// 	// Get the line number of the current cursor position
-// 	const lineNumber = editor.getCursor().line;
-
-// 	// Get the content of the current line
-// 	const lineContent = editor.getLine(lineNumber);
-
-// 	// Replace the old markdown with the new one in the current line
-// 	// If there is no sizing then add
-// 	// If there is sizing then make sure it is the only one and there are no duplicate e.g. | size | size
-// 	const updatedLineContent = lineContent.replace(/!\[(.*?)(\|\d+(\|\d+)?)?\]\((.*?)\)/, newMarkdown);
-
-// 	// Update only the current line in the editor
-// 	editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
-// }
-// function updateMarkdownLink(activeView: MarkdownView, img: HTMLImageElement | HTMLVideoElement, imageName: string | null, newWidth: number, newHeight: number) {
-// 	if (!imageName) return;
-
-// 	const editor = activeView.editor;
-// 	const doc = editor.getDoc();
-// 	const lineCount = doc.lineCount();
-
-// 	// Find the line containing the image's markdown link
-// 	let lineIndex: number | undefined;
-// 	for (let i = 0; i < lineCount; i++) {
-// 		const line = doc.getLine(i);
-
-// 		// Get the full image path from the markdown link
-// 		const wikiLinkMatch = line.match(/!\[\[(.*?)(?:\|.*?)?\]\]/);
-// 		if (wikiLinkMatch) {
-// 			const fullPath = wikiLinkMatch[1];
-// 			// Check if the line contains our image name at the end of the path
-// 			if (fullPath.endsWith(imageName)) {
-// 				lineIndex = i;
-// 				break;
-// 			}
-// 		}
-// 	}
-
-// 	if (lineIndex !== undefined) {
-// 		editor.setCursor({ line: lineIndex, ch: 0 });
-// 		const cursor = editor.getCursor();
-// 		const line = editor.getLine(cursor.line);
-
-// 		// Calculate the longest side
-// 		let longestSide;
-// 		if (img instanceof HTMLImageElement) {
-// 			const percentageIndex = line.indexOf('%', line.indexOf('|'));
-// 			if (percentageIndex !== -1 && percentageIndex < line.indexOf(']]')) {
-// 				newWidth = Math.round((newWidth / img.naturalWidth) * 100);
-// 				newWidth = Math.min(newWidth, 100);
-// 				longestSide = `${newWidth}%`;
-// 			} else {
-// 				longestSide = Math.round(Math.max(newWidth, newHeight));
-// 			}
-// 		} else if (img instanceof HTMLVideoElement) {
-// 			const percentageIndex = line.indexOf('%', line.indexOf('|'));
-// 			if (percentageIndex !== -1 && percentageIndex < line.indexOf(']]')) {
-// 				newWidth = Math.min(newWidth, 100);
-// 				longestSide = `${newWidth}%`;
-// 			} else {
-// 				longestSide = Math.round(newWidth);
-// 			}
-// 		}
-
-// 		// Extract the full path and any existing size information
-// 		const match = line.match(/!\[\[(.*?)(?:\|(\d+%?))?\]\]/);
-// 		if (match) {
-// 			const fullPath = match[1];
-// 			const startPos = line.indexOf('![[');
-// 			const endPos = line.indexOf(']]', startPos) + 2;
-
-// 			// Preserve the full path and update only the size
-// 			editor.replaceRange(`![[${fullPath}|${longestSide}]]`,
-// 				{ line: cursor.line, ch: startPos },
-// 				{ line: cursor.line, ch: endPos });
-// 		}
-// 	}
-// }
-// function resizeBase64Drag(activeView: MarkdownView, imageName: string | null, newWidth: number) {
-// 	// When the user starts resizing the image, find and store the line number of the image
-// 	// Get the current line content
-
-// 	const editor = activeView.editor;
-// 	const doc = editor.getDoc();
-// 	const lineCount = doc.lineCount();
-// 	let imageLine: number | null = null;
-
-// 	if (imageName !== null) {
-// 		for (let i = 0; i < lineCount; i++) {
-// 			const line = doc.getLine(i);
-// 			if (line.includes(imageName)) {
-// 				imageLine = i;
-// 				break;
-// 			}
-// 		}
-// 	}
-
-// 	const lineNumber = imageLine;
-// 	if (lineNumber !== null) {
-// 		const lineContent = editor.getLine(lineNumber);
-// 		// Construct a new width attribute
-// 		const newWidthAttribute = `width="${newWidth}"`;
-
-// 		// Replace the old img tag with the new one in the current line
-// 		let updatedLineContent = lineContent.replace(/width="[^"]*"/, newWidthAttribute);
-
-// 		// If there was no width attribute in the original tag, add it to the new tag
-// 		if (!updatedLineContent.includes(newWidthAttribute)) {
-// 			updatedLineContent = updatedLineContent.replace('<img ', `<img ${newWidthAttribute} `);
-// 		}
-
-// 		// Update only the current line in the editor
-// 		editor.replaceRange(updatedLineContent, { line: lineNumber, ch: 0 }, { line: lineNumber, ch: lineContent.length });
-// 	}
-// }
-
+/* HELPER: for drag resize and scrollwheel */
+/* ------------------------------------------------------------- */
 function updateImageLink({ activeView, element, newWidth, newHeight, settings }: LinkUpdateOptions): void {
     const editor = activeView.editor;
     const imageName = getImageName(element);
@@ -4279,8 +4164,112 @@ function isExternalLink(imageName: string): boolean {
 	// This is a simple check that assumes any link starting with 'http' is an external link.
 	return imageName.startsWith('http://') || imageName.startsWith('https://');
 }
+function resizeImageScrollWheel(event: WheelEvent, img: HTMLImageElement | HTMLVideoElement) {
+
+	const delta = Math.sign(event.deltaY); // get the direction of the scroll
+	const scaleFactor = delta < 0 ? 1.1 : 0.9; // set the scale factor for resizing
+
+	let newWidth;
+	if (img instanceof HTMLVideoElement && img.style.width.endsWith('%')) {
+		// If the element is a video and the width is in percentages, calculate the new width in percentages
+		newWidth = parseFloat(img.style.width) * scaleFactor;
+		// Ensure the width is within the range 1% - 100%
+		newWidth = Math.max(1, Math.min(newWidth, 100));
+	} else {
+		// If the element is an image or the width is in pixels, calculate the new width in pixels
+		newWidth = img.clientWidth * scaleFactor;
+		// Ensure the image doesn't get too small
+		newWidth = Math.max(newWidth, 50);
+	}
+
+	// Calculate the new height while maintaining the aspect ratio
+	const aspectRatio = img.clientWidth / img.clientHeight;
+	let newHeight = newWidth / aspectRatio;
+	newHeight = Math.max(newHeight, 50); // Ensure the image doesn't get too small
+
+	// Round the values to the nearest whole number
+	newWidth = Math.round(newWidth);
+	newHeight = Math.round(newHeight);
+
+	// Calculate the new position of the image so that it zooms towards the mouse pointer
+	const rect = img.getBoundingClientRect();
+	const dx = event.clientX - rect.left; // horizontal distance from left edge of image to mouse pointer
+	const dy = event.clientY - rect.top; // vertical distance from top edge of image to mouse pointer
+	const newLeft = rect.left - dx * (newWidth / img.clientWidth - 1);
+	const newTop = rect.top - dy * (newHeight / img.clientHeight - 1);
+
+	return { newWidth, newHeight, newLeft, newTop };
+}
+/* ------------------------------------------------------------- */
+/* ------------------------------------------------------------- */
 
 
+
+/* HELPER: delete image from vault */
+/* ------------------------------------------------------------- */
+async function deleteImageFromVault(event: MouseEvent, app: App) {
+    const img = event.target as HTMLImageElement;
+    const src = img.getAttribute('src');
+    if (!src) return;
+
+    const activeView = app.workspace.getActiveViewOfType(MarkdownView);
+
+    try {
+        if (src.startsWith('data:image')) {
+            // Handle Base64 image
+            img.parentNode?.removeChild(img);
+            if (activeView) {
+                deleteMarkdownLink(activeView, src);
+            }
+            new Notice('Base64 encoded image deleted from the note');
+            return;
+        }
+
+        if (src.startsWith('http') || src.startsWith('https')) {
+            // Handle external image
+            img.parentNode?.removeChild(img);
+            if (activeView) {
+                deleteMarkdownLink(activeView, src);
+            }
+            new Notice('External image link deleted from the note');
+            return;
+        }
+
+        // Handle internal vault images
+        const rootFolder = app.vault.getName();
+        let imagePath = decodeURIComponent(src);
+
+
+        // Clean up the path
+        const rootFolderIndex = imagePath.indexOf(rootFolder);
+        if (rootFolderIndex !== -1) {
+            imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
+        }
+        imagePath = imagePath.split('?')[0];
+
+
+        // Get the file from vault
+        const file = app.vault.getAbstractFileByPath(imagePath);
+        if (file instanceof TFile && isImage(file)) {
+
+            // Get the full markdown line for deletion
+            const fullPath = getFullImagePath(activeView, file);
+
+            // Delete the file from vault
+            await app.vault.delete(file);
+
+            // Delete the markdown link if we're in a note
+            if (activeView && fullPath) {
+                deleteMarkdownLink(activeView, fullPath);
+            }
+
+            new Notice(`Image deleted: ${file.path}`);
+        }
+    } catch (error) {
+        console.error('Error deleting image:', error);
+        new Notice('Failed to delete image. Check console for details.');
+    }
+}
 function getFullImagePath(activeView: MarkdownView | null, file: TFile): string | null {
     if (!activeView) return null;
 
@@ -4462,69 +4451,9 @@ function deleteMarkdownLink(activeView: MarkdownView, imagePath: string | null) 
 		);
 	}
 }
-async function deleteImageFromVault(event: MouseEvent, app: App) {
-    const img = event.target as HTMLImageElement;
-    const src = img.getAttribute('src');
-    if (!src) return;
+/* ------------------------------------------------------------- */
+/* ------------------------------------------------------------- */
 
-    const activeView = app.workspace.getActiveViewOfType(MarkdownView);
-
-    try {
-        if (src.startsWith('data:image')) {
-            // Handle Base64 image
-            img.parentNode?.removeChild(img);
-            if (activeView) {
-                deleteMarkdownLink(activeView, src);
-            }
-            new Notice('Base64 encoded image deleted from the note');
-            return;
-        }
-
-        if (src.startsWith('http') || src.startsWith('https')) {
-            // Handle external image
-            img.parentNode?.removeChild(img);
-            if (activeView) {
-                deleteMarkdownLink(activeView, src);
-            }
-            new Notice('External image link deleted from the note');
-            return;
-        }
-
-        // Handle internal vault images
-        const rootFolder = app.vault.getName();
-        let imagePath = decodeURIComponent(src);
-
-
-        // Clean up the path
-        const rootFolderIndex = imagePath.indexOf(rootFolder);
-        if (rootFolderIndex !== -1) {
-            imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
-        }
-        imagePath = imagePath.split('?')[0];
-
-
-        // Get the file from vault
-        const file = app.vault.getAbstractFileByPath(imagePath);
-        if (file instanceof TFile && isImage(file)) {
-
-            // Get the full markdown line for deletion
-            const fullPath = getFullImagePath(activeView, file);
-
-            // Delete the file from vault
-            await app.vault.delete(file);
-
-            // Delete the markdown link if we're in a note
-            if (activeView && fullPath) {
-                deleteMarkdownLink(activeView, fullPath);
-            }
-
-            new Notice(`Image deleted: ${file.path}`);
-        }
-    } catch (error) {
-        console.error('Error deleting image:', error);
-        new Notice('Failed to delete image. Check console for details.');
-    }
-}
 
 export class ImageConvertTab extends PluginSettingTab {
 	plugin: ImageConvertPlugin;
