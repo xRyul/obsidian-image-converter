@@ -37,7 +37,7 @@ interface QueueItem {
     file: TFile;
     addedAt: number;
     viewType?: 'markdown' | 'canvas' | 'excalidraw';
-    parentFile?: TFile;
+    parentFile?: TFile;		
     processed: boolean;    // Track processing status
 	originalName?: string; // Track original file name, which prevents the same file from being processed multiple times
 	originalPath?: string;  // Track the original file path
@@ -95,19 +95,19 @@ interface ImageConvertSettings {
 	ProcessCurrentNoteresizeModaldesiredLength: number;
 
 	attachmentLocation: 'default' | 'root' | 'current' | 'subfolder' | 'customOutput';
-	// attachmentSpecifiedFolder: string;
 	attachmentSubfolderName: string;
 	customOutputPath: string;
 	previewPath: string;
 	manage_duplicate_filename: string;
 
-	resizeMode: string;
-	autoNonDestructiveResize: string,
-	customSize: string,
-	customSizeLongestSide: string,
-	desiredWidth: number;
-	desiredHeight: number;
-	desiredLength: number;
+	destructive_resizeMode: string;
+	destructive_desiredWidth: number;
+	destructive_desiredHeight: number;
+	destructive_desiredLongestEdge: number;
+
+	nondestructive_resizeMode: string,
+	nondestructive_resizeMode_customSize: string,
+	nondestructive_resizeMode_fitImage: string,  
 
 	resizeByDragging: boolean;
     resizeWithScrollwheel: boolean;
@@ -175,20 +175,20 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	ProcessCurrentNoteresizeModaldesiredLength: 800,
 
 	attachmentLocation: 'default',
-	// attachmentSpecifiedFolder: '',
 	attachmentSubfolderName: '',
 	customOutputPath: '',
 	previewPath: '',
 	manage_duplicate_filename: 'duplicate_rename',
 
-	resizeMode: 'None',
-	autoNonDestructiveResize: "disabled",
-	customSize: "",
-	customSizeLongestSide: "",
-	desiredWidth: 600,
-	desiredHeight: 800,
-	desiredLength: 800,
+	destructive_resizeMode: 'None',
+	destructive_desiredWidth: 600,
+	destructive_desiredHeight: 800,
+	destructive_desiredLongestEdge: 800,
 
+	nondestructive_resizeMode: "disabled",
+	nondestructive_resizeMode_customSize: "",
+	nondestructive_resizeMode_fitImage: "", 
+	
 	resizeByDragging: true,
     resizeWithScrollwheel: true,
 	scrollwheelModifier: 'Shift',
@@ -204,7 +204,6 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 
 export default class ImageConvertPlugin extends Plugin {
 	settings: ImageConvertSettings;
-	longestSide: number | null = null;
 	widthSide: number | null = null;
 	storedImageName: string | null = null; // get imagename for comparison
 	
@@ -382,7 +381,7 @@ export default class ImageConvertPlugin extends Plugin {
 			// CLEAN external link and Apply custom size on external links: e.g.: | 100
 			// Check if the clipboard data is an external link
 			const linkPattern = /!\[(.*?)\]\((.*?)\)/;
-			if (this.settings.autoNonDestructiveResize === "customSize" || this.settings.autoNonDestructiveResize === "fitImage") {
+			if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" || this.settings.nondestructive_resizeMode === "fitImage") {
 				if (linkPattern.test(markdownImagefromClipboard)) {
 					// Handle the external link
 					const match = markdownImagefromClipboard.match(linkPattern);
@@ -392,14 +391,14 @@ export default class ImageConvertPlugin extends Plugin {
 						const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 						if (activeView) {
 							const editor = activeView.editor;
-							let longestSide;
-							if (this.settings.autoNonDestructiveResize === "customSize") {
-								longestSide = this.settings.customSize;
-							} else if (this.settings.autoNonDestructiveResize === "fitImage") {
-								longestSide = this.settings.customSizeLongestSide;
+							let imageSizeValue;
+							if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize") {
+								imageSizeValue = this.settings.nondestructive_resizeMode_customSize;
+							} else if (this.settings.nondestructive_resizeMode === "fitImage") {
+								imageSizeValue = this.settings.nondestructive_resizeMode_fitImage;
 							}
 							altText = altText.replace(/\|\d+(\|\d+)?/g, ''); // remove any sizing info from alt text
-							const newMarkdown = `![${altText}|${longestSide}](${currentLink})`;
+							const newMarkdown = `![${altText}|${imageSizeValue}](${currentLink})`;
 							const lineNumber = editor.getCursor().line;
 							const lineContent = editor.getLine(lineNumber);
 
@@ -532,8 +531,8 @@ export default class ImageConvertPlugin extends Plugin {
 				}
 
 				if (markdownImageFromDrop && 
-					(this.settings.autoNonDestructiveResize === "customSize" || 
-					this.settings.autoNonDestructiveResize === "fitImage")) {
+					(this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" || 
+					this.settings.nondestructive_resizeMode === "fitImage")) {
 					
 					const linkPattern = /!\[(.*?)\]\((.*?)\)/;
 					const match = markdownImageFromDrop.match(linkPattern);
@@ -545,16 +544,16 @@ export default class ImageConvertPlugin extends Plugin {
 						
 						if (activeView) {
 							const editor = activeView.editor;
-							let longestSide;
+							let imageSizeValue;
 							
-							if (this.settings.autoNonDestructiveResize === "customSize") {
-								longestSide = this.settings.customSize;
-							} else if (this.settings.autoNonDestructiveResize === "fitImage") {
-								longestSide = this.settings.customSizeLongestSide;
+							if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize") {
+								imageSizeValue = this.settings.nondestructive_resizeMode_customSize;
+							} else if (this.settings.nondestructive_resizeMode === "fitImage") {
+								imageSizeValue = this.settings.nondestructive_resizeMode_fitImage;
 							}
 							
 							altText = altText.replace(/\|\d+(\|\d+)?/g, '');
-							const newMarkdown = `![${altText}|${longestSide}](${currentLink})`;
+							const newMarkdown = `![${altText}|${imageSizeValue}](${currentLink})`;
 							
 							const cursor = editor.getCursor();
 							const lineContent = editor.getLine(cursor.line);
@@ -691,7 +690,7 @@ export default class ImageConvertPlugin extends Plugin {
 						file,
 						addedAt: Date.now(),
 						viewType: viewType as 'markdown' | 'canvas' | 'excalidraw',
-						parentFile: viewType !== 'markdown' ? (activeView as any).file : undefined,
+						parentFile: viewType !== 'markdown' ? (activeView as any).file : undefined, // now TFile gets associated with the view where the drop occurred.
 						originalName: originalNameWithExt,
 						originalPath: file.path,
 						processed: false
@@ -1755,7 +1754,10 @@ export default class ImageConvertPlugin extends Plugin {
 	// Work on the file
 	/* ------------------------------------------------------------- */
 	async renameFile1(file: TFile, parentFile?: TFile): Promise<string> {   
-		const activeFile = parentFile || this.getActiveFile();
+		// We want to ensure we get the specific file where the drop occurred (parentFile)
+		// If that's not available, we fall back to Obsidian's getActiveFile()
+		// parentFile is actually the TFile  associated with the view where the drop occurred.
+		const activeFile = parentFile || this.app.workspace.getActiveFile();
 		if (!activeFile) {
 			throw new Error('No active file found');
 		}
@@ -1770,24 +1772,24 @@ export default class ImageConvertPlugin extends Plugin {
 		if (imgBlob instanceof Blob) {
 			const arrayBuffer = await imgBlob.arrayBuffer();
 			await this.app.vault.modifyBinary(file, arrayBuffer);
-		}
 
-		// 2. while we are here - reading the image, lets check its width too. 
-		// So we could later pass it into custom sizing options etc. 
-		// Only check it if the setting for customSize or fitImage is enabled  as there are the only options currently need it
-		if (this.settings.autoNonDestructiveResize === "customSize" || this.settings.autoNonDestructiveResize === "fitImage") {
-			try {
-				this.widthSide = await getImageWidthSide(binary);
-				const maxWidth = printEditorLineWidth(this.app);
-				if (this.widthSide !== null && typeof maxWidth === 'number') {
-					this.settings.customSizeLongestSide = (this.widthSide < maxWidth ? this.widthSide : maxWidth).toString();
-					await this.saveSettings();
+			// 2. while we are here - reading converted image, lets check its width too. 
+			// So we could later pass it into custom sizing options etc. 
+			// Only check it if the setting for nondestructive_resizeMode_customSize or fitImage is enabled  as there are the only options currently need it
+			// Fit image = ensures images are never wider than the editor while preserving their original size if they're already smaller than the editor width.
+			if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" || this.settings.nondestructive_resizeMode === "fitImage") {
+				try {
+					this.widthSide = await getImageWidthSide(arrayBuffer);
+					const maxWidth = printEditorLineWidth(this.app);
+					if (this.widthSide !== null && typeof maxWidth === 'number') {
+						this.settings.nondestructive_resizeMode_fitImage = (this.widthSide < maxWidth ? this.widthSide : maxWidth).toString();
+						await this.saveSettings();
+					}
+				} catch (error) {
+					console.error('Could not determine image dimensions, using default settings');
 				}
-			} catch (error) {
-				console.error('Could not determine image dimensions, using default settings');
 			}
 		}
-
 		// 3. check if renaming is needed
 		let newName: string;
 		if (this.settings.autoRename) {
@@ -1847,10 +1849,10 @@ export default class ImageConvertPlugin extends Plugin {
 
 		const conversionParams = {
 			quality: this.settings.quality,
-			resizeMode: this.settings.resizeMode,
-			desiredWidth: this.settings.desiredWidth,
-			desiredHeight: this.settings.desiredHeight,
-			desiredLength: this.settings.desiredLength
+			destructive_resizeMode: this.settings.destructive_resizeMode,
+			destructive_desiredWidth: this.settings.destructive_desiredWidth,
+			destructive_desiredHeight: this.settings.destructive_desiredHeight,
+			destructive_desiredLongestEdge: this.settings.destructive_desiredLongestEdge
 		};
 
 		let arrayBuffer: ArrayBuffer;
@@ -1860,30 +1862,30 @@ export default class ImageConvertPlugin extends Plugin {
 				arrayBuffer = await convertToWebP(
 					imgBlob,
 					conversionParams.quality,
-					conversionParams.resizeMode,
-					conversionParams.desiredWidth,
-					conversionParams.desiredHeight,
-					conversionParams.desiredLength
+					conversionParams.destructive_resizeMode,
+					conversionParams.destructive_desiredWidth,
+					conversionParams.destructive_desiredHeight,
+					conversionParams.destructive_desiredLongestEdge
 				);
 				break;
 			case 'jpg':
 				arrayBuffer = await convertToJPG(
 					imgBlob,
 					conversionParams.quality,
-					conversionParams.resizeMode,
-					conversionParams.desiredWidth,
-					conversionParams.desiredHeight,
-					conversionParams.desiredLength
+					conversionParams.destructive_resizeMode,
+					conversionParams.destructive_desiredWidth,
+					conversionParams.destructive_desiredHeight,
+					conversionParams.destructive_desiredLongestEdge
 				);
 				break;
 			case 'png':
 				arrayBuffer = await convertToPNG(
 					imgBlob,
 					conversionParams.quality,
-					conversionParams.resizeMode,
-					conversionParams.desiredWidth,
-					conversionParams.desiredHeight,
-					conversionParams.desiredLength
+					conversionParams.destructive_resizeMode,
+					conversionParams.destructive_desiredWidth,
+					conversionParams.destructive_desiredHeight,
+					conversionParams.destructive_desiredLongestEdge
 				);
 				break;
 			default:
@@ -2304,17 +2306,17 @@ export default class ImageConvertPlugin extends Plugin {
 	
 		// Create the link based on plugin settings
 		if (this.settings.useMdLinks) {
-			const size = this.settings.autoNonDestructiveResize === "customSize" ? 
-				this.settings.customSize : 
-				this.settings.autoNonDestructiveResize === "fitImage" ? 
-				this.settings.customSizeLongestSide : '';
+			const size = this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" ? 
+				this.settings.nondestructive_resizeMode_customSize : 
+				this.settings.nondestructive_resizeMode === "fitImage" ? 
+				this.settings.nondestructive_resizeMode_fitImage : '';
 			
 			return size ? `![|${size}](${cleanPath})` : `![](${cleanPath})`;
 		} else {
-			const size = this.settings.autoNonDestructiveResize === "customSize" ? 
-				this.settings.customSize : 
-				this.settings.autoNonDestructiveResize === "fitImage" ? 
-				this.settings.customSizeLongestSide : '';
+			const size = this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" ? 
+				this.settings.nondestructive_resizeMode_customSize : 
+				this.settings.nondestructive_resizeMode === "fitImage" ? 
+				this.settings.nondestructive_resizeMode_fitImage : '';
 	
 			return size ? `![[${cleanPath}|${size}]]` : `![[${cleanPath}]]`;
 		}
@@ -3176,7 +3178,7 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
 	async convertCurrentNoteImages(file: TFile) {
-		const activeFile = this.getActiveFile();
+		const activeFile = this.app.workspace.getActiveFile();
 
 		if (!activeFile) {
 			new Notice('Error: No active file found.');
@@ -3347,36 +3349,6 @@ export default class ImageConvertPlugin extends Plugin {
 	/* ------------------------------------------------------------- */
 	/* ------------------------------------------------------------- */
 
-	private getActiveFile(): TFile | undefined {
-		// Get the actual active leaf
-		const activeLeaf = this.app.workspace.activeLeaf;
-		if (!activeLeaf) return undefined;
-	
-		const viewType = activeLeaf.view.getViewType();
-	
-		// Handle direct active view cases
-		if (viewType === 'markdown') {
-			const file = (activeLeaf.view as MarkdownView).file;
-			return file ?? undefined;  // Convert null to undefined
-		}
-		
-		if (viewType === 'canvas' || viewType === 'excalidraw') {
-			return (activeLeaf.view as any).file;
-		}
-	
-		// Fallback approach for other cases
-		const markdownFile = this.app.workspace.getActiveViewOfType(MarkdownView)?.file ?? undefined;
-		if (markdownFile) return markdownFile;
-	
-		const canvasLeaf = this.app.workspace.getLeavesOfType("canvas").find(leaf => (leaf.view as any)?.file);
-		if (canvasLeaf) return (canvasLeaf.view as any).file;
-	
-		const excalidrawLeaf = this.app.workspace.getLeavesOfType("excalidraw").find(leaf => (leaf.view as any)?.file);
-		if (excalidrawLeaf) return (excalidrawLeaf.view as any).file;
-	
-		return undefined;
-	}
-	
 
 	getActiveEditor(sourcePath: string): Editor | null {
 		let editor: Editor | null = null;
@@ -3535,30 +3507,30 @@ async function handleHeicImage(
 					arrayBuffer = await convertToWebP(
 						imgBlob,
 						Number(settings.quality),
-						settings.resizeMode,
-						settings.desiredWidth,
-						settings.desiredHeight,
-						settings.desiredLength
+						settings.destructive_resizeMode,
+						settings.destructive_desiredWidth,
+						settings.destructive_desiredHeight,
+						settings.destructive_desiredLongestEdge
 					);
 					break;
 				case 'jpg':
 					arrayBuffer = await convertToJPG(
 						imgBlob,
 						Number(settings.quality),
-						settings.resizeMode,
-						settings.desiredWidth,
-						settings.desiredHeight,
-						settings.desiredLength
+						settings.destructive_resizeMode,
+						settings.destructive_desiredWidth,
+						settings.destructive_desiredHeight,
+						settings.destructive_desiredLongestEdge
 					);
 					break;
 				case 'png':
 					arrayBuffer = await convertToPNG(
 						imgBlob,
 						Number(settings.quality),
-						settings.resizeMode,
-						settings.desiredWidth,
-						settings.desiredHeight,
-						settings.desiredLength
+						settings.destructive_resizeMode,
+						settings.destructive_desiredWidth,
+						settings.destructive_desiredHeight,
+						settings.destructive_desiredLongestEdge
 					);
 					break;
 				default:
@@ -3577,7 +3549,7 @@ async function handleHeicImage(
 	}
 }
 
-function convertToWebP(file: Blob, quality: number, resizeMode: string, desiredWidth: number, desiredHeight: number, desiredLength: number): Promise<ArrayBuffer> {
+function convertToWebP(file: Blob, quality: number, destructive_resizeMode: string, destructive_desiredWidth: number, destructive_desiredHeight: number, destructive_desiredLongestEdge: number): Promise<ArrayBuffer> {
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
 		reader.onloadend = (e) => {
@@ -3599,60 +3571,60 @@ function convertToWebP(file: Blob, quality: number, resizeMode: string, desiredW
 				let imageWidth = 0;
 				let imageHeight = 0;
 				const aspectRatio = image.naturalWidth / image.naturalHeight;
-				switch (resizeMode) {
+				switch (destructive_resizeMode) {
 					case 'None':
 						imageWidth = image.naturalWidth;
 						imageHeight = image.naturalHeight;
 						break
 					case 'Fit':
-						if (aspectRatio > desiredWidth / desiredHeight) {
-							imageWidth = desiredWidth;
+						if (aspectRatio > destructive_desiredWidth / destructive_desiredHeight) {
+							imageWidth = destructive_desiredWidth;
 							imageHeight = imageWidth / aspectRatio;
 						} else {
-							imageHeight = desiredHeight;
+							imageHeight = destructive_desiredHeight;
 							imageWidth = imageHeight * aspectRatio;
 						}
 						break;
 					case 'Fill':
-						if (aspectRatio > desiredWidth / desiredHeight) {
-							imageHeight = desiredHeight;
+						if (aspectRatio > destructive_desiredWidth / destructive_desiredHeight) {
+							imageHeight = destructive_desiredHeight;
 							imageWidth = imageHeight * aspectRatio;
 						} else {
-							imageWidth = desiredWidth;
+							imageWidth = destructive_desiredWidth;
 							imageHeight = imageWidth / aspectRatio;
 						}
 						break;
 					case 'LongestEdge':
 						if (image.naturalWidth > image.naturalHeight) {
-							imageWidth = desiredLength;
+							imageWidth = destructive_desiredLongestEdge;
 							imageHeight = imageWidth / aspectRatio;
 						} else {
-							imageHeight = desiredLength;
+							imageHeight = destructive_desiredLongestEdge;
 							imageWidth = imageHeight * aspectRatio;
 						}
 						break;
 					case 'ShortestEdge':
 						if (image.naturalWidth < image.naturalHeight) {
-							imageWidth = desiredLength;
+							imageWidth = destructive_desiredLongestEdge;
 							imageHeight = imageWidth / aspectRatio;
 						} else {
-							imageHeight = desiredLength;
+							imageHeight = destructive_desiredLongestEdge;
 							imageWidth = imageHeight * aspectRatio;
 						}
 						break;
 					case 'Width':
-						imageWidth = desiredWidth;
-						imageHeight = desiredWidth / aspectRatio;
+						imageWidth = destructive_desiredWidth;
+						imageHeight = destructive_desiredWidth / aspectRatio;
 						break;
 					case 'Height':
-						imageHeight = desiredHeight;
-						imageWidth = desiredHeight * aspectRatio;
+						imageHeight = destructive_desiredHeight;
+						imageWidth = destructive_desiredHeight * aspectRatio;
 						break;
 				}
 
 				let data = '';
-				canvas.width = resizeMode === 'Fill' ? desiredWidth : imageWidth;
-				canvas.height = resizeMode === 'Fill' ? desiredHeight : imageHeight;
+				canvas.width = destructive_resizeMode === 'Fill' ? destructive_desiredWidth : imageWidth;
+				canvas.height = destructive_resizeMode === 'Fill' ? destructive_desiredHeight : imageHeight;
 				// context.fillStyle = '#fff';
 				// context.fillRect(0, 0, canvas.width, canvas.height);
 				context.save();
@@ -3663,12 +3635,12 @@ function convertToWebP(file: Blob, quality: number, resizeMode: string, desiredW
 					image,
 					0,
 					0,
-					resizeMode === 'Fill' ? Math.min(image.naturalWidth, image.naturalHeight * aspectRatio) : image.naturalWidth,
-					resizeMode === 'Fill' ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio) : image.naturalHeight,
+					destructive_resizeMode === 'Fill' ? Math.min(image.naturalWidth, image.naturalHeight * aspectRatio) : image.naturalWidth,
+					destructive_resizeMode === 'Fill' ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio) : image.naturalHeight,
 					-imageWidth / 2,
 					-imageHeight / 2,
-					resizeMode === 'Fill' ? desiredWidth : imageWidth,
-					resizeMode === 'Fill' ? desiredHeight : imageHeight
+					destructive_resizeMode === 'Fill' ? destructive_desiredWidth : imageWidth,
+					destructive_resizeMode === 'Fill' ? destructive_desiredHeight : imageHeight
 				);
 				context.restore();
 				data = canvas.toDataURL('image/webp', quality);
@@ -3682,7 +3654,7 @@ function convertToWebP(file: Blob, quality: number, resizeMode: string, desiredW
 	});
 }
 
-function convertToJPG(imgBlob: Blob, quality: number, resizeMode: string, desiredWidth: number, desiredHeight: number, desiredLength: number): Promise<ArrayBuffer> {
+function convertToJPG(imgBlob: Blob, quality: number, destructive_resizeMode: string, destructive_desiredWidth: number, destructive_desiredHeight: number, destructive_desiredLongestEdge: number): Promise<ArrayBuffer> {
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
 		reader.onloadend = (e) => {
@@ -3704,60 +3676,60 @@ function convertToJPG(imgBlob: Blob, quality: number, resizeMode: string, desire
 				let imageWidth = 0;
 				let imageHeight = 0;
 				const aspectRatio = image.naturalWidth / image.naturalHeight;
-				switch (resizeMode) {
+				switch (destructive_resizeMode) {
 					case 'None':
 						imageWidth = image.naturalWidth;
 						imageHeight = image.naturalHeight;
 						break
 					case 'Fit':
-						if (aspectRatio > desiredWidth / desiredHeight) {
-							imageWidth = desiredWidth;
+						if (aspectRatio > destructive_desiredWidth / destructive_desiredHeight) {
+							imageWidth = destructive_desiredWidth;
 							imageHeight = imageWidth / aspectRatio;
 						} else {
-							imageHeight = desiredHeight;
+							imageHeight = destructive_desiredHeight;
 							imageWidth = imageHeight * aspectRatio;
 						}
 						break;
 					case 'Fill':
-						if (aspectRatio > desiredWidth / desiredHeight) {
-							imageHeight = desiredHeight;
+						if (aspectRatio > destructive_desiredWidth / destructive_desiredHeight) {
+							imageHeight = destructive_desiredHeight;
 							imageWidth = imageHeight * aspectRatio;
 						} else {
-							imageWidth = desiredWidth;
+							imageWidth = destructive_desiredWidth;
 							imageHeight = imageWidth / aspectRatio;
 						}
 						break;
 					case 'LongestEdge':
 						if (image.naturalWidth > image.naturalHeight) {
-							imageWidth = desiredLength;
+							imageWidth = destructive_desiredLongestEdge;
 							imageHeight = imageWidth / aspectRatio;
 						} else {
-							imageHeight = desiredLength;
+							imageHeight = destructive_desiredLongestEdge;
 							imageWidth = imageHeight * aspectRatio;
 						}
 						break;
 					case 'ShortestEdge':
 						if (image.naturalWidth < image.naturalHeight) {
-							imageWidth = desiredLength;
+							imageWidth = destructive_desiredLongestEdge;
 							imageHeight = imageWidth / aspectRatio;
 						} else {
-							imageHeight = desiredLength;
+							imageHeight = destructive_desiredLongestEdge;
 							imageWidth = imageHeight * aspectRatio;
 						}
 						break;
 					case 'Width':
-						imageWidth = desiredWidth;
-						imageHeight = desiredWidth / aspectRatio;
+						imageWidth = destructive_desiredWidth;
+						imageHeight = destructive_desiredWidth / aspectRatio;
 						break;
 					case 'Height':
-						imageHeight = desiredHeight;
-						imageWidth = desiredHeight * aspectRatio;
+						imageHeight = destructive_desiredHeight;
+						imageWidth = destructive_desiredHeight * aspectRatio;
 						break;
 				}
 
 				let data = '';
-				canvas.width = resizeMode === 'Fill' ? desiredWidth : imageWidth;
-				canvas.height = resizeMode === 'Fill' ? desiredHeight : imageHeight;
+				canvas.width = destructive_resizeMode === 'Fill' ? destructive_desiredWidth : imageWidth;
+				canvas.height = destructive_resizeMode === 'Fill' ? destructive_desiredHeight : imageHeight;
 				// context.fillStyle = '#fff';
 				// context.fillRect(0, 0, canvas.width, canvas.height);
 				context.save();
@@ -3768,12 +3740,12 @@ function convertToJPG(imgBlob: Blob, quality: number, resizeMode: string, desire
 					image,
 					0,
 					0,
-					resizeMode === 'Fill' ? Math.min(image.naturalWidth, image.naturalHeight * aspectRatio) : image.naturalWidth,
-					resizeMode === 'Fill' ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio) : image.naturalHeight,
+					destructive_resizeMode === 'Fill' ? Math.min(image.naturalWidth, image.naturalHeight * aspectRatio) : image.naturalWidth,
+					destructive_resizeMode === 'Fill' ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio) : image.naturalHeight,
 					-imageWidth / 2,
 					-imageHeight / 2,
-					resizeMode === 'Fill' ? desiredWidth : imageWidth,
-					resizeMode === 'Fill' ? desiredHeight : imageHeight
+					destructive_resizeMode === 'Fill' ? destructive_desiredWidth : imageWidth,
+					destructive_resizeMode === 'Fill' ? destructive_desiredHeight : imageHeight
 				);
 				context.restore();
 				data = canvas.toDataURL('image/jpeg', quality);
@@ -3786,7 +3758,7 @@ function convertToJPG(imgBlob: Blob, quality: number, resizeMode: string, desire
 	});
 }
 
-function convertToPNG(imgBlob: Blob, colorDepth: number, resizeMode: string, desiredWidth: number, desiredHeight: number, desiredLength: number): Promise<ArrayBuffer> {
+function convertToPNG(imgBlob: Blob, colorDepth: number, destructive_resizeMode: string, destructive_desiredWidth: number, destructive_desiredHeight: number, destructive_desiredLongestEdge: number): Promise<ArrayBuffer> {
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
 		reader.onloadend = (e) => {
@@ -3808,60 +3780,60 @@ function convertToPNG(imgBlob: Blob, colorDepth: number, resizeMode: string, des
 				let imageWidth = 0;
 				let imageHeight = 0;
 				const aspectRatio = image.naturalWidth / image.naturalHeight;
-				switch (resizeMode) {
+				switch (destructive_resizeMode) {
 					case 'None':
 						imageWidth = image.naturalWidth;
 						imageHeight = image.naturalHeight;
 						break
 					case 'Fit':
-						if (aspectRatio > desiredWidth / desiredHeight) {
-							imageWidth = desiredWidth;
+						if (aspectRatio > destructive_desiredWidth / destructive_desiredHeight) {
+							imageWidth = destructive_desiredWidth;
 							imageHeight = imageWidth / aspectRatio;
 						} else {
-							imageHeight = desiredHeight;
+							imageHeight = destructive_desiredHeight;
 							imageWidth = imageHeight * aspectRatio;
 						}
 						break;
 					case 'Fill':
-						if (aspectRatio > desiredWidth / desiredHeight) {
-							imageHeight = desiredHeight;
+						if (aspectRatio > destructive_desiredWidth / destructive_desiredHeight) {
+							imageHeight = destructive_desiredHeight;
 							imageWidth = imageHeight * aspectRatio;
 						} else {
-							imageWidth = desiredWidth;
+							imageWidth = destructive_desiredWidth;
 							imageHeight = imageWidth / aspectRatio;
 						}
 						break;
 					case 'LongestEdge':
 						if (image.naturalWidth > image.naturalHeight) {
-							imageWidth = desiredLength;
+							imageWidth = destructive_desiredLongestEdge;
 							imageHeight = imageWidth / aspectRatio;
 						} else {
-							imageHeight = desiredLength;
+							imageHeight = destructive_desiredLongestEdge;
 							imageWidth = imageHeight * aspectRatio;
 						}
 						break;
 					case 'ShortestEdge':
 						if (image.naturalWidth < image.naturalHeight) {
-							imageWidth = desiredLength;
+							imageWidth = destructive_desiredLongestEdge;
 							imageHeight = imageWidth / aspectRatio;
 						} else {
-							imageHeight = desiredLength;
+							imageHeight = destructive_desiredLongestEdge;
 							imageWidth = imageHeight * aspectRatio;
 						}
 						break;
 					case 'Width':
-						imageWidth = desiredWidth;
-						imageHeight = desiredWidth / aspectRatio;
+						imageWidth = destructive_desiredWidth;
+						imageHeight = destructive_desiredWidth / aspectRatio;
 						break;
 					case 'Height':
-						imageHeight = desiredHeight;
-						imageWidth = desiredHeight * aspectRatio;
+						imageHeight = destructive_desiredHeight;
+						imageWidth = destructive_desiredHeight * aspectRatio;
 						break;
 				}
 
 				let data = '';
-				canvas.width = resizeMode === 'Fill' ? desiredWidth : imageWidth;
-				canvas.height = resizeMode === 'Fill' ? desiredHeight : imageHeight;
+				canvas.width = destructive_resizeMode === 'Fill' ? destructive_desiredWidth : imageWidth;
+				canvas.height = destructive_resizeMode === 'Fill' ? destructive_desiredHeight : imageHeight;
 				// context.fillStyle = '#fff';
 				// context.fillRect(0, 0, canvas.width, canvas.height);
 				context.save();
@@ -3872,12 +3844,12 @@ function convertToPNG(imgBlob: Blob, colorDepth: number, resizeMode: string, des
 					image,
 					0,
 					0,
-					resizeMode === 'Fill' ? Math.min(image.naturalWidth, image.naturalHeight * aspectRatio) : image.naturalWidth,
-					resizeMode === 'Fill' ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio) : image.naturalHeight,
+					destructive_resizeMode === 'Fill' ? Math.min(image.naturalWidth, image.naturalHeight * aspectRatio) : image.naturalWidth,
+					destructive_resizeMode === 'Fill' ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio) : image.naturalHeight,
 					-imageWidth / 2,
 					-imageHeight / 2,
-					resizeMode === 'Fill' ? desiredWidth : imageWidth,
-					resizeMode === 'Fill' ? desiredHeight : imageHeight
+					destructive_resizeMode === 'Fill' ? destructive_desiredWidth : imageWidth,
+					destructive_resizeMode === 'Fill' ? destructive_desiredHeight : imageHeight
 				);
 				context.restore();
 
@@ -4039,6 +4011,8 @@ function updateImageLink({ activeView, element, newWidth, newHeight, settings }:
 
     if (targetLine === -1) return;
 
+	// Obsidian supports WIDTHxHEIGHT syntax. But for simplicity we can use only 1 whichever is longer.
+	// This helps with setting appropriate initial |size depending on the image at hand
     const longestSide = Math.round(Math.max(newWidth, newHeight));
 
     let updatedContent = targetLineContent;
@@ -4600,9 +4574,9 @@ export class ImageConvertTab extends PluginSettingTab {
 						Width: 'Width',
 						Height: 'Height'
 					})
-					.setValue(this.plugin.settings.resizeMode)
+					.setValue(this.plugin.settings.destructive_resizeMode)
 					.onChange(async value => {
-						this.plugin.settings.resizeMode = value;
+						this.plugin.settings.destructive_resizeMode = value;
 						await this.plugin.saveSettings();
 						if (value !== 'None') {
 							const modal = new ResizeModal(this.plugin);
@@ -5047,18 +5021,18 @@ export class ImageConvertTab extends PluginSettingTab {
 						.addOptions({
 							disabled: "None",
 							fitImage: "Fit Image",
-							customSize: "Custom"
+							nondestructive_resizeMode_customSize: "Custom"
 						})
-						.setValue(this.plugin.settings.autoNonDestructiveResize)
+						.setValue(this.plugin.settings.nondestructive_resizeMode)
 						.onChange(async (value) => {
-							this.plugin.settings.autoNonDestructiveResize = value;
+							this.plugin.settings.nondestructive_resizeMode = value;
 							await this.plugin.saveSettings();
 							this.displayGeneralSettings();
 						})
 				);
 
 			// Show custom size setting immediately after non-destructive resize if "Custom" is selected
-			if (this.plugin.settings.autoNonDestructiveResize === "customSize") {
+			if (this.plugin.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize") {
 				new Setting(settingsContainer)
 					.setName("Custom size")
 					.setDesc("Specify the default size which should be applied on all dropped/pasted images. For example, if you specify \
@@ -5066,9 +5040,9 @@ export class ImageConvertTab extends PluginSettingTab {
 					.setClass('settings-indent')
 					.addText((text) => {
 						text.setPlaceholder("800")
-							.setValue(this.plugin.settings.customSize)
+							.setValue(this.plugin.settings.nondestructive_resizeMode_customSize)
 							.onChange(async (value) => {
-								this.plugin.settings.customSize = value;
+								this.plugin.settings.nondestructive_resizeMode_customSize = value;
 								await this.plugin.saveSettings();
 							});
 					});
@@ -5264,7 +5238,7 @@ class ResizeModal extends Modal {
 
 		// Add an explanation of the selected resize mode
 		let explanation = '';
-		switch (this.plugin.settings.resizeMode) {
+		switch (this.plugin.settings.destructive_resizeMode) {
 			case 'Fit':
 				explanation = 'Fit mode resizes the image to fit within the desired dimensions while maintaining the aspect ratio of the image.';
 				break;
@@ -5287,14 +5261,14 @@ class ResizeModal extends Modal {
 		contentEl.createEl('p', { text: explanation });
 
 		// Add input fields for the desired dimensions based on the selected resize mode
-		if (['Fit', 'Fill'].includes(this.plugin.settings.resizeMode)) {
+		if (['Fit', 'Fill'].includes(this.plugin.settings.destructive_resizeMode)) {
 			const widthInput = new TextComponent(contentEl)
 				.setPlaceholder('Width')
-				.setValue(this.plugin.settings.desiredWidth.toString());
+				.setValue(this.plugin.settings.destructive_desiredWidth.toString());
 
 			const heightInput = new TextComponent(contentEl)
 				.setPlaceholder('Height')
-				.setValue(this.plugin.settings.desiredHeight.toString());
+				.setValue(this.plugin.settings.destructive_desiredHeight.toString());
 
 			// Add a button to save the settings and close the modal
 			new ButtonComponent(contentEl)
@@ -5302,12 +5276,12 @@ class ResizeModal extends Modal {
 				.onClick(async () => {
 					const width = parseInt(widthInput.getValue());
 					if (/^\d+$/.test(widthInput.getValue()) && width > 0) {
-						this.plugin.settings.desiredWidth = width;
+						this.plugin.settings.destructive_desiredWidth = width;
 					}
 
 					const height = parseInt(heightInput.getValue());
 					if (/^\d+$/.test(heightInput.getValue()) && height > 0) {
-						this.plugin.settings.desiredHeight = height;
+						this.plugin.settings.destructive_desiredHeight = height;
 					}
 
 					await this.plugin.saveSettings();
@@ -5317,9 +5291,9 @@ class ResizeModal extends Modal {
 			const lengthInput = new TextComponent(contentEl)
 				.setPlaceholder('Enter desired length in pixels')
 				.setValue(
-					['LongestEdge', 'ShortestEdge', 'Width', 'Height'].includes(this.plugin.settings.resizeMode)
-						? this.plugin.settings.desiredWidth.toString()
-						: this.plugin.settings.desiredHeight.toString()
+					['LongestEdge', 'ShortestEdge', 'Width', 'Height'].includes(this.plugin.settings.destructive_resizeMode)
+						? this.plugin.settings.destructive_desiredWidth.toString()
+						: this.plugin.settings.destructive_desiredHeight.toString()
 				);
 
 			// Add a button to save the settings and close the modal
@@ -5328,20 +5302,20 @@ class ResizeModal extends Modal {
 				.onClick(async () => {
 					const length = parseInt(lengthInput.getValue());
 					if (/^\d+$/.test(lengthInput.getValue()) && length > 0) {
-						if (['LongestEdge'].includes(this.plugin.settings.resizeMode)) {
-							this.plugin.settings.desiredLength = length;
+						if (['LongestEdge'].includes(this.plugin.settings.destructive_resizeMode)) {
+							this.plugin.settings.destructive_desiredLongestEdge = length;
 						}
 
-						if (['ShortestEdge'].includes(this.plugin.settings.resizeMode)) {
-							this.plugin.settings.desiredLength = length;
+						if (['ShortestEdge'].includes(this.plugin.settings.destructive_resizeMode)) {
+							this.plugin.settings.destructive_desiredLongestEdge = length;
 						}
 
-						if (['Width'].includes(this.plugin.settings.resizeMode)) {
-							this.plugin.settings.desiredWidth = length;
+						if (['Width'].includes(this.plugin.settings.destructive_resizeMode)) {
+							this.plugin.settings.destructive_desiredWidth = length;
 						}
 
-						if (['Height'].includes(this.plugin.settings.resizeMode)) {
-							this.plugin.settings.desiredHeight = length;
+						if (['Height'].includes(this.plugin.settings.destructive_resizeMode)) {
+							this.plugin.settings.destructive_desiredHeight = length;
 						}
 					}
 
