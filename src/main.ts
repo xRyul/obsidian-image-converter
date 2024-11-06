@@ -86,6 +86,7 @@ interface ImageConvertSettings {
 	ProcessAllVaultResizeModaldesiredHeight: number;
 	ProcessAllVaultResizeModaldesiredLength: number;
 	ProcessAllVaultskipImagesInTargetFormat: boolean;
+	ProcessAllVaultEnlargeOrReduce: 'Always' | 'Reduce' | 'Enlarge';
 
 	ProcessCurrentNoteconvertTo: string;
 	ProcessCurrentNotequality: number;
@@ -93,6 +94,7 @@ interface ImageConvertSettings {
 	ProcessCurrentNoteresizeModaldesiredWidth: number;
 	ProcessCurrentNoteresizeModaldesiredHeight: number;
 	ProcessCurrentNoteresizeModaldesiredLength: number;
+	ProcessCurrentNoteEnlargeOrReduce: 'Always' | 'Reduce' | 'Enlarge';
 
 	attachmentLocation: 'default' | 'root' | 'current' | 'subfolder' | 'customOutput';
 	attachmentSubfolderName: string;
@@ -104,6 +106,7 @@ interface ImageConvertSettings {
 	destructive_desiredWidth: number;
 	destructive_desiredHeight: number;
 	destructive_desiredLongestEdge: number;
+	destructive_enlarge_or_reduce: 'Always' | 'Reduce' | 'Enlarge';
 
 	nondestructive_resizeMode: string,
 	nondestructive_resizeMode_customSize: string,
@@ -166,6 +169,7 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	ProcessAllVaultResizeModaldesiredHeight: 800,
 	ProcessAllVaultResizeModaldesiredLength: 800,
 	ProcessAllVaultskipImagesInTargetFormat: true,
+	ProcessAllVaultEnlargeOrReduce: 'Always',
 
 	ProcessCurrentNoteconvertTo: 'webp',
 	ProcessCurrentNotequality: 0.75,
@@ -173,6 +177,7 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	ProcessCurrentNoteresizeModaldesiredWidth: 600,
 	ProcessCurrentNoteresizeModaldesiredHeight: 800,
 	ProcessCurrentNoteresizeModaldesiredLength: 800,
+	ProcessCurrentNoteEnlargeOrReduce: 'Always',
 
 	attachmentLocation: 'default',
 	attachmentSubfolderName: '',
@@ -184,7 +189,8 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	destructive_desiredWidth: 600,
 	destructive_desiredHeight: 800,
 	destructive_desiredLongestEdge: 800,
-
+	destructive_enlarge_or_reduce: 'Always',
+	
 	nondestructive_resizeMode: "disabled",
 	nondestructive_resizeMode_customSize: "",
 	nondestructive_resizeMode_fitImage: "", 
@@ -1852,7 +1858,8 @@ export default class ImageConvertPlugin extends Plugin {
 			destructive_resizeMode: this.settings.destructive_resizeMode,
 			destructive_desiredWidth: this.settings.destructive_desiredWidth,
 			destructive_desiredHeight: this.settings.destructive_desiredHeight,
-			destructive_desiredLongestEdge: this.settings.destructive_desiredLongestEdge
+			destructive_desiredLongestEdge: this.settings.destructive_desiredLongestEdge,
+			destructive_enlarge_or_reduce: this.settings.destructive_enlarge_or_reduce
 		};
 
 		let arrayBuffer: ArrayBuffer;
@@ -1865,7 +1872,8 @@ export default class ImageConvertPlugin extends Plugin {
 					conversionParams.destructive_resizeMode,
 					conversionParams.destructive_desiredWidth,
 					conversionParams.destructive_desiredHeight,
-					conversionParams.destructive_desiredLongestEdge
+					conversionParams.destructive_desiredLongestEdge,
+					conversionParams.destructive_enlarge_or_reduce
 				);
 				break;
 			case 'jpg':
@@ -1875,7 +1883,8 @@ export default class ImageConvertPlugin extends Plugin {
 					conversionParams.destructive_resizeMode,
 					conversionParams.destructive_desiredWidth,
 					conversionParams.destructive_desiredHeight,
-					conversionParams.destructive_desiredLongestEdge
+					conversionParams.destructive_desiredLongestEdge,
+					conversionParams.destructive_enlarge_or_reduce
 				);
 				break;
 			case 'png':
@@ -1885,7 +1894,8 @@ export default class ImageConvertPlugin extends Plugin {
 					conversionParams.destructive_resizeMode,
 					conversionParams.destructive_desiredWidth,
 					conversionParams.destructive_desiredHeight,
-					conversionParams.destructive_desiredLongestEdge
+					conversionParams.destructive_desiredLongestEdge,
+					conversionParams.destructive_enlarge_or_reduce
 				);
 				break;
 			default:
@@ -2260,6 +2270,22 @@ export default class ImageConvertPlugin extends Plugin {
 		return newName;
 	}
 
+	private sanitizeFileName(fileName: string): string {
+		// Remove invalid filename characters
+		let safe = fileName.replace(/[<>:"/\\|?*]/g, '_');
+
+		// Prevent starting with dots (hidden files)
+		safe = safe.replace(/^\.+/, '');
+
+		// Limit length (filesystem dependent, using 255 as safe default)
+		if (safe.length > 255) {
+			safe = safe.slice(0, 255);
+		}
+
+		return safe;
+	}
+
+
 	makeLinkText(file: TFile, sourcePath: string, subpath?: string): string {
 		// Store the original case of the filename
 		const originalName = file.basename + '.' + file.extension;
@@ -2329,20 +2355,6 @@ export default class ImageConvertPlugin extends Plugin {
 		}
 	}
 
-	private sanitizeFileName(fileName: string): string {
-		// Remove invalid filename characters
-		let safe = fileName.replace(/[<>:"/\\|?*]/g, '_');
-
-		// Prevent starting with dots (hidden files)
-		safe = safe.replace(/^\.+/, '');
-
-		// Limit length (filesystem dependent, using 255 as safe default)
-		if (safe.length > 255) {
-			safe = safe.slice(0, 255);
-		}
-
-		return safe;
-	}
 
 	async processSubfolderVariables(template: string, file: TFile, activeFile: TFile): Promise<string> {
 		const moment = (window as any).moment;
@@ -2975,123 +2987,83 @@ export default class ImageConvertPlugin extends Plugin {
 		} else {
 			await this.updateAllVaultLinks(file, extension);
 		}
-
+	
 		const binary = await this.app.vault.readBinary(file);
 		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
-
-		// In your main code:
+	
+		// Handle special formats
 		if (file.extension === 'tif' || file.extension === 'tiff') {
 			imgBlob = await handleTiffImage(binary);
 		}
-
+	
 		if (file.extension === 'heic') {
 			imgBlob = await convertHeicToFormat(
 				binary,
 				'JPEG',
-				Number(this.settings.ProcessAllVaultquality)
+				this.settings.ProcessAllVaultquality
 			);
 		}
-
-		if (this.settings.ProcessAllVaultquality !== 1) {
-			if (this.settings.ProcessAllVaultconvertTo === 'webp') {
-				const arrayBufferWebP = await convertToWebP(
-					imgBlob,
-					Number(this.settings.ProcessAllVaultquality),
-					this.settings.ProcessAllVaultResizeModalresizeMode,
-					this.settings.ProcessAllVaultResizeModaldesiredWidth,
-					this.settings.ProcessAllVaultResizeModaldesiredHeight,
-					this.settings.ProcessAllVaultResizeModaldesiredLength
-				);
-				await this.app.vault.modifyBinary(file, arrayBufferWebP);
-			} else if (this.settings.ProcessAllVaultconvertTo === 'jpg') {
-				const arrayBufferJPG = await convertToJPG(
-					imgBlob,
-					Number(this.settings.ProcessAllVaultquality),
-					this.settings.ProcessAllVaultResizeModalresizeMode,
-					this.settings.ProcessAllVaultResizeModaldesiredWidth,
-					this.settings.ProcessAllVaultResizeModaldesiredHeight,
-					this.settings.ProcessAllVaultResizeModaldesiredLength
-				);
-				await this.app.vault.modifyBinary(file, arrayBufferJPG);
-			} else if (this.settings.ProcessAllVaultconvertTo === 'png') {
-				const arrayBufferPNG = await convertToPNG(
-					imgBlob,
-					Number(this.settings.ProcessAllVaultquality),
-					this.settings.ProcessAllVaultResizeModalresizeMode,
-					this.settings.ProcessAllVaultResizeModaldesiredWidth,
-					this.settings.ProcessAllVaultResizeModaldesiredHeight,
-					this.settings.ProcessAllVaultResizeModaldesiredLength
-				);
-				await this.app.vault.modifyBinary(file, arrayBufferPNG);
-			} else if (this.settings.ProcessAllVaultconvertTo === 'disabled') {
-				let arrayBuffer;
-				if (file.extension === 'jpg' || file.extension === 'jpeg') {
-					arrayBuffer = await convertToJPG(
-						imgBlob,
-						Number(this.settings.ProcessAllVaultquality),
-						this.settings.ProcessAllVaultResizeModalresizeMode,
-						this.settings.ProcessAllVaultResizeModaldesiredWidth,
-						this.settings.ProcessAllVaultResizeModaldesiredHeight,
-						this.settings.ProcessAllVaultResizeModaldesiredLength
-					);
-				} else if (file.extension === 'png') {
-					arrayBuffer = await convertToPNG(
-						imgBlob,
-						Number(this.settings.ProcessAllVaultquality),
-						this.settings.ProcessAllVaultResizeModalresizeMode,
-						this.settings.ProcessAllVaultResizeModaldesiredWidth,
-						this.settings.ProcessAllVaultResizeModaldesiredHeight,
-						this.settings.ProcessAllVaultResizeModaldesiredLength
-					);
-				} else if (file.extension === 'webp') {
-					arrayBuffer = await convertToWebP(
-						imgBlob,
-						Number(this.settings.ProcessAllVaultquality),
-						this.settings.ProcessAllVaultResizeModalresizeMode,
-						this.settings.ProcessAllVaultResizeModaldesiredWidth,
-						this.settings.ProcessAllVaultResizeModaldesiredHeight,
-						this.settings.ProcessAllVaultResizeModaldesiredLength
-					);
-				}
-				if (arrayBuffer) {
-					await this.app.vault.modifyBinary(file, arrayBuffer);
-				} else {
-					new Notice('Error: Failed to compress image.');
-				}
+	
+		const quality = this.settings.ProcessAllVaultquality;
+		const resizeMode = this.settings.ProcessAllVaultResizeModalresizeMode;
+		const desiredWidth = this.settings.ProcessAllVaultResizeModaldesiredWidth;
+		const desiredHeight = this.settings.ProcessAllVaultResizeModaldesiredHeight;
+		const desiredLength = this.settings.ProcessAllVaultResizeModaldesiredLength;
+		const enlargeOrReduce = this.settings.ProcessAllVaultEnlargeOrReduce;
+		const convertTo = this.settings.ProcessAllVaultconvertTo;
+	
+		// Handle quality < 1 (compression) case
+		if (quality !== 1) {
+			let arrayBuffer: ArrayBuffer | undefined;
+			
+			switch (convertTo) {
+				case 'webp':
+					arrayBuffer = await convertToWebP(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+					break;
+				case 'jpg':
+					arrayBuffer = await convertToJPG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+					break;
+				case 'png':
+					arrayBuffer = await convertToPNG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+					break;
+				case 'disabled':
+					// Keep original format but compress
+					if (file.extension === 'jpg' || file.extension === 'jpeg') {
+						arrayBuffer = await convertToJPG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+					} else if (file.extension === 'png') {
+						arrayBuffer = await convertToPNG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+					} else if (file.extension === 'webp') {
+						arrayBuffer = await convertToWebP(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+					}
+					break;
+				default:
+					new Notice('Error: No format selected for conversion.');
+					return;
+			}
+	
+			if (arrayBuffer) {
+				await this.app.vault.modifyBinary(file, arrayBuffer);
 			} else {
-				new Notice('Error: No format selected for conversion.');
-				return;
+				new Notice('Error: Failed to compress image.');
 			}
-		} else if (this.settings.ProcessAllVaultquality === 1 && this.settings.ProcessAllVaultResizeModalresizeMode !== 'None') { // Do not compress, but allow resizing
-			let arrayBuffer;
-			if (file.extension === 'jpg' || file.extension === 'jpeg') {
-				arrayBuffer = await convertToJPG(
-					imgBlob,
-					1,
-					this.settings.ProcessAllVaultResizeModalresizeMode,
-					this.settings.ProcessAllVaultResizeModaldesiredWidth,
-					this.settings.ProcessAllVaultResizeModaldesiredHeight,
-					this.settings.ProcessAllVaultResizeModaldesiredLength
-				);
-			} else if (file.extension === 'png') {
-				arrayBuffer = await convertToPNG(
-					imgBlob,
-					1,
-					this.settings.ProcessAllVaultResizeModalresizeMode,
-					this.settings.ProcessAllVaultResizeModaldesiredWidth,
-					this.settings.ProcessAllVaultResizeModaldesiredHeight,
-					this.settings.ProcessAllVaultResizeModaldesiredLength
-				);
-			} else if (file.extension === 'webp') {
-				arrayBuffer = await convertToWebP(
-					imgBlob,
-					1,
-					this.settings.ProcessAllVaultResizeModalresizeMode,
-					this.settings.ProcessAllVaultResizeModaldesiredWidth,
-					this.settings.ProcessAllVaultResizeModaldesiredHeight,
-					this.settings.ProcessAllVaultResizeModaldesiredLength
-				);
+		} 
+		// Handle resize only case (no compression)
+		else if (quality === 1 && resizeMode !== 'None') {
+			let arrayBuffer: ArrayBuffer | undefined;
+			
+			switch (file.extension) {
+				case 'jpg':
+				case 'jpeg':
+					arrayBuffer = await convertToJPG(imgBlob, 1, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+					break;
+				case 'png':
+					arrayBuffer = await convertToPNG(imgBlob, 1, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+					break;
+				case 'webp':
+					arrayBuffer = await convertToWebP(imgBlob, 1, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+					break;
 			}
+	
 			if (arrayBuffer) {
 				await this.app.vault.modifyBinary(file, arrayBuffer);
 			} else {
@@ -3100,7 +3072,8 @@ export default class ImageConvertPlugin extends Plugin {
 		} else {
 			new Notice('Original file kept without any compression.');
 		}
-
+	
+		// Rename file if extension changed
 		const newFilePath = file.path.replace(/\.[^/.]+$/, "." + extension);
 		await this.app.vault.rename(file, newFilePath);
 	}
@@ -3225,7 +3198,8 @@ export default class ImageConvertPlugin extends Plugin {
 					this.settings.ProcessCurrentNoteResizeModalresizeMode,
 					this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
 					this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
-					this.settings.ProcessCurrentNoteresizeModaldesiredLength
+					this.settings.ProcessCurrentNoteresizeModaldesiredLength,
+					this.settings.ProcessCurrentNoteEnlargeOrReduce
 				);
 				await this.app.vault.modifyBinary(file, arrayBufferWebP);
 			} else if (this.settings.ProcessCurrentNoteconvertTo === 'jpg') {
@@ -3235,7 +3209,8 @@ export default class ImageConvertPlugin extends Plugin {
 					this.settings.ProcessCurrentNoteResizeModalresizeMode,
 					this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
 					this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
-					this.settings.ProcessCurrentNoteresizeModaldesiredLength
+					this.settings.ProcessCurrentNoteresizeModaldesiredLength,
+					this.settings.ProcessCurrentNoteEnlargeOrReduce
 				);
 				await this.app.vault.modifyBinary(file, arrayBufferJPG);
 			} else if (this.settings.ProcessCurrentNoteconvertTo === 'png') {
@@ -3245,7 +3220,8 @@ export default class ImageConvertPlugin extends Plugin {
 					this.settings.ProcessCurrentNoteResizeModalresizeMode,
 					this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
 					this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
-					this.settings.ProcessCurrentNoteresizeModaldesiredLength
+					this.settings.ProcessCurrentNoteresizeModaldesiredLength,
+					this.settings.ProcessCurrentNoteEnlargeOrReduce
 				);
 				await this.app.vault.modifyBinary(file, arrayBufferPNG);
 			} else if (this.settings.ProcessCurrentNoteconvertTo === 'disabled') { // Same as original is selected? 
@@ -3257,7 +3233,8 @@ export default class ImageConvertPlugin extends Plugin {
 						this.settings.ProcessCurrentNoteResizeModalresizeMode,
 						this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
 						this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
-						this.settings.ProcessCurrentNoteresizeModaldesiredLength
+						this.settings.ProcessCurrentNoteresizeModaldesiredLength,
+						this.settings.ProcessCurrentNoteEnlargeOrReduce
 					);
 				} else if (file.extension === 'png') {
 					arrayBuffer = await convertToPNG(
@@ -3266,7 +3243,8 @@ export default class ImageConvertPlugin extends Plugin {
 						this.settings.ProcessCurrentNoteResizeModalresizeMode,
 						this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
 						this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
-						this.settings.ProcessCurrentNoteresizeModaldesiredLength
+						this.settings.ProcessCurrentNoteresizeModaldesiredLength,
+						this.settings.ProcessCurrentNoteEnlargeOrReduce
 					);
 				} else if (file.extension === 'webp') {
 					arrayBuffer = await convertToWebP(
@@ -3275,7 +3253,8 @@ export default class ImageConvertPlugin extends Plugin {
 						this.settings.ProcessCurrentNoteResizeModalresizeMode,
 						this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
 						this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
-						this.settings.ProcessCurrentNoteresizeModaldesiredLength
+						this.settings.ProcessCurrentNoteresizeModaldesiredLength,
+						this.settings.ProcessCurrentNoteEnlargeOrReduce
 					);
 				}
 				if (arrayBuffer) {
@@ -3296,7 +3275,8 @@ export default class ImageConvertPlugin extends Plugin {
 					this.settings.ProcessCurrentNoteResizeModalresizeMode,
 					this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
 					this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
-					this.settings.ProcessCurrentNoteresizeModaldesiredLength
+					this.settings.ProcessCurrentNoteresizeModaldesiredLength,
+					this.settings.ProcessCurrentNoteEnlargeOrReduce
 				);
 			} else if (file.extension === 'png') {
 				arrayBuffer = await convertToPNG(
@@ -3305,7 +3285,8 @@ export default class ImageConvertPlugin extends Plugin {
 					this.settings.ProcessCurrentNoteResizeModalresizeMode,
 					this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
 					this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
-					this.settings.ProcessCurrentNoteresizeModaldesiredLength
+					this.settings.ProcessCurrentNoteresizeModaldesiredLength,
+					this.settings.ProcessCurrentNoteEnlargeOrReduce
 				);
 			} else if (file.extension === 'webp') {
 				arrayBuffer = await convertToWebP(
@@ -3314,7 +3295,8 @@ export default class ImageConvertPlugin extends Plugin {
 					this.settings.ProcessCurrentNoteResizeModalresizeMode,
 					this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
 					this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
-					this.settings.ProcessCurrentNoteresizeModaldesiredLength
+					this.settings.ProcessCurrentNoteresizeModaldesiredLength,
+					this.settings.ProcessCurrentNoteEnlargeOrReduce
 				);
 			}
 			if (arrayBuffer) {
@@ -3517,7 +3499,8 @@ async function handleHeicImage(
 						settings.destructive_resizeMode,
 						settings.destructive_desiredWidth,
 						settings.destructive_desiredHeight,
-						settings.destructive_desiredLongestEdge
+						settings.destructive_desiredLongestEdge,
+						settings.destructive_enlarge_or_reduce
 					);
 					break;
 				case 'jpg':
@@ -3527,7 +3510,8 @@ async function handleHeicImage(
 						settings.destructive_resizeMode,
 						settings.destructive_desiredWidth,
 						settings.destructive_desiredHeight,
-						settings.destructive_desiredLongestEdge
+						settings.destructive_desiredLongestEdge,
+						settings.destructive_enlarge_or_reduce
 					);
 					break;
 				case 'png':
@@ -3537,7 +3521,8 @@ async function handleHeicImage(
 						settings.destructive_resizeMode,
 						settings.destructive_desiredWidth,
 						settings.destructive_desiredHeight,
-						settings.destructive_desiredLongestEdge
+						settings.destructive_desiredLongestEdge,
+						settings.destructive_enlarge_or_reduce
 					);
 					break;
 				default:
@@ -3556,7 +3541,15 @@ async function handleHeicImage(
 	}
 }
 
-function convertToWebP(file: Blob, quality: number, destructive_resizeMode: string, destructive_desiredWidth: number, destructive_desiredHeight: number, destructive_desiredLongestEdge: number): Promise<ArrayBuffer> {
+function convertToWebP(
+	file: Blob,
+	quality: number,
+	destructive_resizeMode: string,
+	destructive_desiredWidth: number,
+	destructive_desiredHeight: number,
+	destructive_desiredLongestEdge: number,
+	destructive_enlarge_or_reduce: 'Always' | 'Reduce' | 'Enlarge'
+): Promise<ArrayBuffer> {
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
 		reader.onloadend = (e) => {
@@ -3566,6 +3559,15 @@ function convertToWebP(file: Blob, quality: number, destructive_resizeMode: stri
 			}
 			const image = new Image();
 			image.onload = () => {
+				const { imageWidth, imageHeight, aspectRatio } = calculateDesiredDimensions(
+					image,
+					destructive_resizeMode,
+					destructive_desiredWidth,
+					destructive_desiredHeight,
+					destructive_desiredLongestEdge,
+					destructive_enlarge_or_reduce
+				);
+
 				const canvas = document.createElement('canvas');
 				const context = canvas.getContext('2d');
 				if (!context) {
@@ -3573,71 +3575,12 @@ function convertToWebP(file: Blob, quality: number, destructive_resizeMode: stri
 					return;
 				}
 
-				// Calculate the new dimensions of the image based on the selected resize mode
-				// let imageWidth, imageHeight;
-				let imageWidth = 0;
-				let imageHeight = 0;
-				const aspectRatio = image.naturalWidth / image.naturalHeight;
-				switch (destructive_resizeMode) {
-					case 'None':
-						imageWidth = image.naturalWidth;
-						imageHeight = image.naturalHeight;
-						break
-					case 'Fit':
-						if (aspectRatio > destructive_desiredWidth / destructive_desiredHeight) {
-							imageWidth = destructive_desiredWidth;
-							imageHeight = imageWidth / aspectRatio;
-						} else {
-							imageHeight = destructive_desiredHeight;
-							imageWidth = imageHeight * aspectRatio;
-						}
-						break;
-					case 'Fill':
-						if (aspectRatio > destructive_desiredWidth / destructive_desiredHeight) {
-							imageHeight = destructive_desiredHeight;
-							imageWidth = imageHeight * aspectRatio;
-						} else {
-							imageWidth = destructive_desiredWidth;
-							imageHeight = imageWidth / aspectRatio;
-						}
-						break;
-					case 'LongestEdge':
-						if (image.naturalWidth > image.naturalHeight) {
-							imageWidth = destructive_desiredLongestEdge;
-							imageHeight = imageWidth / aspectRatio;
-						} else {
-							imageHeight = destructive_desiredLongestEdge;
-							imageWidth = imageHeight * aspectRatio;
-						}
-						break;
-					case 'ShortestEdge':
-						if (image.naturalWidth < image.naturalHeight) {
-							imageWidth = destructive_desiredLongestEdge;
-							imageHeight = imageWidth / aspectRatio;
-						} else {
-							imageHeight = destructive_desiredLongestEdge;
-							imageWidth = imageHeight * aspectRatio;
-						}
-						break;
-					case 'Width':
-						imageWidth = destructive_desiredWidth;
-						imageHeight = destructive_desiredWidth / aspectRatio;
-						break;
-					case 'Height':
-						imageHeight = destructive_desiredHeight;
-						imageWidth = destructive_desiredHeight * aspectRatio;
-						break;
-				}
-
-				let data = '';
-				canvas.width = destructive_resizeMode === 'Fill' ? destructive_desiredWidth : imageWidth;
-				canvas.height = destructive_resizeMode === 'Fill' ? destructive_desiredHeight : imageHeight;
-				// context.fillStyle = '#fff';
-				// context.fillRect(0, 0, canvas.width, canvas.height);
+				canvas.width = imageWidth;
+				canvas.height = imageHeight;
 				context.save();
 				context.translate(canvas.width / 2, canvas.height / 2);
 
-				// Draw the resized and/or cropped 	image on the canvas
+				// Draw the resized and/or cropped image on the canvas
 				context.drawImage(
 					image,
 					0,
@@ -3646,12 +3589,12 @@ function convertToWebP(file: Blob, quality: number, destructive_resizeMode: stri
 					destructive_resizeMode === 'Fill' ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio) : image.naturalHeight,
 					-imageWidth / 2,
 					-imageHeight / 2,
-					destructive_resizeMode === 'Fill' ? destructive_desiredWidth : imageWidth,
-					destructive_resizeMode === 'Fill' ? destructive_desiredHeight : imageHeight
+					imageWidth,
+					imageHeight
 				);
 				context.restore();
-				data = canvas.toDataURL('image/webp', quality);
 
+				const data = canvas.toDataURL('image/webp', quality);
 				const arrayBuffer = base64ToArrayBuffer(data);
 				resolve(arrayBuffer);
 			};
@@ -3661,7 +3604,15 @@ function convertToWebP(file: Blob, quality: number, destructive_resizeMode: stri
 	});
 }
 
-function convertToJPG(imgBlob: Blob, quality: number, destructive_resizeMode: string, destructive_desiredWidth: number, destructive_desiredHeight: number, destructive_desiredLongestEdge: number): Promise<ArrayBuffer> {
+function convertToJPG(
+	file: Blob,
+	quality: number,
+	destructive_resizeMode: string,
+	destructive_desiredWidth: number,
+	destructive_desiredHeight: number,
+	destructive_desiredLongestEdge: number,
+	destructive_enlarge_or_reduce: 'Always' | 'Reduce' | 'Enlarge'
+): Promise<ArrayBuffer> {
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
 		reader.onloadend = (e) => {
@@ -3671,6 +3622,15 @@ function convertToJPG(imgBlob: Blob, quality: number, destructive_resizeMode: st
 			}
 			const image = new Image();
 			image.onload = () => {
+				const { imageWidth, imageHeight, aspectRatio } = calculateDesiredDimensions(
+					image,
+					destructive_resizeMode,
+					destructive_desiredWidth,
+					destructive_desiredHeight,
+					destructive_desiredLongestEdge,
+					destructive_enlarge_or_reduce
+				);
+
 				const canvas = document.createElement('canvas');
 				const context = canvas.getContext('2d');
 				if (!context) {
@@ -3678,71 +3638,12 @@ function convertToJPG(imgBlob: Blob, quality: number, destructive_resizeMode: st
 					return;
 				}
 
-				// Calculate the new dimensions of the image based on the selected resize mode
-				// let imageWidth, imageHeight;
-				let imageWidth = 0;
-				let imageHeight = 0;
-				const aspectRatio = image.naturalWidth / image.naturalHeight;
-				switch (destructive_resizeMode) {
-					case 'None':
-						imageWidth = image.naturalWidth;
-						imageHeight = image.naturalHeight;
-						break
-					case 'Fit':
-						if (aspectRatio > destructive_desiredWidth / destructive_desiredHeight) {
-							imageWidth = destructive_desiredWidth;
-							imageHeight = imageWidth / aspectRatio;
-						} else {
-							imageHeight = destructive_desiredHeight;
-							imageWidth = imageHeight * aspectRatio;
-						}
-						break;
-					case 'Fill':
-						if (aspectRatio > destructive_desiredWidth / destructive_desiredHeight) {
-							imageHeight = destructive_desiredHeight;
-							imageWidth = imageHeight * aspectRatio;
-						} else {
-							imageWidth = destructive_desiredWidth;
-							imageHeight = imageWidth / aspectRatio;
-						}
-						break;
-					case 'LongestEdge':
-						if (image.naturalWidth > image.naturalHeight) {
-							imageWidth = destructive_desiredLongestEdge;
-							imageHeight = imageWidth / aspectRatio;
-						} else {
-							imageHeight = destructive_desiredLongestEdge;
-							imageWidth = imageHeight * aspectRatio;
-						}
-						break;
-					case 'ShortestEdge':
-						if (image.naturalWidth < image.naturalHeight) {
-							imageWidth = destructive_desiredLongestEdge;
-							imageHeight = imageWidth / aspectRatio;
-						} else {
-							imageHeight = destructive_desiredLongestEdge;
-							imageWidth = imageHeight * aspectRatio;
-						}
-						break;
-					case 'Width':
-						imageWidth = destructive_desiredWidth;
-						imageHeight = destructive_desiredWidth / aspectRatio;
-						break;
-					case 'Height':
-						imageHeight = destructive_desiredHeight;
-						imageWidth = destructive_desiredHeight * aspectRatio;
-						break;
-				}
-
-				let data = '';
-				canvas.width = destructive_resizeMode === 'Fill' ? destructive_desiredWidth : imageWidth;
-				canvas.height = destructive_resizeMode === 'Fill' ? destructive_desiredHeight : imageHeight;
-				// context.fillStyle = '#fff';
-				// context.fillRect(0, 0, canvas.width, canvas.height);
+				canvas.width = imageWidth;
+				canvas.height = imageHeight;
 				context.save();
 				context.translate(canvas.width / 2, canvas.height / 2);
 
-				// Draw the resized and/or cropped 	image on the canvas
+				// Draw the resized and/or cropped image on the canvas
 				context.drawImage(
 					image,
 					0,
@@ -3751,21 +3652,30 @@ function convertToJPG(imgBlob: Blob, quality: number, destructive_resizeMode: st
 					destructive_resizeMode === 'Fill' ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio) : image.naturalHeight,
 					-imageWidth / 2,
 					-imageHeight / 2,
-					destructive_resizeMode === 'Fill' ? destructive_desiredWidth : imageWidth,
-					destructive_resizeMode === 'Fill' ? destructive_desiredHeight : imageHeight
+					imageWidth,
+					imageHeight
 				);
 				context.restore();
-				data = canvas.toDataURL('image/jpeg', quality);
+
+				const data = canvas.toDataURL('image/jpeg', quality);
 				const arrayBuffer = base64ToArrayBuffer(data);
 				resolve(arrayBuffer);
 			};
 			image.src = e.target.result.toString();
 		};
-		reader.readAsDataURL(imgBlob);
+		reader.readAsDataURL(file);
 	});
 }
 
-function convertToPNG(imgBlob: Blob, colorDepth: number, destructive_resizeMode: string, destructive_desiredWidth: number, destructive_desiredHeight: number, destructive_desiredLongestEdge: number): Promise<ArrayBuffer> {
+function convertToPNG(
+	file: Blob,
+	colorDepth: number,
+	destructive_resizeMode: string,
+	destructive_desiredWidth: number,
+	destructive_desiredHeight: number,
+	destructive_desiredLongestEdge: number,
+	destructive_enlarge_or_reduce: 'Always' | 'Reduce' | 'Enlarge'
+): Promise<ArrayBuffer> {
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
 		reader.onloadend = (e) => {
@@ -3775,6 +3685,15 @@ function convertToPNG(imgBlob: Blob, colorDepth: number, destructive_resizeMode:
 			}
 			const image = new Image();
 			image.onload = () => {
+				const { imageWidth, imageHeight, aspectRatio } = calculateDesiredDimensions(
+					image,
+					destructive_resizeMode,
+					destructive_desiredWidth,
+					destructive_desiredHeight,
+					destructive_desiredLongestEdge,
+					destructive_enlarge_or_reduce
+				);
+
 				const canvas = document.createElement('canvas');
 				const context = canvas.getContext('2d');
 				if (!context) {
@@ -3782,71 +3701,12 @@ function convertToPNG(imgBlob: Blob, colorDepth: number, destructive_resizeMode:
 					return;
 				}
 
-				// Calculate the new dimensions of the image based on the selected resize mode
-				// let imageWidth, imageHeight;
-				let imageWidth = 0;
-				let imageHeight = 0;
-				const aspectRatio = image.naturalWidth / image.naturalHeight;
-				switch (destructive_resizeMode) {
-					case 'None':
-						imageWidth = image.naturalWidth;
-						imageHeight = image.naturalHeight;
-						break
-					case 'Fit':
-						if (aspectRatio > destructive_desiredWidth / destructive_desiredHeight) {
-							imageWidth = destructive_desiredWidth;
-							imageHeight = imageWidth / aspectRatio;
-						} else {
-							imageHeight = destructive_desiredHeight;
-							imageWidth = imageHeight * aspectRatio;
-						}
-						break;
-					case 'Fill':
-						if (aspectRatio > destructive_desiredWidth / destructive_desiredHeight) {
-							imageHeight = destructive_desiredHeight;
-							imageWidth = imageHeight * aspectRatio;
-						} else {
-							imageWidth = destructive_desiredWidth;
-							imageHeight = imageWidth / aspectRatio;
-						}
-						break;
-					case 'LongestEdge':
-						if (image.naturalWidth > image.naturalHeight) {
-							imageWidth = destructive_desiredLongestEdge;
-							imageHeight = imageWidth / aspectRatio;
-						} else {
-							imageHeight = destructive_desiredLongestEdge;
-							imageWidth = imageHeight * aspectRatio;
-						}
-						break;
-					case 'ShortestEdge':
-						if (image.naturalWidth < image.naturalHeight) {
-							imageWidth = destructive_desiredLongestEdge;
-							imageHeight = imageWidth / aspectRatio;
-						} else {
-							imageHeight = destructive_desiredLongestEdge;
-							imageWidth = imageHeight * aspectRatio;
-						}
-						break;
-					case 'Width':
-						imageWidth = destructive_desiredWidth;
-						imageHeight = destructive_desiredWidth / aspectRatio;
-						break;
-					case 'Height':
-						imageHeight = destructive_desiredHeight;
-						imageWidth = destructive_desiredHeight * aspectRatio;
-						break;
-				}
-
-				let data = '';
-				canvas.width = destructive_resizeMode === 'Fill' ? destructive_desiredWidth : imageWidth;
-				canvas.height = destructive_resizeMode === 'Fill' ? destructive_desiredHeight : imageHeight;
-				// context.fillStyle = '#fff';
-				// context.fillRect(0, 0, canvas.width, canvas.height);
+				canvas.width = imageWidth;
+				canvas.height = imageHeight;
 				context.save();
 				context.translate(canvas.width / 2, canvas.height / 2);
 
-				// Draw the resized and/or cropped 	image on the canvas
+				// Draw the resized and/or cropped image on the canvas
 				context.drawImage(
 					image,
 					0,
@@ -3855,22 +3715,114 @@ function convertToPNG(imgBlob: Blob, colorDepth: number, destructive_resizeMode:
 					destructive_resizeMode === 'Fill' ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio) : image.naturalHeight,
 					-imageWidth / 2,
 					-imageHeight / 2,
-					destructive_resizeMode === 'Fill' ? destructive_desiredWidth : imageWidth,
-					destructive_resizeMode === 'Fill' ? destructive_desiredHeight : imageHeight
+					imageWidth,
+					imageHeight
 				);
 				context.restore();
 
 				const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
 				const reducedImageData = reduceColorDepth(imageData, colorDepth);
 				context.putImageData(reducedImageData, 0, 0);
-				data = canvas.toDataURL('image/png');
+
+				const data = canvas.toDataURL('image/png');
 				const arrayBuffer = base64ToArrayBuffer(data);
 				resolve(arrayBuffer);
 			};
 			image.src = e.target.result.toString();
 		};
-		reader.readAsDataURL(imgBlob);
+		reader.readAsDataURL(file);
 	});
+}
+
+function calculateDesiredDimensions(
+	image: HTMLImageElement,
+	destructive_resizeMode: string,
+	destructive_desiredWidth: number,
+	destructive_desiredHeight: number,
+	destructive_desiredLongestEdge: number,
+	destructive_enlarge_or_reduce: 'Always' | 'Reduce' | 'Enlarge'
+): { imageWidth: number; imageHeight: number; aspectRatio: number } {
+	const aspectRatio = image.naturalWidth / image.naturalHeight;
+
+	let imageWidth = 0;
+	let imageHeight = 0;
+
+	switch (destructive_resizeMode) {
+		case 'None':
+			imageWidth = image.naturalWidth;
+			imageHeight = image.naturalHeight;
+			break;
+		case 'Fit':
+			if (aspectRatio > destructive_desiredWidth / destructive_desiredHeight) {
+				imageWidth = destructive_desiredWidth;
+				imageHeight = imageWidth / aspectRatio;
+			} else {
+				imageHeight = destructive_desiredHeight;
+				imageWidth = imageHeight * aspectRatio;
+			}
+			break;
+		case 'Fill':
+			if (aspectRatio > destructive_desiredWidth / destructive_desiredHeight) {
+				imageHeight = destructive_desiredHeight;
+				imageWidth = imageHeight * aspectRatio;
+			} else {
+				imageWidth = destructive_desiredWidth;
+				imageHeight = imageWidth / aspectRatio;
+			}
+			break;
+		case 'LongestEdge':
+			if (image.naturalWidth > image.naturalHeight) {
+				imageWidth = destructive_desiredLongestEdge;
+				imageHeight = imageWidth / aspectRatio;
+			} else {
+				imageHeight = destructive_desiredLongestEdge;
+				imageWidth = imageHeight * aspectRatio;
+			}
+			break;
+		case 'ShortestEdge':
+			if (image.naturalWidth < image.naturalHeight) {
+				imageWidth = destructive_desiredLongestEdge;
+				imageHeight = imageWidth / aspectRatio;
+			} else {
+				imageHeight = destructive_desiredLongestEdge;
+				imageWidth = imageHeight * aspectRatio;
+			}
+			break;
+		case 'Width':
+			imageWidth = destructive_desiredWidth;
+			imageHeight = destructive_desiredWidth / aspectRatio;
+			break;
+		case 'Height':
+			imageHeight = destructive_desiredHeight;
+			imageWidth = destructive_desiredHeight * aspectRatio;
+			break;
+	}
+
+	switch (destructive_enlarge_or_reduce) {
+		case 'Always':
+			// Always resize the image to the desired dimensions, regardless of its size
+			break;
+		case 'Reduce':
+			// Only reduce size if larger
+			if (image.naturalWidth > imageWidth || image.naturalHeight > imageHeight) {
+				// Do nothing, the desired dimensions are already calculated
+			} else {
+				imageWidth = image.naturalWidth;
+				imageHeight = image.naturalHeight;
+			}
+			break;
+		case 'Enlarge':
+			// Only enlarge size if smaller
+			if (image.naturalWidth < imageWidth && image.naturalHeight < imageHeight) {
+				// Do nothing, the desired dimensions are already calculated
+			} else {
+				imageWidth = image.naturalWidth;
+				imageHeight = image.naturalHeight;
+			}
+			break;
+	}
+
+	return { imageWidth, imageHeight, aspectRatio };
 }
 
 function reduceColorDepth(imageData: ImageData, colorDepth: number): ImageData {
@@ -4530,8 +4482,11 @@ export class ImageConvertTab extends PluginSettingTab {
 	private displayConvertSettings(): void {
 		const container = this.contentContainer.createDiv('settings-container');
 
+		// Basic Settings Container
+		const basicSettingsContainer = container.createDiv('basic-settings-container');
+
 		// Format Setting
-		new Setting(container)
+		new Setting(basicSettingsContainer)
 			.setName('Format')
 			.setDesc('Select format to convert images to')
 			.addDropdown(dropdown =>
@@ -4550,9 +4505,9 @@ export class ImageConvertTab extends PluginSettingTab {
 			);
 
 		// Quality Setting
-		new Setting(container)
+		new Setting(basicSettingsContainer)
 			.setName('Quality')
-			.setDesc('0 - low quality, 99 - high quality, 100 - no compression; 75 - recommended')
+			.setDesc('0 - low quality, 75 - recommended, 99 - high quality, 100 - no compression; ')
 			.addText(text =>
 				text
 					.setPlaceholder('Enter quality (0-100)')
@@ -4566,8 +4521,14 @@ export class ImageConvertTab extends PluginSettingTab {
 					})
 			);
 
+		// Create a separate container for resize-related settings
+		const resizeSettingsContainer = container.createDiv('resize-settings-container');
+
+		// Add a heading for resize settings
+		resizeSettingsContainer.createEl('h3', { text: '', cls: 'setting-group-heading' });
+		
 		// Resize Mode Setting
-		new Setting(container)
+		new Setting(resizeSettingsContainer)
 			.setName('Image resize mode')
 			.setDesc('Select the mode to use when resizing the image')
 			.addDropdown(dropdown =>
@@ -4585,12 +4546,146 @@ export class ImageConvertTab extends PluginSettingTab {
 					.onChange(async value => {
 						this.plugin.settings.destructive_resizeMode = value;
 						await this.plugin.saveSettings();
+						
+						// Clear existing resize-related elements
+						const resizeInputsContainer = resizeSettingsContainer.querySelector('.resize-inputs');
+						if (resizeInputsContainer) resizeInputsContainer.remove();
+						
+						const enlargeReduceContainer = resizeSettingsContainer.querySelector('.enlarge-reduce-setting');
+						if (enlargeReduceContainer) enlargeReduceContainer.remove();
+						
+						// Add new elements if needed
 						if (value !== 'None') {
-							const modal = new ResizeModal(this.plugin);
-							modal.open();
+							this.updateResizeInputs(resizeSettingsContainer, value);
+							this.addEnlargeReduceSetting(resizeSettingsContainer);
 						}
 					})
 			);
+
+
+		// Add initial resize inputs and enlarge/reduce setting if needed
+		if (this.plugin.settings.destructive_resizeMode !== 'None') {
+			this.updateResizeInputs(resizeSettingsContainer, this.plugin.settings.destructive_resizeMode);
+			this.addEnlargeReduceSetting(resizeSettingsContainer);
+		}
+	}
+
+	private addEnlargeReduceSetting(container: HTMLElement): void {
+		const enlargeReduceDiv = container.createDiv('enlarge-reduce-setting');
+		new Setting(enlargeReduceDiv)
+			.setName('Enlarge/Reduce')
+			.setDesc(
+				'Reduce and Enlarge - would make sure that image set to specified dimensions are always fit\
+				inside these dimensions so both actions would be performed: small images would be enlarged\
+				to fit the dimensions and large images would be reduced;\
+				Reduce only - only large images will be reduced;\
+				Enlarge only - only small images will be increased')
+			.addDropdown(dropdown =>
+				dropdown
+					.addOptions({
+						Always: 'Reduce and Enlarge',
+						Reduce: 'Reduce only',
+						Enlarge: 'Enlarge only',
+					})
+					.setValue(this.plugin.settings.destructive_enlarge_or_reduce)
+					.onChange(async (value: 'Always' | 'Reduce' | 'Enlarge') => {
+						this.plugin.settings.destructive_enlarge_or_reduce = value;
+						await this.plugin.saveSettings();
+					})
+			);
+	}
+
+	private updateResizeInputs(container: HTMLElement, resizeMode: string): void {
+		// Remove existing resize inputs
+		const existingInputs = container.querySelector('.resize-inputs');
+		if (existingInputs) {
+			existingInputs.remove();
+		}
+	
+		if (resizeMode === 'None') return;
+	
+		const inputsContainer = container.createDiv('resize-inputs');
+		
+		// Add explanation
+		const explanations: Record<string, string> = {
+			Fit: 'Fit mode resizes the image to fit within the desired dimensions while maintaining the aspect ratio.',
+			Fill: 'Fill mode resizes the image to fill the desired dimensions while maintaining the aspect ratio. May result in cropping.',
+			LongestEdge: 'Longest Edge mode resizes the longest side while maintaining the aspect ratio.',
+			ShortestEdge: 'Shortest Edge mode resizes the shortest side while maintaining the aspect ratio.',
+			Width: 'Width mode resizes the width while maintaining the aspect ratio.',
+			Height: 'Height mode resizes the height while maintaining the aspect ratio.'
+		};
+	
+		if (explanations[resizeMode]) {
+			inputsContainer.createEl('p', { text: explanations[resizeMode], cls: 'setting-item-description' });
+		}
+	
+		if (['Fit', 'Fill'].includes(resizeMode)) {
+			new Setting(inputsContainer)
+				.setName('Dimensions')
+				.addText(text => text
+					.setPlaceholder('Width')
+					.setValue(this.plugin.settings.destructive_desiredWidth.toString())
+					.onChange(async value => {
+						const width = parseInt(value);
+						if (/^\d+$/.test(value) && width > 0) {
+							this.plugin.settings.destructive_desiredWidth = width;
+							await this.plugin.saveSettings();
+						}
+					}))
+				.addText(text => text
+					.setPlaceholder('Height')
+					.setValue(this.plugin.settings.destructive_desiredHeight.toString())
+					.onChange(async value => {
+						const height = parseInt(value);
+						if (/^\d+$/.test(value) && height > 0) {
+							this.plugin.settings.destructive_desiredHeight = height;
+							await this.plugin.saveSettings();
+						}
+					}));
+		} else {
+			new Setting(inputsContainer)
+				.setName('Target size')
+				.addText(text => text
+					.setPlaceholder('Enter desired length in pixels')
+					.setValue(this.getInitialValue(resizeMode))
+					.onChange(async value => {
+						const length = parseInt(value);
+						if (/^\d+$/.test(value) && length > 0) {
+							await this.updateResizeValue(resizeMode, length);
+						}
+					}));
+		}
+	}
+
+	private getInitialValue(resizeMode: string): string {
+		switch (resizeMode) {
+			case 'LongestEdge':
+			case 'ShortestEdge':
+				return this.plugin.settings.destructive_desiredLongestEdge.toString();
+			case 'Width':
+				return this.plugin.settings.destructive_desiredWidth.toString();
+			case 'Height':
+				return this.plugin.settings.destructive_desiredHeight.toString();
+			default:
+				return '';
+		}
+	}
+
+	private async updateResizeValue(resizeMode: string, length: number): Promise<void> {
+		switch (resizeMode) {
+			case 'LongestEdge':
+			case 'ShortestEdge':
+				this.plugin.settings.destructive_desiredLongestEdge = length;
+				break;
+			case 'Width':
+				this.plugin.settings.destructive_desiredWidth = length;
+				break;
+			case 'Height':
+				this.plugin.settings.destructive_desiredHeight = length;
+				break;
+		}
+		await this.plugin.saveSettings();
 	}
 
 	// Output
@@ -5231,108 +5326,6 @@ export class ImageConvertTab extends PluginSettingTab {
 
 }
 
-class ResizeModal extends Modal {
-	plugin: ImageConvertPlugin;
-
-	constructor(plugin: ImageConvertPlugin) {
-		super(plugin.app);
-		this.plugin = plugin;
-	}
-
-	onOpen() {
-		const { contentEl } = this;
-		contentEl.empty();
-
-		// Add an explanation of the selected resize mode
-		let explanation = '';
-		switch (this.plugin.settings.destructive_resizeMode) {
-			case 'Fit':
-				explanation = 'Fit mode resizes the image to fit within the desired dimensions while maintaining the aspect ratio of the image.';
-				break;
-			case 'Fill':
-				explanation = 'Fill mode resizes the image to fill the desired dimensions while maintaining the aspect ratio of the image. This may result in cropping of the image.';
-				break;
-			case 'LongestEdge':
-				explanation = 'Longest Edge mode resizes the longest side of the image to match the desired length while maintaining the aspect ratio of the image.';
-				break;
-			case 'ShortestEdge':
-				explanation = 'Shortest Edge mode resizes the shortest side of the image to match the desired length while maintaining the aspect ratio of the image.';
-				break;
-			case 'Width':
-				explanation = 'Width mode resizes the width of the image to match the desired width while maintaining the aspect ratio of the image.';
-				break;
-			case 'Height':
-				explanation = 'Height mode resizes the height of the image to match the desired height while maintaining the aspect ratio of the image.';
-				break;
-		}
-		contentEl.createEl('p', { text: explanation });
-
-		// Add input fields for the desired dimensions based on the selected resize mode
-		if (['Fit', 'Fill'].includes(this.plugin.settings.destructive_resizeMode)) {
-			const widthInput = new TextComponent(contentEl)
-				.setPlaceholder('Width')
-				.setValue(this.plugin.settings.destructive_desiredWidth.toString());
-
-			const heightInput = new TextComponent(contentEl)
-				.setPlaceholder('Height')
-				.setValue(this.plugin.settings.destructive_desiredHeight.toString());
-
-			// Add a button to save the settings and close the modal
-			new ButtonComponent(contentEl)
-				.setButtonText('Save')
-				.onClick(async () => {
-					const width = parseInt(widthInput.getValue());
-					if (/^\d+$/.test(widthInput.getValue()) && width > 0) {
-						this.plugin.settings.destructive_desiredWidth = width;
-					}
-
-					const height = parseInt(heightInput.getValue());
-					if (/^\d+$/.test(heightInput.getValue()) && height > 0) {
-						this.plugin.settings.destructive_desiredHeight = height;
-					}
-
-					await this.plugin.saveSettings();
-					this.close();
-				});
-		} else {
-			const lengthInput = new TextComponent(contentEl)
-				.setPlaceholder('Enter desired length in pixels')
-				.setValue(
-					['LongestEdge', 'ShortestEdge', 'Width', 'Height'].includes(this.plugin.settings.destructive_resizeMode)
-						? this.plugin.settings.destructive_desiredWidth.toString()
-						: this.plugin.settings.destructive_desiredHeight.toString()
-				);
-
-			// Add a button to save the settings and close the modal
-			new ButtonComponent(contentEl)
-				.setButtonText('Save')
-				.onClick(async () => {
-					const length = parseInt(lengthInput.getValue());
-					if (/^\d+$/.test(lengthInput.getValue()) && length > 0) {
-						if (['LongestEdge'].includes(this.plugin.settings.destructive_resizeMode)) {
-							this.plugin.settings.destructive_desiredLongestEdge = length;
-						}
-
-						if (['ShortestEdge'].includes(this.plugin.settings.destructive_resizeMode)) {
-							this.plugin.settings.destructive_desiredLongestEdge = length;
-						}
-
-						if (['Width'].includes(this.plugin.settings.destructive_resizeMode)) {
-							this.plugin.settings.destructive_desiredWidth = length;
-						}
-
-						if (['Height'].includes(this.plugin.settings.destructive_resizeMode)) {
-							this.plugin.settings.destructive_desiredHeight = length;
-						}
-					}
-
-					await this.plugin.saveSettings();
-					this.close();
-				});
-		}
-	}
-}
-
 class ResizeImageModal extends Modal {
 	width: string;
 	height: string;
@@ -5397,20 +5390,159 @@ class ResizeImageModal extends Modal {
 	}
 }
 
-
 class ProcessAllVault extends Modal {
 	plugin: ImageConvertPlugin;
+	private enlargeReduceSettings: Setting | null = null;
+	private resizeInputSettings: Setting | null = null;
 
 	constructor(plugin: ImageConvertPlugin) {
 		super(plugin.app);
 		this.plugin = plugin;
 	}
 
+    private updateResizeInputVisibility(resizeMode: string): void {
+        if (resizeMode === 'None') {
+            this.resizeInputSettings?.settingEl.hide();
+            this.enlargeReduceSettings?.settingEl.hide();
+        } else {
+            if (!this.resizeInputSettings) {
+                this.createResizeInputSettings(resizeMode);
+            } else {
+                this.updateResizeInputSettings(resizeMode);
+            }
+            if (!this.enlargeReduceSettings) {
+                this.createEnlargeReduceSettings();
+            }
+            this.resizeInputSettings?.settingEl.show();
+            this.enlargeReduceSettings?.settingEl.show();
+        }
+    }
+
+    private createEnlargeReduceSettings(): void {
+        // Remove old setting if it exists
+        this.enlargeReduceSettings?.settingEl.remove();
+        
+        // Create new setting
+        this.enlargeReduceSettings = new Setting(this.contentEl)
+			.setName('Enlarge or Reduce')
+			.setDesc(
+				'Reduce and Enlarge - would make sure that image set to specified dimensions are always fit\
+				inside these dimensions so both actions would be performed: small images would be enlarged\
+				to fit the dimensions and large images would be reduced;\
+				Reduce only - only large images will be reduced;\
+				Enlarge only - only small images will be increased')
+			.addDropdown((dropdown) => 
+				dropdown
+					.addOptions({
+						Always: 'Reduce and Enlarge',
+						Reduce: 'Reduce only',
+						Enlarge: 'Enlarge only',
+					})
+                    .setValue(this.plugin.settings.ProcessAllVaultEnlargeOrReduce)
+                    .onChange(async (value: 'Always' | 'Reduce' | 'Enlarge') => {
+                        this.plugin.settings.ProcessAllVaultEnlargeOrReduce = value;
+                        await this.plugin.saveSettings();
+                    })
+            );
+
+        // Insert the enlarge/reduce setting after the resize input settings
+        if (this.resizeInputSettings) {
+            this.resizeInputSettings.settingEl.insertAdjacentElement('afterend', this.enlargeReduceSettings.settingEl);
+        }
+    }
+	
+    private createResizeInputSettings(resizeMode: string): void {
+        this.resizeInputSettings = new Setting(this.contentEl);
+        this.updateResizeInputSettings(resizeMode);
+    }
+
+    private updateResizeInputSettings(resizeMode: string): void {
+        if (!this.resizeInputSettings) return;
+
+        // Remove the old enlarge/reduce settings if they exist
+        this.enlargeReduceSettings?.settingEl.remove();
+        this.enlargeReduceSettings = null;
+
+        this.resizeInputSettings.clear();
+        
+        if (['Fit', 'Fill'].includes(resizeMode)) {
+            this.resizeInputSettings
+                .setName('Resize Dimensions')
+                .setDesc('Enter the desired width and height in pixels')
+                .addText((text: TextComponent) => text
+                    .setPlaceholder('Width')
+                    .setValue(this.plugin.settings.ProcessAllVaultResizeModaldesiredWidth.toString())
+                    .onChange(async (value: string) => {
+                        const width = parseInt(value);
+                        if (/^\d+$/.test(value) && width > 0) {
+                            this.plugin.settings.ProcessAllVaultResizeModaldesiredWidth = width;
+                            await this.plugin.saveSettings();
+                        }
+                    }))
+                .addText((text: TextComponent) => text
+                    .setPlaceholder('Height')
+                    .setValue(this.plugin.settings.ProcessAllVaultResizeModaldesiredHeight.toString())
+                    .onChange(async (value: string) => {
+                        const height = parseInt(value);
+                        if (/^\d+$/.test(value) && height > 0) {
+                            this.plugin.settings.ProcessAllVaultResizeModaldesiredHeight = height;
+                            await this.plugin.saveSettings();
+                        }
+                    }));
+        } else if (['LongestEdge', 'ShortestEdge'].includes(resizeMode)) {
+            this.resizeInputSettings
+                .setName(`${resizeMode} Length`)
+                .setDesc(`Enter the desired length in pixels it will be automatically calculated`)
+                .addText((text: TextComponent) => text
+                    .setPlaceholder('Length')
+                    .setValue(this.plugin.settings.ProcessAllVaultResizeModaldesiredLength.toString())
+                    .onChange(async (value: string) => {
+                        const length = parseInt(value);
+                        if (/^\d+$/.test(value) && length > 0) {
+                            this.plugin.settings.ProcessAllVaultResizeModaldesiredLength = length;
+                            await this.plugin.saveSettings();
+                        }
+                    }));
+        } else if (resizeMode === 'Width') {
+            this.resizeInputSettings
+                .setName('Width')
+                .setDesc('Enter the desired width in pixels')
+                .addText((text: TextComponent) => text
+                    .setPlaceholder('Width')
+                    .setValue(this.plugin.settings.ProcessAllVaultResizeModaldesiredWidth.toString())
+                    .onChange(async (value: string) => {
+                        const width = parseInt(value);
+                        if (/^\d+$/.test(value) && width > 0) {
+                            this.plugin.settings.ProcessAllVaultResizeModaldesiredWidth = width;
+                            await this.plugin.saveSettings();
+                        }
+                    }));
+        } else if (resizeMode === 'Height') {
+            this.resizeInputSettings
+                .setName('Height')
+                .setDesc('Enter the desired height in pixels')
+                .addText((text: TextComponent) => text
+                    .setPlaceholder('Height')
+                    .setValue(this.plugin.settings.ProcessAllVaultResizeModaldesiredHeight.toString())
+                    .onChange(async (value: string) => {
+                        const height = parseInt(value);
+                        if (/^\d+$/.test(value) && height > 0) {
+                            this.plugin.settings.ProcessAllVaultResizeModaldesiredHeight = height;
+                            await this.plugin.saveSettings();
+                        }
+                    }));
+        }
+
+        // Create the enlarge/reduce settings after the resize inputs
+        this.createEnlargeReduceSettings();
+    }
+
 	onOpen() {
 		const { contentEl } = this;
 
 		const heading = contentEl.createEl('h1');
 		heading.textContent = 'Convert, compress and resize';
+		
 		const desc = contentEl.createEl('p');
 		desc.textContent = 'Running this will modify all your internal images in the Vault. Please create backups. All internal image links will be automatically updated.';
 
@@ -5446,23 +5578,30 @@ class ProcessAllVault extends Modal {
 			);
 
 		new Setting(contentEl)
-			.setName('Image resize mode')
-			.setDesc('Select the mode to use when resizing the image. Resizing an image will further reduce file-size, but it will resize your actual file, which means that the original file will be modified, and the changes will be permanent.')
-			.addDropdown(dropdown =>
-				dropdown
-					.addOptions({ None: 'None', Fit: 'Fit', Fill: 'Fill', LongestEdge: 'Longest Edge', ShortestEdge: 'Shortest Edge', Width: 'Width', Height: 'Height' })
-					.setValue(this.plugin.settings.ProcessAllVaultResizeModalresizeMode)
-					.onChange(async value => {
-						this.plugin.settings.ProcessAllVaultResizeModalresizeMode = value;
-						await this.plugin.saveSettings();
+            .setName('Image resize mode')
+            .setDesc('Select the mode to use when resizing the image. Resizing an image will further reduce file-size, but it will resize your actual file, which means that the original file will be modified, and the changes will be permanent.')
+            .addDropdown(dropdown =>
+                dropdown
+                    .addOptions({ 
+                        None: 'None', 
+                        Fit: 'Fit', 
+                        Fill: 'Fill', 
+                        LongestEdge: 'Longest Edge', 
+                        ShortestEdge: 'Shortest Edge', 
+                        Width: 'Width', 
+                        Height: 'Height' 
+                    })
+                    .setValue(this.plugin.settings.ProcessAllVaultResizeModalresizeMode)
+                    .onChange(async value => {
+                        this.plugin.settings.ProcessAllVaultResizeModalresizeMode = value;
+                        await this.plugin.saveSettings();
+                        
+                        this.updateResizeInputVisibility(value);
+                    })
+            );
 
-						if (value !== 'None') {
-							// Open the ResizeModal when an option is selected
-							const modal = new ProcessAllVaultResizeModal(this.plugin);
-							modal.open();
-						}
-					})
-			);
+		// Initially create and show/hide resize inputs based on current mode
+		this.updateResizeInputVisibility(this.plugin.settings.ProcessAllVaultResizeModalresizeMode);
 
 		new Setting(contentEl)
 			.setName('Skip images in target format')
@@ -5476,6 +5615,7 @@ class ProcessAllVault extends Modal {
 					})
 			);
 
+		
 		// Add a submit button
 		new ButtonComponent(contentEl)
 			.setButtonText('Submit')
@@ -5487,316 +5627,262 @@ class ProcessAllVault extends Modal {
 			});
 	}
 }
-class ProcessAllVaultResizeModal extends Modal {
-	plugin: ImageConvertPlugin;
-
-	constructor(plugin: ImageConvertPlugin) {
-		super(plugin.app);
-		this.plugin = plugin;
-	}
-
-	onOpen() {
-		const { contentEl } = this;
-		contentEl.empty();
-
-		// Add an explanation of the selected resize mode
-		let explanation = '';
-		switch (this.plugin.settings.ProcessAllVaultResizeModalresizeMode) {
-			case 'Fit':
-				explanation = 'Fit mode resizes the image to fit within the desired dimensions while maintaining the aspect ratio of the image.';
-				break;
-			case 'Fill':
-				explanation = 'Fill mode resizes the image to fill the desired dimensions while maintaining the aspect ratio of the image. This may result in cropping of the image.';
-				break;
-			case 'LongestEdge':
-				explanation = 'Longest Edge mode resizes the longest side of the image to match the desired length while maintaining the aspect ratio of the image.';
-				break;
-			case 'ShortestEdge':
-				explanation = 'Shortest Edge mode resizes the shortest side of the image to match the desired length while maintaining the aspect ratio of the image.';
-				break;
-			case 'Width':
-				explanation = 'Width mode resizes the width of the image to match the desired width while maintaining the aspect ratio of the image.';
-				break;
-			case 'Height':
-				explanation = 'Height mode resizes the height of the image to match the desired height while maintaining the aspect ratio of the image.';
-				break;
-		}
-		contentEl.createEl('p', { text: explanation });
-
-		// Add input fields for the desired dimensions based on the selected resize mode
-		if (['Fit', 'Fill'].includes(this.plugin.settings.ProcessAllVaultResizeModalresizeMode)) {
-			const widthInput = new TextComponent(contentEl)
-				.setPlaceholder('Width')
-				.setValue(this.plugin.settings.ProcessAllVaultResizeModaldesiredWidth.toString());
-
-			const heightInput = new TextComponent(contentEl)
-				.setPlaceholder('Height')
-				.setValue(this.plugin.settings.ProcessAllVaultResizeModaldesiredHeight.toString());
-
-			// Add a button to save the settings and close the modal
-			new ButtonComponent(contentEl)
-				.setButtonText('Save')
-				.onClick(async () => {
-					const width = parseInt(widthInput.getValue());
-					if (/^\d+$/.test(widthInput.getValue()) && width > 0) {
-						this.plugin.settings.ProcessAllVaultResizeModaldesiredWidth = width;
-					}
-
-					const height = parseInt(heightInput.getValue());
-					if (/^\d+$/.test(heightInput.getValue()) && height > 0) {
-						this.plugin.settings.ProcessAllVaultResizeModaldesiredHeight = height;
-					}
-
-					await this.plugin.saveSettings();
-					this.close();
-				});
-		} else {
-			const lengthInput = new TextComponent(contentEl)
-				.setPlaceholder('Enter desired length in pixels')
-				.setValue(
-					['LongestEdge', 'ShortestEdge', 'Width', 'Height'].includes(this.plugin.settings.ProcessAllVaultResizeModalresizeMode)
-						? this.plugin.settings.ProcessAllVaultResizeModaldesiredWidth.toString()
-						: this.plugin.settings.ProcessAllVaultResizeModaldesiredHeight.toString()
-				);
-
-			// Add a button to save the settings and close the modal
-			new ButtonComponent(contentEl)
-				.setButtonText('Save')
-				.onClick(async () => {
-					const length = parseInt(lengthInput.getValue());
-					if (/^\d+$/.test(lengthInput.getValue()) && length > 0) {
-						if (['LongestEdge'].includes(this.plugin.settings.ProcessAllVaultResizeModalresizeMode)) {
-							this.plugin.settings.ProcessAllVaultResizeModaldesiredLength = length;
-						}
-
-						if (['ShortestEdge'].includes(this.plugin.settings.ProcessAllVaultResizeModalresizeMode)) {
-							this.plugin.settings.ProcessAllVaultResizeModaldesiredLength = length;
-						}
-
-						if (['Width'].includes(this.plugin.settings.ProcessAllVaultResizeModalresizeMode)) {
-							this.plugin.settings.ProcessAllVaultResizeModaldesiredWidth = length;
-						}
-
-						if (['Height'].includes(this.plugin.settings.ProcessAllVaultResizeModalresizeMode)) {
-							this.plugin.settings.ProcessAllVaultResizeModaldesiredHeight = length;
-						}
-					}
-
-					await this.plugin.saveSettings();
-					this.close();
-				});
-		}
-	}
-}
 
 class ProcessCurrentNote extends Modal {
-	plugin: ImageConvertPlugin;
+    plugin: ImageConvertPlugin;
+    private enlargeReduceSettings: Setting | null = null;
+    private resizeInputSettings: Setting | null = null;
+    private submitButton: ButtonComponent | null = null;
 
-	constructor(plugin: ImageConvertPlugin) {
-		super(plugin.app);
-		this.plugin = plugin;
+    constructor(plugin: ImageConvertPlugin) {
+        super(plugin.app);
+        this.plugin = plugin;
+    }
+
+	private updateResizeInputVisibility(resizeMode: string): void {
+		if (resizeMode === 'None') {
+			this.resizeInputSettings?.settingEl.hide();
+			this.enlargeReduceSettings?.settingEl.hide();
+		} else {
+			if (!this.resizeInputSettings) {
+				this.createResizeInputSettings(resizeMode);
+			} else {
+				this.updateResizeInputSettings(resizeMode);
+			}
+			if (!this.enlargeReduceSettings) {
+				this.createEnlargeReduceSettings();
+			}
+			this.resizeInputSettings?.settingEl.show();
+			this.enlargeReduceSettings?.settingEl.show();
+		}
 	}
 
-	onOpen() {
-		const { contentEl } = this;
+    private createEnlargeReduceSettings(): void {
+        this.enlargeReduceSettings = new Setting(this.contentEl)
+            .setName('Enlarge or Reduce')
+            .setDesc(
+				'Reduce and Enlarge - would make sure that image set to specified dimensions are always fit\
+				inside these dimensions so both actions would be performed: small images would be enlarged\
+				to fit the dimensions and large images would be reduced;\
+				Reduce only - only large images will be reduced;\
+				Enlarge only - only small images will be increased')
+            .addDropdown((dropdown) => 
+                dropdown
+                    .addOptions({
+						Always: 'Reduce and Enlarge',
+						Reduce: 'Reduce only',
+						Enlarge: 'Enlarge only',
+                    })
+                    .setValue(this.plugin.settings.ProcessCurrentNoteEnlargeOrReduce)
+                    .onChange(async (value: 'Always' | 'Reduce' | 'Enlarge') => {
+                        this.plugin.settings.ProcessCurrentNoteEnlargeOrReduce = value;
+                        await this.plugin.saveSettings();
+                    })
+            );
+    }
 
+    private createResizeInputSettings(resizeMode: string): void {
+        this.resizeInputSettings = new Setting(this.contentEl);
+        this.updateResizeInputSettings(resizeMode);
+    }
 
-		const div1 = contentEl.createEl('div');
-		div1.style.display = 'flex';
-		div1.style.flexDirection = 'column';
-		div1.style.alignItems = 'center';
-		div1.style.justifyContent = 'center';
-
-		const heading1 = div1.createEl('h2')
-		heading1.textContent = 'Convert, compress and resize';
-
-		let noteName = 'current note';
-		let noteExtension = '';
-		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (activeView && activeView.file) {
-			noteName = activeView.file.basename;
-			noteExtension = activeView.file.extension;
-		} else {
-			noteName = "";
-		}
-
-		const heading2 = div1.createEl('h6');
-		heading2.textContent = `all images in: ${noteName}.${noteExtension}`;
-		heading2.style.marginTop = '-18px';
-
-		const desc = div1.createEl('p');
-		desc.textContent = 'Running this will modify all internal images in the current note. Please create backups. All internal image links will be automatically updated.';
-		desc.style.marginTop = '-10px'; // space between the heading and the paragraph
-		desc.style.padding = '20px'; // padding around the div
-		desc.style.borderRadius = '10px'; // rounded corners
-
-
-		// Add your settings here
-		new Setting(contentEl)
-			.setName('Select format to convert images to')
-			.setDesc(`"Same as original" - will keep original file format.`)
-			.addDropdown(dropdown =>
-				dropdown
-					.addOptions({ disabled: 'Same as original', webp: 'WebP', jpg: 'JPG', png: 'PNG' })
-					.setValue(this.plugin.settings.ProcessCurrentNoteconvertTo)
-					.onChange(async value => {
-						this.plugin.settings.ProcessCurrentNoteconvertTo = value;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(contentEl)
-			.setName('Quality')
-			.setDesc('0 - low quality, 99 - high quality, 100 - no compression; 75 - recommended')
-			.addText(text =>
-				text
-					.setPlaceholder('Enter quality (0-100)')
-					.setValue((this.plugin.settings.ProcessCurrentNotequality * 100).toString())
-					.onChange(async value => {
-						const quality = parseInt(value);
-
-						if (/^\d+$/.test(value) && quality >= 0 && quality <= 100) {
-							this.plugin.settings.ProcessCurrentNotequality = quality / 100;
+	private updateResizeInputSettings(resizeMode: string): void {
+		if (!this.resizeInputSettings) return;
+	
+		this.resizeInputSettings.clear();
+	
+		let name = '';
+		let desc = '';
+	
+		if (['Fit', 'Fill'].includes(resizeMode)) {
+			name = 'Resize Dimensions';
+			desc = 'Enter the desired width and height in pixels';
+			this.resizeInputSettings
+				.setName(name)
+				.setDesc(desc)
+				.addText((text: TextComponent) => text
+					.setPlaceholder('Width')
+					.setValue(this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth.toString())
+					.onChange(async (value: string) => {
+						const width = parseInt(value);
+						if (/^\d+$/.test(value) && width > 0) {
+							this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth = width;
 							await this.plugin.saveSettings();
 						}
-					})
-			);
-
-		new Setting(contentEl)
-			.setName('Image resize mode')
-			.setDesc('Select the mode to use when resizing the image. Resizing an image will further reduce file-size, but it will resize your actual file, which means that the original file will be modified, and the changes will be permanent.')
-			.addDropdown(dropdown =>
-				dropdown
-					.addOptions({ None: 'None', Fit: 'Fit', Fill: 'Fill', LongestEdge: 'Longest Edge', ShortestEdge: 'Shortest Edge', Width: 'Width', Height: 'Height' })
-					.setValue(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)
-					.onChange(async value => {
-						this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode = value;
-						await this.plugin.saveSettings();
-
-						if (value !== 'None') {
-							// Open the ResizeModal when an option is selected
-							const modal = new ProcessCurrentNoteResizeModal(this.plugin);
-							modal.open();
+					}))
+				.addText((text: TextComponent) => text
+					.setPlaceholder('Height')
+					.setValue(this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight.toString())
+					.onChange(async (value: string) => {
+						const height = parseInt(value);
+						if (/^\d+$/.test(value) && height > 0) {
+							this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight = height;
+							await this.plugin.saveSettings();
 						}
-					})
-			);
-
-		// Add a submit button
-		new ButtonComponent(contentEl)
-			.setButtonText('Submit')
-			.onClick(() => {
-				// Close the modal when the button is clicked
-				this.close();
-				const currentNote = this.app.workspace.getActiveFile();
-				// Check if currentNote is not null
-				if (currentNote) {
-					// Process all images in the current note
-					this.plugin.processCurrentNoteImages(currentNote);
-				} else {
-					new Notice('Error: No active note found.');
-				}
-			});
-
-	}
-}
-class ProcessCurrentNoteResizeModal extends Modal {
-	plugin: ImageConvertPlugin;
-
-	constructor(plugin: ImageConvertPlugin) {
-		super(plugin.app);
-		this.plugin = plugin;
-	}
-
-	onOpen() {
-		const { contentEl } = this;
-		contentEl.empty();
-
-		// Add an explanation of the selected resize mode
-		let explanation = '';
-		switch (this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode) {
-			case 'Fit':
-				explanation = 'Fit mode resizes the image to fit within the desired dimensions while maintaining the aspect ratio of the image.';
-				break;
-			case 'Fill':
-				explanation = 'Fill mode resizes the image to fill the desired dimensions while maintaining the aspect ratio of the image. This may result in cropping of the image.';
-				break;
-			case 'LongestEdge':
-				explanation = 'Longest Edge mode resizes the longest side of the image to match the desired length while maintaining the aspect ratio of the image.';
-				break;
-			case 'ShortestEdge':
-				explanation = 'Shortest Edge mode resizes the shortest side of the image to match the desired length while maintaining the aspect ratio of the image.';
-				break;
-			case 'Width':
-				explanation = 'Width mode resizes the width of the image to match the desired width while maintaining the aspect ratio of the image.';
-				break;
-			case 'Height':
-				explanation = 'Height mode resizes the height of the image to match the desired height while maintaining the aspect ratio of the image.';
-				break;
-		}
-		contentEl.createEl('p', { text: explanation });
-
-		// Add input fields for the desired dimensions based on the selected resize mode
-		if (['Fit', 'Fill'].includes(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)) {
-			const widthInput = new TextComponent(contentEl)
-				.setPlaceholder('Width')
-				.setValue(this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth.toString());
-
-			const heightInput = new TextComponent(contentEl)
-				.setPlaceholder('Height')
-				.setValue(this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight.toString());
-
-			// Add a button to save the settings and close the modal
-			new ButtonComponent(contentEl)
-				.setButtonText('Save')
-				.onClick(async () => {
-					const width = parseInt(widthInput.getValue());
-					if (/^\d+$/.test(widthInput.getValue()) && width > 0) {
-						this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth = width;
-					}
-
-					const height = parseInt(heightInput.getValue());
-					if (/^\d+$/.test(heightInput.getValue()) && height > 0) {
-						this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight = height;
-					}
-
-					await this.plugin.saveSettings();
-					this.close();
-				});
+					}));
 		} else {
-			const lengthInput = new TextComponent(contentEl)
-				.setPlaceholder('Enter desired length in pixels')
-				.setValue(
-					['LongestEdge', 'ShortestEdge', 'Width', 'Height'].includes(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)
-						? this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth.toString()
-						: this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight.toString()
-				);
-
-			// Add a button to save the settings and close the modal
-			new ButtonComponent(contentEl)
-				.setButtonText('Save')
-				.onClick(async () => {
-					const length = parseInt(lengthInput.getValue());
-					if (/^\d+$/.test(lengthInput.getValue()) && length > 0) {
-						if (['LongestEdge'].includes(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)) {
-							this.plugin.settings.ProcessCurrentNoteresizeModaldesiredLength = length;
+			switch (resizeMode) {
+				case 'LongestEdge':
+				case 'ShortestEdge':
+					name = `${resizeMode} Length`;
+					desc = 'Enter the desired length in pixels';
+					break;
+				case 'Width':
+					name = 'Width';
+					desc = 'Enter the desired width in pixels';
+					break;
+				case 'Height':
+					name = 'Height';
+					desc = 'Enter the desired height in pixels';
+					break;
+			}
+	
+			this.resizeInputSettings
+				.setName(name)
+				.setDesc(desc)
+				.addText((text: TextComponent) => text
+					.setPlaceholder('Length')
+					.setValue(this.getInitialValue(resizeMode).toString())
+					.onChange(async (value: string) => {
+						const length = parseInt(value);
+						if (/^\d+$/.test(value) && length > 0) {
+							await this.updateSettingValue(resizeMode, length);
 						}
-
-						if (['ShortestEdge'].includes(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)) {
-							this.plugin.settings.ProcessCurrentNoteresizeModaldesiredLength = length;
-						}
-
-						if (['Width'].includes(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)) {
-							this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth = length;
-						}
-
-						if (['Height'].includes(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)) {
-							this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight = length;
-						}
-					}
-
-					await this.plugin.saveSettings();
-					this.close();
-				});
+					}));
+		}
+	
+		// Update the enlarge/reduce settings in place instead of recreating
+		if (!this.enlargeReduceSettings) {
+			this.createEnlargeReduceSettings();
 		}
 	}
+
+    private getInitialValue(resizeMode: string): number {
+        switch (resizeMode) {
+            case 'LongestEdge':
+            case 'ShortestEdge':
+                return this.plugin.settings.ProcessCurrentNoteresizeModaldesiredLength;
+            case 'Width':
+                return this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth;
+            case 'Height':
+                return this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight;
+            default:
+                return 0;
+        }
+    }
+
+    private async updateSettingValue(resizeMode: string, value: number): Promise<void> {
+        switch (resizeMode) {
+            case 'LongestEdge':
+            case 'ShortestEdge':
+                this.plugin.settings.ProcessCurrentNoteresizeModaldesiredLength = value;
+                break;
+            case 'Width':
+                this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth = value;
+                break;
+            case 'Height':
+                this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight = value;
+                break;
+        }
+        await this.plugin.saveSettings();
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+
+        const div1 = contentEl.createEl('div');
+        div1.style.display = 'flex';
+        div1.style.flexDirection = 'column';
+        div1.style.alignItems = 'center';
+        div1.style.justifyContent = 'center';
+
+        const heading1 = div1.createEl('h2')
+        heading1.textContent = 'Convert, compress and resize';
+
+        let noteName = 'current note';
+        let noteExtension = '';
+        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (activeView && activeView.file) {
+            noteName = activeView.file.basename;
+            noteExtension = activeView.file.extension;
+        }
+
+        const heading2 = div1.createEl('h6');
+        heading2.textContent = `all images in: ${noteName}.${noteExtension}`;
+        heading2.style.marginTop = '-18px';
+
+        const desc = div1.createEl('p');
+        desc.textContent = 'Running this will modify all internal images in the current note. Please create backups. All internal image links will be automatically updated.';
+        desc.style.marginTop = '-10px';
+        desc.style.padding = '20px';
+        desc.style.borderRadius = '10px';
+
+        const settingsContainer = contentEl.createDiv('settings-container');
+
+        new Setting(settingsContainer)
+            .setName('Select format to convert images to')
+            .setDesc(`"Same as original" - will keep original file format.`)
+            .addDropdown(dropdown =>
+                dropdown
+                    .addOptions({ disabled: 'Same as original', webp: 'WebP', jpg: 'JPG', png: 'PNG' })
+                    .setValue(this.plugin.settings.ProcessCurrentNoteconvertTo)
+                    .onChange(async value => {
+                        this.plugin.settings.ProcessCurrentNoteconvertTo = value;
+                        await this.plugin.saveSettings();
+                    })
+            );
+
+        new Setting(settingsContainer)
+            .setName('Quality')
+            .setDesc('0 - low quality, 99 - high quality, 100 - no compression; 75 - recommended')
+            .addText(text =>
+                text
+                    .setPlaceholder('Enter quality (0-100)')
+                    .setValue((this.plugin.settings.ProcessCurrentNotequality * 100).toString())
+                    .onChange(async value => {
+                        const quality = parseInt(value);
+                        if (/^\d+$/.test(value) && quality >= 0 && quality <= 100) {
+                            this.plugin.settings.ProcessCurrentNotequality = quality / 100;
+                            await this.plugin.saveSettings();
+                        }
+                    })
+            );
+
+        new Setting(settingsContainer)
+            .setName('Image resize mode')
+            .setDesc('Select the mode to use when resizing the image. Resizing an image will further reduce file-size, but it will resize your actual file, which means that the original file will be modified, and the changes will be permanent.')
+            .addDropdown(dropdown =>
+                dropdown
+                    .addOptions({ 
+                        None: 'None', 
+                        Fit: 'Fit', 
+                        Fill: 'Fill', 
+                        LongestEdge: 'Longest Edge', 
+                        ShortestEdge: 'Shortest Edge', 
+                        Width: 'Width', 
+                        Height: 'Height' 
+                    })
+                    .setValue(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)
+                    .onChange(async value => {
+                        this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode = value;
+                        await this.plugin.saveSettings();
+                        this.updateResizeInputVisibility(value);
+                    })
+            );
+			
+        // Initially create and show/hide resize inputs based on current mode
+        this.updateResizeInputVisibility(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode);
+
+        this.submitButton = new ButtonComponent(contentEl)
+            .setButtonText('Submit')
+            .onClick(() => {
+                this.close();
+                const currentNote = this.app.workspace.getActiveFile();
+                if (currentNote) {
+                    this.plugin.processCurrentNoteImages(currentNote);
+                } else {
+                    new Notice('Error: No active note found.');
+                }
+            });
+    }
 }
