@@ -87,6 +87,7 @@ interface ImageConvertSettings {
 	ProcessAllVaultResizeModaldesiredLength: number;
 	ProcessAllVaultskipImagesInTargetFormat: boolean;
 	ProcessAllVaultEnlargeOrReduce: 'Always' | 'Reduce' | 'Enlarge';
+	ProcessAllVaultSkipFormats: string;
 
 	ProcessCurrentNoteconvertTo: string;
 	ProcessCurrentNotequality: number;
@@ -94,8 +95,21 @@ interface ImageConvertSettings {
 	ProcessCurrentNoteresizeModaldesiredWidth: number;
 	ProcessCurrentNoteresizeModaldesiredHeight: number;
 	ProcessCurrentNoteresizeModaldesiredLength: number;
+	ProcessCurrentNoteskipImagesInTargetFormat: boolean;
 	ProcessCurrentNoteEnlargeOrReduce: 'Always' | 'Reduce' | 'Enlarge';
+	ProcessCurrentNoteSkipFormats: string;
 
+	// ProcessCurrentImage_convertTo: string;
+	// ProcessCurrentImage_quality: number;
+	// ProcessCurrentImage_ResizeModalresizeMode: string
+	// ProcessCurrentImage_resizeModaldesiredWidth: number;
+	// ProcessCurrentImage_resizeModaldesiredHeight: number;
+	// ProcessCurrentImage_resizeModaldesiredLength: number;
+	// ProcessCurrentImage_SkipImagesInTargetFormat: boolean;
+	// ProcessCurrentImage_EnlargeOrReduce: 'Always' | 'Reduce' | 'Enlarge';
+	// ProcessCurrentImage_SkipFormats: string;
+
+	
 	attachmentLocation: 'default' | 'root' | 'current' | 'subfolder' | 'customOutput';
 	attachmentSubfolderName: string;
 	customOutputPath: string;
@@ -168,8 +182,9 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	ProcessAllVaultResizeModaldesiredWidth: 600,
 	ProcessAllVaultResizeModaldesiredHeight: 800,
 	ProcessAllVaultResizeModaldesiredLength: 800,
-	ProcessAllVaultskipImagesInTargetFormat: true,
+	ProcessAllVaultskipImagesInTargetFormat: false,
 	ProcessAllVaultEnlargeOrReduce: 'Always',
+	ProcessAllVaultSkipFormats: 'tif,tiff,heic',
 
 	ProcessCurrentNoteconvertTo: 'webp',
 	ProcessCurrentNotequality: 0.75,
@@ -177,7 +192,19 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	ProcessCurrentNoteresizeModaldesiredWidth: 600,
 	ProcessCurrentNoteresizeModaldesiredHeight: 800,
 	ProcessCurrentNoteresizeModaldesiredLength: 800,
+	ProcessCurrentNoteskipImagesInTargetFormat: false,
 	ProcessCurrentNoteEnlargeOrReduce: 'Always',
+	ProcessCurrentNoteSkipFormats: 'tif,tiff,heic',
+
+	// ProcessCurrentImage_convertTo: 'webp',
+	// ProcessCurrentImage_quality: 0.75,
+	// ProcessCurrentImage_ResizeModalresizeMode: 'None',
+	// ProcessCurrentImage_resizeModaldesiredWidth: 600,
+	// ProcessCurrentImage_resizeModaldesiredHeight: 800,
+	// ProcessCurrentImage_resizeModaldesiredLength: 800,
+	// ProcessCurrentImage_SkipImagesInTargetFormat: false,
+	// ProcessCurrentImage_EnlargeOrReduce: 'Always',
+	// ProcessCurrentImage_SkipFormats: 'tif,tiff,heic',
 
 	attachmentLocation: 'default',
 	attachmentSubfolderName: '',
@@ -2933,8 +2960,16 @@ export default class ImageConvertPlugin extends Plugin {
 	//Process All Vault
 	/* ------------------------------------------------------------- */
 	async processAllVaultImages() {
+		// Early return if no processing is needed
+		if (this.settings.ProcessAllVaultconvertTo === 'disabled' && 
+			this.settings.ProcessAllVaultquality === 1 && 
+			this.settings.ProcessAllVaultResizeModalresizeMode === 'None') {
+			new Notice('No processing needed: Original format selected with no compression or resizing.');
+			return;
+		}
+		
 		const getallfiles = this.app.vault.getFiles();
-		const files = getallfiles.filter(file => file instanceof TFile && isImage(file) && this.shouldProcessImage(file));
+		const files = getallfiles.filter(file => file instanceof TFile && isImage(file) && this.processAllVaultImages_shouldProcessImage(file));
 		let imageCount = 0;
 
 		// Create a status bar item
@@ -2979,13 +3014,24 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
 	async convertAllVault(file: TFile) {
-		// Check if extension/format needs to be preserved
+		// Early return if no processing is needed
+		if (this.settings.ProcessAllVaultconvertTo === 'disabled' && 
+			this.settings.ProcessAllVaultquality === 1 && 
+			this.settings.ProcessAllVaultResizeModalresizeMode === 'None') {
+			return; // Skip processing entirely
+		}
+	
 		let extension = file.extension;
-		if (this.settings.ProcessAllVaultconvertTo && this.settings.ProcessAllVaultconvertTo !== 'disabled') {
+		let shouldRename = false;
+		let newFilePath: string | undefined;
+	
+		// Only prepare for rename if we're changing to a different format
+		if (this.settings.ProcessAllVaultconvertTo && 
+			this.settings.ProcessAllVaultconvertTo !== 'disabled' &&
+			this.settings.ProcessAllVaultconvertTo !== file.extension) {
 			extension = this.settings.ProcessAllVaultconvertTo;
-			await this.updateAllVaultLinks(file, extension);
-		} else {
-			await this.updateAllVaultLinks(file, extension);
+			shouldRename = true;
+			newFilePath = await this.getUniqueFilePath(file, extension);
 		}
 	
 		const binary = await this.app.vault.readBinary(file);
@@ -3015,30 +3061,34 @@ export default class ImageConvertPlugin extends Plugin {
 		// Handle quality < 1 (compression) case
 		if (quality !== 1) {
 			let arrayBuffer: ArrayBuffer | undefined;
-			
-			switch (convertTo) {
-				case 'webp':
-					arrayBuffer = await convertToWebP(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
-					break;
-				case 'jpg':
-					arrayBuffer = await convertToJPG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
-					break;
-				case 'png':
-					arrayBuffer = await convertToPNG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
-					break;
-				case 'disabled':
-					// Keep original format but compress
-					if (file.extension === 'jpg' || file.extension === 'jpeg') {
+
+			// If format is disabled or same as source format, just compress in original format
+			if (convertTo === 'disabled' || convertTo === file.extension) {
+				switch (file.extension) {
+					case 'jpg':
+					case 'jpeg':
 						arrayBuffer = await convertToJPG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
-					} else if (file.extension === 'png') {
+						break;
+					case 'png':
 						arrayBuffer = await convertToPNG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
-					} else if (file.extension === 'webp') {
+						break;
+					case 'webp':
 						arrayBuffer = await convertToWebP(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
-					}
-					break;
-				default:
-					new Notice('Error: No format selected for conversion.');
-					return;
+						break;
+				}
+			} else {
+				// Handle format conversion with compression
+				switch (convertTo) {
+					case 'webp':
+						arrayBuffer = await convertToWebP(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+						break;
+					case 'jpg':
+						arrayBuffer = await convertToJPG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+						break;
+					case 'png':
+						arrayBuffer = await convertToPNG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+						break;
+				}
 			}
 	
 			if (arrayBuffer) {
@@ -3048,7 +3098,7 @@ export default class ImageConvertPlugin extends Plugin {
 			}
 		} 
 		// Handle resize only case (no compression)
-		else if (quality === 1 && resizeMode !== 'None') {
+			else if (quality === 1 && resizeMode !== 'None') {
 			let arrayBuffer: ArrayBuffer | undefined;
 			
 			switch (file.extension) {
@@ -3069,275 +3119,355 @@ export default class ImageConvertPlugin extends Plugin {
 			} else {
 				new Notice('Error: Failed to resize image.');
 			}
-		} else {
-			new Notice('Original file kept without any compression.');
 		}
 	
-		// Rename file if extension changed
-		const newFilePath = file.path.replace(/\.[^/.]+$/, "." + extension);
-		await this.app.vault.rename(file, newFilePath);
-	}
-
-	async updateAllVaultLinks(file: TFile, newExtension: string) { // https://forum.obsidian.md/t/vault-rename-file-path-doesnt-trigger-link-update/32317
-		// Get the new file path
-		const newFilePath = file.path.replace(/\.[^/.]+$/, "." + newExtension);
-
-		// Rename the file and update all links to it
-		await this.app.fileManager.renameFile(file, newFilePath);
-
-		// Get all markdown files in the vault
-		const markdownFiles = this.app.vault.getMarkdownFiles();
-
-		// Iterate over each markdown file
-		for (const markdownFile of markdownFiles) {
-			// Read the content of the file
-			let content = await this.app.vault.read(markdownFile);
-
-			// Generate a new markdown link for the renamed file
-			const newLink = this.app.fileManager.generateMarkdownLink(file, markdownFile.path);
-
-			// Replace all old links with the new link
-			const oldLink = `![[${file.basename}]]`;
-			content = content.split(oldLink).join(newLink);
-
-			// Write the updated content back to the file
-			await this.app.vault.modify(markdownFile, content);
+		// Only rename and update links if we're changing formats
+		if (shouldRename && newFilePath) {
+			await this.updateAllVaultLinks(file, newFilePath);
 		}
 	}
 
-	shouldProcessImage(image: TFile): boolean {
-		if (this.settings.ProcessAllVaultskipImagesInTargetFormat && image.extension === this.settings.ProcessAllVaultconvertTo) {
+	async updateAllVaultLinks(file: TFile, newFilePath: string) {
+		try {
+			// Rename the file first
+			await this.app.fileManager.renameFile(file, newFilePath);
+	
+			// Get the new file reference after renaming
+			const newFile = this.app.vault.getAbstractFileByPath(newFilePath) as TFile;
+			if (!newFile) {
+				console.error('Could not find renamed file:', newFilePath);
+				return;
+			}
+	
+			// Get all markdown files in the vault
+			const markdownFiles = this.app.vault.getMarkdownFiles();
+	
+			// Iterate over each markdown file
+			for (const markdownFile of markdownFiles) {
+				let content = await this.app.vault.read(markdownFile);
+				let modified = false;
+	
+				// Handle different link formats
+				const linkPatterns = [
+					`![[${file.basename}]]`,                    // Basic wikilink
+					`![[${file.basename}.${file.extension}]]`,  // Full filename wikilink
+					`![](${file.name})`,                        // Markdown link
+				];
+	
+				const newLink = `![[${newFile.basename}.${newFile.extension}]]`;
+	
+				// Replace each pattern if found
+				for (const pattern of linkPatterns) {
+					if (content.includes(pattern)) {
+						content = content.split(pattern).join(newLink);
+						modified = true;
+					}
+				}
+	
+				// Only modify the file if changes were made
+				if (modified) {
+					await this.app.vault.modify(markdownFile, content);
+				}
+			}
+		} catch (error) {
+			// console.error('Error updating links:', error);
+			// new Notice(`Error updating links: ${error.message}`);
+		}
+	}
+
+	processAllVaultImages_shouldProcessImage(image: TFile): boolean {
+		// Skip images already in target format
+		if (this.settings.ProcessAllVaultskipImagesInTargetFormat && 
+			image.extension === this.settings.ProcessAllVaultconvertTo) {
 			return false;
 		}
+		
+		// Get skip formats from settings and parse them
+		const skipFormats = this.settings.ProcessAllVaultSkipFormats
+			.toLowerCase()
+			.split(',')
+			.map(format => format.trim())
+			.filter(format => format.length > 0);
+		
+		// Skip files with extensions in the skip list
+		if (skipFormats.includes(image.extension.toLowerCase())) {
+			return false;
+		}
+		
 		return true;
 	}
 
-	/* ------------------------------------------------------------- */
-	/* ------------------------------------------------------------- */
-
+	private async processAllVaultImages_fileExists(path: string): Promise<boolean> {
+		try {
+			const abstractFile = this.app.vault.getAbstractFileByPath(path);
+			return abstractFile !== null;
+		} catch {
+			return false;
+		}
+	}
 
 
 	//Process Current Note
 	/* ------------------------------------------------------------- */
+	// Collect all images in the note
 	async processCurrentNoteImages(note: TFile) {
-		let imageCount = 0;
-		const statusBarItemEl = this.addStatusBarItem();
-		const startTime = Date.now();
+		try {
+			// Early return if no processing is needed
+			if (this.settings.ProcessCurrentNoteconvertTo === 'disabled' && 
+				this.settings.ProcessCurrentNotequality === 1 && 
+				this.settings.ProcessCurrentNoteResizeModalresizeMode === 'None') {
+				new Notice('No processing needed: Original format selected with no compression or resizing.');
+				return;
+			}
+					
+			let imageCount = 0;
+			const statusBarItemEl = this.addStatusBarItem();
+			const startTime = Date.now();
 
-		// Get path from image link
-		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (activeView) {
-			const currentFile = activeView.file;
-			if (currentFile) {
-				const resolvedLinks = this.app.metadataCache.resolvedLinks;
-				const linksInCurrentNote = resolvedLinks[currentFile.path];
-				const totalLinks = Object.keys(linksInCurrentNote).length;
-				for (const link in linksInCurrentNote) {
-					const linkedFile = this.app.vault.getAbstractFileByPath(link);
-					if (linkedFile instanceof TFile && isImage(linkedFile)) {
+			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (activeView) {
+				const currentFile = activeView.file;
+				if (currentFile) {
+					const resolvedLinks = this.app.metadataCache.resolvedLinks;
+					const linksInCurrentNote = resolvedLinks[currentFile.path];
+					const linkedFiles = Object.keys(linksInCurrentNote)
+						.map(link => this.app.vault.getAbstractFileByPath(link))
+						.filter((file): file is TFile => 
+							file instanceof TFile && 
+							isImage(file) && 
+							this.processCurrentNoteImages_shouldProcessImage(file)
+						);
+		
+					const totalImages = linkedFiles.length;
+		
+					for (const linkedFile of linkedFiles) {
 						imageCount++;
 						await this.convertCurrentNoteImages(linkedFile);
-						refreshImagesInActiveNote();
+						await refreshImagesInActiveNote();
+						
 						const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
-						statusBarItemEl.setText(`Processing image ${imageCount} of ${totalLinks}, elapsed time: ${elapsedTime} seconds`);
+						statusBarItemEl.setText(
+							`Processing image ${imageCount} of ${totalImages}, elapsed time: ${elapsedTime} seconds`
+						);
 					}
 				}
 			}
+
+			if (imageCount === 0) {
+				new Notice('No images found in the vault.');
+			} else {
+				// new Notice(`${imageCount} images were converted.`);
+				const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
+				statusBarItemEl.setText(`Finished processing ${imageCount} images, total time: ${totalTime} seconds`);
+				setTimeout(() => {
+					statusBarItemEl.setText('');
+				}, 5000);
+			}
+		} catch (error) {
+			console.error('Error processing images in current note:', error);
+			new Notice(`Error processing images: ${error.message}`);
+		} finally {
+			// Always clean up the status bar
+			if (this.statusBarItemEl) {
+				this.statusBarItemEl.remove();
+			}
 		}
 
-		if (imageCount === 0) {
-			new Notice('No images found in the vault.');
-		} else {
-			new Notice(`${imageCount} images were converted.`);
-			const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
-			statusBarItemEl.setText(`Finished processing ${imageCount} images, total time: ${totalTime} seconds`);
-			setTimeout(() => {
-				statusBarItemEl.setText('');
-			}, 5000);
-		}
 	}
 
 	async convertCurrentNoteImages(file: TFile) {
-		const activeFile = this.app.workspace.getActiveFile();
-
-		if (!activeFile) {
-			new Notice('Error: No active file found.');
-			return;
-		}
-
-		// Check if extension/format needs to be preserved
-		let extension = file.extension;
-		if (this.settings.ProcessCurrentNoteconvertTo && this.settings.ProcessCurrentNoteconvertTo !== 'disabled') {
-			extension = this.settings.ProcessCurrentNoteconvertTo;
-			await this.updateCurrentNoteLinks(activeFile, file, extension);
-		} else {
-			await this.updateCurrentNoteLinks(activeFile, file, extension);
-		}
-
-		const binary = await this.app.vault.readBinary(file);
-		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
-
-		// In your main code:
-		if (file.extension === 'tif' || file.extension === 'tiff') {
-			imgBlob = await handleTiffImage(binary);
-		}
-
-		if (file.extension === 'heic') {
-			imgBlob = await convertHeicToFormat(
-				binary,
-				'JPEG',
-				Number(this.settings.ProcessCurrentNotequality)
-			);
-		}
-
-		if (this.settings.ProcessCurrentNotequality !== 1) { // Compression only works between 0-99
-			if (this.settings.ProcessCurrentNoteconvertTo === 'webp') {
-				const arrayBufferWebP = await convertToWebP(
-					imgBlob,
-					Number(this.settings.ProcessCurrentNotequality),
-					this.settings.ProcessCurrentNoteResizeModalresizeMode,
-					this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
-					this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
-					this.settings.ProcessCurrentNoteresizeModaldesiredLength,
-					this.settings.ProcessCurrentNoteEnlargeOrReduce
-				);
-				await this.app.vault.modifyBinary(file, arrayBufferWebP);
-			} else if (this.settings.ProcessCurrentNoteconvertTo === 'jpg') {
-				const arrayBufferJPG = await convertToJPG(
-					imgBlob,
-					Number(this.settings.ProcessCurrentNotequality),
-					this.settings.ProcessCurrentNoteResizeModalresizeMode,
-					this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
-					this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
-					this.settings.ProcessCurrentNoteresizeModaldesiredLength,
-					this.settings.ProcessCurrentNoteEnlargeOrReduce
-				);
-				await this.app.vault.modifyBinary(file, arrayBufferJPG);
-			} else if (this.settings.ProcessCurrentNoteconvertTo === 'png') {
-				const arrayBufferPNG = await convertToPNG(
-					imgBlob,
-					Number(this.settings.ProcessCurrentNotequality),
-					this.settings.ProcessCurrentNoteResizeModalresizeMode,
-					this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
-					this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
-					this.settings.ProcessCurrentNoteresizeModaldesiredLength,
-					this.settings.ProcessCurrentNoteEnlargeOrReduce
-				);
-				await this.app.vault.modifyBinary(file, arrayBufferPNG);
-			} else if (this.settings.ProcessCurrentNoteconvertTo === 'disabled') { // Same as original is selected? 
-				let arrayBuffer;
-				if (file.extension === 'jpg' || file.extension === 'jpeg') {
-					arrayBuffer = await convertToJPG(
-						imgBlob,
-						Number(this.settings.ProcessCurrentNotequality),
-						this.settings.ProcessCurrentNoteResizeModalresizeMode,
-						this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
-						this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
-						this.settings.ProcessCurrentNoteresizeModaldesiredLength,
-						this.settings.ProcessCurrentNoteEnlargeOrReduce
-					);
-				} else if (file.extension === 'png') {
-					arrayBuffer = await convertToPNG(
-						imgBlob,
-						Number(this.settings.ProcessCurrentNotequality),
-						this.settings.ProcessCurrentNoteResizeModalresizeMode,
-						this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
-						this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
-						this.settings.ProcessCurrentNoteresizeModaldesiredLength,
-						this.settings.ProcessCurrentNoteEnlargeOrReduce
-					);
-				} else if (file.extension === 'webp') {
-					arrayBuffer = await convertToWebP(
-						imgBlob,
-						Number(this.settings.ProcessCurrentNotequality),
-						this.settings.ProcessCurrentNoteResizeModalresizeMode,
-						this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
-						this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
-						this.settings.ProcessCurrentNoteresizeModaldesiredLength,
-						this.settings.ProcessCurrentNoteEnlargeOrReduce
-					);
-				}
-				if (arrayBuffer) {
-					await this.app.vault.modifyBinary(file, arrayBuffer);
-				} else {
-					new Notice('Error: Failed to compress image.');
-				}
-			} else {
-				new Notice('Error: No format selected for conversion.');
+		try {
+			// Early return if no processing is needed
+			if (this.settings.ProcessCurrentNoteconvertTo === 'disabled' && 
+				this.settings.ProcessCurrentNotequality === 1 && 
+				this.settings.ProcessCurrentNoteResizeModalresizeMode === 'None') {
 				return;
 			}
-		} else if (this.settings.ProcessCurrentNotequality === 1 && this.settings.ProcessCurrentNoteResizeModalresizeMode !== 'None') { // Do not compress, but allow resizing
-			let arrayBuffer;
-			if (file.extension === 'jpg' || file.extension === 'jpeg') {
-				arrayBuffer = await convertToJPG(
-					imgBlob,
-					1,
-					this.settings.ProcessCurrentNoteResizeModalresizeMode,
-					this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
-					this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
-					this.settings.ProcessCurrentNoteresizeModaldesiredLength,
-					this.settings.ProcessCurrentNoteEnlargeOrReduce
-				);
-			} else if (file.extension === 'png') {
-				arrayBuffer = await convertToPNG(
-					imgBlob,
-					1,
-					this.settings.ProcessCurrentNoteResizeModalresizeMode,
-					this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
-					this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
-					this.settings.ProcessCurrentNoteresizeModaldesiredLength,
-					this.settings.ProcessCurrentNoteEnlargeOrReduce
-				);
-			} else if (file.extension === 'webp') {
-				arrayBuffer = await convertToWebP(
-					imgBlob,
-					1,
-					this.settings.ProcessCurrentNoteResizeModalresizeMode,
-					this.settings.ProcessCurrentNoteresizeModaldesiredWidth,
-					this.settings.ProcessCurrentNoteresizeModaldesiredHeight,
-					this.settings.ProcessCurrentNoteresizeModaldesiredLength,
-					this.settings.ProcessCurrentNoteEnlargeOrReduce
+
+			// // Skip images already in target format
+			// if (
+			// 	this.settings.ProcessCurrentNoteskipImagesInTargetFormat &&
+			// 	file.extension === this.settings.ProcessCurrentNoteconvertTo
+			// ) {
+			// 	return;
+			// }
+
+			// // Get skip formats from settings and parse them
+			// const skipFormats = this.settings.ProcessCurrentNoteSkipFormats
+			// 	.toLowerCase()
+			// 	.split(',')
+			// 	.map((format) => format.trim())
+			// 	.filter((format) => format.length > 0);
+
+			// // Skip files with extensions in the skip list
+			// if (skipFormats.includes(file.extension.toLowerCase())) {
+			// 	return;
+			// }
+			
+			const activeFile = this.app.workspace.getActiveFile();
+			if (!activeFile) {
+				new Notice('Error: No active file found.');
+				return;
+			}
+
+			// Prepare for format conversion and renaming
+			let extension = file.extension;
+			let shouldRename = false;
+			let newFilePath: string | undefined;
+
+			if (this.settings.ProcessCurrentNoteconvertTo && this.settings.ProcessCurrentNoteconvertTo !== 'disabled') {
+				extension = this.settings.ProcessCurrentNoteconvertTo;
+				shouldRename = true;
+				newFilePath = await this.getUniqueFilePath(file, extension);
+			}
+
+			const binary = await this.app.vault.readBinary(file);
+			let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
+
+			// Handle special formats
+			if (file.extension === 'tif' || file.extension === 'tiff') {
+				imgBlob = await handleTiffImage(binary);
+			}
+
+			if (file.extension === 'heic') {
+				imgBlob = await convertHeicToFormat(
+					binary,
+					'JPEG',
+					this.settings.ProcessCurrentNotequality
 				);
 			}
+
+			const quality = this.settings.ProcessCurrentNotequality;
+			const resizeMode = this.settings.ProcessCurrentNoteResizeModalresizeMode;
+			const desiredWidth = this.settings.ProcessCurrentNoteresizeModaldesiredWidth;
+			const desiredHeight = this.settings.ProcessCurrentNoteresizeModaldesiredHeight;
+			const desiredLength = this.settings.ProcessCurrentNoteresizeModaldesiredLength;
+			const enlargeOrReduce = this.settings.ProcessCurrentNoteEnlargeOrReduce;
+
+			let arrayBuffer: ArrayBuffer | undefined;
+
+			// Handle image conversion and compression/resizing
+			switch (extension) {
+				case 'jpg':
+				case 'jpeg':
+					arrayBuffer = await convertToJPG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+					break;
+				case 'png':
+					arrayBuffer = await convertToPNG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+					break;
+				case 'webp':
+					arrayBuffer = await convertToWebP(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+					break;
+				default:
+					new Notice(`Unsupported image format: ${file.extension}`);
+					return;
+			}
+
+			// Apply the processed image if available
 			if (arrayBuffer) {
 				await this.app.vault.modifyBinary(file, arrayBuffer);
 			} else {
-				new Notice('Error: Failed to resize image.');
+				new Notice('Error: Failed to process image.');
+				return;
 			}
-		} else {
-			new Notice('Original file kept without any compression.');
-		}
 
-		const newFilePath = file.path.replace(/\.[^/.]+$/, "." + extension);
-		await this.app.vault.rename(file, newFilePath);
+			// Rename and update links if necessary
+			if (shouldRename && newFilePath) {
+				await this.updateCurrentNoteLinks(activeFile, file, extension);
+				await this.app.vault.rename(file, newFilePath);
+			}
+		} catch (error) {
+			console.error('Error converting image:', error);
+			new Notice(`Error converting image: ${error.message}`);
+		}
 	}
 
 	async updateCurrentNoteLinks(note: TFile, file: TFile, newExtension: string) {
-		// Get the new file path
-		const newFilePath = file.path.replace(/\.[^/.]+$/, "." + newExtension);
+		try {
+			// Rename the file first
+			const newFilePath = await this.getUniqueFilePath(file, newExtension);
+			await this.app.fileManager.renameFile(file, newFilePath);
 
-		// Rename the file and update all links to it
-		await this.app.fileManager.renameFile(file, newFilePath);
+			// Get the new file reference after renaming
+			const newFile = this.app.vault.getAbstractFileByPath(newFilePath) as TFile;
+			if (!newFile) {
+				console.error('Could not find renamed file:', newFilePath);
+				return;
+			}
 
-		// Read the content of the note
-		let content = await this.app.vault.read(note);
+			// Get the content of the current note
+			let content = await this.app.vault.read(note);
+			let modified = false;
 
-		// Generate a new markdown link for the renamed file
-		const newLink = this.app.fileManager.generateMarkdownLink(file, note.path);
+			// Handle different link formats
+			const linkPatterns = [
+				`![[${file.basename}]]`,                    // Basic wikilink
+				`![[${file.basename}.${file.extension}]]`,  // Full filename wikilink
+				`![](${file.name})`,                        // Markdown link
+			];
 
-		// Replace all old links with the new link
-		const oldLink = `![[${file.basename}]]`;
-		content = content.split(oldLink).join(newLink);
+			const newLink = `![[${newFile.basename}.${newFile.extension}]]`;
 
-		// Write the updated content back to the note
-		await this.app.vault.modify(note, content);
+			// Replace each pattern if found
+			for (const pattern of linkPatterns) {
+				if (content.includes(pattern)) {
+					content = content.split(pattern).join(newLink);
+					modified = true;
+				}
+			}
+
+			// Only modify the file if changes were made
+			if (modified) {
+				await this.app.vault.modify(note, content);
+			}
+		} catch (error) {
+			console.error('Error updating links:', error);
+			new Notice(`Error updating links: ${error.message}`);
+		}
 	}
 
+	private processCurrentNoteImages_shouldProcessImage(image: TFile): boolean {
+		// Skip images already in target format
+		if (this.settings.ProcessCurrentNoteskipImagesInTargetFormat && 
+			image.extension === this.settings.ProcessCurrentNoteconvertTo) {
+			return false;
+		}
+		
+		// Get skip formats from settings and parse them
+		const skipFormats = this.settings.ProcessCurrentNoteSkipFormats
+			.toLowerCase()
+			.split(',')
+			.map(format => format.trim())
+			.filter(format => format.length > 0);
+		
+		// Skip files with extensions in the skip list
+		if (skipFormats.includes(image.extension.toLowerCase())) {
+			return false;
+		}
+		
+		return true;
+	}
+	/* ------------------------------------------------------------- */
 
+	private async getUniqueFilePath(file: TFile, newExtension: string): Promise<string> {
+		const dir = file.parent?.path || "";
+		const baseName = file.basename;
+		let counter = 0;
+		let newPath: string;
+		
+		do {
+			newPath = counter === 0 
+				? `${dir}/${baseName}.${newExtension}`
+				: `${dir}/${baseName}-${counter}.${newExtension}`;
+			newPath = newPath.replace(/^\//, ''); // Remove leading slash if present
+			counter++;
+		} while (await this.processAllVaultImages_fileExists(newPath));
 	
-	/* ------------------------------------------------------------- */
-	/* ------------------------------------------------------------- */
+		return newPath;
+	}
 
+	/* ------------------------------------------------------------- */
+	/* ------------------------------------------------------------- */
 
 	getActiveEditor(sourcePath: string): Editor | null {
 		let editor: Editor | null = null;
@@ -4487,8 +4617,9 @@ export class ImageConvertTab extends PluginSettingTab {
 
 		// Format Setting
 		new Setting(basicSettingsContainer)
-			.setName('Format')
-			.setDesc('Select format to convert images to')
+			.setName('Convert to ⓘ ')
+			.setDesc('Choose output format for your images')
+			.setTooltip('Same as original: preserves current format while applying compression/resizing')
 			.addDropdown(dropdown =>
 				dropdown
 					.addOptions({
@@ -4506,8 +4637,9 @@ export class ImageConvertTab extends PluginSettingTab {
 
 		// Quality Setting
 		new Setting(basicSettingsContainer)
-			.setName('Quality')
-			.setDesc('0 - low quality, 75 - recommended, 99 - high quality, 100 - no compression; ')
+			.setName('Quality ⓘ')
+			.setDesc('Compression level (0-100)')
+			.setTooltip('100: No compression (original quality)\n75: Recommended (good balance)\n0-50: High compression (lower quality)')
 			.addText(text =>
 				text
 					.setPlaceholder('Enter quality (0-100)')
@@ -4529,8 +4661,9 @@ export class ImageConvertTab extends PluginSettingTab {
 		
 		// Resize Mode Setting
 		new Setting(resizeSettingsContainer)
-			.setName('Image resize mode')
-			.setDesc('Select the mode to use when resizing the image')
+			.setName('Resize Mode ⓘ')
+			.setDesc('Choose how images should be resized. Note: Results are permanent.')
+			.setTooltip('Fit: Maintains aspect ratio within dimensions\nFill: Exactly matches dimensions\nLongest Edge: Limits the longest side\nShortest Edge: Limits the shortest side\nWidth/Height: Constrains single dimension')
 			.addDropdown(dropdown =>
 				dropdown
 					.addOptions({
@@ -4546,14 +4679,14 @@ export class ImageConvertTab extends PluginSettingTab {
 					.onChange(async value => {
 						this.plugin.settings.destructive_resizeMode = value;
 						await this.plugin.saveSettings();
-						
+
 						// Clear existing resize-related elements
 						const resizeInputsContainer = resizeSettingsContainer.querySelector('.resize-inputs');
 						if (resizeInputsContainer) resizeInputsContainer.remove();
-						
+
 						const enlargeReduceContainer = resizeSettingsContainer.querySelector('.enlarge-reduce-setting');
 						if (enlargeReduceContainer) enlargeReduceContainer.remove();
-						
+
 						// Add new elements if needed
 						if (value !== 'None') {
 							this.updateResizeInputs(resizeSettingsContainer, value);
@@ -4573,13 +4706,9 @@ export class ImageConvertTab extends PluginSettingTab {
 	private addEnlargeReduceSetting(container: HTMLElement): void {
 		const enlargeReduceDiv = container.createDiv('enlarge-reduce-setting');
 		new Setting(enlargeReduceDiv)
-			.setName('Enlarge/Reduce')
-			.setDesc(
-				'Reduce and Enlarge - would make sure that image set to specified dimensions are always fit\
-				inside these dimensions so both actions would be performed: small images would be enlarged\
-				to fit the dimensions and large images would be reduced;\
-				Reduce only - only large images will be reduced;\
-				Enlarge only - only small images will be increased')
+			.setName('Enlarge or Reduce ⓘ')
+			.setDesc('Controls how images are adjusted relative to target size:')
+			.setTooltip('• Reduce and Enlarge: Adjusts image to fit specified dimensions\n• Reduce only: Only shrinks image which is larger than target\n• Enlarge only: Only enlarges image which is smaller than target')
 			.addDropdown(dropdown =>
 				dropdown
 					.addOptions({
@@ -4605,24 +4734,10 @@ export class ImageConvertTab extends PluginSettingTab {
 		if (resizeMode === 'None') return;
 	
 		const inputsContainer = container.createDiv('resize-inputs');
-		
-		// Add explanation
-		const explanations: Record<string, string> = {
-			Fit: 'Fit mode resizes the image to fit within the desired dimensions while maintaining the aspect ratio.',
-			Fill: 'Fill mode resizes the image to fill the desired dimensions while maintaining the aspect ratio. May result in cropping.',
-			LongestEdge: 'Longest Edge mode resizes the longest side while maintaining the aspect ratio.',
-			ShortestEdge: 'Shortest Edge mode resizes the shortest side while maintaining the aspect ratio.',
-			Width: 'Width mode resizes the width while maintaining the aspect ratio.',
-			Height: 'Height mode resizes the height while maintaining the aspect ratio.'
-		};
-	
-		if (explanations[resizeMode]) {
-			inputsContainer.createEl('p', { text: explanations[resizeMode], cls: 'setting-item-description' });
-		}
 	
 		if (['Fit', 'Fill'].includes(resizeMode)) {
 			new Setting(inputsContainer)
-				.setName('Dimensions')
+				.setName('Resize dimensions')
 				.addText(text => text
 					.setPlaceholder('Width')
 					.setValue(this.plugin.settings.destructive_desiredWidth.toString())
@@ -5390,85 +5505,407 @@ class ResizeImageModal extends Modal {
 	}
 }
 
-class ProcessAllVault extends Modal {
-	plugin: ImageConvertPlugin;
-	private enlargeReduceSettings: Setting | null = null;
-	private resizeInputSettings: Setting | null = null;
 
-	constructor(plugin: ImageConvertPlugin) {
-		super(plugin.app);
-		this.plugin = plugin;
-	}
+// class ProcessCurrentImage extends Modal {
+//     plugin: ImageConvertPlugin;
+//     private enlargeReduceSettings: Setting | null = null;
+//     private resizeInputSettings: Setting | null = null;
+//     private submitButton: ButtonComponent | null = null;
+// 	private resizeInputsDiv: HTMLDivElement | null = null;  // Add this
+//     private enlargeReduceDiv: HTMLDivElement | null = null; // Add this
+
+//     constructor(plugin: ImageConvertPlugin) {
+//         super(plugin.app);
+//         this.plugin = plugin;
+//     }
+
+// 	private updateResizeInputVisibility(resizeMode: string): void {
+// 		if (resizeMode === 'None') {
+// 			this.resizeInputSettings?.settingEl.hide();
+// 			this.enlargeReduceSettings?.settingEl.hide();
+// 		} else {
+// 			if (!this.resizeInputSettings) {
+// 				this.createResizeInputSettings(resizeMode);
+// 			} else {
+// 				this.updateResizeInputSettings(resizeMode);
+// 			}
+// 			if (!this.enlargeReduceSettings) {
+// 				this.createEnlargeReduceSettings();
+// 			}
+// 			this.resizeInputSettings?.settingEl.show();
+// 			this.enlargeReduceSettings?.settingEl.show();
+// 		}
+// 	}
+
+//     private createEnlargeReduceSettings(): void {
+//         if (!this.enlargeReduceDiv) return;
+//         this.enlargeReduceDiv.empty();
+        
+//         this.enlargeReduceSettings = new Setting(this.enlargeReduceDiv)
+//             .setName('Enlarge or Reduce')
+//             .setDesc(
+//                 'Reduce and Enlarge - would make sure that image set to specified dimensions are always fit\
+//                 inside these dimensions so both actions would be performed: small images would be enlarged\
+//                 to fit the dimensions and large images would be reduced;\
+//                 Reduce only - only large images will be reduced;\
+//                 Enlarge only - only small images will be increased')
+//             .addDropdown((dropdown) => 
+//                 dropdown
+//                     .addOptions({
+//                         Always: 'Reduce and Enlarge',
+//                         Reduce: 'Reduce only',
+//                         Enlarge: 'Enlarge only',
+//                     })
+//                     .setValue(this.plugin.settings.ProcessCurrentImage_EnlargeOrReduce)
+//                     .onChange(async (value: 'Always' | 'Reduce' | 'Enlarge') => {
+//                         this.plugin.settings.ProcessCurrentImage_EnlargeOrReduce = value;
+//                         await this.plugin.saveSettings();
+//                     })
+//             );
+//     }
+
+//     private createResizeInputSettings(resizeMode: string): void {
+//         if (!this.resizeInputsDiv) return;
+//         this.resizeInputsDiv.empty();
+//         this.resizeInputSettings = new Setting(this.resizeInputsDiv);
+//         this.updateResizeInputSettings(resizeMode);
+//     }
+
+// 	private updateResizeInputSettings(resizeMode: string): void {
+// 		if (!this.resizeInputSettings) return;
+	
+// 		this.resizeInputSettings.clear();
+	
+// 		let name = '';
+// 		let desc = '';
+	
+// 		if (['Fit', 'Fill'].includes(resizeMode)) {
+// 			name = 'Resize Dimensions';
+// 			desc = 'Enter the desired width and height in pixels';
+// 			this.resizeInputSettings
+// 				.setName(name)
+// 				.setDesc(desc)
+// 				.addText((text: TextComponent) => text
+// 					.setPlaceholder('Width')
+// 					.setValue(this.plugin.settings.ProcessCurrentImage_resizeModaldesiredWidth.toString())
+// 					.onChange(async (value: string) => {
+// 						const width = parseInt(value);
+// 						if (/^\d+$/.test(value) && width > 0) {
+// 							this.plugin.settings.ProcessCurrentImage_resizeModaldesiredWidth = width;
+// 							await this.plugin.saveSettings();
+// 						}
+// 					}))
+// 				.addText((text: TextComponent) => text
+// 					.setPlaceholder('Height')
+// 					.setValue(this.plugin.settings.ProcessCurrentImage_resizeModaldesiredHeight.toString())
+// 					.onChange(async (value: string) => {
+// 						const height = parseInt(value);
+// 						if (/^\d+$/.test(value) && height > 0) {
+// 							this.plugin.settings.ProcessCurrentImage_resizeModaldesiredHeight = height;
+// 							await this.plugin.saveSettings();
+// 						}
+// 					}));
+// 		} else {
+// 			switch (resizeMode) {
+// 				case 'LongestEdge':
+// 				case 'ShortestEdge':
+// 					name = `${resizeMode} Length`;
+// 					desc = 'Enter the desired length in pixels';
+// 					break;
+// 				case 'Width':
+// 					name = 'Width';
+// 					desc = 'Enter the desired width in pixels';
+// 					break;
+// 				case 'Height':
+// 					name = 'Height';
+// 					desc = 'Enter the desired height in pixels';
+// 					break;
+// 			}
+	
+// 			this.resizeInputSettings
+// 				.setName(name)
+// 				.setDesc(desc)
+// 				.addText((text: TextComponent) => text
+// 					.setPlaceholder('Length')
+// 					.setValue(this.getInitialValue(resizeMode).toString())
+// 					.onChange(async (value: string) => {
+// 						const length = parseInt(value);
+// 						if (/^\d+$/.test(value) && length > 0) {
+// 							await this.updateSettingValue(resizeMode, length);
+// 						}
+// 					}));
+// 		}
+	
+// 		// Update the enlarge/reduce settings in place instead of recreating
+// 		if (!this.enlargeReduceSettings) {
+// 			this.createEnlargeReduceSettings();
+// 		}
+// 	}
+
+//     private getInitialValue(resizeMode: string): number {
+//         switch (resizeMode) {
+//             case 'LongestEdge':
+//             case 'ShortestEdge':
+//                 return this.plugin.settings.ProcessCurrentImage_resizeModaldesiredLength;
+//             case 'Width':
+//                 return this.plugin.settings.ProcessCurrentImage_resizeModaldesiredWidth;
+//             case 'Height':
+//                 return this.plugin.settings.ProcessCurrentImage_resizeModaldesiredHeight;
+//             default:
+//                 return 0;
+//         }
+//     }
+
+//     private async updateSettingValue(resizeMode: string, value: number): Promise<void> {
+//         switch (resizeMode) {
+//             case 'LongestEdge':
+//             case 'ShortestEdge':
+//                 this.plugin.settings.ProcessCurrentImage_resizeModaldesiredLength = value;
+//                 break;
+//             case 'Width':
+//                 this.plugin.settings.ProcessCurrentImage_resizeModaldesiredWidth = value;
+//                 break;
+//             case 'Height':
+//                 this.plugin.settings.ProcessCurrentImage_resizeModaldesiredHeight = value;
+//                 break;
+//         }
+//         await this.plugin.saveSettings();
+//     }
+
+//     onOpen() {
+//         const { contentEl } = this;
+
+// 		const div1 = contentEl.createEl('div');
+// 		div1.style.display = 'flex';
+// 		div1.style.flexDirection = 'column';
+// 		div1.style.alignItems = 'center';
+// 		div1.style.justifyContent = 'center';
+
+// 		const heading1 = div1.createEl('h2')
+// 		heading1.textContent = 'Convert, compress and resize';
+	
+// 		let imageName = 'current image';
+// 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+
+// 		if (activeView && activeView.file) {
+// 			const element = this.app.workspace.getActiveFile();
+// 			if (element instanceof HTMLImageElement) {
+// 				imageName = element.getAttribute('src') || 'current image';
+// 			} else {
+// 				// Retrieve the image name from the context menu event
+// 				const contextMenuEvent = this.plugin.contextMenuEvent;
+// 				if (contextMenuEvent && contextMenuEvent.target instanceof HTMLImageElement) {
+// 					imageName = contextMenuEvent.target.getAttribute('src') || 'current image';
+// 				}
+// 			}
+// 		}
+	
+// 		const heading2 = div1.createEl('h6');
+// 		heading2.textContent = `${imageName}`;
+// 		heading2.style.marginTop = '-18px';
+	
+// 		const desc = div1.createEl('p');
+// 		desc.textContent = 'Running this will modify the selected image. Please create backups. The image link will be automatically updated.';
+// 		desc.style.marginTop = '-10px';
+// 		desc.style.padding = '20px';
+// 		desc.style.borderRadius = '10px';
+	
+// 		const settingsContainer = contentEl.createDiv('settings-container');
+
+//         new Setting(settingsContainer)
+//             .setName('Select format to convert images to')
+//             .setDesc(`"Same as original" - will keep original file format.`)
+//             .addDropdown(dropdown =>
+//                 dropdown
+//                     .addOptions({ disabled: 'Same as original', webp: 'WebP', jpg: 'JPG', png: 'PNG' })
+//                     .setValue(this.plugin.settings.ProcessCurrentImage_convertTo)
+//                     .onChange(async value => {
+//                         this.plugin.settings.ProcessCurrentImage_convertTo = value;
+//                         await this.plugin.saveSettings();
+//                     })
+//             );
+
+//         new Setting(settingsContainer)
+//             .setName('Quality')
+//             .setDesc('0 - low quality, 99 - high quality, 100 - no compression; 75 - recommended')
+//             .addText(text =>
+//                 text
+//                     .setPlaceholder('Enter quality (0-100)')
+//                     .setValue((this.plugin.settings.ProcessCurrentImage_quality * 100).toString())
+//                     .onChange(async value => {
+//                         const quality = parseInt(value);
+//                         if (/^\d+$/.test(value) && quality >= 0 && quality <= 100) {
+//                             this.plugin.settings.ProcessCurrentImage_quality = quality / 100;
+//                             await this.plugin.saveSettings();
+//                         }
+//                     })
+//             );
+
+// 		// Create a dedicated container for resize-related settings
+// 		const resizeContainer = settingsContainer.createDiv('resize-settings-container');
+
+
+// 		new Setting(resizeContainer)
+// 			.setName('Image resize mode')
+// 			.setDesc('Select the mode to use when resizing the image. Resizing an image will further reduce file-size, but it will resize your actual file, which means that the original file will be modified, and the changes will be permanent.')
+// 			.addDropdown(dropdown =>
+// 				dropdown
+// 					.addOptions({
+// 						None: 'None',
+// 						Fit: 'Fit',
+// 						Fill: 'Fill',
+// 						LongestEdge: 'Longest Edge',
+// 						ShortestEdge: 'Shortest Edge',
+// 						Width: 'Width',
+// 						Height: 'Height'
+// 					})
+// 					.setValue(this.plugin.settings.ProcessCurrentImage_ResizeModalresizeMode)
+// 					.onChange(async value => {
+// 						this.plugin.settings.ProcessCurrentImage_ResizeModalresizeMode = value;
+// 						await this.plugin.saveSettings();
+// 						this.updateResizeInputVisibility(value);
+// 					})
+// 			);
+// 		// Create placeholder divs for resize inputs and enlarge/reduce settings
+// 		this.resizeInputsDiv = resizeContainer.createDiv('resize-inputs');
+// 		this.enlargeReduceDiv = resizeContainer.createDiv('enlarge-reduce-settings');
+
+//         // Initially create and show/hide resize inputs based on current mode
+//         this.updateResizeInputVisibility(this.plugin.settings.ProcessCurrentImage_ResizeModalresizeMode);
+
+// 		// Add the missing settings
+// 		new Setting(settingsContainer)
+// 			.setName('Skip File Formats')
+// 			.setDesc('Comma-separated list of file formats to skip (e.g., tif,tiff,heic). Leave empty to process all formats.')
+// 			.addText(text =>
+// 				text
+// 					.setPlaceholder('tif,tiff,heic')
+// 					.setValue(this.plugin.settings.ProcessCurrentImage_SkipFormats)
+// 					.onChange(async (value) => {
+// 						this.plugin.settings.ProcessCurrentImage_SkipFormats = value;
+// 						await this.plugin.saveSettings();
+// 					})
+// 			);
+
+// 		new Setting(settingsContainer)
+// 			.setName('Skip images in target format')
+// 			.setDesc('Selecting this will skip images that already are in the target format. This is useful if you have a very large library, and want to process images in batches.')
+// 			.addToggle(toggle =>
+// 				toggle
+// 					.setValue(this.plugin.settings.ProcessCurrentImage_SkipImagesInTargetFormat)
+// 					.onChange(async value => {
+// 						this.plugin.settings.ProcessCurrentImage_SkipImagesInTargetFormat = value;
+// 						await this.plugin.saveSettings();
+// 					})
+// 			);
+
+// 		// Initially create and show/hide resize inputs based on current mode
+// 		this.updateResizeInputVisibility(this.plugin.settings.ProcessCurrentImage_ResizeModalresizeMode);
+
+// 		// Add submit button in a container at the bottom
+// 		const buttonContainer = settingsContainer.createDiv('button-container');
+
+// 		this.submitButton = new ButtonComponent(buttonContainer)
+// 			.setButtonText('Submit')
+// 			.onClick(() => {
+// 				this.close();
+// 				const currentNote = this.app.workspace.getActiveFile();
+// 				if (currentNote) {
+// 					this.plugin.processCurrentNoteImages(currentNote);
+// 				} else {
+// 					new Notice('Error: No active note found.');
+// 				}
+// 			});
+// 	}
+// }
+
+class ProcessAllVault extends Modal {
+    plugin: ImageConvertPlugin;
+    private enlargeReduceSettings: Setting | null = null;
+    private resizeInputSettings: Setting | null = null;
+    private submitButton: ButtonComponent | null = null;
+    private resizeInputsDiv: HTMLDivElement | null = null;
+    private enlargeReduceDiv: HTMLDivElement | null = null;
+
+    constructor(plugin: ImageConvertPlugin) {
+        super(plugin.app);
+        this.plugin = plugin;
+    }
 
     private updateResizeInputVisibility(resizeMode: string): void {
         if (resizeMode === 'None') {
-            this.resizeInputSettings?.settingEl.hide();
-            this.enlargeReduceSettings?.settingEl.hide();
+            if (this.resizeInputSettings) {
+                this.resizeInputSettings.settingEl.hide();
+            }
+            if (this.enlargeReduceSettings) {
+                this.enlargeReduceSettings.settingEl.hide();
+            }
         } else {
             if (!this.resizeInputSettings) {
                 this.createResizeInputSettings(resizeMode);
             } else {
                 this.updateResizeInputSettings(resizeMode);
             }
+            
             if (!this.enlargeReduceSettings) {
                 this.createEnlargeReduceSettings();
             }
+            
             this.resizeInputSettings?.settingEl.show();
             this.enlargeReduceSettings?.settingEl.show();
         }
     }
 
     private createEnlargeReduceSettings(): void {
-        // Remove old setting if it exists
-        this.enlargeReduceSettings?.settingEl.remove();
+        if (!this.enlargeReduceDiv) return;
         
-        // Create new setting
-        this.enlargeReduceSettings = new Setting(this.contentEl)
-			.setName('Enlarge or Reduce')
-			.setDesc(
-				'Reduce and Enlarge - would make sure that image set to specified dimensions are always fit\
-				inside these dimensions so both actions would be performed: small images would be enlarged\
-				to fit the dimensions and large images would be reduced;\
-				Reduce only - only large images will be reduced;\
-				Enlarge only - only small images will be increased')
-			.addDropdown((dropdown) => 
-				dropdown
-					.addOptions({
-						Always: 'Reduce and Enlarge',
-						Reduce: 'Reduce only',
-						Enlarge: 'Enlarge only',
-					})
+        this.enlargeReduceDiv.empty();
+        
+        this.enlargeReduceSettings = new Setting(this.enlargeReduceDiv)
+            .setClass('enlarge-reduce-setting')
+            .setName('Enlarge or Reduce ⓘ')
+            .setDesc('Controls how images are adjusted relative to target size:')
+            .setTooltip('• Reduce and Enlarge: Adjusts all images to fit specified dimensions\n• Reduce only: Only shrinks images larger than target\n• Enlarge only: Only enlarges images smaller than target')
+            .addDropdown((dropdown) => {
+                dropdown
+                    .addOptions({
+                        Always: 'Reduce and Enlarge',
+                        Reduce: 'Reduce only',
+                        Enlarge: 'Enlarge only',
+                    })
                     .setValue(this.plugin.settings.ProcessAllVaultEnlargeOrReduce)
                     .onChange(async (value: 'Always' | 'Reduce' | 'Enlarge') => {
                         this.plugin.settings.ProcessAllVaultEnlargeOrReduce = value;
                         await this.plugin.saveSettings();
-                    })
-            );
-
-        // Insert the enlarge/reduce setting after the resize input settings
-        if (this.resizeInputSettings) {
-            this.resizeInputSettings.settingEl.insertAdjacentElement('afterend', this.enlargeReduceSettings.settingEl);
-        }
+                    });
+            });
     }
-	
+
     private createResizeInputSettings(resizeMode: string): void {
-        this.resizeInputSettings = new Setting(this.contentEl);
+        if (!this.resizeInputsDiv) return;
+        
+        this.resizeInputsDiv.empty();
+        
+        this.resizeInputSettings = new Setting(this.resizeInputsDiv)
+            .setClass('resize-input-setting');
+        
         this.updateResizeInputSettings(resizeMode);
     }
 
     private updateResizeInputSettings(resizeMode: string): void {
         if (!this.resizeInputSettings) return;
 
-        // Remove the old enlarge/reduce settings if they exist
-        this.enlargeReduceSettings?.settingEl.remove();
-        this.enlargeReduceSettings = null;
-
         this.resizeInputSettings.clear();
-        
+
+        let name = '';
+        let desc = '';
+
         if (['Fit', 'Fill'].includes(resizeMode)) {
+            name = 'Resize dimensions';
+            desc = 'Enter the desired width and height in pixels';
             this.resizeInputSettings
-                .setName('Resize Dimensions')
-                .setDesc('Enter the desired width and height in pixels')
+                .setName(name)
+                .setDesc(desc)
                 .addText((text: TextComponent) => text
                     .setPlaceholder('Width')
                     .setValue(this.plugin.settings.ProcessAllVaultResizeModaldesiredWidth.toString())
@@ -5489,143 +5926,204 @@ class ProcessAllVault extends Modal {
                             await this.plugin.saveSettings();
                         }
                     }));
-        } else if (['LongestEdge', 'ShortestEdge'].includes(resizeMode)) {
+        } else {
+            switch (resizeMode) {
+                case 'LongestEdge':
+                case 'ShortestEdge':
+                    name = `${resizeMode}`;
+                    desc = 'Enter the desired length in pixels';
+                    break;
+                case 'Width':
+                    name = 'Width';
+                    desc = 'Enter the desired width in pixels';
+                    break;
+                case 'Height':
+                    name = 'Height';
+                    desc = 'Enter the desired height in pixels';
+                    break;
+            }
+
             this.resizeInputSettings
-                .setName(`${resizeMode} Length`)
-                .setDesc(`Enter the desired length in pixels it will be automatically calculated`)
+                .setName(name)
+                .setDesc(desc)
                 .addText((text: TextComponent) => text
-                    .setPlaceholder('Length')
-                    .setValue(this.plugin.settings.ProcessAllVaultResizeModaldesiredLength.toString())
+                    .setPlaceholder('')
+                    .setValue(this.getInitialValue(resizeMode).toString())
                     .onChange(async (value: string) => {
                         const length = parseInt(value);
                         if (/^\d+$/.test(value) && length > 0) {
-                            this.plugin.settings.ProcessAllVaultResizeModaldesiredLength = length;
-                            await this.plugin.saveSettings();
-                        }
-                    }));
-        } else if (resizeMode === 'Width') {
-            this.resizeInputSettings
-                .setName('Width')
-                .setDesc('Enter the desired width in pixels')
-                .addText((text: TextComponent) => text
-                    .setPlaceholder('Width')
-                    .setValue(this.plugin.settings.ProcessAllVaultResizeModaldesiredWidth.toString())
-                    .onChange(async (value: string) => {
-                        const width = parseInt(value);
-                        if (/^\d+$/.test(value) && width > 0) {
-                            this.plugin.settings.ProcessAllVaultResizeModaldesiredWidth = width;
-                            await this.plugin.saveSettings();
-                        }
-                    }));
-        } else if (resizeMode === 'Height') {
-            this.resizeInputSettings
-                .setName('Height')
-                .setDesc('Enter the desired height in pixels')
-                .addText((text: TextComponent) => text
-                    .setPlaceholder('Height')
-                    .setValue(this.plugin.settings.ProcessAllVaultResizeModaldesiredHeight.toString())
-                    .onChange(async (value: string) => {
-                        const height = parseInt(value);
-                        if (/^\d+$/.test(value) && height > 0) {
-                            this.plugin.settings.ProcessAllVaultResizeModaldesiredHeight = height;
-                            await this.plugin.saveSettings();
+                            await this.updateSettingValue(resizeMode, length);
                         }
                     }));
         }
-
-        // Create the enlarge/reduce settings after the resize inputs
-        this.createEnlargeReduceSettings();
     }
 
-	onOpen() {
-		const { contentEl } = this;
+    private getInitialValue(resizeMode: string): number {
+        switch (resizeMode) {
+            case 'LongestEdge':
+            case 'ShortestEdge':
+                return this.plugin.settings.ProcessAllVaultResizeModaldesiredLength;
+            case 'Width':
+                return this.plugin.settings.ProcessAllVaultResizeModaldesiredWidth;
+            case 'Height':
+                return this.plugin.settings.ProcessAllVaultResizeModaldesiredHeight;
+            default:
+                return 0;
+        }
+    }
 
-		const heading = contentEl.createEl('h1');
-		heading.textContent = 'Convert, compress and resize';
-		
-		const desc = contentEl.createEl('p');
-		desc.textContent = 'Running this will modify all your internal images in the Vault. Please create backups. All internal image links will be automatically updated.';
+    private async updateSettingValue(resizeMode: string, value: number): Promise<void> {
+        switch (resizeMode) {
+            case 'LongestEdge':
+            case 'ShortestEdge':
+                this.plugin.settings.ProcessAllVaultResizeModaldesiredLength = value;
+                break;
+            case 'Width':
+                this.plugin.settings.ProcessAllVaultResizeModaldesiredWidth = value;
+                break;
+            case 'Height':
+                this.plugin.settings.ProcessAllVaultResizeModaldesiredHeight = value;
+                break;
+        }
+        await this.plugin.saveSettings();
+    }
 
-		// Add your settings here
-		new Setting(contentEl)
-			.setName('Select format to convert images to')
-			.setDesc(`"Same as original" - will keep original file format.`)
-			.addDropdown(dropdown =>
-				dropdown
-					.addOptions({ disabled: 'Same as original', webp: 'WebP', jpg: 'JPG', png: 'PNG' })
-					.setValue(this.plugin.settings.ProcessAllVaultconvertTo)
-					.onChange(async value => {
-						this.plugin.settings.ProcessAllVaultconvertTo = value;
-						await this.plugin.saveSettings();
-					})
-			);
+    onOpen() {
+        const { contentEl } = this;
 
-		new Setting(contentEl)
-			.setName('Quality')
-			.setDesc('0 - low quality, 99 - high quality, 100 - no compression; 75 - recommended')
-			.addText(text =>
-				text
-					.setPlaceholder('Enter quality (0-100)')
-					.setValue((this.plugin.settings.ProcessAllVaultquality * 100).toString())
-					.onChange(async value => {
-						const quality = parseInt(value);
+        // Create main container
+        const mainContainer = contentEl.createDiv({ cls: 'image-convert-modal' });
 
-						if (/^\d+$/.test(value) && quality >= 0 && quality <= 100) {
-							this.plugin.settings.ProcessAllVaultquality = quality / 100;
-							await this.plugin.saveSettings();
-						}
-					})
-			);
+        // Header section
+        const headerContainer = mainContainer.createDiv({ cls: 'modal-header' });
+        headerContainer.createEl('h2', { text: 'Convert, compress and resize' });
+        headerContainer.createEl('p', {
+            cls: 'modal-warning',
+            text: 'Running this will modify all your internal images in the Vault. Please create backups. All internal image links will be automatically updated.'
+        });
 
-		new Setting(contentEl)
-            .setName('Image resize mode')
-            .setDesc('Select the mode to use when resizing the image. Resizing an image will further reduce file-size, but it will resize your actual file, which means that the original file will be modified, and the changes will be permanent.')
+        // Settings container
+        const settingsContainer = mainContainer.createDiv({ cls: 'settings-container' });
+
+        // Format and Quality Container
+        const formatQualityContainer = settingsContainer.createDiv({ cls: 'format-quality-container' });
+
+        // Convert To setting
+        new Setting(formatQualityContainer)
+            .setName('Convert to ⓘ ')
+            .setDesc('Choose output format for your images')
+            .setTooltip('Same as original: preserves current format while applying compression/resizing')
             .addDropdown(dropdown =>
                 dropdown
-                    .addOptions({ 
-                        None: 'None', 
-                        Fit: 'Fit', 
-                        Fill: 'Fill', 
-                        LongestEdge: 'Longest Edge', 
-                        ShortestEdge: 'Shortest Edge', 
-                        Width: 'Width', 
-                        Height: 'Height' 
+                    .addOptions({
+                        disabled: 'Same as original',
+                        webp: 'WebP',
+                        jpg: 'JPG',
+                        png: 'PNG'
+                    })
+                    .setValue(this.plugin.settings.ProcessAllVaultconvertTo)
+                    .onChange(async value => {
+                        this.plugin.settings.ProcessAllVaultconvertTo = value;
+                        await this.plugin.saveSettings();
+                    })
+            );
+
+        // Quality setting
+        new Setting(formatQualityContainer)
+            .setName('Quality ⓘ')
+            .setDesc('Compression level (0-100)')
+            .setTooltip('100: No compression (original quality)\n75: Recommended (good balance)\n0-50: High compression (lower quality)')
+            .addText(text =>
+                text
+                    .setPlaceholder('Enter quality (0-100)')
+                    .setValue((this.plugin.settings.ProcessAllVaultquality * 100).toString())
+                    .onChange(async value => {
+                        const quality = parseInt(value);
+                        if (/^\d+$/.test(value) && quality >= 0 && quality <= 100) {
+                            this.plugin.settings.ProcessAllVaultquality = quality / 100;
+                            await this.plugin.saveSettings();
+                        }
+                    })
+            );
+
+        // Resize Container
+        const resizeContainer = settingsContainer.createDiv({ cls: 'resize-container' });
+
+        // Resize Mode setting
+        new Setting(resizeContainer)
+            .setName('Resize Mode ⓘ')
+            .setDesc('Choose how images should be resized. Note: Results are permanent.')
+            .setTooltip('Fit: Maintains aspect ratio within dimensions\nFill: Exactly matches dimensions\nLongest Edge: Limits the longest side\nShortest Edge: Limits the shortest side\nWidth/Height: Constrains single dimension')
+            .addDropdown(dropdown =>
+                dropdown
+                    .addOptions({
+                        None: 'None',
+                        LongestEdge: 'Longest Edge',
+                        ShortestEdge: 'Shortest Edge',
+                        Width: 'Width',
+                        Height: 'Height',
+                        Fit: 'Fit',
+                        Fill: 'Fill',
                     })
                     .setValue(this.plugin.settings.ProcessAllVaultResizeModalresizeMode)
                     .onChange(async value => {
                         this.plugin.settings.ProcessAllVaultResizeModalresizeMode = value;
                         await this.plugin.saveSettings();
-                        
                         this.updateResizeInputVisibility(value);
                     })
             );
 
-		// Initially create and show/hide resize inputs based on current mode
-		this.updateResizeInputVisibility(this.plugin.settings.ProcessAllVaultResizeModalresizeMode);
+        // Create resize inputs and enlarge/reduce containers
+        this.resizeInputsDiv = resizeContainer.createDiv({ cls: 'resize-inputs' });
+        this.enlargeReduceDiv = resizeContainer.createDiv({ cls: 'enlarge-reduce-settings' });
 
-		new Setting(contentEl)
-			.setName('Skip images in target format')
-			.setDesc('Selecting this will skip images that already are in the target format. This is useful if you have a very large library, and want to process images in batches.')
-			.addToggle(toggle =>
-				toggle
-					.setValue(this.plugin.settings.ProcessAllVaultskipImagesInTargetFormat)
-					.onChange(async value => {
-						this.plugin.settings.ProcessAllVaultskipImagesInTargetFormat = value;
-						await this.plugin.saveSettings();
-					})
-			);
+        // Skip Container
+        const skipContainer = settingsContainer.createDiv({ cls: 'skip-container' });
 
-		
-		// Add a submit button
-		new ButtonComponent(contentEl)
-			.setButtonText('Submit')
-			.onClick(() => {
-				// Close the modal when the button is clicked
-				this.close();
-				// Process all images in the vault
-				this.plugin.processAllVaultImages();
-			});
-	}
+        // Skip formats setting
+        new Setting(skipContainer)
+            .setName('Skip File Formats ⓘ')
+            .setTooltip('Comma-separated list of file formats to skip (e.g., tif,tiff,heic). Leave empty to process all formats.')
+            .addText(text =>
+                text
+                    .setPlaceholder('tif,tiff,heic')
+                    .setValue(this.plugin.settings.ProcessAllVaultSkipFormats)
+                    .onChange(async value => {
+                        this.plugin.settings.ProcessAllVaultSkipFormats = value;
+                        await this.plugin.saveSettings();
+                    })
+            );
+
+        // Skip target format setting
+        new Setting(skipContainer)
+            .setName('Skip images in target format ⓘ')
+            .setTooltip('When enabled, skips processing images that are already in the target format.')
+            .addToggle(toggle =>
+                toggle
+                    .setValue(this.plugin.settings.ProcessAllVaultskipImagesInTargetFormat)
+                    .onChange(async value => {
+                        this.plugin.settings.ProcessAllVaultskipImagesInTargetFormat = value;
+                        await this.plugin.saveSettings();
+                    })
+            );
+
+        // Initialize resize inputs
+        this.updateResizeInputVisibility(this.plugin.settings.ProcessAllVaultResizeModalresizeMode);
+
+        // Submit button
+        const buttonContainer = settingsContainer.createDiv({ cls: 'button-container' });
+        this.submitButton = new ButtonComponent(buttonContainer)
+            .setButtonText('Submit')
+            .onClick(() => {
+                this.close();
+                this.plugin.processAllVaultImages();
+            });
+    }
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
+    }
 }
 
 class ProcessCurrentNote extends Modal {
@@ -5633,56 +6131,75 @@ class ProcessCurrentNote extends Modal {
     private enlargeReduceSettings: Setting | null = null;
     private resizeInputSettings: Setting | null = null;
     private submitButton: ButtonComponent | null = null;
+	private resizeInputsDiv: HTMLDivElement | null = null;
+    private enlargeReduceDiv: HTMLDivElement | null = null;
 
     constructor(plugin: ImageConvertPlugin) {
         super(plugin.app);
         this.plugin = plugin;
     }
 
-	private updateResizeInputVisibility(resizeMode: string): void {
-		if (resizeMode === 'None') {
-			this.resizeInputSettings?.settingEl.hide();
-			this.enlargeReduceSettings?.settingEl.hide();
-		} else {
-			if (!this.resizeInputSettings) {
-				this.createResizeInputSettings(resizeMode);
-			} else {
-				this.updateResizeInputSettings(resizeMode);
-			}
-			if (!this.enlargeReduceSettings) {
-				this.createEnlargeReduceSettings();
-			}
-			this.resizeInputSettings?.settingEl.show();
-			this.enlargeReduceSettings?.settingEl.show();
-		}
-	}
+    private updateResizeInputVisibility(resizeMode: string): void {
+        // Use Obsidian's methods for showing/hiding
+        if (resizeMode === 'None') {
+            if (this.resizeInputSettings) {
+                this.resizeInputSettings.settingEl.hide();
+            }
+            if (this.enlargeReduceSettings) {
+                this.enlargeReduceSettings.settingEl.hide();
+            }
+        } else {
+            if (!this.resizeInputSettings) {
+                this.createResizeInputSettings(resizeMode);
+            } else {
+                this.updateResizeInputSettings(resizeMode);
+            }
+            
+            if (!this.enlargeReduceSettings) {
+                this.createEnlargeReduceSettings();
+            }
+            
+            this.resizeInputSettings?.settingEl.show();
+            this.enlargeReduceSettings?.settingEl.show();
+        }
+    }
 
     private createEnlargeReduceSettings(): void {
-        this.enlargeReduceSettings = new Setting(this.contentEl)
-            .setName('Enlarge or Reduce')
-            .setDesc(
-				'Reduce and Enlarge - would make sure that image set to specified dimensions are always fit\
-				inside these dimensions so both actions would be performed: small images would be enlarged\
-				to fit the dimensions and large images would be reduced;\
-				Reduce only - only large images will be reduced;\
-				Enlarge only - only small images will be increased')
-            .addDropdown((dropdown) => 
+        if (!this.enlargeReduceDiv) return;
+        
+        // Clear existing content using Obsidian's method
+        this.enlargeReduceDiv.empty();
+        
+        this.enlargeReduceSettings = new Setting(this.enlargeReduceDiv)
+            .setClass('enlarge-reduce-setting')
+            .setName('Enlarge or Reduce ⓘ')
+            .setDesc('Controls how images are adjusted relative to target size:')
+            .setTooltip('• Reduce and Enlarge: Adjusts all images to fit specified dimensions\n• Reduce only: Only shrinks images larger than target\n• Enlarge only: Only enlarges images smaller than target')
+            .addDropdown((dropdown) => {
                 dropdown
                     .addOptions({
-						Always: 'Reduce and Enlarge',
-						Reduce: 'Reduce only',
-						Enlarge: 'Enlarge only',
+                        Always: 'Reduce and Enlarge',
+                        Reduce: 'Reduce only',
+                        Enlarge: 'Enlarge only',
                     })
                     .setValue(this.plugin.settings.ProcessCurrentNoteEnlargeOrReduce)
                     .onChange(async (value: 'Always' | 'Reduce' | 'Enlarge') => {
                         this.plugin.settings.ProcessCurrentNoteEnlargeOrReduce = value;
                         await this.plugin.saveSettings();
-                    })
-            );
+                    });
+            });
     }
 
     private createResizeInputSettings(resizeMode: string): void {
-        this.resizeInputSettings = new Setting(this.contentEl);
+        if (!this.resizeInputsDiv) return;
+        
+        // Clear existing content using Obsidian's method
+        this.resizeInputsDiv.empty();
+        
+        // Create new setting
+        this.resizeInputSettings = new Setting(this.resizeInputsDiv)
+            .setClass('resize-input-setting'); // Add a class for styling if needed
+        
         this.updateResizeInputSettings(resizeMode);
     }
 
@@ -5695,7 +6212,7 @@ class ProcessCurrentNote extends Modal {
 		let desc = '';
 	
 		if (['Fit', 'Fill'].includes(resizeMode)) {
-			name = 'Resize Dimensions';
+			name = 'Resize dimensions';
 			desc = 'Enter the desired width and height in pixels';
 			this.resizeInputSettings
 				.setName(name)
@@ -5724,7 +6241,7 @@ class ProcessCurrentNote extends Modal {
 			switch (resizeMode) {
 				case 'LongestEdge':
 				case 'ShortestEdge':
-					name = `${resizeMode} Length`;
+					name = `${resizeMode}`;
 					desc = 'Enter the desired length in pixels';
 					break;
 				case 'Width':
@@ -5741,7 +6258,7 @@ class ProcessCurrentNote extends Modal {
 				.setName(name)
 				.setDesc(desc)
 				.addText((text: TextComponent) => text
-					.setPlaceholder('Length')
+					.setPlaceholder('')
 					.setValue(this.getInitialValue(resizeMode).toString())
 					.onChange(async (value: string) => {
 						const length = parseInt(value);
@@ -5787,102 +6304,161 @@ class ProcessCurrentNote extends Modal {
         await this.plugin.saveSettings();
     }
 
-    onOpen() {
-        const { contentEl } = this;
+	onOpen() {
+		const { contentEl } = this;
+	
+		// Create main container
+		const mainContainer = contentEl.createDiv({ cls: 'image-convert-modal' });
+	
+		// Header section
+		const headerContainer = mainContainer.createDiv({ cls: 'modal-header' });
+		headerContainer.createEl('h2', { text: 'Convert, compress and resize' });
+	
+		// Get current note info
+		let noteName = 'current note';
+		let noteExtension = '';
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (activeView?.file) {
+			noteName = activeView.file.basename;
+			noteExtension = activeView.file.extension;
+		}
+	
+		headerContainer.createEl('h6', {
+			text: `all images in: ${noteName}.${noteExtension}`,
+			cls: 'modal-subtitle'
+		});
+	
+		// Warning message
+		headerContainer.createEl('p', {
+			cls: 'modal-warning',
+			text: '⚠️ This will modify all images in the current note. Please ensure you have backups.'
+		});
+	
+		// Settings container
+		const settingsContainer = mainContainer.createDiv({ cls: 'settings-container' });
+	
+		// Format and Quality Container
+		const formatQualityContainer = settingsContainer.createDiv({ cls: 'format-quality-container' });
+	
+		// Convert To setting
+		new Setting(formatQualityContainer)
+			.setName('Convert to ⓘ ')
+			.setDesc('Choose output format for your images')
+			.setTooltip('Same as original: preserves current format while applying compression/resizing')
+			.addDropdown(dropdown =>
+				dropdown
+					.addOptions({
+						disabled: 'Same as original',
+						webp: 'WebP',
+						jpg: 'JPG',
+						png: 'PNG'
+					})
+					.setValue(this.plugin.settings.ProcessCurrentNoteconvertTo)
+					.onChange(async value => {
+						this.plugin.settings.ProcessCurrentNoteconvertTo = value;
+						await this.plugin.saveSettings();
+					})
+			);
+	
+		// Quality setting
+		new Setting(formatQualityContainer)
+			.setName('Quality ⓘ')
+			.setDesc('Compression level (0-100)')
+			.setTooltip('100: No compression (original quality)\n75: Recommended (good balance)\n0-50: High compression (lower quality)')
+			.addText(text =>
+				text
+					.setPlaceholder('Enter quality (0-100)')
+					.setValue((this.plugin.settings.ProcessCurrentNotequality * 100).toString())
+					.onChange(async value => {
+						const quality = parseInt(value);
+						if (/^\d+$/.test(value) && quality >= 0 && quality <= 100) {
+							this.plugin.settings.ProcessCurrentNotequality = quality / 100;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+	
+		// Resize Container (separate from format/quality)
+		const resizeContainer = settingsContainer.createDiv({ cls: 'resize-container' });
+	
+		// Resize Mode setting
+		new Setting(resizeContainer)
+			.setName('Resize Mode ⓘ')
+			.setDesc('Choose how images should be resized. Note: Results are permanent.')
+			.setTooltip('Fit: Maintains aspect ratio within dimensions\nFill: Exactly matches dimensions\nLongest Edge: Limits the longest side\nShortest Edge: Limits the shortest side\nWidth/Height: Constrains single dimension')
+			.addDropdown(dropdown =>
+				dropdown
+					.addOptions({
+						None: 'None',
+						LongestEdge: 'Longest Edge',
+						ShortestEdge: 'Shortest Edge',
+						Width: 'Width',
+						Height: 'Height',
+						Fit: 'Fit',
+						Fill: 'Fill',
+					})
+					.setValue(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)
+					.onChange(async value => {
+						this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode = value;
+						await this.plugin.saveSettings();
+						this.updateResizeInputVisibility(value);
+					})
+			);
+	
+		// Create resize inputs and enlarge/reduce containers
+		this.resizeInputsDiv = resizeContainer.createDiv({ cls: 'resize-inputs' });
+		this.enlargeReduceDiv = resizeContainer.createDiv({ cls: 'enlarge-reduce-settings' });
+	
+		// Skip formats Container
+		const skipContainer = settingsContainer.createDiv({ cls: 'skip-container' });
+	
+		// Skip formats setting
+		new Setting(skipContainer)
+			.setName('Skip File Formats ⓘ')
+			.setTooltip('Comma-separated list of file formats to skip (e.g., tif,tiff,heic). Leave empty to process all formats.')
+			.addText(text =>
+				text
+					.setPlaceholder('tif,tiff,heic')
+					.setValue(this.plugin.settings.ProcessCurrentNoteSkipFormats)
+					.onChange(async value => {
+						this.plugin.settings.ProcessCurrentNoteSkipFormats = value;
+						await this.plugin.saveSettings();
+					})
+			);
+	
+		// Skip target format setting
+		new Setting(skipContainer)
+			.setName('Skip images in target format ⓘ')
+			.setTooltip('When enabled, skips processing images that are already in the target format.')
+			.addToggle(toggle =>
+				toggle
+					.setValue(this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat)
+					.onChange(async value => {
+						this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat = value;
+						await this.plugin.saveSettings();
+					})
+			);
+	
+		// Initialize resize inputs
+		this.updateResizeInputVisibility(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode);
+	
+		// Submit button
+		const buttonContainer = settingsContainer.createDiv({ cls: 'button-container' });
+		this.submitButton = new ButtonComponent(buttonContainer)
+			.setButtonText('Submit')
+			.onClick(() => {
+				this.close();
+				const currentNote = this.app.workspace.getActiveFile();
+				if (currentNote) {
+					this.plugin.processCurrentNoteImages(currentNote);
+				} else {
+					new Notice('Error: No active note found.');
+				}
+			});
+	}
 
-        const div1 = contentEl.createEl('div');
-        div1.style.display = 'flex';
-        div1.style.flexDirection = 'column';
-        div1.style.alignItems = 'center';
-        div1.style.justifyContent = 'center';
-
-        const heading1 = div1.createEl('h2')
-        heading1.textContent = 'Convert, compress and resize';
-
-        let noteName = 'current note';
-        let noteExtension = '';
-        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-        if (activeView && activeView.file) {
-            noteName = activeView.file.basename;
-            noteExtension = activeView.file.extension;
-        }
-
-        const heading2 = div1.createEl('h6');
-        heading2.textContent = `all images in: ${noteName}.${noteExtension}`;
-        heading2.style.marginTop = '-18px';
-
-        const desc = div1.createEl('p');
-        desc.textContent = 'Running this will modify all internal images in the current note. Please create backups. All internal image links will be automatically updated.';
-        desc.style.marginTop = '-10px';
-        desc.style.padding = '20px';
-        desc.style.borderRadius = '10px';
-
-        const settingsContainer = contentEl.createDiv('settings-container');
-
-        new Setting(settingsContainer)
-            .setName('Select format to convert images to')
-            .setDesc(`"Same as original" - will keep original file format.`)
-            .addDropdown(dropdown =>
-                dropdown
-                    .addOptions({ disabled: 'Same as original', webp: 'WebP', jpg: 'JPG', png: 'PNG' })
-                    .setValue(this.plugin.settings.ProcessCurrentNoteconvertTo)
-                    .onChange(async value => {
-                        this.plugin.settings.ProcessCurrentNoteconvertTo = value;
-                        await this.plugin.saveSettings();
-                    })
-            );
-
-        new Setting(settingsContainer)
-            .setName('Quality')
-            .setDesc('0 - low quality, 99 - high quality, 100 - no compression; 75 - recommended')
-            .addText(text =>
-                text
-                    .setPlaceholder('Enter quality (0-100)')
-                    .setValue((this.plugin.settings.ProcessCurrentNotequality * 100).toString())
-                    .onChange(async value => {
-                        const quality = parseInt(value);
-                        if (/^\d+$/.test(value) && quality >= 0 && quality <= 100) {
-                            this.plugin.settings.ProcessCurrentNotequality = quality / 100;
-                            await this.plugin.saveSettings();
-                        }
-                    })
-            );
-
-        new Setting(settingsContainer)
-            .setName('Image resize mode')
-            .setDesc('Select the mode to use when resizing the image. Resizing an image will further reduce file-size, but it will resize your actual file, which means that the original file will be modified, and the changes will be permanent.')
-            .addDropdown(dropdown =>
-                dropdown
-                    .addOptions({ 
-                        None: 'None', 
-                        Fit: 'Fit', 
-                        Fill: 'Fill', 
-                        LongestEdge: 'Longest Edge', 
-                        ShortestEdge: 'Shortest Edge', 
-                        Width: 'Width', 
-                        Height: 'Height' 
-                    })
-                    .setValue(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)
-                    .onChange(async value => {
-                        this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode = value;
-                        await this.plugin.saveSettings();
-                        this.updateResizeInputVisibility(value);
-                    })
-            );
-			
-        // Initially create and show/hide resize inputs based on current mode
-        this.updateResizeInputVisibility(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode);
-
-        this.submitButton = new ButtonComponent(contentEl)
-            .setButtonText('Submit')
-            .onClick(() => {
-                this.close();
-                const currentNote = this.app.workspace.getActiveFile();
-                if (currentNote) {
-                    this.plugin.processCurrentNoteImages(currentNote);
-                } else {
-                    new Notice('Error: No active note found.');
-                }
-            });
-    }
+	onClose() {
+		const { contentEl } = this;
+		contentEl.empty();
+	}
 }
