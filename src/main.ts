@@ -1,5 +1,5 @@
 // working 2
-import { App, MarkdownView, Notice, Plugin, TFile, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
+import { App, View, MarkdownView, Notice, Plugin, TFile, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
 // Browsers use the MIME type, not the file extension this module allows 
 // us to be more precise when default MIME checking options fail
 import mime from "./mime.min.js"
@@ -28,6 +28,15 @@ declare module 'obsidian' {
     }
 }
 
+interface ObsidianApp extends App {
+    plugins: {
+        plugins: {
+            [key: string]: any;
+        };
+    };
+}
+
+
 interface Listener {
 	(this: Document, ev: Event): void;
 }
@@ -41,7 +50,7 @@ interface QueueItem {
     processed: boolean;    // Track processing status
 	originalName?: string; // Track original file name, which prevents the same file from being processed multiple times
 	originalPath?: string;  // Track the original file path
-	newPath?: string;
+	// newPath?: string;
 	isMobileAttachment?: boolean;
 }
 
@@ -72,6 +81,7 @@ interface ImageConvertSettings {
 	convertToPNG: boolean;
 	convertTo: string;
 	quality: number;
+	allowLargerFiles: boolean;
 
 	baseTimeout: number;
 	timeoutPerMB: number;
@@ -169,6 +179,7 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	convertToPNG: false,
 	convertTo: 'webp',
 	quality: 0.75,
+	allowLargerFiles: true,
 
 	baseTimeout: 20000,
 	timeoutPerMB: 1000,
@@ -239,11 +250,13 @@ export default class ImageConvertPlugin extends Plugin {
 	settings: ImageConvertSettings;
 	widthSide: number | null = null;
 	storedImageName: string | null = null; // get imagename for comparison
-	
-	// Declare the properties
-	pasteListener: (event: ClipboardEvent) => void;
-	dropListener: (event: DragEvent) => void;
-	mouseOverHandler: (event: MouseEvent) => void;
+	private lastProcessedTime = 0;
+
+	private rafId: number | null = null;
+	private handleDragOver = (e: DragEvent) => {
+		e.preventDefault();
+		e.stopPropagation();
+	};
 
 	// Queue
 	private fileHashes = new Set<string>();
@@ -290,544 +303,97 @@ export default class ImageConvertPlugin extends Plugin {
 	// Escape key to stop conversion
 	private isKillSwitchActive = false;
 
+
 	async onload() {
+		this.lastProcessedTime = 0;
+		// Load settings first
 		await this.loadSettings();
 		this.addSettingTab(new ImageConvertTab(this.app, this));
 
-		// Escape key to stop conversion
-		this.registerDomEvent(document, 'keydown', (evt: KeyboardEvent) => {
-			if (evt.key === 'Escape' && this.isProcessingQueue) {  // Only activate ESCAPE if actually processing
-				this.activateKillSwitch();
-			}
-		});
-		// Create progress container
-        this.progressEl = document.body.createDiv('image-converter-progress');
-        this.progressEl.style.display = 'none';
-
-		// Add evenet listeners on paste and drop to prevent filerenaming during `sync` or `git pull`
-		// This allows us to check if  file was created as a result of a user action (like dropping 
-		// or pasting an image into a note) rather than a git pull action.
-		// true when a user action is detected and false otherwise. 
-		// let userAction = false;
-		// set to true, then reset back to `false` after 100ms. This way, 'create' event handler should
-		// get triggered only if its an image and if image was created within 100ms of a 'paste/drop' event
-		// also if pasting, check if it is an External Link and wether to apply '| size' syntax to the link
-		this.pasteListener = (event: ClipboardEvent) => {
-			if (this.isConversionPaused) return; // check if paused
-
-			this.userAction = true;
-			this.batchStarted = true;
-		
-			// Clear previous batch hashes
-			this.fileHashes.clear();
-		
-			// Reset statistics
-			this.totalSizeBeforeBytes = 0;
-			this.totalSizeAfterBytes = 0;
-			this.processedFiles = [];
-		
-			// Generate new batch ID
-			this.batchId = Date.now().toString();
-		
-			// Analyze clipboard items
-			const items = event.clipboardData?.items;
-			if (!items) return;
-		
-			// Get image items and their details
-			const imageItems = Array.from(items)
-				.filter(item => item.kind === 'file' && item.type.startsWith('image/'))
-				.map(item => {
-					const file = item.getAsFile();
-					return {
-						name: file?.name || 'clipboard-image',
-						size: file?.size || 0,
-						type: item.type
-					};
-				});
-			
-			// Calculate adaptive timeout based on files
-			const calculateTimeout = (files: typeof imageItems) => {
-				const BASE_TIMEOUT = 10000;  // 10 seconds base
-				const SIZE_FACTOR = 1000;    // 1 second per MB
-		
-				let timeout = BASE_TIMEOUT;
-				
-				files.forEach(file => {
-					const sizeInMB = file.size / (1024 * 1024);
-					const fileTypeMultiplier = 
-						file.type === 'image/heic' ? 3 :
-						file.type === 'image/tiff' ? 2 :
-						file.type === 'image/png' ? 1.5 :
-						1;
-					
-					timeout += (sizeInMB * SIZE_FACTOR * fileTypeMultiplier);
-				});
-		
-				return Math.min(Math.max(timeout, 10000), 300000);
-			};
-		
-			const timeout = calculateTimeout(imageItems);
-		
-			// Initialize dropInfo for paste operation
-			this.dropInfo = {
-				totalExpectedFiles: imageItems.length,
-				totalProcessedFiles: 0,
-				batchId: this.batchId,
-				files: imageItems,
-				timeoutId: setTimeout(() => {
-					if (this.dropInfo?.batchId === this.batchId) {
-						const incompleteBatch = this.fileQueue.length > 0;
-						if (incompleteBatch) {
-							this.dropInfo.timeoutId = setTimeout(() => {
-								this.userAction = false;
-								this.batchStarted = false;
-								this.dropInfo = null;
-							}, calculateTimeout(this.dropInfo.files.slice(this.dropInfo.totalProcessedFiles)));
-						} else {
-							this.userAction = false;
-							this.batchStarted = false;
-							this.dropInfo = null;
-						}
-					}
-				}, timeout)
-			};
-		
-			if (this.settings.showProgress) {
-				this.updateProgressUI(0, imageItems.length, 'Starting processing...');
-			}
-		
-			// Handle external link resizing if needed
-			/* ----------------------------------------------------------------------------*/
-			// Get the clipboard data as HTML and parse it as Markdown LINK
-			const clipboardHTML = event.clipboardData?.getData('text/html') || '';
-			const parser = new DOMParser();
-			const doc = parser.parseFromString(clipboardHTML, 'text/html');
-			const img = doc.querySelector('img');
-
-			let markdownImagefromClipboard = '';
-			if (img) {
-				const altText = img.alt;
-				const src = img.src;
-				markdownImagefromClipboard = `![${altText}](${src})`;
-			}
-
-			// CLEAN external link and Apply custom size on external links: e.g.: | 100
-			// Check if the clipboard data is an external link
-			const linkPattern = /!\[(.*?)\]\((.*?)\)/;
-			if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" || this.settings.nondestructive_resizeMode === "fitImage") {
-				if (linkPattern.test(markdownImagefromClipboard)) {
-					// Handle the external link
-					const match = markdownImagefromClipboard.match(linkPattern);
-					if (match) {
-						let altText = match[1];
-						const currentLink = match[2];
-						const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-						if (activeView) {
-							const editor = activeView.editor;
-							let imageSizeValue;
-							if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize") {
-								imageSizeValue = this.settings.nondestructive_resizeMode_customSize;
-							} else if (this.settings.nondestructive_resizeMode === "fitImage") {
-								imageSizeValue = this.settings.nondestructive_resizeMode_fitImage;
-							}
-							altText = altText.replace(/\|\d+(\|\d+)?/g, ''); // remove any sizing info from alt text
-							const newMarkdown = `![${altText}|${imageSizeValue}](${currentLink})`;
-							const lineNumber = editor.getCursor().line;
-							const lineContent = editor.getLine(lineNumber);
-
-							// Preserve existing elements e.g. order/unordered list, comment, code
-							// find the start and end position of the image link in the line
-							const startPos = lineContent.indexOf(`![${altText}`);
-							const endPos = lineContent.indexOf(')', startPos) + 1;
-
-							// update the size value in the image's markdown link
-							if (startPos !== -1 && endPos !== -1) {
-								editor.replaceRange(newMarkdown, { line: lineNumber, ch: startPos }, { line: lineNumber, ch: endPos });
-							}
-						}
-					}
-				}
-			}
-
-			/* ----------------------------------------------------------------------------*/
-			/* ----------------------------------------------------------------------------*/
-		};
-
-		this.dropListener = (event: DragEvent) => {
-			if (this.isConversionPaused) return; // check if paused
-			this.userAction = true;
-			this.batchStarted = true;
-
-			// Clear previous batch hashes
-			this.fileHashes.clear();
-
-			// Reset counters
-			this.totalSizeBeforeBytes = 0;
-			this.totalSizeAfterBytes = 0;
-			this.processedFiles = [];
-			
-			// Clear any existing timeout
-			if (this.dropInfo?.timeoutId) {
-				clearTimeout(this.dropInfo.timeoutId);
-			}
-		
-			this.batchId = Date.now().toString();
-		
-			// Enhanced file analysis
-			let imageFiles: Array<{name: string; size: number; type: string}> = [];
-			if (event.dataTransfer?.files) {
-				imageFiles = Array.from(event.dataTransfer.files)
-					.map(file => {
-						const mimeType = mime.getType(file.name) || file.type;
-						return {
-							name: file.name,
-							size: file.size,
-							type: mimeType
-						};
-					});
-			}
-		
-			// Calculate adaptive timeout based on file types and sizes
-			const calculateTimeout = (files: Array<{ name: string; size: number; type: string }>) => {
-				const BASE_TIMEOUT = 10000;  // 10 seconds base
-				const SIZE_FACTOR = 1000;    // 1 second per MB
-				
-				let timeout = BASE_TIMEOUT;
-			
-				files.forEach(file => {
-					// Get the MIME type using mime package if available
-					const mimeType = mime.getType(file.name) || file.type;
-					
-					// Calculate multiplier based on MIME type
-					const fileTypeMultiplier = 
-						mimeType === 'image/heic' ? 3 :  // HEIC takes longer
-						mimeType === 'image/tiff' ? 2 :  // TIFF takes longer
-						mimeType === 'image/png' ? 1.5 : // PNG takes a bit longer
-						1;  // Default multiplier for other formats
-					
-					// Add to the base timeout
-					const sizeInMB = file.size / (1024 * 1024);
-					timeout += (sizeInMB * SIZE_FACTOR * fileTypeMultiplier);
-				});
-			
-				return Math.min(Math.max(timeout, 10000), 300000); // Between 10s and 5min
-			};
-			
-		
-			const timeout = calculateTimeout(imageFiles);
-		
-			// Initialize new dropInfo
-			this.dropInfo = {
-				totalExpectedFiles: imageFiles.length,
-				totalProcessedFiles: 0,
-				batchId: this.batchId,
-				files: imageFiles,
-				timeoutId: setTimeout(() => {
-					if (this.dropInfo?.batchId === this.batchId) {
-						// Instead of resetting, check if processing is still ongoing
-						const incompleteBatch = this.fileQueue.length > 0;
-						if (incompleteBatch) {
-							// Extend timeout if files are still being processed
-							this.dropInfo.timeoutId = setTimeout(() => {
-								this.userAction = false;
-								this.batchStarted = false;
-								this.dropInfo = null;
-							}, calculateTimeout(this.dropInfo.files.slice(this.dropInfo.totalProcessedFiles)));
-						} else {
-							this.userAction = false;
-							this.batchStarted = false;
-							this.dropInfo = null;
-						}
-					}
-				}, timeout)
-			};
-		
-			// Handle external link resizing if needed
-			/* ----------------------------------------------------------------------------*/
-			// Get the clipboard data as HTML and parse it as Markdown LINK
-			if (event.dataTransfer) {
-				// Try HTML first as it preserves more formatting
-				const htmlData = event.dataTransfer.getData('text/html');
-				
-				let markdownImageFromDrop = '';
-				
-				if (htmlData) {
-					const parser = new DOMParser();
-					const doc = parser.parseFromString(htmlData, 'text/html');
-					const img = doc.querySelector('img');
-					
-					if (img) {
-						const altText = img.alt;
-						const src = img.src;
-						markdownImageFromDrop = `![${altText}](${src})`;
-					}
-				}
-
-				if (markdownImageFromDrop && 
-					(this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" || 
-					this.settings.nondestructive_resizeMode === "fitImage")) {
-					
-					const linkPattern = /!\[(.*?)\]\((.*?)\)/;
-					const match = markdownImageFromDrop.match(linkPattern);
-					
-					if (match) {
-						let altText = match[1];
-						const currentLink = match[2];
-						const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-						
-						if (activeView) {
-							const editor = activeView.editor;
-							let imageSizeValue;
-							
-							if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize") {
-								imageSizeValue = this.settings.nondestructive_resizeMode_customSize;
-							} else if (this.settings.nondestructive_resizeMode === "fitImage") {
-								imageSizeValue = this.settings.nondestructive_resizeMode_fitImage;
-							}
-							
-							altText = altText.replace(/\|\d+(\|\d+)?/g, '');
-							const newMarkdown = `![${altText}|${imageSizeValue}](${currentLink})`;
-							
-							const cursor = editor.getCursor();
-							const lineContent = editor.getLine(cursor.line);
-							
-							const startPos = lineContent.indexOf(`![${altText}`);
-							const endPos = lineContent.indexOf(')', startPos) + 1;
-							
-							if (startPos !== -1 && endPos !== -1) {
-								editor.replaceRange(
-									newMarkdown,
-									{ line: cursor.line, ch: startPos },
-									{ line: cursor.line, ch: endPos }
-								);
-							}
-						}
-					}
-				}
-			}
-			/* ----------------------------------------------------------------------------*/
-			/* ----------------------------------------------------------------------------*/
-
-			
-			if (this.settings.showProgress) {
-				this.updateProgressUI(0, imageFiles.length, 'Starting processing...');
-			}
-		};
-
-		// Wait for layout to be ready
+		// Wait for layout to be ready before registering events
 		this.app.workspace.onLayoutReady(() => {
-			// Register listeners for all supported view types
-			const supportedViewTypes = ['markdown', 'canvas', 'excalidraw'];
-			supportedViewTypes.forEach(viewType => {
-				const leaves = this.app.workspace.getLeavesOfType(viewType);
-				leaves.forEach(leaf => {
-					const doc = leaf.view.containerEl.ownerDocument;
-					doc.addEventListener("paste", this.pasteListener);
-					doc.addEventListener('drop', this.dropListener as EventListener);
-				});
-			});
+			// Initialize UI elements
+			this.progressEl = document.body.createDiv('image-converter-progress');
+			this.progressEl.style.display = 'none';
+		
+			// Register commands
+			this.registerCommands();
+			
+			
+			// Register all event handlers
+			this.registerEventHandlers();
 	
-			// Initialize drag resize functionality
+			// Initialize UI features
 			this.initializeDragResize();
 			this.registerScrollWheelResize();
 			this.scrollwheelresize_registerMouseoverHandler();
-
-			// Register the create event handler
-			this.registerEvent(this.app.vault.on('create', async (file: TFile) => {
-				// Check if conversion is paused first
-				if (this.isConversionPaused) return;
-				// Check if we're on mobile
-				const isMobile = Platform.isMobile;
-            
-				// For mobile, we don't need to check userAction
-				if (isMobile) {
-					if (!(file instanceof TFile) || !isImage(file)) return;
-					
-					// Set batch parameters for single file processing
-					this.currentBatchTotal = 1;
-					this.batchStarted = true;
-					this.userAction = true; // Force userAction to true for mobile
 	
-					// Add to queue with mobile-specific context
-					this.fileQueue.push({ 
-						file,
-						addedAt: Date.now(),
-						viewType: 'markdown', // Mobile attachments are typically in markdown
-						originalName: file.name,
-						originalPath: file.path,
-						processed: false,
-						isMobileAttachment: true
-					});
-					
-					await this.processQueue();
-					
-					// Reset state after processing
-					setTimeout(() => {
-						this.userAction = false;
-						this.batchStarted = false;
-					}, 1000);
-				} else {
-					if (!(file instanceof TFile) || !isImage(file) || !this.userAction) return;
-		
-					// Generate hash first
-					const sourceHash = await this.generateSourceHash(file);
-
-					// If we've seen this hash before, check user settings
-					if (this.fileHashes.has(sourceHash)) {
-						// console.log('Duplicate file content detected:', file.name);
-
-						// Check the user setting for duplicate handling
-						const duplicateHandling = this.settings.manage_duplicate_filename;
-
-						if (duplicateHandling === "duplicate_replace") {
-							// Log and continue processing, treating it as a new entry
-							// console.log('Replacing the existing file:', file.name);
-							// No need to skip, just proceed
-						} else if (duplicateHandling === "duplicate_rename") {
-							// Log and rename the file
-							// console.log('Renaming the existing file:', file.name);
-							await this.renameFile1(file); // Call a method to rename the file
-							// Add hash to our set since we're continuing processing
-						} else {
-							// If neither option is selected, you can choose to skip or handle accordingly
-							return;
-						}
-					} else {
-						// Add hash to our set since it's a new file
-						this.fileHashes.add(sourceHash);
-					}
-
-					// Check if this file was already processed based on its full name (basename + extension)
-					const originalNameWithExt = file.name; // This includes both the basename and extension
-					if (this.fileQueue.some(item => item.originalName === originalNameWithExt)) {
-						return;
-					}
-
-					// Get active view type
-					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView)
-						|| this.app.workspace.getLeavesOfType("canvas").find(leaf => leaf.view)?.view
-						|| this.app.workspace.getLeavesOfType("excalidraw").find(leaf => leaf.view)?.view;
-
-					const viewType = activeView?.getViewType();
-					const isValidView = ['markdown', 'canvas', 'excalidraw'].includes(viewType || '');
-
-					if (!isValidView) return;
-
-					// Handle single file drops
-					if (!this.batchStarted) {
-						this.currentBatchTotal = 1;
-					}
-					
-					// Add to queue with minimal necessary information
-					this.fileQueue.push({ 
-						file,
-						addedAt: Date.now(),
-						viewType: viewType as 'markdown' | 'canvas' | 'excalidraw',
-						parentFile: viewType !== 'markdown' ? (activeView as any).file : undefined, // now TFile gets associated with the view where the drop occurred.
-						originalName: originalNameWithExt,
-						originalPath: file.path,
-						processed: false
-					});
-					
-					this.processQueue();
-				}
-			}));
+			// Register for file creation events
+			this.registerFileEvents();
 	
-			// Listen for layout changes to register new leaves
+			// Register for layout changes
 			this.registerEvent(
 				this.app.workspace.on('layout-change', () => {
-					supportedViewTypes.forEach(viewType => {
-						const leaves = this.app.workspace.getLeavesOfType(viewType);
-						leaves.forEach(leaf => {
-							const container = leaf.view.containerEl;
-							if (!container.hasAttribute('data-image-converter-registered')) {
-								container.setAttribute('data-image-converter-registered', 'true');
-								container.ownerDocument.addEventListener("paste", this.pasteListener );
-								container.ownerDocument.addEventListener('drop', this.dropListener as EventListener);
-							}
-						});
-					});
-					// Reinitialize drag resize on layout changes
+					this.registerEventHandlers();
 					this.initializeDragResize();
 				})
 			);
+	
+			// Register context menu
+			this.registerContextMenu();
 		});
-
-		// Context Menu
-		// Add event listener for contextmenu event on image elements
-		this.register(
-			this.onElement(
-				document,
-				'contextmenu',
-				'img',
-				this.onContextMenu.bind(this)
-			)
+	
+		// Register escape key handler
+		this.registerDomEvent(
+			document, 'keydown', (evt: KeyboardEvent) => {
+				if (evt.key === 'Escape' && this.isProcessingQueue) {
+					this.activateKillSwitch();
+				}
+			}
 		);
-
-		// Add a command to process all images in the vault
-		this.addCommand({
-			id: 'process-all-vault-images',
-			name: 'Process all vault images',
-			callback: () => {
-				const modal = new ProcessAllVault(this);
-				modal.open();
-			}
-		});
-
-		// Add a command to process all images in the current note
-		this.addCommand({
-			id: 'process-all-images-current-note',
-			name: 'Process all images in current note',
-			callback: () => {
-				const modal = new ProcessCurrentNote(this);
-				modal.open();
-			}
-		});
-		this.registerEvent(
-			this.app.workspace.on("file-menu", (menu, file) => {
-				menu.addItem((item) => {
-					item
-						.setTitle("Process all images in current note")
-						.setIcon("cog")
-						.onClick(async () => {
-							const modal = new ProcessCurrentNote(this);
-							modal.open();
-						});
-				});
-			})
-		);
-
-		// Add command to open Image Converter settings
-		this.addCommand({
-			id: 'open-image-converter-settings',
-			name: 'Open Image Converter Settings',
-			callback: () => {
-				this.openSettingsTab();
-			}
-		});
-
-		// Add commmand to Pause/Continue image
-		this.addCommand({
-            id: 'toggle-image-conversion',
-            name: 'Toggle Image Conversion (Pause/Resume)',
-            callback: () => {
-                this.toggleConversion();
-            }
-        });
 	}
 
 	async onunload() {
-		// Remove event listeners for all supported view types
+		// Clear all registered events (this will handle the editor-paste and editor-drop events)
+		// Obsidian's Plugin class automatically cleans up events registered with this.registerEvent()
+
+		// Cancel any pending operations
+		this.isKillSwitchActive = true;
+
+		// Remove any remaining DOM event listeners
 		const supportedViewTypes = ['markdown', 'canvas', 'excalidraw'];
 		supportedViewTypes.forEach(viewType => {
 			const leaves = this.app.workspace.getLeavesOfType(viewType);
 			leaves.forEach(leaf => {
-				const doc = leaf.view.containerEl.ownerDocument;
-				doc.removeEventListener("paste", this.pasteListener);
-				doc.removeEventListener("drop", this.dropListener as EventListener);
+				const container = leaf.view.containerEl;
+				if (container.hasAttribute('data-image-converter-registered')) {
+					container.removeAttribute('data-image-converter-registered');
+					// Remove any specific view listeners
+					container.removeEventListener('dragover', this.handleDragOver, true);
+				}
 			});
 		});
+		// Remove workspace-level listeners
+		const workspaceContainer = this.app.workspace.containerEl;
+		workspaceContainer.removeEventListener('paste', this.handlePaste);
+		workspaceContainer.removeEventListener('drop', this.handleDrop);
+		// Clean up any remaining timeouts
+		if (this.dropInfo?.timeoutId) {
+			clearTimeout(this.dropInfo.timeoutId);
+		}
+		if (this.isConversionPaused_statusTimeout) {
+			clearTimeout(this.isConversionPaused_statusTimeout);
+		}
 	
+		// Clean up UI elements
+		if (this.statusBarItemEl) {
+			this.statusBarItemEl.remove();
+		}
+
+		if (this.progressEl) {
+			this.progressEl.remove();
+		}
+
 		// Remove drag resize event listeners
 		document.removeEventListener('mousedown', this.dragResize_handleMouseDown);
 		document.removeEventListener('mousemove', this.dragResize_handleMouseMove);
@@ -835,26 +401,599 @@ export default class ImageConvertPlugin extends Plugin {
 		document.removeEventListener('mouseout', this.dragResize_handleMouseOut);
 	
 		// Remove the resize class from workspace
-		this.app.workspace.containerEl.removeClass('image-resize-enabled');
-	
-		// Your existing cleanup code
+		this.app.workspace.containerEl.removeClass('image-resize-enabled');	
+
+		// Clear all internal states
+		this.dragResize_cleanupResizeAttributes();
 		this.fileQueue = [];
 		this.isProcessingQueue = false;
-		if (this.isConversionPaused_statusTimeout) {
-			clearTimeout(this.isConversionPaused_statusTimeout);
-			this.isConversionPaused_statusTimeout = null;
-		}
-		
-		if (this.statusBarItemEl) {
-			this.statusBarItemEl.remove();
-			this.statusBarItemEl = null;
+		this.dropInfo = null;
+		this.fileHashes.clear();
+		this.processedFiles = [];
+		this.statusBarItemEl = null;
+		this.progressEl = null;
+		this.isConversionPaused_statusTimeout = null;
+
+		this.hideProgressBar();
+		if (this.rafId) {
+			cancelAnimationFrame(this.rafId);
 		}
 		this.dragResize_cleanupResizeAttributes();
-		this.progressEl?.remove();
-		this.hideProgressBar();
-		this.fileQueue = [];
-		this.dropInfo = null;
+		this.app.workspace.containerEl.removeClass('image-resize-enabled');
+		// Wait for any pending operations to complete
+		await new Promise(resolve => setTimeout(resolve, 100));
+
 	}
+
+
+	private activateKillSwitch() {
+		this.isKillSwitchActive = true;
+		this.isProcessingQueue = false;
+		this.userAction = false;
+		this.batchStarted = false;
+		
+		// Clear the file queue
+		this.fileQueue = [];
+		
+		// Clear any existing timeouts
+		if (this.dropInfo?.timeoutId) {
+			clearTimeout(this.dropInfo.timeoutId);
+		}
+		
+		// Reset dropInfo
+		this.dropInfo = null;
+		
+		// Hide progress UI
+		this.hideProgressBar();
+		
+		// Show notice to user
+		new Notice('Image processing cancelled');
+		
+		// Reset kill switch after cleanup
+		setTimeout(() => {
+			this.isKillSwitchActive = false;
+		}, 1000);
+	}
+
+	// Handle the initial drop/paste and put it in a queue
+	/* ------------------------------------------------------------- */
+	private registerEventHandlers() {
+		// Register workspace-level events
+		this.registerEvent(
+			this.app.workspace.on('editor-paste', (evt: ClipboardEvent, editor, view) => {
+				if (this.shouldSkipEvent(evt)) return;
+				this.handlePaste(evt);
+			})
+		);
+	
+		this.registerEvent(
+			this.app.workspace.on('editor-drop', (evt: DragEvent, editor, view) => {
+				if (this.shouldSkipEvent(evt)) return;
+				this.handleDrop(evt);
+			})
+		);
+	
+		// Register direct DOM events for the entire workspace
+		const workspaceContainer = this.app.workspace.containerEl;
+		
+		// Use capture phase to ensure we catch events before they're handled by views
+		workspaceContainer.addEventListener('paste', (evt: ClipboardEvent) => {
+			if (this.shouldSkipEvent(evt)) return;
+			this.handlePaste(evt);
+		}, true); // true enables capture phase
+	
+		workspaceContainer.addEventListener('drop', (evt: DragEvent) => {
+			if (this.shouldSkipEvent(evt)) return;
+			this.handleDrop(evt);
+		}, true); // true enables capture phase
+	
+		// Register for specific view types
+		const supportedViewTypes = ['markdown', 'canvas', 'excalidraw'];
+		supportedViewTypes.forEach(viewType => {
+			const leaves = this.app.workspace.getLeavesOfType(viewType);
+			leaves.forEach(leaf => {
+				const container = leaf.view.containerEl;
+				if (!container.hasAttribute('data-image-converter-registered')) {
+					container.setAttribute('data-image-converter-registered', 'true');
+					
+					// Add view-specific handlers if needed
+					container.addEventListener('dragover', (e: DragEvent) => {
+						e.preventDefault();
+						e.stopPropagation();
+					}, true);
+				}
+			});
+		});
+	}
+	private handlePaste(event: ClipboardEvent) {
+
+		this.userAction = true;
+		this.batchStarted = true;
+	
+		// Clear previous batch hashes
+		this.fileHashes.clear();
+	
+		// Reset statistics
+		this.totalSizeBeforeBytes = 0;
+		this.totalSizeAfterBytes = 0;
+		this.processedFiles = [];
+	
+		// Generate new batch ID
+		this.batchId = Date.now().toString();
+	
+		// Analyze clipboard items
+		const items = event.clipboardData?.items;
+		if (!items) return;
+	
+		// Get image items and their details
+		const imageItems = Array.from(items)
+			.filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+			.map(item => {
+				const file = item.getAsFile();
+				return {
+					name: file?.name || 'clipboard-image',
+					size: file?.size || 0,
+					type: item.type
+				};
+			});
+		
+		// Calculate adaptive timeout based on files
+		const calculateTimeout = (files: typeof imageItems) => {
+			const BASE_TIMEOUT = 10000;  // 10 seconds base
+			const SIZE_FACTOR = 1000;    // 1 second per MB
+	
+			let timeout = BASE_TIMEOUT;
+			
+			files.forEach(file => {
+				const sizeInMB = file.size / (1024 * 1024);
+				const fileTypeMultiplier = 
+					file.type === 'image/heic' ? 3 :
+					file.type === 'image/tiff' ? 2 :
+					file.type === 'image/png' ? 1.5 :
+					1;
+				
+				timeout += (sizeInMB * SIZE_FACTOR * fileTypeMultiplier);
+			});
+	
+			return Math.min(Math.max(timeout, 10000), 300000);
+		};
+	
+		const timeout = calculateTimeout(imageItems);
+	
+		// Initialize dropInfo for paste operation
+		this.dropInfo = {
+			totalExpectedFiles: imageItems.length,
+			totalProcessedFiles: 0,
+			batchId: this.batchId,
+			files: imageItems,
+			timeoutId: setTimeout(() => {
+				if (this.dropInfo?.batchId === this.batchId) {
+					const incompleteBatch = this.fileQueue.length > 0;
+					if (incompleteBatch) {
+						this.dropInfo.timeoutId = setTimeout(() => {
+							this.userAction = false;
+							this.batchStarted = false;
+							this.dropInfo = null;
+						}, calculateTimeout(this.dropInfo.files.slice(this.dropInfo.totalProcessedFiles)));
+					} else {
+						this.userAction = false;
+						this.batchStarted = false;
+						this.dropInfo = null;
+					}
+				}
+			}, timeout)
+		};
+	
+		if (this.settings.showProgress) {
+			this.updateProgressUI(0, imageItems.length, 'Starting processing...');
+		}
+	
+		// Handle external link resizing if needed
+		/* ----------------------------------------------------------------------------*/
+		// Get the clipboard data as HTML and parse it as Markdown LINK
+		const clipboardHTML = event.clipboardData?.getData('text/html') || '';
+		const parser = new DOMParser();
+		const doc = parser.parseFromString(clipboardHTML, 'text/html');
+		const img = doc.querySelector('img');
+
+		let markdownImagefromClipboard = '';
+		if (img) {
+			const altText = img.alt;
+			const src = img.src;
+			markdownImagefromClipboard = `![${altText}](${src})`;
+		}
+
+		// CLEAN external link and Apply custom size on external links: e.g.: | 100
+		// Check if the clipboard data is an external link
+		const linkPattern = /!\[(.*?)\]\((.*?)\)/;
+		if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" || this.settings.nondestructive_resizeMode === "fitImage") {
+			if (linkPattern.test(markdownImagefromClipboard)) {
+				// Handle the external link
+				const match = markdownImagefromClipboard.match(linkPattern);
+				if (match) {
+					let altText = match[1];
+					const currentLink = match[2];
+					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+					if (activeView) {
+						const editor = activeView.editor;
+						let imageSizeValue;
+						if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize") {
+							imageSizeValue = this.settings.nondestructive_resizeMode_customSize;
+						} else if (this.settings.nondestructive_resizeMode === "fitImage") {
+							imageSizeValue = this.settings.nondestructive_resizeMode_fitImage;
+						}
+						altText = altText.replace(/\|\d+(\|\d+)?/g, ''); // remove any sizing info from alt text
+						const newMarkdown = `![${altText}|${imageSizeValue}](${currentLink})`;
+						const lineNumber = editor.getCursor().line;
+						const lineContent = editor.getLine(lineNumber);
+
+						// Preserve existing elements e.g. order/unordered list, comment, code
+						// find the start and end position of the image link in the line
+						const startPos = lineContent.indexOf(`![${altText}`);
+						const endPos = lineContent.indexOf(')', startPos) + 1;
+
+						// update the size value in the image's markdown link
+						if (startPos !== -1 && endPos !== -1) {
+							editor.replaceRange(newMarkdown, { line: lineNumber, ch: startPos }, { line: lineNumber, ch: endPos });
+						}
+					}
+				}
+			}
+		}
+
+		/* ----------------------------------------------------------------------------*/
+		/* ----------------------------------------------------------------------------*/
+	}
+	private handleDrop(event: DragEvent) {
+
+		this.userAction = true;
+		this.batchStarted = true;
+
+		// Clear previous batch hashes
+		this.fileHashes.clear();
+
+		// Reset counters
+		this.totalSizeBeforeBytes = 0;
+		this.totalSizeAfterBytes = 0;
+		this.processedFiles = [];
+		
+		// Clear any existing timeout
+		if (this.dropInfo?.timeoutId) {
+			clearTimeout(this.dropInfo.timeoutId);
+		}
+	
+		this.batchId = Date.now().toString();
+	
+		// Enhanced file analysis
+		let imageFiles: Array<{name: string; size: number; type: string}> = [];
+		if (event.dataTransfer?.files) {
+			imageFiles = Array.from(event.dataTransfer.files)
+				.map(file => {
+					const mimeType = mime.getType(file.name) || file.type;
+					return {
+						name: file.name,
+						size: file.size,
+						type: mimeType
+					};
+				});
+		}
+	
+		// Calculate adaptive timeout based on file types and sizes
+		const calculateTimeout = (files: Array<{ name: string; size: number; type: string }>) => {
+			const BASE_TIMEOUT = 10000;  // 10 seconds base
+			const SIZE_FACTOR = 1000;    // 1 second per MB
+			
+			let timeout = BASE_TIMEOUT;
+		
+			files.forEach(file => {
+				// Get the MIME type using mime package if available
+				const mimeType = mime.getType(file.name) || file.type;
+				
+				// Calculate multiplier based on MIME type
+				const fileTypeMultiplier = 
+					mimeType === 'image/heic' ? 3 :  // HEIC takes longer
+					mimeType === 'image/tiff' ? 2 :  // TIFF takes longer
+					mimeType === 'image/png' ? 1.5 : // PNG takes a bit longer
+					1;  // Default multiplier for other formats
+				
+				// Add to the base timeout
+				const sizeInMB = file.size / (1024 * 1024);
+				timeout += (sizeInMB * SIZE_FACTOR * fileTypeMultiplier);
+			});
+		
+			return Math.min(Math.max(timeout, 10000), 300000); // Between 10s and 5min
+		};
+		
+	
+		const timeout = calculateTimeout(imageFiles);
+	
+		// Initialize new dropInfo
+		this.dropInfo = {
+			totalExpectedFiles: imageFiles.length,
+			totalProcessedFiles: 0,
+			batchId: this.batchId,
+			files: imageFiles,
+			timeoutId: setTimeout(() => {
+				if (this.dropInfo?.batchId === this.batchId) {
+					// Instead of resetting, check if processing is still ongoing
+					const incompleteBatch = this.fileQueue.length > 0;
+					if (incompleteBatch) {
+						// Extend timeout if files are still being processed
+						this.dropInfo.timeoutId = setTimeout(() => {
+							this.userAction = false;
+							this.batchStarted = false;
+							this.dropInfo = null;
+						}, calculateTimeout(this.dropInfo.files.slice(this.dropInfo.totalProcessedFiles)));
+					} else {
+						this.userAction = false;
+						this.batchStarted = false;
+						this.dropInfo = null;
+					}
+				}
+			}, timeout)
+		};
+	
+		// Handle external link resizing if needed
+		/* ----------------------------------------------------------------------------*/
+		// Get the clipboard data as HTML and parse it as Markdown LINK
+		if (event.dataTransfer) {
+			// Try HTML first as it preserves more formatting
+			const htmlData = event.dataTransfer.getData('text/html');
+			
+			let markdownImageFromDrop = '';
+			
+			if (htmlData) {
+				const parser = new DOMParser();
+				const doc = parser.parseFromString(htmlData, 'text/html');
+				const img = doc.querySelector('img');
+				
+				if (img) {
+					const altText = img.alt;
+					const src = img.src;
+					markdownImageFromDrop = `![${altText}](${src})`;
+				}
+			}
+
+			if (markdownImageFromDrop && 
+				(this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" || 
+				this.settings.nondestructive_resizeMode === "fitImage")) {
+				
+				const linkPattern = /!\[(.*?)\]\((.*?)\)/;
+				const match = markdownImageFromDrop.match(linkPattern);
+				
+				if (match) {
+					let altText = match[1];
+					const currentLink = match[2];
+					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+					
+					if (activeView) {
+						const editor = activeView.editor;
+						let imageSizeValue;
+						
+						if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize") {
+							imageSizeValue = this.settings.nondestructive_resizeMode_customSize;
+						} else if (this.settings.nondestructive_resizeMode === "fitImage") {
+							imageSizeValue = this.settings.nondestructive_resizeMode_fitImage;
+						}
+						
+						altText = altText.replace(/\|\d+(\|\d+)?/g, '');
+						const newMarkdown = `![${altText}|${imageSizeValue}](${currentLink})`;
+						
+						const cursor = editor.getCursor();
+						const lineContent = editor.getLine(cursor.line);
+						
+						const startPos = lineContent.indexOf(`![${altText}`);
+						const endPos = lineContent.indexOf(')', startPos) + 1;
+						
+						if (startPos !== -1 && endPos !== -1) {
+							editor.replaceRange(
+								newMarkdown,
+								{ line: cursor.line, ch: startPos },
+								{ line: cursor.line, ch: endPos }
+							);
+						}
+					}
+				}
+			}
+		}
+		/* ----------------------------------------------------------------------------*/
+		/* ----------------------------------------------------------------------------*/
+
+		
+		if (this.settings.showProgress) {
+			this.updateProgressUI(0, imageFiles.length, 'Starting processing...');
+		}
+	}
+	private shouldSkipEvent(evt: ClipboardEvent | DragEvent): boolean {
+
+		if (this.isConversionPaused || evt.defaultPrevented) {
+			return true;
+		}
+	
+		const target = evt.target as HTMLElement;
+	
+		// Find the closest workspace leaf content
+		const closestView = target.closest('.workspace-leaf-content');
+	
+		if (!closestView) {
+			return true;
+		}
+	
+		const viewType = closestView.getAttribute('data-type');
+	
+		const shouldSkip = !['markdown', 'canvas', 'excalidraw'].includes(viewType || '');
+	
+		return shouldSkip;
+	}
+	private registerFileEvents() {
+		this.registerEvent(
+			this.app.vault.on('create', async (file: TFile) => {
+				if (await this.isExternalOperation(file)) return;
+				if (this.isConversionPaused) return;
+	
+				const isMobile = Platform.isMobile;
+				if (!(file instanceof TFile) || !isImage(file)) return;
+	
+				// For multiple files, we want to maintain the batch state
+				if (!this.batchStarted) {
+					this.batchStarted = true;
+					this.userAction = true;
+				}
+				
+				if (isMobile) {
+					await this.handleMobileFileCreation(file);
+				} else {
+					await this.handleDesktopFileCreation(file);
+				}
+			})
+		);
+	}
+	private async isExternalOperation(file: TFile): Promise<boolean> {
+		const app = this.app as ObsidianApp;
+		
+		// Check if Obsidian window is not focused
+		if (!document.hasFocus()) {
+			return true;
+		}
+	
+		// Check if this is a file system operation without user interaction
+		if (!this.userAction) {
+			return true;
+		}
+		
+		// Check file path indicators for sync operations
+		const syncPatterns = [
+			'.sync-conflict',
+			'.git',
+			'.remote.',
+			'.sync/',
+			'.obsidian/plugins/remotely-save/',
+			'.obsidian/plugins/syncthing/'
+		];
+		
+		const isSyncPath = syncPatterns.some(pattern => file.path.includes(pattern));
+		
+		// Check sync plugin states
+		const syncPlugins = ['remotely-save', 'syncthing', 'obsidian-git'];
+		const isAnySyncing = syncPlugins.some(pluginId => 
+			app.plugins.plugins[pluginId]?.isSyncing ||
+			app.plugins.plugins[pluginId]?.status === 'syncing'
+		);
+	
+		// Check if file was recently processed to prevent double processing
+		const wasRecentlyProcessed = this.processedFiles.some(
+			processedFile => processedFile.name === file.path
+		);
+		
+		return isSyncPath || isAnySyncing || wasRecentlyProcessed || !this.userAction;
+	}
+	private async handleMobileFileCreation(file: TFile) {
+		// Set batch parameters for single file processing
+		this.currentBatchTotal = 1;
+		this.batchStarted = true;
+		this.userAction = true; // Force userAction to true for mobile
+	
+		// Generate new batch ID
+		this.batchId = Date.now().toString();
+	
+		try {
+			// Add to queue with mobile-specific context
+			this.fileQueue.push({ 
+				file,
+				addedAt: Date.now(),
+				viewType: 'markdown', // Mobile attachments typically in markdown
+				originalName: file.name,
+				originalPath: file.path,
+				processed: false,
+				isMobileAttachment: true
+			});
+			
+			await this.processQueue();
+
+			// Verify processing success
+			const processedFile = await this.app.vault.adapter.stat(file.path);
+			if (!processedFile) {
+				throw new Error('File not found after processing');
+			}
+
+		} catch (error) {
+			console.error('Error processing mobile file:', error);
+			// Only show notice for actual failures, not successful conversions
+			if (!await this.app.vault.adapter.exists(file.path)) {
+				new Notice(`Failed to process mobile file: ${file.name}`);
+			}
+		} finally {
+			// Reset state after processing
+			setTimeout(() => {
+				this.userAction = false;
+				this.batchStarted = false;
+			}, 1000);
+		}
+	}
+	private async handleDesktopFileCreation(file: TFile) {
+		if (!this.userAction) return;
+	
+		try {
+			// Generate hash for duplicate detection
+			const sourceHash = await this.generateSourceHash(file);
+	
+			// Handle duplicates based on settings
+			if (this.fileHashes.has(sourceHash)) {
+				const duplicateHandling = this.settings.manage_duplicate_filename;
+	
+				switch (duplicateHandling) {
+					case "duplicate_replace":
+						// Continue processing, treating it as a new entry
+						break;
+					case "duplicate_rename":
+						await this.renameFile1(file);
+						break;
+					default:
+						// Skip processing if neither option is selected
+						return;
+				}
+			} else {
+				// Add hash to our set since it's a new file
+				this.fileHashes.add(sourceHash);
+			}
+	
+			// Check if this file was already processed
+			const originalNameWithExt = file.name;
+			if (this.fileQueue.some(item => item.originalName === originalNameWithExt)) {
+				return;
+			}
+	
+			// Get active view type and validate
+			const activeView = this.getActiveView();
+			const viewType = activeView?.getViewType();
+			
+			if (!this.isValidViewType(viewType)) return;
+	
+			// Handle single file drops
+			if (!this.batchStarted) {
+				this.currentBatchTotal = 1;
+				this.batchId = Date.now().toString();
+			}
+	
+			// Add to queue with desktop-specific context
+			this.fileQueue.push({ 
+				file,
+				addedAt: Date.now(),
+				viewType: viewType as 'markdown' | 'canvas' | 'excalidraw',
+				parentFile: viewType !== 'markdown' ? (activeView as any).file : undefined,
+				originalName: originalNameWithExt,
+				originalPath: file.path,
+				processed: false
+			});
+	
+			await this.processQueue();
+	
+		} catch (error) {
+			console.error('Error processing desktop file:', error);
+			new Notice(`Failed to process file: ${file.name}`);
+		}
+	}
+
 
 	// Queue
 	/////////////////////////////////
@@ -1127,7 +1266,7 @@ export default class ImageConvertPlugin extends Plugin {
         if (this.processedFiles.length === 0) return;  // Don't show empty summary
 
         const totalSaved = this.totalSizeBeforeBytes - this.totalSizeAfterBytes;
-        const overallRatio = ((totalSaved / this.totalSizeBeforeBytes) * 100).toFixed(1);
+        const overallRatio = ((-totalSaved / this.totalSizeBeforeBytes) * 100).toFixed(1);
         
         let summaryText = `📊 Image Converter Summary\n`;
         summaryText += `Files Processed: ${this.processedFiles.length}\n`;
@@ -1145,643 +1284,8 @@ export default class ImageConvertPlugin extends Plugin {
 
         new Notice(summaryText, 10000);
     }
-
-
 	/* ------------------------------------------------------------- */
 	/* ------------------------------------------------------------- */
-
-
-	onElement(
-		el: Document,
-		event: keyof HTMLElementEventMap,
-		selector: string,
-		listener: Listener,
-		options?: { capture?: boolean; }
-	) {
-		el.on(event, selector, listener, options);
-		return () => el.off(event, selector, listener, options);
-	}
-
-	onContextMenu(event: MouseEvent) {
-		// Prevent default context menu from being displayed
-		// event.preventDefault();
-		// If the 'Disable right-click context menu' setting is enabled, return immediately
-		if (!this.settings.rightClickContextMenu) {
-			return;
-		}
-		const target = (event.target as Element);
-
-		const img = event.target as HTMLImageElement;
-		const rect = img.getBoundingClientRect();
-		const x = event.clientX - rect.left;
-		const y = event.clientY - rect.top;
-		const edgeSize = 30; // size of the edge in pixels
-
-		// Only show the context menu if the user right-clicks within the center of the image
-		if ((x > edgeSize && x < rect.width - edgeSize) && (y > edgeSize && y < rect.height - edgeSize)) {
-			// Create new Menu object
-			const menu = new Menu();
-
-			// Add option to copy image to clipboard
-			menu.addItem((item: MenuItem) =>
-				item
-					.setTitle('Copy Image')
-					.setIcon('copy')
-					.onClick(() => {
-						// Copy original image data to clipboard
-						const img = new Image();
-						img.crossOrigin = 'anonymous'; // Set crossOrigin to 'anonymous' for copying external images
-						const targetImg = event.target as HTMLImageElement; // Cast target to HTMLImageElement
-						img.onload = async function () {
-							const canvas = document.createElement('canvas');
-							canvas.width = img.naturalWidth;
-							canvas.height = img.naturalHeight;
-							const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
-							ctx.drawImage(img, 0, 0);
-							const dataURL = canvas.toDataURL();
-							const response = await fetch(dataURL);
-							const blob = await response.blob();
-							const item = new ClipboardItem({ [blob.type]: blob });
-							await navigator.clipboard.write([item]);
-							new Notice('Image copied to clipboard');
-						};
-						img.src = targetImg.src; // Set src after setting crossOrigin
-					})
-			);
-
-			// Add option to copy Base64 encoded image into clipboard
-			menu.addItem((item: MenuItem) =>
-				item
-					.setTitle('Copy as Base64 encoded image')
-					.setIcon('copy')
-					.onClick(() => {
-						// Copy original image data to clipboard
-						const img = new Image();
-						img.crossOrigin = 'anonymous'; // Set crossOrigin to 'anonymous'
-						const targetImg = event.target as HTMLImageElement; // Cast target to HTMLImageElement
-						img.onload = async function () {
-							const canvas = document.createElement('canvas');
-							canvas.width = img.naturalWidth;
-							canvas.height = img.naturalHeight;
-							const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
-							ctx.drawImage(img, 0, 0);
-							const dataURL = canvas.toDataURL();
-							await navigator.clipboard.writeText('<img src="' + dataURL + '"/>');
-							new Notice('Image copied to clipboard');
-						};
-						img.src = targetImg.src; // Set src after setting crossOrigin
-					})
-			);
-
-
-			// Add option to resize image
-			menu.addItem((item: MenuItem) =>
-				item
-					.setTitle('Resize Image')
-					.setIcon('image-file')
-					.onClick(async () => {
-						// Show resize image modal
-						const modal = new ResizeImageModal(this.app, async (width, height) => {
-							if (width || height) {
-								// Resize image data
-								const img = target as HTMLImageElement;
-								const canvas = document.createElement('canvas');
-								const aspectRatio = img.naturalWidth / img.naturalHeight;
-								if (width && !height) {
-									canvas.width = parseInt(width);
-									canvas.height = canvas.width / aspectRatio;
-								} else if (!width && height) {
-									canvas.height = parseInt(height);
-									canvas.width = canvas.height * aspectRatio;
-								} else {
-									const newWidth = parseInt(width);
-									const newHeight = parseInt(height);
-									const newAspectRatio = newWidth / newHeight;
-									if (newAspectRatio > aspectRatio) {
-										canvas.width = newHeight * aspectRatio;
-										canvas.height = newHeight;
-									} else {
-										canvas.width = newWidth;
-										canvas.height = newWidth / aspectRatio;
-									}
-								}
-								const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
-								ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-								const dataURL = canvas.toDataURL();
-
-								// Replace original image file with resized image data
-								const response = await fetch(dataURL);
-								const blob = await response.blob();
-								const buffer = await blob.arrayBuffer();
-
-								// Get file path from src attribute
-								// Get Vault Name
-								const rootFolder = this.app.vault.getName();
-								const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-								if (activeView) {
-									// Grab full path of an src, it will return full path including Drive letter etc.
-									// thus we need to get rid of anything what is not part of the vault
-									let imagePath = img.getAttribute('src');
-									if (imagePath) {
-										// Find the position of the root folder in the path
-										const rootFolderIndex = imagePath.indexOf(rootFolder);
-
-										// Remove everything before the root folder
-										if (rootFolderIndex !== -1) {
-											imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
-										}
-
-										// Remove the query string
-										imagePath = imagePath.split('?')[0];
-										// Decode percent-encoded characters
-										const decodedPath = decodeURIComponent(imagePath);
-
-										const file = this.app.vault.getAbstractFileByPath(decodedPath);
-										if (file instanceof TFile && isImage(file)) {
-											// Replace the image
-											await this.app.vault.modifyBinary(file, buffer);
-											// Refresh the image
-											if (img.src) {
-												const newSrc = img.src + (img.src.includes('?') ? '&' : '?') + new Date().getTime();
-												img.src = newSrc;
-											}
-										}
-									}
-								}
-							}
-						});
-						modal.open();
-					})
-			);
-
-			// Delete (Image + md link)
-			menu.addItem((item) => {
-				item.setTitle('Delete Image from vault')
-					.setIcon('trash')
-					.onClick(async () => {
-						deleteImageFromVault(event, this.app);
-					});
-			});
-
-			// Show menu at mouse event location
-			menu.showAtPosition({ x: event.pageX, y: event.pageY });
-
-			// Prevent the default context menu from appearing
-			event.preventDefault();
-		}
-
-	}
-
-	private activateKillSwitch() {
-		this.isKillSwitchActive = true;
-		this.isProcessingQueue = false;
-		this.userAction = false;
-		this.batchStarted = false;
-		
-		// Clear the file queue
-		this.fileQueue = [];
-		
-		// Clear any existing timeouts
-		if (this.dropInfo?.timeoutId) {
-			clearTimeout(this.dropInfo.timeoutId);
-		}
-		
-		// Reset dropInfo
-		this.dropInfo = null;
-		
-		// Hide progress UI
-		this.hideProgressBar();
-		
-		// Show notice to user
-		new Notice('Image processing cancelled');
-		
-		// Reset kill switch after cleanup
-		setTimeout(() => {
-			this.isKillSwitchActive = false;
-		}, 1000);
-	}
-
-	/* Drag Resize */
-	/* ------------------------------------------------------------- */
-	private initializeDragResize() {
-		this.registerDomEvent(document, 'mousedown', this.dragResize_handleMouseDown.bind(this));
-		this.registerDomEvent(document, 'mousemove', this.dragResize_handleMouseMove.bind(this));
-		this.registerDomEvent(document, 'mouseup', this.dragResize_handleMouseUp.bind(this));
-		this.registerDomEvent(document, 'mouseout', this.dragResize_handleMouseOut.bind(this));
-	
-		// Add the base CSS class to workspace
-		this.app.workspace.containerEl.addClass('image-resize-enabled');
-	
-		// Also reinitialize on layout changes
-		this.registerEvent(
-			this.app.workspace.on('layout-change', () => {
-				// You might want to remove and reapply the class
-				this.app.workspace.containerEl.removeClass('image-resize-enabled');
-				this.app.workspace.containerEl.addClass('image-resize-enabled');
-			})
-		);
-	}
-
-	private dragResize_isValidTarget(element: HTMLElement): element is HTMLImageElement | HTMLVideoElement {
-		if (!this.settings.resizeByDragging) return false;
-		
-		// Check if we're in reading mode and if it's allowed
-		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (!activeView) return false;
-		
-		if (activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode) {
-			return false;
-		}
-	
-		// Check if element is valid image/video
-		if (!(element instanceof HTMLImageElement || element instanceof HTMLVideoElement)) {
-			return false;
-		}
-	
-		// Check if element is in the active view
-		return activeView.containerEl.contains(element);
-	}
-
-	private dragResize_handleMouseDown(event: MouseEvent) {
-		if (!this.settings.resizeByDragging) return;
-
-		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-		const target = event.target as HTMLElement;
-		// Early return if disabled or in reading mode without permission
-		if (!this.settings.resizeByDragging || 
-			!activeView || 
-			(activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode)) {
-			return;
-		}
-		if (!this.dragResize_isValidTarget(target)) return;
-	
-		const rect = target.getBoundingClientRect();
-		const x = event.clientX - rect.left;
-		const y = event.clientY - rect.top;
-		const edgeSize = 30;
-	
-		if ((x >= rect.width - edgeSize || x <= edgeSize) || 
-			(y >= rect.height - edgeSize || y <= edgeSize)) {
-			
-			event.preventDefault();
-			
-			// Set active resize state
-			target.setAttribute('data-resize-active', 'true');
-			
-			this.resizeState = {
-				isResizing: true,
-				startX: event.clientX,
-				startY: event.clientY,
-				startWidth: target.clientWidth,
-				startHeight: target.clientHeight,
-				element: target
-			};
-		}
-	}
-
-	private dragResize_handleMouseMove(event: MouseEvent) {
-		if (!this.settings.resizeByDragging) return;
-
-		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (!activeView || 
-			(activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode)) {
-			return;
-		}
-
-		const target = event.target as HTMLElement;
-		
-		if (this.resizeState.isResizing && this.resizeState.element) {
-			const { newWidth, newHeight } = this.dragResize_calculateNewDimensions(event);
-			this.dragResize_updateElementSize(newWidth, newHeight);
-			this.dragResize_updateMarkdownContent(newWidth, newHeight);
-		} else if (this.dragResize_isValidTarget(target)) {
-			const rect = target.getBoundingClientRect();
-			const x = event.clientX - rect.left;
-			const y = event.clientY - rect.top;
-			const edgeSize = 30;
-	
-			if ((x >= rect.width - edgeSize || x <= edgeSize) || 
-				(y >= rect.height - edgeSize || y <= edgeSize)) {
-				target.setAttribute('data-resize-edge', 'true');
-			} else {
-				target.removeAttribute('data-resize-edge');
-			}
-		}
-	}
-
-	private dragResize_handleMouseUp() {
-		if (this.resizeState.element) {
-			// Clean up all resize-related attributes
-			this.resizeState.element.removeAttribute('data-resize-edge');
-			this.resizeState.element.removeAttribute('data-resize-active');
-			this.dragResize_updateCursorPosition();
-		}
-	
-		this.resizeState = {
-			isResizing: false,
-			startX: 0,
-			startY: 0,
-			startWidth: 0,
-			startHeight: 0,
-			element: null
-		};
-	}
-
-	private dragResize_handleMouseOut = (event: MouseEvent) => {
-		if (!this.settings.resizeByDragging) return;
-		const target = event.target as HTMLElement;
-		if (this.dragResize_isValidTarget(target) && !this.resizeState.isResizing) {
-			target.removeAttribute('data-resize-edge');
-		}
-	}
-
-    private dragResize_updateElementSize(newWidth: number, newHeight: number) {
-        if (!this.resizeState.element) return;
-
-        if (this.resizeState.element instanceof HTMLImageElement) {
-            this.resizeState.element.style.width = `${newWidth}px`;
-            this.resizeState.element.style.height = `${newHeight}px`;
-        } else if (this.resizeState.element instanceof HTMLVideoElement) {
-            const containerWidth = this.resizeState.element.parentElement?.clientWidth ?? 0;
-            const newWidthPercentage = (newWidth / containerWidth) * 100;
-            this.resizeState.element.style.width = `${newWidthPercentage}%`;
-        }
-    }
-
-    private dragResize_calculateNewDimensions(event: MouseEvent) {
-        const deltaX = event.clientX - this.resizeState.startX;
-        const aspectRatio = this.resizeState.startWidth / this.resizeState.startHeight;
-        
-        const newWidth = Math.max(this.resizeState.startWidth + deltaX, 50);
-        const newHeight = newWidth / aspectRatio;
-
-        return {
-            newWidth: Math.round(newWidth),
-            newHeight: Math.round(newHeight)
-        };
-    }
-
-	private dragResize_updateMarkdownContent(newWidth: number, newHeight: number) {
-		if (!this.resizeState.element) return;
-	
-		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (!activeView) return;
-	
-		// Store the current element being resized
-		const currentElement = this.resizeState.element;
-		const currentImageName = getImageName(currentElement);
-		
-		if (!currentImageName) return;
-	
-		updateImageLink({
-			activeView,
-			element: currentElement,
-			newWidth,
-			newHeight,
-			settings: this.settings
-		});
-	}
-
-	private dragResize_updateCursorPosition() {
-		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (!activeView || !this.resizeState.element) return;
-	
-		const editor = activeView.editor;
-		const cursorPos = editor.getCursor();
-		const lineContent = editor.getLine(cursorPos.line);
-		
-		// Get image name safely
-		const imageName = getImageName(this.resizeState.element);
-		if (!imageName) return;
-	
-		// Ensure we have valid content to work with
-		if (!lineContent.includes(imageName)) return;
-	
-		let newCursorPos;
-		if (this.settings.cursorPosition === 'front') {
-			// Look for both internal and external link syntax
-			const linkStart = Math.max(lineContent.indexOf('![['), lineContent.indexOf('!['));
-			newCursorPos = { line: cursorPos.line, ch: Math.max(linkStart, 0) };
-		} else {
-			// Handle both internal and external link endings
-			const linkEnd = lineContent.indexOf(']]') !== -1 ? 
-				lineContent.indexOf(']]') + 2 : 
-				lineContent.indexOf(')') + 1;
-			newCursorPos = { line: cursorPos.line, ch: Math.min(linkEnd, lineContent.length) };
-		}
-	
-		// Set cursor position immediately without setTimeout
-		editor.setCursor(newCursorPos);
-	}
-	
-	// Add cleanup method to remove any lingering attributes
-	private dragResize_cleanupResizeAttributes() {
-		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (!activeView) return;
-
-		// Clean up any images/videos with resize attributes
-		activeView.containerEl.querySelectorAll('img, video').forEach(element => {
-			element.removeAttribute('data-resize-edge');
-			element.removeAttribute('data-resize-active');
-		});
-	}
-	
-	/* ------------------------------------------------------------- */
-	/* ------------------------------------------------------------- */
-
-
-
-
-	/* Scrolwheel resize*/
-	/* ------------------------------------------------------------- */
-	// Allow resizing with SHIFT + Scrollwheel
-	// Fix a bug which on when hover on external images it would replace 1 image link with another
-	// Sometimes it would replace image1 with image2 because there is no way to find linenumber
-	// for external links. Linenumber gets shown only for internal images.
-	private scrollwheelresize_checkModifierKey(event: WheelEvent): boolean {
-		switch (this.settings.scrollwheelModifier) {
-			case 'Shift':
-				return event.shiftKey;
-			case 'Control':
-				return event.ctrlKey;
-			case 'Alt':
-				return event.altKey;
-			case 'Meta':
-				return event.metaKey;
-			case 'None':
-				return true;
-			default:
-				return false;
-		}
-	}
-
-	private registerScrollWheelResize() {
-		this.register(
-			this.onElement(
-				document,
-				"wheel",
-				"img, video",
-				(event: WheelEvent) => {
-					if (!this.settings.resizeWithScrollwheel) return;
-					
-					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-					if (!activeView) return;
-					// Check if resizing is enabled for Reading Mode
-					if (!activeView || 
-						(activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode)) {
-						return;
-					}
-					const markdownContainer = activeView.containerEl;
-					const target = event.target as HTMLElement;
-					if (!markdownContainer.contains(target)) return;
-	
-					// Check for the configured modifier key
-					if (!this.scrollwheelresize_checkModifierKey(event)) return;
-	
-					try {
-						const img = event.target as HTMLImageElement | HTMLVideoElement;
-						const imageName = getImageName(img);
-	
-                        if (!imageName || imageName !== this.storedImageName) {
-                            return;
-                        }
-	
-						// Prevent default scrolling behavior when using modifier
-						// event.preventDefault();
-	
-						const { newWidth, newHeight, newLeft, newTop } = 
-							resizeImageScrollWheel(event, img);
-						
-						if (img instanceof HTMLImageElement) {
-							img.style.width = `${newWidth}px`;
-							img.style.height = `${newHeight}px`;
-							img.style.left = `${newLeft}px`;
-							img.style.top = `${newTop}px`;
-						} else if (img instanceof HTMLVideoElement) {
-							img.style.width = `${newWidth}%`;
-						}
-	
-						const editor = activeView.editor;
-						updateImageLink({
-							activeView,
-							element: img,
-							newWidth,
-							newHeight,
-							settings: this.settings
-						});
-						
-						// Handle cursor position after update
-						this.scrollwheelresize_updateCursorPosition(editor, imageName);
-	
-					} catch (error) {
-						console.error('An error occurred:', error);
-					}
-				}
-			)
-		);
-	}
-
-	private scrollwheelresize_registerMouseoverHandler() {
-		this.register(
-			this.onElement(
-				document,
-				"mouseover",
-				"img, video",
-				(event: MouseEvent) => {
-					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-					if (!activeView) return;
-					// Check if resizing is enabled for Reading Mode
-					if (!activeView || 
-						(activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode)) {
-						return;
-					}
-					const markdownContainer = activeView.containerEl;
-					const target = event.target as HTMLElement;
-					if (!markdownContainer.contains(target)) return;
-	
-					// Check if the current modifier is pressed
-					const modifierPressed = this.settings.scrollwheelModifier === 'None' ? false :
-						event[`${this.settings.scrollwheelModifier.toLowerCase()}Key` as keyof MouseEvent];
-					
-					if (modifierPressed) return;
-	
-					const img = event.target as HTMLImageElement | HTMLVideoElement;
-					this.storedImageName = getImageName(img);
-				}
-			)
-		);
-	}
-
-    private scrollwheelresize_updateCursorPosition(editor: Editor, imageName: string | null) {
-        if (!imageName) return;  // Early return if imageName is null
-
-        const cursorPos = editor.getCursor();
-        const lineContent = editor.getLine(cursorPos.line);
-        
-        let newCursorPos;
-        if (this.settings.cursorPosition === 'front') {
-            const linkStart = Math.max(lineContent.indexOf('![['), lineContent.indexOf('!['));
-            newCursorPos = { line: cursorPos.line, ch: Math.max(linkStart, 0) };
-        } else {
-            const linkEnd = lineContent.indexOf(']]') !== -1 ? 
-                lineContent.indexOf(']]') + 2 : 
-                lineContent.indexOf(')') + 1;
-            newCursorPos = { line: cursorPos.line, ch: Math.min(linkEnd, lineContent.length) };
-        }
-        editor.setCursor(newCursorPos);
-    }
-
-	/* ------------------------------------------------------------- */
-	/* ------------------------------------------------------------- */
-
-
-
-
-	// Toogle to Pause / Continue image conversion
-	private toggleConversion(): void {
-		this.isConversionPaused = !this.isConversionPaused;
-		
-		// Clear any existing timeout for status bar removal
-		if (this.isConversionPaused_statusTimeout) {
-			clearTimeout(this.isConversionPaused_statusTimeout);
-			this.isConversionPaused_statusTimeout = null;
-		}
-		
-		// Create status bar item if it doesn't exist
-		if (!this.statusBarItemEl) {
-			this.statusBarItemEl = this.addStatusBarItem();
-		}
-		
-		if (this.isConversionPaused) {
-			this.statusBarItemEl.setText('Image Conversion: Paused ⏸️');
-			new Notice('Image conversion paused');
-			// Clear current queue if any
-			this.fileQueue = [];
-			this.isProcessingQueue = false;
-			this.hideProgressBar();
-		} else {
-			this.statusBarItemEl.setText('Image Conversion: Active ▶️');
-			new Notice('Image conversion resumed');
-			// Remove status bar item after 5 seconds
-			this.isConversionPaused_statusTimeout = window.setTimeout(() => {
-				if (this.statusBarItemEl) {
-					this.statusBarItemEl.remove();
-					this.statusBarItemEl = null;
-				}
-			}, 5000);
-		}
-	}
-
-    async openSettingsTab() {
-        const setting = (this.app as any).setting;
-        if (setting) {
-            await setting.open();
-            setting.openTabById(this.manifest.id);
-        } else {
-            new Notice('Unable to open settings. Please check if the settings plugin is enabled.');
-        }
-    }
-
 
 
 	// Work on the file
@@ -1869,12 +1373,77 @@ export default class ImageConvertPlugin extends Plugin {
 			imgBlob = await handleHeicImage(file, binary, this.settings, this.app);
 		}
 	
-		// Process compression if quality is not 100%
-		if (this.settings.quality !== 1) {
+		// Only process if we need to compress or resize
+		if (this.settings.convertTo === 'disabled') {
+			// If format is "Same as original"
+			if (this.settings.quality < 1 || this.needsResize()) {
+				// Process compression/resize while maintaining original format
+				imgBlob = await this.processOriginalFormat(imgBlob, file.extension);
+			}
+		} else {
+			// Convert to specified format
 			imgBlob = await this.convertImageFormat(imgBlob, file.extension);
 		}
-	
+		
 		return imgBlob;
+	}
+
+	private needsResize(): boolean {
+		return this.settings.destructive_resizeMode !== 'None' &&
+			(this.settings.destructive_desiredWidth > 0 ||
+				this.settings.destructive_desiredHeight > 0 ||
+				this.settings.destructive_desiredLongestEdge > 0);
+	}
+
+	private async processOriginalFormat(imgBlob: Blob, extension: string): Promise<Blob> {
+		let buffer: ArrayBuffer;
+		const ext = extension.toLowerCase();
+	
+		switch (ext) {
+			case 'jpg':
+			case 'jpeg':
+				buffer = await convertToJPG(
+					imgBlob,
+					this.settings.quality,
+					this.settings.destructive_resizeMode,
+					this.settings.destructive_desiredWidth,
+					this.settings.destructive_desiredHeight,
+					this.settings.destructive_desiredLongestEdge,
+					this.settings.destructive_enlarge_or_reduce,
+					this.settings.allowLargerFiles
+				);
+				return new Blob([buffer], { type: 'image/jpeg' });
+	
+			case 'png':
+				buffer = await convertToPNG(
+					imgBlob,
+					this.settings.quality,
+					this.settings.destructive_resizeMode,
+					this.settings.destructive_desiredWidth,
+					this.settings.destructive_desiredHeight,
+					this.settings.destructive_desiredLongestEdge,
+					this.settings.destructive_enlarge_or_reduce,
+					this.settings.allowLargerFiles
+				);
+				return new Blob([buffer], { type: 'image/png' });
+	
+			case 'webp':
+				buffer = await convertToWebP(
+					imgBlob,
+					this.settings.quality,
+					this.settings.destructive_resizeMode,
+					this.settings.destructive_desiredWidth,
+					this.settings.destructive_desiredHeight,
+					this.settings.destructive_desiredLongestEdge,
+					this.settings.destructive_enlarge_or_reduce,
+					this.settings.allowLargerFiles
+				);
+				return new Blob([buffer], { type: 'image/webp' });
+	
+			default:
+				// For unsupported formats, return original
+				return imgBlob;
+		}
 	}
 
 	private async convertImageFormat(imgBlob: Blob, originalExtension: string): Promise<Blob> {
@@ -1886,7 +1455,8 @@ export default class ImageConvertPlugin extends Plugin {
 			destructive_desiredWidth: this.settings.destructive_desiredWidth,
 			destructive_desiredHeight: this.settings.destructive_desiredHeight,
 			destructive_desiredLongestEdge: this.settings.destructive_desiredLongestEdge,
-			destructive_enlarge_or_reduce: this.settings.destructive_enlarge_or_reduce
+			destructive_enlarge_or_reduce: this.settings.destructive_enlarge_or_reduce,
+			allowLargerFiles: this.settings.allowLargerFiles
 		};
 
 		let arrayBuffer: ArrayBuffer;
@@ -1900,7 +1470,8 @@ export default class ImageConvertPlugin extends Plugin {
 					conversionParams.destructive_desiredWidth,
 					conversionParams.destructive_desiredHeight,
 					conversionParams.destructive_desiredLongestEdge,
-					conversionParams.destructive_enlarge_or_reduce
+					conversionParams.destructive_enlarge_or_reduce,
+					conversionParams.allowLargerFiles
 				);
 				break;
 			case 'jpg':
@@ -1911,7 +1482,8 @@ export default class ImageConvertPlugin extends Plugin {
 					conversionParams.destructive_desiredWidth,
 					conversionParams.destructive_desiredHeight,
 					conversionParams.destructive_desiredLongestEdge,
-					conversionParams.destructive_enlarge_or_reduce
+					conversionParams.destructive_enlarge_or_reduce,
+					conversionParams.allowLargerFiles
 				);
 				break;
 			case 'png':
@@ -1922,7 +1494,8 @@ export default class ImageConvertPlugin extends Plugin {
 					conversionParams.destructive_desiredWidth,
 					conversionParams.destructive_desiredHeight,
 					conversionParams.destructive_desiredLongestEdge,
-					conversionParams.destructive_enlarge_or_reduce
+					conversionParams.destructive_enlarge_or_reduce,
+					conversionParams.allowLargerFiles
 				);
 				break;
 			default:
@@ -2725,10 +2298,6 @@ export default class ImageConvertPlugin extends Plugin {
 		return this.processSubfolderVariables(template, file, file);
 	}
 
-	// private normalizePath(path: string): string {
-	// 	return path.toLowerCase();
-	// }
-
 	// Helper function to manage counters for renaming e.g. -001 002 003 etc. 
 	private async getNextCounter(folderPath: string): Promise<number> {
 		const counterKey = `counter-${folderPath}`;
@@ -2957,59 +2526,179 @@ export default class ImageConvertPlugin extends Plugin {
 
 
 
-	//Process All Vault
+	/* Commands */
 	/* ------------------------------------------------------------- */
-	async processAllVaultImages() {
-		// Early return if no processing is needed
-		if (this.settings.ProcessAllVaultconvertTo === 'disabled' && 
-			this.settings.ProcessAllVaultquality === 1 && 
-			this.settings.ProcessAllVaultResizeModalresizeMode === 'None') {
-			new Notice('No processing needed: Original format selected with no compression or resizing.');
-			return;
+
+	private registerCommands() {
+		// Process all vault images
+		this.addCommand({
+			id: 'process-all-vault-images',
+			name: 'Process all vault images',
+			callback: () => new ProcessAllVault(this).open()
+		});
+	
+		// Process current note images
+		this.addCommand({
+			id: 'process-all-images-current-note',
+			name: 'Process all images in current note',
+			callback: () => new ProcessCurrentNote(this).open()
+		});
+	
+		// Open settings
+		this.addCommand({
+			id: 'open-image-converter-settings',
+			name: 'Open Image Converter Settings',
+			callback: () => this.command_openSettingsTab()
+		});
+	
+		// Toggle conversion
+		this.addCommand({
+			id: 'toggle-image-conversion',
+			name: 'Toggle Image Conversion (Pause/Resume)',
+			callback: () => this.command_toggleConversion()
+		});
+	}
+
+	// Toogle to Pause / Continue image conversion
+	private command_toggleConversion(): void {
+		this.isConversionPaused = !this.isConversionPaused;
+		
+		// Clear any existing timeout for status bar removal
+		if (this.isConversionPaused_statusTimeout) {
+			clearTimeout(this.isConversionPaused_statusTimeout);
+			this.isConversionPaused_statusTimeout = null;
 		}
 		
-		const getallfiles = this.app.vault.getFiles();
-		const files = getallfiles.filter(file => file instanceof TFile && isImage(file) && this.processAllVaultImages_shouldProcessImage(file));
-		let imageCount = 0;
-
-		// Create a status bar item
-		const statusBarItemEl = this.addStatusBarItem();
-
-		// Record the start time
-		const startTime = Date.now();
-
-		for (const file of files) {
-			if (isImage(file)) {
-				imageCount++;
-
-				// Log each file, this way the log will show files even if there is an error
-				console.log(`Processing image ${imageCount} of ${files.length}: ${file.name} ${file.path}`)
-
-				await this.convertAllVault(file);
-
-				await refreshImagesInActiveNote();
-
-				// Calculate the elapsed time
-				const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
-
-				// Update the status bar item
-				statusBarItemEl.setText(`Processing image ${imageCount} of ${files.length}, elapsed time: ${elapsedTime} seconds`);
-				// Log each file, if there is delay, at least log will show corrupt file
-				console.log(`${imageCount} of ${files.length} ${file.name} ${file.path}  ${elapsedTime} seconds elapsed`);
-			}
+		// Create status bar item if it doesn't exist
+		if (!this.statusBarItemEl) {
+			this.statusBarItemEl = this.addStatusBarItem();
 		}
-
-		if (imageCount === 0) {
-			new Notice('No images found in the vault.');
+		
+		if (this.isConversionPaused) {
+			this.statusBarItemEl.setText('Image Conversion: Paused ⏸️');
+			new Notice('Image conversion paused');
+			// Clear current queue if any
+			this.fileQueue = [];
+			this.isProcessingQueue = false;
+			this.hideProgressBar();
 		} else {
-			new Notice(`${imageCount} images were converted.`);
-			// Update the status bar item to show that processing is complete
+			this.statusBarItemEl.setText('Image Conversion: Active ▶️');
+			new Notice('Image conversion resumed');
+			// Remove status bar item after 5 seconds
+			this.isConversionPaused_statusTimeout = window.setTimeout(() => {
+				if (this.statusBarItemEl) {
+					this.statusBarItemEl.remove();
+					this.statusBarItemEl = null;
+				}
+			}, 5000);
+		}
+	}
+
+	// Command to open settings tab
+	async command_openSettingsTab() {
+		const setting = (this.app as any).setting;
+		if (setting) {
+			await setting.open();
+			setting.openTabById(this.manifest.id);
+		} else {
+			new Notice('Unable to open settings. Please check if the settings plugin is enabled.');
+		}
+	}
+
+	//////////////////Process All Vault
+	async processAllVaultImages() {
+		try {
+			const isKeepOriginalFormat = this.settings.ProcessAllVaultconvertTo === 'disabled';
+			const noCompression = this.settings.ProcessAllVaultquality === 1;
+			const noResize = this.settings.ProcessAllVaultResizeModalresizeMode === 'None';
+			const targetFormat = this.settings.ProcessAllVaultconvertTo;
+	
+			// Parse skip formats
+			const skipFormats = this.settings.ProcessAllVaultSkipFormats
+				.toLowerCase()
+				.split(',')
+				.map(format => format.trim())
+				.filter(format => format.length > 0);
+	
+			// Get all image files in the vault
+			const allFiles = this.app.vault.getFiles();
+			const imageFiles = allFiles.filter(file => 
+				file instanceof TFile && 
+				isImage(file)
+			);
+	
+			// If no images found at all
+			if (imageFiles.length === 0) {
+				new Notice('No images found in the vault.');
+				return;
+			}
+	
+			// Check if all images are either in target format or in skip list
+			const allImagesSkippable = imageFiles.every(file => 
+				(file.extension === (isKeepOriginalFormat ? file.extension : targetFormat)) ||
+				skipFormats.includes(file.extension.toLowerCase())
+			);
+	
+			// Early return with appropriate message if no processing is needed
+			if (allImagesSkippable && noCompression && noResize) {
+				if (isKeepOriginalFormat) {
+					new Notice('No processing needed: All vault images are either in skip list or kept in original format with no compression or resizing.');
+				} else {
+					new Notice(`No processing needed: All vault images are either in skip list or already in ${targetFormat.toUpperCase()} format with no compression or resizing.`);
+				}
+				return;
+			}
+	
+			// Filter files that actually need processing
+			const filesToProcess = imageFiles.filter(file => 
+				this.processAllVaultImages_shouldProcessImage(file)
+			);
+	
+			if (filesToProcess.length === 0) {
+				if (this.settings.ProcessAllVaultskipImagesInTargetFormat) {
+					new Notice(`No processing needed: All vault images are either in ${isKeepOriginalFormat ? 'their original' : targetFormat.toUpperCase()} format or in skip list.`);
+				} else {
+					new Notice('No images found that need processing.');
+				}
+				return;
+			}
+	
+			let imageCount = 0;
+			const statusBarItemEl = this.addStatusBarItem();
+			const startTime = Date.now();
+	
+			for (const file of filesToProcess) {
+				imageCount++;
+				console.log(`Processing image ${imageCount} of ${filesToProcess.length}: ${file.name} ${file.path}`);
+	
+				await this.convertAllVault(file);
+				await refreshImagesInActiveNote();
+	
+				const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+				statusBarItemEl.setText(
+					`Processing image ${imageCount} of ${filesToProcess.length}, elapsed time: ${elapsedTime} seconds`
+				);
+				console.log(`${imageCount} of ${filesToProcess.length} ${file.name} ${file.path} ${elapsedTime} seconds elapsed`);
+			}
+	
 			const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
 			statusBarItemEl.setText(`Finished processing ${imageCount} images, total time: ${totalTime} seconds`);
-			// Hide the status bar after 5 seconds
+			
+			if (imageCount > 0) {
+				new Notice(`Successfully processed ${imageCount} images.`);
+			}
+	
 			setTimeout(() => {
 				statusBarItemEl.setText('');
-			}, 5000); // 5000 milliseconds = 5 seconds
+			}, 5000);
+	
+		} catch (error) {
+			console.error('Error processing vault images:', error);
+			new Notice(`Error processing images: ${error.message}`);
+		} finally {
+			if (this.statusBarItemEl) {
+				this.statusBarItemEl.remove();
+			}
 		}
 	}
 
@@ -3057,6 +2746,7 @@ export default class ImageConvertPlugin extends Plugin {
 		const desiredLength = this.settings.ProcessAllVaultResizeModaldesiredLength;
 		const enlargeOrReduce = this.settings.ProcessAllVaultEnlargeOrReduce;
 		const convertTo = this.settings.ProcessAllVaultconvertTo;
+		const allowLargerFiles = this.settings.allowLargerFiles;
 	
 		// Handle quality < 1 (compression) case
 		if (quality !== 1) {
@@ -3067,26 +2757,26 @@ export default class ImageConvertPlugin extends Plugin {
 				switch (file.extension) {
 					case 'jpg':
 					case 'jpeg':
-						arrayBuffer = await convertToJPG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+						arrayBuffer = await convertToJPG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce, allowLargerFiles);
 						break;
 					case 'png':
-						arrayBuffer = await convertToPNG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+						arrayBuffer = await convertToPNG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce, allowLargerFiles);
 						break;
 					case 'webp':
-						arrayBuffer = await convertToWebP(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+						arrayBuffer = await convertToWebP(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce, allowLargerFiles);
 						break;
 				}
 			} else {
 				// Handle format conversion with compression
 				switch (convertTo) {
 					case 'webp':
-						arrayBuffer = await convertToWebP(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+						arrayBuffer = await convertToWebP(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce, allowLargerFiles);
 						break;
 					case 'jpg':
-						arrayBuffer = await convertToJPG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+						arrayBuffer = await convertToJPG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce, allowLargerFiles);
 						break;
 					case 'png':
-						arrayBuffer = await convertToPNG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+						arrayBuffer = await convertToPNG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce, allowLargerFiles);
 						break;
 				}
 			}
@@ -3104,13 +2794,13 @@ export default class ImageConvertPlugin extends Plugin {
 			switch (file.extension) {
 				case 'jpg':
 				case 'jpeg':
-					arrayBuffer = await convertToJPG(imgBlob, 1, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+					arrayBuffer = await convertToJPG(imgBlob, 1, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce, allowLargerFiles);
 					break;
 				case 'png':
-					arrayBuffer = await convertToPNG(imgBlob, 1, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+					arrayBuffer = await convertToPNG(imgBlob, 1, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce, allowLargerFiles);
 					break;
 				case 'webp':
-					arrayBuffer = await convertToWebP(imgBlob, 1, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+					arrayBuffer = await convertToWebP(imgBlob, 1, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce, allowLargerFiles);
 					break;
 			}
 	
@@ -3176,12 +2866,11 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
 	processAllVaultImages_shouldProcessImage(image: TFile): boolean {
-		// Skip images already in target format
-		if (this.settings.ProcessAllVaultskipImagesInTargetFormat && 
-			image.extension === this.settings.ProcessAllVaultconvertTo) {
-			return false;
-		}
-		
+		const isKeepOriginalFormat = this.settings.ProcessAllVaultconvertTo === 'disabled';
+		const effectiveTargetFormat = isKeepOriginalFormat 
+			? image.extension 
+			: this.settings.ProcessAllVaultconvertTo;
+	
 		// Get skip formats from settings and parse them
 		const skipFormats = this.settings.ProcessAllVaultSkipFormats
 			.toLowerCase()
@@ -3191,6 +2880,14 @@ export default class ImageConvertPlugin extends Plugin {
 		
 		// Skip files with extensions in the skip list
 		if (skipFormats.includes(image.extension.toLowerCase())) {
+			console.log(`Skipping ${image.name}: Format ${image.extension} is in skip list`);
+			return false;
+		}
+	
+		// Skip images already in target format (or original format if disabled)
+		if (this.settings.ProcessAllVaultskipImagesInTargetFormat && 
+			image.extension === effectiveTargetFormat) {
+			console.log(`Skipping ${image.name}: Already in ${effectiveTargetFormat} format`);
 			return false;
 		}
 		
@@ -3206,91 +2903,140 @@ export default class ImageConvertPlugin extends Plugin {
 		}
 	}
 
-
-	//Process Current Note
-	/* ------------------------------------------------------------- */
-	// Collect all images in the note
+	/////////////////Process Current Note
 	async processCurrentNoteImages(note: TFile) {
 		try {
+			const isKeepOriginalFormat = this.settings.ProcessCurrentNoteconvertTo === 'disabled';
+			const noCompression = this.settings.ProcessCurrentNotequality === 1;
+			const noResize = this.settings.ProcessCurrentNoteResizeModalresizeMode === 'None';
+			const targetFormat = this.settings.ProcessCurrentNoteconvertTo;
+	
+			// Parse skip formats
+			const skipFormats = this.settings.ProcessCurrentNoteSkipFormats
+			.toLowerCase()
+			.split(',')
+			.map(format => format.trim())
+			.filter(format => format.length > 0);
+			
+			// Get all image files in the note first
+			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!activeView?.file) {
+				new Notice('No active note found.');
+				return;
+			}
+	
+			const resolvedLinks = this.app.metadataCache.resolvedLinks;
+			const linksInCurrentNote = resolvedLinks[activeView.file.path];
+			const linkedFiles = Object.keys(linksInCurrentNote)
+				.map(link => this.app.vault.getAbstractFileByPath(link))
+				.filter((file): file is TFile => 
+					file instanceof TFile && 
+					isImage(file)
+				);
+	
+			// If no images found at all
+			if (linkedFiles.length === 0) {
+				new Notice('No images found in the note.');
+				return;
+			}
+	
+			// Check if all images are either in target format or in skip list
+			const allImagesSkippable = linkedFiles.every(file => 
+				(file.extension === (isKeepOriginalFormat ? file.extension : targetFormat)) ||
+				skipFormats.includes(file.extension.toLowerCase())
+			);
+	
+			// Early return with appropriate message if no processing is needed
+			if (allImagesSkippable && noCompression && noResize) {
+				if (isKeepOriginalFormat) {
+					new Notice('No processing needed: All images are either in skip list or kept in original format with no compression or resizing.');
+				} else {
+					new Notice(`No processing needed: All images are either in skip list or already in ${targetFormat.toUpperCase()} format with no compression or resizing.`);
+				}
+				return;
+			}
+
+	
 			// Early return if no processing is needed
-			if (this.settings.ProcessCurrentNoteconvertTo === 'disabled' && 
-				this.settings.ProcessCurrentNotequality === 1 && 
-				this.settings.ProcessCurrentNoteResizeModalresizeMode === 'None') {
+			if (isKeepOriginalFormat && noCompression && noResize) {
 				new Notice('No processing needed: Original format selected with no compression or resizing.');
+				return;
+			}
+	
+			// Filter files that actually need processing
+			const filesToProcess = linkedFiles.filter(file => 
+				this.processCurrentNoteImages_shouldProcessImage(file)
+			);
+	
+			if (filesToProcess.length === 0) {
+				if (this.settings.ProcessCurrentNoteskipImagesInTargetFormat) {
+					new Notice(`No processing needed: All images are already in ${isKeepOriginalFormat ? 'their original' : targetFormat.toUpperCase()} format.`);
+				} else {
+					new Notice('No images found that need processing.');
+				}
 				return;
 			}
 					
 			let imageCount = 0;
 			const statusBarItemEl = this.addStatusBarItem();
 			const startTime = Date.now();
-
-			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-			if (activeView) {
-				const currentFile = activeView.file;
-				if (currentFile) {
-					const resolvedLinks = this.app.metadataCache.resolvedLinks;
-					const linksInCurrentNote = resolvedLinks[currentFile.path];
-					const linkedFiles = Object.keys(linksInCurrentNote)
-						.map(link => this.app.vault.getAbstractFileByPath(link))
-						.filter((file): file is TFile => 
-							file instanceof TFile && 
-							isImage(file) && 
-							this.processCurrentNoteImages_shouldProcessImage(file)
-						);
-		
-					const totalImages = linkedFiles.length;
-		
-					for (const linkedFile of linkedFiles) {
-						imageCount++;
-						await this.convertCurrentNoteImages(linkedFile);
-						await refreshImagesInActiveNote();
-						
-						const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
-						statusBarItemEl.setText(
-							`Processing image ${imageCount} of ${totalImages}, elapsed time: ${elapsedTime} seconds`
-						);
-					}
-				}
+	
+			const totalImages = filesToProcess.length;
+	
+			for (const linkedFile of filesToProcess) {
+				imageCount++;
+				await this.convertCurrentNoteImages(linkedFile);
+				await refreshImagesInActiveNote();
+				
+				const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+				statusBarItemEl.setText(
+					`Processing image ${imageCount} of ${totalImages}, elapsed time: ${elapsedTime} seconds`
+				);
 			}
-
-			if (imageCount === 0) {
-				new Notice('No images found in the vault.');
-			} else {
-				// new Notice(`${imageCount} images were converted.`);
-				const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
-				statusBarItemEl.setText(`Finished processing ${imageCount} images, total time: ${totalTime} seconds`);
-				setTimeout(() => {
-					statusBarItemEl.setText('');
-				}, 5000);
-			}
+	
+			const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
+			statusBarItemEl.setText(`Finished processing ${imageCount} images, total time: ${totalTime} seconds`);
+			setTimeout(() => {
+				statusBarItemEl.setText('');
+			}, 5000);
+	
 		} catch (error) {
 			console.error('Error processing images in current note:', error);
 			new Notice(`Error processing images: ${error.message}`);
 		} finally {
-			// Always clean up the status bar
 			if (this.statusBarItemEl) {
 				this.statusBarItemEl.remove();
 			}
 		}
-
 	}
 
 	async convertCurrentNoteImages(file: TFile) {
 		try {
-			// Early return if no processing is needed
-			if (this.settings.ProcessCurrentNoteconvertTo === 'disabled' && 
-				this.settings.ProcessCurrentNotequality === 1 && 
-				this.settings.ProcessCurrentNoteResizeModalresizeMode === 'None') {
+			const isKeepOriginalFormat = this.settings.ProcessCurrentNoteconvertTo === 'disabled';
+			const noCompression = this.settings.ProcessCurrentNotequality === 1;
+			const noResize = this.settings.ProcessCurrentNoteResizeModalresizeMode === 'None';
+	
+			// When "Same as original" is selected, treat the file's current extension
+			// as the target format
+			const effectiveTargetFormat = isKeepOriginalFormat 
+				? file.extension 
+				: this.settings.ProcessCurrentNoteconvertTo;
+	
+			// Skip processing if:
+			// 1. We're keeping original format (disabled)
+			// 2. No compression
+			// 3. No resize
+			if (isKeepOriginalFormat && noCompression && noResize) {
+				console.log(`Skipping ${file.name}: No processing needed`);
 				return;
 			}
-
-			// // Skip images already in target format
-			// if (
-			// 	this.settings.ProcessCurrentNoteskipImagesInTargetFormat &&
-			// 	file.extension === this.settings.ProcessCurrentNoteconvertTo
-			// ) {
-			// 	return;
-			// }
+	
+			// Skip if the image is already in target format (or original format if disabled)
+			if (this.settings.ProcessCurrentNoteskipImagesInTargetFormat &&
+				file.extension === effectiveTargetFormat) {
+				console.log(`Skipping ${file.name}: Already in ${isKeepOriginalFormat ? 'original' : 'target'} format`);
+				return;
+			}
 
 			// // Get skip formats from settings and parse them
 			// const skipFormats = this.settings.ProcessCurrentNoteSkipFormats
@@ -3315,8 +3061,10 @@ export default class ImageConvertPlugin extends Plugin {
 			let shouldRename = false;
 			let newFilePath: string | undefined;
 
-			if (this.settings.ProcessCurrentNoteconvertTo && this.settings.ProcessCurrentNoteconvertTo !== 'disabled') {
-				extension = this.settings.ProcessCurrentNoteconvertTo;
+			if (effectiveTargetFormat && 
+				effectiveTargetFormat !== 'disabled' &&
+				effectiveTargetFormat !== file.extension) {
+				extension = effectiveTargetFormat;
 				shouldRename = true;
 				newFilePath = await this.getUniqueFilePath(file, extension);
 			}
@@ -3343,6 +3091,7 @@ export default class ImageConvertPlugin extends Plugin {
 			const desiredHeight = this.settings.ProcessCurrentNoteresizeModaldesiredHeight;
 			const desiredLength = this.settings.ProcessCurrentNoteresizeModaldesiredLength;
 			const enlargeOrReduce = this.settings.ProcessCurrentNoteEnlargeOrReduce;
+			const allowLargerFiles = this.settings.allowLargerFiles;
 
 			let arrayBuffer: ArrayBuffer | undefined;
 
@@ -3350,13 +3099,13 @@ export default class ImageConvertPlugin extends Plugin {
 			switch (extension) {
 				case 'jpg':
 				case 'jpeg':
-					arrayBuffer = await convertToJPG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+					arrayBuffer = await convertToJPG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce, allowLargerFiles);
 					break;
 				case 'png':
-					arrayBuffer = await convertToPNG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+					arrayBuffer = await convertToPNG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce, allowLargerFiles);
 					break;
 				case 'webp':
-					arrayBuffer = await convertToWebP(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce);
+					arrayBuffer = await convertToWebP(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce, allowLargerFiles);
 					break;
 				default:
 					new Notice(`Unsupported image format: ${file.extension}`);
@@ -3427,12 +3176,11 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
 	private processCurrentNoteImages_shouldProcessImage(image: TFile): boolean {
-		// Skip images already in target format
-		if (this.settings.ProcessCurrentNoteskipImagesInTargetFormat && 
-			image.extension === this.settings.ProcessCurrentNoteconvertTo) {
-			return false;
-		}
-		
+		const isKeepOriginalFormat = this.settings.ProcessCurrentNoteconvertTo === 'disabled';
+		const effectiveTargetFormat = isKeepOriginalFormat 
+			? image.extension 
+			: this.settings.ProcessCurrentNoteconvertTo;
+	
 		// Get skip formats from settings and parse them
 		const skipFormats = this.settings.ProcessCurrentNoteSkipFormats
 			.toLowerCase()
@@ -3442,6 +3190,14 @@ export default class ImageConvertPlugin extends Plugin {
 		
 		// Skip files with extensions in the skip list
 		if (skipFormats.includes(image.extension.toLowerCase())) {
+			console.log(`Skipping ${image.name}: Format ${image.extension} is in skip list`);
+			return false;
+		}
+	
+		// Skip images already in target format (or original format if disabled)
+		if (this.settings.ProcessCurrentNoteskipImagesInTargetFormat && 
+			image.extension === effectiveTargetFormat) {
+			console.log(`Skipping ${image.name}: Already in ${effectiveTargetFormat} format`);
 			return false;
 		}
 		
@@ -3469,6 +3225,635 @@ export default class ImageConvertPlugin extends Plugin {
 	/* ------------------------------------------------------------- */
 	/* ------------------------------------------------------------- */
 
+
+
+	/* Context menu */
+	/* ------------------------------------------------------------- */
+
+	private registerContextMenu() {
+		this.register(
+			this.onElement(document, 'contextmenu', 'img', this.onContextMenu.bind(this))
+		);
+	
+		this.registerEvent(
+			this.app.workspace.on("file-menu", (menu, file) => {
+				menu.addItem((item) => {
+					item
+						.setTitle("Process all images in current note")
+						.setIcon("cog")
+						.onClick(async () => {
+							new ProcessCurrentNote(this).open();
+						});
+				});
+			})
+		);
+	}
+
+	onElement(
+		el: Document,
+		event: keyof HTMLElementEventMap,
+		selector: string,
+		listener: Listener,
+		options?: { capture?: boolean; }
+	) {
+		el.on(event, selector, listener, options);
+		return () => el.off(event, selector, listener, options);
+	}
+
+	onContextMenu(event: MouseEvent) {
+		// Prevent default context menu from being displayed
+		// event.preventDefault();
+		// If the 'Disable right-click context menu' setting is enabled, return immediately
+		if (!this.settings.rightClickContextMenu) {
+			return;
+		}
+
+		// Check if we're in Canvas view first
+		const activeView = this.getActiveView();
+		const isCanvasView = activeView?.getViewType() === 'canvas';
+	
+		// If we're in Canvas view, prevent default and return immediately
+		if (isCanvasView) {
+			event.preventDefault();
+			return;
+		}
+	
+		const target = (event.target as Element);
+
+		const img = event.target as HTMLImageElement;
+		const rect = img.getBoundingClientRect();
+		const x = event.clientX - rect.left;
+		const y = event.clientY - rect.top;
+		const edgeSize = 30; // size of the edge in pixels
+
+		// Only show the context menu if the user right-clicks within the center of the image
+		if ((x > edgeSize && x < rect.width - edgeSize) && (y > edgeSize && y < rect.height - edgeSize)) {
+			// Create new Menu object
+			const menu = new Menu();
+
+			// Add option to copy image to clipboard
+			menu.addItem((item: MenuItem) =>
+				item
+					.setTitle('Copy Image')
+					.setIcon('copy')
+					.onClick(() => {
+						// Copy original image data to clipboard
+						const img = new Image();
+						img.crossOrigin = 'anonymous'; // Set crossOrigin to 'anonymous' for copying external images
+						const targetImg = event.target as HTMLImageElement; // Cast target to HTMLImageElement
+						img.onload = async function () {
+							const canvas = document.createElement('canvas');
+							canvas.width = img.naturalWidth;
+							canvas.height = img.naturalHeight;
+							const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+							ctx.drawImage(img, 0, 0);
+							const dataURL = canvas.toDataURL();
+							const response = await fetch(dataURL);
+							const blob = await response.blob();
+							const item = new ClipboardItem({ [blob.type]: blob });
+							await navigator.clipboard.write([item]);
+							new Notice('Image copied to clipboard');
+						};
+						img.src = targetImg.src; // Set src after setting crossOrigin
+					})
+			);
+
+			// Add option to copy Base64 encoded image into clipboard
+			menu.addItem((item: MenuItem) =>
+				item
+					.setTitle('Copy as Base64 encoded image')
+					.setIcon('copy')
+					.onClick(() => {
+						// Copy original image data to clipboard
+						const img = new Image();
+						img.crossOrigin = 'anonymous'; // Set crossOrigin to 'anonymous'
+						const targetImg = event.target as HTMLImageElement; // Cast target to HTMLImageElement
+						img.onload = async function () {
+							const canvas = document.createElement('canvas');
+							canvas.width = img.naturalWidth;
+							canvas.height = img.naturalHeight;
+							const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+							ctx.drawImage(img, 0, 0);
+							const dataURL = canvas.toDataURL();
+							await navigator.clipboard.writeText('<img src="' + dataURL + '"/>');
+							new Notice('Image copied to clipboard');
+						};
+						img.src = targetImg.src; // Set src after setting crossOrigin
+					})
+			);
+
+
+			// Add option to resize image
+			menu.addItem((item: MenuItem) =>
+				item
+					.setTitle('Resize Image')
+					.setIcon('image-file')
+					.onClick(async () => {
+						// Show resize image modal
+						const modal = new ResizeImageModal(this.app, async (width, height) => {
+							if (width || height) {
+								// Resize image data
+								const img = target as HTMLImageElement;
+								const canvas = document.createElement('canvas');
+								const aspectRatio = img.naturalWidth / img.naturalHeight;
+								if (width && !height) {
+									canvas.width = parseInt(width);
+									canvas.height = canvas.width / aspectRatio;
+								} else if (!width && height) {
+									canvas.height = parseInt(height);
+									canvas.width = canvas.height * aspectRatio;
+								} else {
+									const newWidth = parseInt(width);
+									const newHeight = parseInt(height);
+									const newAspectRatio = newWidth / newHeight;
+									if (newAspectRatio > aspectRatio) {
+										canvas.width = newHeight * aspectRatio;
+										canvas.height = newHeight;
+									} else {
+										canvas.width = newWidth;
+										canvas.height = newWidth / aspectRatio;
+									}
+								}
+								const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+								ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+								const dataURL = canvas.toDataURL();
+
+								// Replace original image file with resized image data
+								const response = await fetch(dataURL);
+								const blob = await response.blob();
+								const buffer = await blob.arrayBuffer();
+
+								// Get file path from src attribute
+								// Get Vault Name
+								const rootFolder = this.app.vault.getName();
+								const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+								if (activeView) {
+									// Grab full path of an src, it will return full path including Drive letter etc.
+									// thus we need to get rid of anything what is not part of the vault
+									let imagePath = img.getAttribute('src');
+									if (imagePath) {
+										// Find the position of the root folder in the path
+										const rootFolderIndex = imagePath.indexOf(rootFolder);
+
+										// Remove everything before the root folder
+										if (rootFolderIndex !== -1) {
+											imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
+										}
+
+										// Remove the query string
+										imagePath = imagePath.split('?')[0];
+										// Decode percent-encoded characters
+										const decodedPath = decodeURIComponent(imagePath);
+
+										const file = this.app.vault.getAbstractFileByPath(decodedPath);
+										if (file instanceof TFile && isImage(file)) {
+											// Replace the image
+											await this.app.vault.modifyBinary(file, buffer);
+											// Refresh the image
+											if (img.src) {
+												const newSrc = img.src + (img.src.includes('?') ? '&' : '?') + new Date().getTime();
+												img.src = newSrc;
+											}
+										}
+									}
+								}
+							}
+						});
+						modal.open();
+					})
+			);
+
+			// Delete (Image + md link)
+			menu.addItem((item) => {
+				item.setTitle('Delete Image from vault')
+					.setIcon('trash')
+					.onClick(async () => {
+						deleteImageFromVault(event, this.app);
+					});
+			});
+
+
+			menu.showAtPosition({ x: event.pageX, y: event.pageY });
+			
+
+			// Prevent the default context menu from appearing
+			event.preventDefault();
+		}
+
+	}
+
+	/* ------------------------------------------------------------- */
+	/* ------------------------------------------------------------- */
+
+
+	/* Drag Resize */
+	/* ------------------------------------------------------------- */
+	private initializeDragResize() {
+		this.registerDomEvent(document, 'mousedown', this.dragResize_handleMouseDown.bind(this));
+		this.registerDomEvent(document, 'mousemove', this.dragResize_handleMouseMove.bind(this));
+		this.registerDomEvent(document, 'mouseup', this.dragResize_handleMouseUp.bind(this));
+		this.registerDomEvent(document, 'mouseout', this.dragResize_handleMouseOut.bind(this));
+	
+		// Add the base CSS class to workspace
+		this.app.workspace.containerEl.addClass('image-resize-enabled');
+	
+		// Also reinitialize on layout changes
+		this.registerEvent(
+			this.app.workspace.on('layout-change', () => {
+				// You might want to remove and reapply the class
+				this.app.workspace.containerEl.removeClass('image-resize-enabled');
+				this.app.workspace.containerEl.addClass('image-resize-enabled');
+			})
+		);
+	}
+
+	private dragResize_isValidTarget(element: HTMLElement): element is HTMLImageElement | HTMLVideoElement {
+		if (!this.settings.resizeByDragging) return false;
+		
+		// Check if we're in reading mode and if it's allowed
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!activeView) return false;
+		
+		if (activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode) {
+			return false;
+		}
+	
+		// Check if element is valid image/video
+		if (!(element instanceof HTMLImageElement || element instanceof HTMLVideoElement)) {
+			return false;
+		}
+	
+		// Check if element is in the active view
+		return activeView.containerEl.contains(element);
+	}
+
+	private dragResize_handleMouseDown(event: MouseEvent) {
+		if (!this.settings.resizeByDragging) return;
+
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		const target = event.target as HTMLElement;
+		// Early return if disabled or in reading mode without permission
+		if (!this.settings.resizeByDragging || 
+			!activeView || 
+			(activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode)) {
+			return;
+		}
+		if (!this.dragResize_isValidTarget(target)) return;
+	
+		const rect = target.getBoundingClientRect();
+		const x = event.clientX - rect.left;
+		const y = event.clientY - rect.top;
+		const edgeSize = 30;
+	
+		if ((x >= rect.width - edgeSize || x <= edgeSize) || 
+			(y >= rect.height - edgeSize || y <= edgeSize)) {
+			
+			event.preventDefault();
+			
+			// Set active resize state
+			target.setAttribute('data-resize-active', 'true');
+			
+			this.resizeState = {
+				isResizing: true,
+				startX: event.clientX,
+				startY: event.clientY,
+				startWidth: target.clientWidth,
+				startHeight: target.clientHeight,
+				element: target
+			};
+		}
+	}
+
+	private dragResize_handleMouseMove = (event: MouseEvent) => {
+		if (!this.settings.resizeByDragging) return;
+	
+		if (this.resizeState.isResizing && this.resizeState.element) {
+			if (this.rafId) {
+				cancelAnimationFrame(this.rafId);
+			}
+			
+			this.rafId = requestAnimationFrame(() => {
+				const { newWidth, newHeight } = this.dragResize_calculateNewDimensions(event);
+				this.dragResize_updateElementSize(newWidth, newHeight);
+				this.dragResize_updateMarkdownContent(newWidth, newHeight);
+			});
+		} else {
+			this.handleNonResizingMouseMove(event);
+		}
+	}
+
+	private dragResize_handleMouseUp() {
+		if (this.resizeState.element) {
+			// Clean up all resize-related attributes
+			this.resizeState.element.removeAttribute('data-resize-edge');
+			this.resizeState.element.removeAttribute('data-resize-active');
+			this.dragResize_updateCursorPosition();
+		}
+	
+		this.resizeState = {
+			isResizing: false,
+			startX: 0,
+			startY: 0,
+			startWidth: 0,
+			startHeight: 0,
+			element: null
+		};
+	}
+
+	private dragResize_handleMouseOut = (event: MouseEvent) => {
+		if (!this.settings.resizeByDragging) return;
+		const target = event.target as HTMLElement;
+		if (this.dragResize_isValidTarget(target) && !this.resizeState.isResizing) {
+			target.removeAttribute('data-resize-edge');
+		}
+	}
+
+    private dragResize_updateElementSize(newWidth: number, newHeight: number) {
+        if (!this.resizeState.element) return;
+
+        if (this.resizeState.element instanceof HTMLImageElement) {
+            this.resizeState.element.style.width = `${newWidth}px`;
+            this.resizeState.element.style.height = `${newHeight}px`;
+        } else if (this.resizeState.element instanceof HTMLVideoElement) {
+            const containerWidth = this.resizeState.element.parentElement?.clientWidth ?? 0;
+            const newWidthPercentage = (newWidth / containerWidth) * 100;
+            this.resizeState.element.style.width = `${newWidthPercentage}%`;
+        }
+    }
+
+	private dragResize_calculateNewDimensions(event: MouseEvent) {
+		if (!this.resizeState.element) return { newWidth: 0, newHeight: 0 };
+	
+		const deltaX = event.clientX - this.resizeState.startX;
+		const aspectRatio = this.resizeState.startWidth / this.resizeState.startHeight;
+		
+		// Use integer math for better performance
+		const newWidth = Math.max(~~(this.resizeState.startWidth + deltaX), 50);
+		const newHeight = ~~(newWidth / aspectRatio);
+	
+		return {
+			newWidth: Math.max(50, newWidth),
+			newHeight: Math.max(50, newHeight)
+		};
+	}
+
+	private dragResize_updateMarkdownContent = this.throttle((newWidth: number, newHeight: number) => {
+		if (!this.resizeState.element) return;
+	
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!activeView) return;
+	
+		const currentElement = this.resizeState.element;
+		const currentImageName = getImageName(currentElement);
+		
+		if (!currentImageName) return;
+	
+		updateImageLink({
+			activeView,
+			element: currentElement,
+			newWidth,
+			newHeight,
+			settings: this.settings
+		});
+	}, 100);  // Update markdown content at most every 100ms
+
+	private dragResize_updateCursorPosition() {
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!activeView || !this.resizeState.element) return;
+	
+		const editor = activeView.editor;
+		const cursorPos = editor.getCursor();
+		const lineContent = editor.getLine(cursorPos.line);
+		
+		// Get image name safely
+		const imageName = getImageName(this.resizeState.element);
+		if (!imageName) return;
+	
+		// Ensure we have valid content to work with
+		if (!lineContent.includes(imageName)) return;
+	
+		let newCursorPos;
+		if (this.settings.cursorPosition === 'front') {
+			// Look for both internal and external link syntax
+			const linkStart = Math.max(lineContent.indexOf('![['), lineContent.indexOf('!['));
+			newCursorPos = { line: cursorPos.line, ch: Math.max(linkStart, 0) };
+		} else {
+			// Handle both internal and external link endings
+			const linkEnd = lineContent.indexOf(']]') !== -1 ? 
+				lineContent.indexOf(']]') + 2 : 
+				lineContent.indexOf(')') + 1;
+			newCursorPos = { line: cursorPos.line, ch: Math.min(linkEnd, lineContent.length) };
+		}
+	
+		// Set cursor position immediately without setTimeout
+		editor.setCursor(newCursorPos);
+	}
+	
+	// Add cleanup method to remove any lingering attributes
+	private dragResize_cleanupResizeAttributes() {
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!activeView) return;
+
+		// Clean up any images/videos with resize attributes
+		activeView.containerEl.querySelectorAll('img, video').forEach(element => {
+			element.removeAttribute('data-resize-edge');
+			element.removeAttribute('data-resize-active');
+		});
+	}
+	
+	private handleNonResizingMouseMove = this.debounce((event: MouseEvent) => {
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!activeView || 
+			(activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode)) {
+			return;
+		}
+	
+		const target = event.target as HTMLElement;
+		if (this.dragResize_isValidTarget(target)) {
+			const rect = target.getBoundingClientRect();
+			const x = event.clientX - rect.left;
+			const y = event.clientY - rect.top;
+			const edgeSize = 30;
+	
+			if ((x >= rect.width - edgeSize || x <= edgeSize) || 
+				(y >= rect.height - edgeSize || y <= edgeSize)) {
+				target.setAttribute('data-resize-edge', 'true');
+			} else {
+				target.removeAttribute('data-resize-edge');
+			}
+		}
+	}, 16);  // roughly 60fps
+
+	private debounce<T extends (...args: any[]) => void>(
+		func: T,
+		wait: number
+	): (...args: Parameters<T>) => void {
+		let timeout: NodeJS.Timeout;
+		return (...args: Parameters<T>) => {
+			clearTimeout(timeout);
+			timeout = setTimeout(() => func(...args), wait);
+		};
+	}
+	
+	private throttle<T extends (...args: any[]) => void>(
+		func: T,
+		limit: number
+	): (...args: Parameters<T>) => void {
+		let inThrottle: boolean;
+		return (...args: Parameters<T>) => {
+			if (!inThrottle) {
+				func(...args);
+				inThrottle = true;
+				setTimeout(() => inThrottle = false, limit);
+			}
+		};
+	}
+
+	/* ------------------------------------------------------------- */
+	/* ------------------------------------------------------------- */
+
+
+	/* Scrolwheel resize*/
+	/* ------------------------------------------------------------- */
+	// Allow resizing with SHIFT + Scrollwheel
+	private scrollwheelresize_checkModifierKey(event: WheelEvent): boolean {
+		switch (this.settings.scrollwheelModifier) {
+			case 'Shift':
+				return event.shiftKey;
+			case 'Control':
+				return event.ctrlKey;
+			case 'Alt':
+				return event.altKey;
+			case 'Meta':
+				return event.metaKey;
+			case 'None':
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	private registerScrollWheelResize() {
+		this.register(
+			this.onElement(
+				document,
+				"wheel",
+				"img, video",
+				(event: WheelEvent) => {
+					if (!this.settings.resizeWithScrollwheel) return;
+					
+					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+					if (!activeView) return;
+					// Check if resizing is enabled for Reading Mode
+					if (!activeView || 
+						(activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode)) {
+						return;
+					}
+					const markdownContainer = activeView.containerEl;
+					const target = event.target as HTMLElement;
+					if (!markdownContainer.contains(target)) return;
+	
+					// Check for the configured modifier key
+					if (!this.scrollwheelresize_checkModifierKey(event)) return;
+	
+					try {
+						const img = event.target as HTMLImageElement | HTMLVideoElement;
+						const imageName = getImageName(img);
+	
+                        if (!imageName || imageName !== this.storedImageName) {
+                            return;
+                        }
+	
+						// Prevent default scrolling behavior when using modifier
+						// event.preventDefault();
+	
+						const { newWidth, newHeight, newLeft, newTop } = 
+							resizeImageScrollWheel(event, img);
+						
+						if (img instanceof HTMLImageElement) {
+							img.style.width = `${newWidth}px`;
+							img.style.height = `${newHeight}px`;
+							img.style.left = `${newLeft}px`;
+							img.style.top = `${newTop}px`;
+						} else if (img instanceof HTMLVideoElement) {
+							img.style.width = `${newWidth}%`;
+						}
+	
+						const editor = activeView.editor;
+						updateImageLink({
+							activeView,
+							element: img,
+							newWidth,
+							newHeight,
+							settings: this.settings
+						});
+						
+						// Handle cursor position after update
+						this.scrollwheelresize_updateCursorPosition(editor, imageName);
+	
+					} catch (error) {
+						console.error('An error occurred:', error);
+					}
+				}
+			)
+		);
+	}
+
+	private scrollwheelresize_registerMouseoverHandler() {
+		this.register(
+			this.onElement(
+				document,
+				"mouseover",
+				"img, video",
+				(event: MouseEvent) => {
+					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+					if (!activeView) return;
+					// Check if resizing is enabled for Reading Mode
+					if (!activeView || 
+						(activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode)) {
+						return;
+					}
+					const markdownContainer = activeView.containerEl;
+					const target = event.target as HTMLElement;
+					if (!markdownContainer.contains(target)) return;
+	
+					// Check if the current modifier is pressed
+					const modifierPressed = this.settings.scrollwheelModifier === 'None' ? false :
+						event[`${this.settings.scrollwheelModifier.toLowerCase()}Key` as keyof MouseEvent];
+					
+					if (modifierPressed) return;
+	
+					const img = event.target as HTMLImageElement | HTMLVideoElement;
+					this.storedImageName = getImageName(img);
+				}
+			)
+		);
+	}
+
+    private scrollwheelresize_updateCursorPosition(editor: Editor, imageName: string | null) {
+        if (!imageName) return;  // Early return if imageName is null
+
+        const cursorPos = editor.getCursor();
+        const lineContent = editor.getLine(cursorPos.line);
+        
+        let newCursorPos;
+        if (this.settings.cursorPosition === 'front') {
+            const linkStart = Math.max(lineContent.indexOf('![['), lineContent.indexOf('!['));
+            newCursorPos = { line: cursorPos.line, ch: Math.max(linkStart, 0) };
+        } else {
+            const linkEnd = lineContent.indexOf(']]') !== -1 ? 
+                lineContent.indexOf(']]') + 2 : 
+                lineContent.indexOf(')') + 1;
+            newCursorPos = { line: cursorPos.line, ch: Math.min(linkEnd, lineContent.length) };
+        }
+        editor.setCursor(newCursorPos);
+    }
+
+	/* ------------------------------------------------------------- */
+	/* ------------------------------------------------------------- */
+
+
+
 	getActiveEditor(sourcePath: string): Editor | null {
 		let editor: Editor | null = null;
 	
@@ -3490,6 +3875,18 @@ export default class ImageConvertPlugin extends Plugin {
 		return editor;
 	}
 	
+	private getActiveView(): MarkdownView | View | null {
+		return this.app.workspace.getActiveViewOfType(MarkdownView)
+			|| this.app.workspace.getLeavesOfType("canvas").find(leaf => leaf.view)?.view
+			|| this.app.workspace.getLeavesOfType("excalidraw").find(leaf => leaf.view)?.view
+			|| null;
+	}
+	
+	private isValidViewType(viewType: string | undefined): boolean {
+		return ['markdown', 'canvas', 'excalidraw'].includes(viewType || '');
+	}
+
+
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -3630,7 +4027,8 @@ async function handleHeicImage(
 						settings.destructive_desiredWidth,
 						settings.destructive_desiredHeight,
 						settings.destructive_desiredLongestEdge,
-						settings.destructive_enlarge_or_reduce
+						settings.destructive_enlarge_or_reduce,
+						settings.allowLargerFiles
 					);
 					break;
 				case 'jpg':
@@ -3641,7 +4039,8 @@ async function handleHeicImage(
 						settings.destructive_desiredWidth,
 						settings.destructive_desiredHeight,
 						settings.destructive_desiredLongestEdge,
-						settings.destructive_enlarge_or_reduce
+						settings.destructive_enlarge_or_reduce,
+						settings.allowLargerFiles
 					);
 					break;
 				case 'png':
@@ -3652,7 +4051,8 @@ async function handleHeicImage(
 						settings.destructive_desiredWidth,
 						settings.destructive_desiredHeight,
 						settings.destructive_desiredLongestEdge,
-						settings.destructive_enlarge_or_reduce
+						settings.destructive_enlarge_or_reduce,
+						settings.allowLargerFiles
 					);
 					break;
 				default:
@@ -3672,196 +4072,312 @@ async function handleHeicImage(
 }
 
 function convertToWebP(
-	file: Blob,
-	quality: number,
-	destructive_resizeMode: string,
-	destructive_desiredWidth: number,
-	destructive_desiredHeight: number,
-	destructive_desiredLongestEdge: number,
-	destructive_enlarge_or_reduce: 'Always' | 'Reduce' | 'Enlarge'
+    file: Blob,
+    quality: number,
+    destructive_resizeMode: string,
+    destructive_desiredWidth: number,
+    destructive_desiredHeight: number,
+    destructive_desiredLongestEdge: number,
+    destructive_enlarge_or_reduce: 'Always' | 'Reduce' | 'Enlarge',
+    allowLargerFiles: boolean
 ): Promise<ArrayBuffer> {
-	return new Promise((resolve, reject) => {
-		const reader = new FileReader();
-		reader.onloadend = (e) => {
-			if (!e.target || !e.target.result) {
-				reject(new Error('Failed to load file'));
-				return;
-			}
-			const image = new Image();
-			image.onload = () => {
-				const { imageWidth, imageHeight, aspectRatio } = calculateDesiredDimensions(
-					image,
-					destructive_resizeMode,
-					destructive_desiredWidth,
-					destructive_desiredHeight,
-					destructive_desiredLongestEdge,
-					destructive_enlarge_or_reduce
-				);
+	// If quality is 1 and no resize needed, return original
+	if (quality === 1 && destructive_resizeMode === 'None') {
+		return file.arrayBuffer();
+	}
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = (e) => {
+            if (!e.target?.result) {
+                reject(new Error('Failed to load file'));
+                return;
+            }
 
-				const canvas = document.createElement('canvas');
-				const context = canvas.getContext('2d');
-				if (!context) {
-					reject(new Error('Failed to get canvas context'));
-					return;
-				}
+            const image = new Image();
+            image.onload = () => {
+                try {
+                    // Adjust quality for mobile devices
+                    let adjustedQuality = quality;
+                    const maxSize = 1024 * 1024; // 1MB
+                    if (file.size <= maxSize && Platform.isMobile) {
+                        adjustedQuality = Math.max(quality, 0.85);
+                    }
 
-				canvas.width = imageWidth;
-				canvas.height = imageHeight;
-				context.save();
-				context.translate(canvas.width / 2, canvas.height / 2);
+                    const { imageWidth, imageHeight, aspectRatio } = calculateDesiredDimensions(
+                        image,
+                        destructive_resizeMode,
+                        destructive_desiredWidth,
+                        destructive_desiredHeight,
+                        destructive_desiredLongestEdge,
+                        destructive_enlarge_or_reduce
+                    );
 
-				// Draw the resized and/or cropped image on the canvas
-				context.drawImage(
-					image,
-					0,
-					0,
-					destructive_resizeMode === 'Fill' ? Math.min(image.naturalWidth, image.naturalHeight * aspectRatio) : image.naturalWidth,
-					destructive_resizeMode === 'Fill' ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio) : image.naturalHeight,
-					-imageWidth / 2,
-					-imageHeight / 2,
-					imageWidth,
-					imageHeight
-				);
-				context.restore();
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    if (!context) {
+                        reject(new Error('Failed to get canvas context'));
+                        return;
+                    }
 
-				const data = canvas.toDataURL('image/webp', quality);
-				const arrayBuffer = base64ToArrayBuffer(data);
-				resolve(arrayBuffer);
-			};
-			image.src = e.target.result.toString();
-		};
-		reader.readAsDataURL(file);
-	});
+                    canvas.width = imageWidth;
+                    canvas.height = imageHeight;
+                    context.save();
+                    context.translate(canvas.width / 2, canvas.height / 2);
+
+                    const drawWidth = destructive_resizeMode === 'Fill'
+                        ? Math.min(image.naturalWidth, image.naturalHeight * aspectRatio)
+                        : image.naturalWidth;
+                    const drawHeight = destructive_resizeMode === 'Fill'
+                        ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio)
+                        : image.naturalHeight;
+
+                    context.drawImage(
+                        image,
+                        0, 0,
+                        drawWidth, drawHeight,
+                        -imageWidth / 2, -imageHeight / 2,
+                        imageWidth, imageHeight
+                    );
+                    context.restore();
+
+                    const webpData = canvas.toDataURL('image/webp', adjustedQuality);
+                    const convertedBuffer = base64ToArrayBuffer(webpData);
+
+                    if (!allowLargerFiles && convertedBuffer.byteLength > file.size) {
+                        // Return original file if converted is larger and not allowed
+                        const originalReader = new FileReader();
+                        originalReader.onloadend = () => {
+                            if (originalReader.result instanceof ArrayBuffer) {
+                                resolve(originalReader.result);
+                            }
+                        };
+                        originalReader.readAsArrayBuffer(file);
+                    } else {
+                        resolve(convertedBuffer);
+                    }
+                } catch (error) {
+                    console.error('WebP conversion error:', error);
+                    // Fallback to original file
+                    reader.readAsArrayBuffer(file);
+                    reader.onloadend = () => {
+                        if (reader.result instanceof ArrayBuffer) {
+                            resolve(reader.result);
+                        }
+                    };
+                }
+            };
+            image.onerror = () => reject(new Error('Failed to load image'));
+            image.src = e.target.result.toString();
+        };
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+    });
 }
 
 function convertToJPG(
-	file: Blob,
-	quality: number,
-	destructive_resizeMode: string,
-	destructive_desiredWidth: number,
-	destructive_desiredHeight: number,
-	destructive_desiredLongestEdge: number,
-	destructive_enlarge_or_reduce: 'Always' | 'Reduce' | 'Enlarge'
+    file: Blob,
+    quality: number,
+    destructive_resizeMode: string,
+    destructive_desiredWidth: number,
+    destructive_desiredHeight: number,
+    destructive_desiredLongestEdge: number,
+    destructive_enlarge_or_reduce: 'Always' | 'Reduce' | 'Enlarge',
+    allowLargerFiles: boolean
 ): Promise<ArrayBuffer> {
-	return new Promise((resolve, reject) => {
-		const reader = new FileReader();
-		reader.onloadend = (e) => {
-			if (!e.target || !e.target.result) {
-				reject(new Error('Failed to load file'));
-				return;
-			}
-			const image = new Image();
-			image.onload = () => {
-				const { imageWidth, imageHeight, aspectRatio } = calculateDesiredDimensions(
-					image,
-					destructive_resizeMode,
-					destructive_desiredWidth,
-					destructive_desiredHeight,
-					destructive_desiredLongestEdge,
-					destructive_enlarge_or_reduce
-				);
+	// If quality is 1 and no resize needed, return original
+	if (quality === 1 && destructive_resizeMode === 'None') {
+		return file.arrayBuffer();
+	}
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = (e) => {
+            if (!e.target?.result) {
+                reject(new Error('Failed to load file'));
+                return;
+            }
 
-				const canvas = document.createElement('canvas');
-				const context = canvas.getContext('2d');
-				if (!context) {
-					reject(new Error('Failed to get canvas context'));
-					return;
-				}
+            const image = new Image();
+            image.onload = () => {
+                try {
+                    // Adjust quality for mobile devices
+                    let adjustedQuality = quality;
+                    const maxSize = 1024 * 1024; // 1MB
+                    if (file.size <= maxSize && Platform.isMobile) {
+                        adjustedQuality = Math.max(quality, 0.85);
+                    }
 
-				canvas.width = imageWidth;
-				canvas.height = imageHeight;
-				context.save();
-				context.translate(canvas.width / 2, canvas.height / 2);
+                    const { imageWidth, imageHeight, aspectRatio } = calculateDesiredDimensions(
+                        image,
+                        destructive_resizeMode,
+                        destructive_desiredWidth,
+                        destructive_desiredHeight,
+                        destructive_desiredLongestEdge,
+                        destructive_enlarge_or_reduce
+                    );
 
-				// Draw the resized and/or cropped image on the canvas
-				context.drawImage(
-					image,
-					0,
-					0,
-					destructive_resizeMode === 'Fill' ? Math.min(image.naturalWidth, image.naturalHeight * aspectRatio) : image.naturalWidth,
-					destructive_resizeMode === 'Fill' ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio) : image.naturalHeight,
-					-imageWidth / 2,
-					-imageHeight / 2,
-					imageWidth,
-					imageHeight
-				);
-				context.restore();
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    if (!context) {
+                        reject(new Error('Failed to get canvas context'));
+                        return;
+                    }
 
-				const data = canvas.toDataURL('image/jpeg', quality);
-				const arrayBuffer = base64ToArrayBuffer(data);
-				resolve(arrayBuffer);
-			};
-			image.src = e.target.result.toString();
-		};
-		reader.readAsDataURL(file);
-	});
+                    canvas.width = imageWidth;
+                    canvas.height = imageHeight;
+                    context.save();
+                    context.translate(canvas.width / 2, canvas.height / 2);
+
+                    // Optional: Set white background for JPG
+                    // context.fillStyle = '#FFFFFF';
+                    // context.fillRect(-imageWidth / 2, -imageHeight / 2, imageWidth, imageHeight);
+
+                    const drawWidth = destructive_resizeMode === 'Fill'
+                        ? Math.min(image.naturalWidth, image.naturalHeight * aspectRatio)
+                        : image.naturalWidth;
+                    const drawHeight = destructive_resizeMode === 'Fill'
+                        ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio)
+                        : image.naturalHeight;
+
+                    context.drawImage(
+                        image,
+                        0, 0,
+                        drawWidth, drawHeight,
+                        -imageWidth / 2, -imageHeight / 2,
+                        imageWidth, imageHeight
+                    );
+                    context.restore();
+
+                    const jpegData = canvas.toDataURL('image/jpeg', adjustedQuality);
+                    const convertedBuffer = base64ToArrayBuffer(jpegData);
+
+                    if (!allowLargerFiles && convertedBuffer.byteLength > file.size) {
+                        const originalReader = new FileReader();
+                        originalReader.onloadend = () => {
+                            if (originalReader.result instanceof ArrayBuffer) {
+                                resolve(originalReader.result);
+                            }
+                        };
+                        originalReader.readAsArrayBuffer(file);
+                    } else {
+                        resolve(convertedBuffer);
+                    }
+                } catch (error) {
+                    console.error('JPEG conversion error:', error);
+                    reader.readAsArrayBuffer(file);
+                    reader.onloadend = () => {
+                        if (reader.result instanceof ArrayBuffer) {
+                            resolve(reader.result);
+                        }
+                    };
+                }
+            };
+            image.onerror = () => reject(new Error('Failed to load image'));
+            image.src = e.target.result.toString();
+        };
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+    });
 }
 
 function convertToPNG(
-	file: Blob,
-	colorDepth: number,
-	destructive_resizeMode: string,
-	destructive_desiredWidth: number,
-	destructive_desiredHeight: number,
-	destructive_desiredLongestEdge: number,
-	destructive_enlarge_or_reduce: 'Always' | 'Reduce' | 'Enlarge'
+    file: Blob,
+    colorDepth: number,
+    destructive_resizeMode: string,
+    destructive_desiredWidth: number,
+    destructive_desiredHeight: number,
+    destructive_desiredLongestEdge: number,
+    destructive_enlarge_or_reduce: 'Always' | 'Reduce' | 'Enlarge',
+    allowLargerFiles: boolean
 ): Promise<ArrayBuffer> {
-	return new Promise((resolve, reject) => {
-		const reader = new FileReader();
-		reader.onloadend = (e) => {
-			if (!e.target || !e.target.result) {
-				reject(new Error('Failed to load file'));
-				return;
-			}
-			const image = new Image();
-			image.onload = () => {
-				const { imageWidth, imageHeight, aspectRatio } = calculateDesiredDimensions(
-					image,
-					destructive_resizeMode,
-					destructive_desiredWidth,
-					destructive_desiredHeight,
-					destructive_desiredLongestEdge,
-					destructive_enlarge_or_reduce
-				);
+    // If colorDepth is 1 and no resize needed, return original
+    if (colorDepth === 1 && destructive_resizeMode === 'None') {
+        return file.arrayBuffer();
+    }
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = (e) => {
+            if (!e.target?.result) {
+                reject(new Error('Failed to load file'));
+                return;
+            }
 
-				const canvas = document.createElement('canvas');
-				const context = canvas.getContext('2d');
-				if (!context) {
-					reject(new Error('Failed to get canvas context'));
-					return;
-				}
+            const image = new Image();
+            image.onload = () => {
+                try {
+                    const { imageWidth, imageHeight, aspectRatio } = calculateDesiredDimensions(
+                        image,
+                        destructive_resizeMode,
+                        destructive_desiredWidth,
+                        destructive_desiredHeight,
+                        destructive_desiredLongestEdge,
+                        destructive_enlarge_or_reduce
+                    );
 
-				canvas.width = imageWidth;
-				canvas.height = imageHeight;
-				context.save();
-				context.translate(canvas.width / 2, canvas.height / 2);
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    if (!context) {
+                        reject(new Error('Failed to get canvas context'));
+                        return;
+                    }
 
-				// Draw the resized and/or cropped image on the canvas
-				context.drawImage(
-					image,
-					0,
-					0,
-					destructive_resizeMode === 'Fill' ? Math.min(image.naturalWidth, image.naturalHeight * aspectRatio) : image.naturalWidth,
-					destructive_resizeMode === 'Fill' ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio) : image.naturalHeight,
-					-imageWidth / 2,
-					-imageHeight / 2,
-					imageWidth,
-					imageHeight
-				);
-				context.restore();
+                    canvas.width = imageWidth;
+                    canvas.height = imageHeight;
+                    context.save();
+                    context.translate(canvas.width / 2, canvas.height / 2);
 
-				const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-				const reducedImageData = reduceColorDepth(imageData, colorDepth);
-				context.putImageData(reducedImageData, 0, 0);
+                    const drawWidth = destructive_resizeMode === 'Fill'
+                        ? Math.min(image.naturalWidth, image.naturalHeight * aspectRatio)
+                        : image.naturalWidth;
+                    const drawHeight = destructive_resizeMode === 'Fill'
+                        ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio)
+                        : image.naturalHeight;
 
-				const data = canvas.toDataURL('image/png');
-				const arrayBuffer = base64ToArrayBuffer(data);
-				resolve(arrayBuffer);
-			};
-			image.src = e.target.result.toString();
-		};
-		reader.readAsDataURL(file);
-	});
+                    context.drawImage(
+                        image,
+                        0, 0,
+                        drawWidth, drawHeight,
+                        -imageWidth / 2, -imageHeight / 2,
+                        imageWidth, imageHeight
+                    );
+                    context.restore();
+
+                    // Apply color depth reduction if needed
+                    if (colorDepth < 1) {
+                        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                        const reducedImageData = reduceColorDepth(imageData, colorDepth);
+                        context.putImageData(reducedImageData, 0, 0);
+                    }
+
+                    const pngData = canvas.toDataURL('image/png');
+                    const convertedBuffer = base64ToArrayBuffer(pngData);
+
+                    if (!allowLargerFiles && convertedBuffer.byteLength > file.size) {
+                        const originalReader = new FileReader();
+                        originalReader.onloadend = () => {
+                            if (originalReader.result instanceof ArrayBuffer) {
+                                resolve(originalReader.result);
+                            }
+                        };
+                        originalReader.readAsArrayBuffer(file);
+                    } else {
+                        resolve(convertedBuffer);
+                    }
+                } catch (error) {
+                    console.error('PNG conversion error:', error);
+                    reader.readAsArrayBuffer(file);
+                    reader.onloadend = () => {
+                        if (reader.result instanceof ArrayBuffer) {
+                            resolve(reader.result);
+                        }
+                    };
+                }
+            };
+            image.onerror = () => reject(new Error('Failed to load image'));
+            image.src = e.target.result.toString();
+        };
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+    });
 }
 
 function calculateDesiredDimensions(
@@ -3983,15 +4499,18 @@ function reduceColorDepth(imageData: ImageData, colorDepth: number): ImageData {
 	return reducedImageData;
 }
 
-function base64ToArrayBuffer(code: string): ArrayBuffer {
-	const parts = code.split(';base64,');
-	const raw = window.atob(parts[1]);
-	const rawLength = raw.length;
-	const uInt8Array = new Uint8Array(rawLength);
-	for (let i = 0; i < rawLength; ++i) {
-		uInt8Array[i] = raw.charCodeAt(i);
-	}
-	return uInt8Array.buffer;
+// Helper function to convert base64 to ArrayBuffer
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+    const binary = atob(base64.split(',')[1]);
+    const length = binary.length;
+    const buffer = new ArrayBuffer(length);
+    const view = new Uint8Array(buffer);
+    
+    for (let i = 0; i < length; i++) {
+        view[i] = binary.charCodeAt(i);
+    }
+    
+    return buffer;
 }
 /* ------------------------------------------------------------- */
 /* ------------------------------------------------------------- */
@@ -4275,7 +4794,7 @@ async function deleteImageFromVault(event: MouseEvent, app: App) {
     const src = img.getAttribute('src');
     if (!src) return;
 
-    const activeView = app.workspace.getActiveViewOfType(MarkdownView);
+	const activeView = app.workspace.getActiveViewOfType(MarkdownView);
 
     try {
         if (src.startsWith('data:image')) {
@@ -5437,6 +5956,16 @@ export class ImageConvertTab extends PluginSettingTab {
 					this.plugin.settings.timeoutPerMB = parseInt(value) * 1000;
 					await this.plugin.saveSettings();
 				}));
+
+		new Setting(container)
+			.setName('Allow larger file sizes after conversion ⓘ')
+            .setTooltip('• When enabled, processed images will be saved even if they are larger than the original.\n• When disabled, it might produce smaller file sizes, but it might also disable any resizing, conversion or compression.\n• Thus, if you really need that file to be at 1000px width, then keep this setting turned ON. Otherwise, if you never use destructive resizing, never use any of the commands to "Process all vault" or "Process all images in current note" and simply want smallest file possible then you can KEEP this OFF.')			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.allowLargerFiles)
+				.onChange(async (value) => {
+					this.plugin.settings.allowLargerFiles = value;
+					await this.plugin.saveSettings();
+				}));
+		
 	}
 
 }
@@ -6097,7 +6626,7 @@ class ProcessAllVault extends Modal {
         // Skip target format setting
         new Setting(skipContainer)
             .setName('Skip images in target format ⓘ')
-            .setTooltip('When enabled, skips processing images that are already in the target format.')
+			.setTooltip('If image is already in target format, this allows you to skip its compression, conversion and resizing. Processing of all other formats will be still performed.')
             .addToggle(toggle =>
                 toggle
                     .setValue(this.plugin.settings.ProcessAllVaultskipImagesInTargetFormat)
@@ -6429,7 +6958,7 @@ class ProcessCurrentNote extends Modal {
 		// Skip target format setting
 		new Setting(skipContainer)
 			.setName('Skip images in target format ⓘ')
-			.setTooltip('When enabled, skips processing images that are already in the target format.')
+			.setTooltip('If image is already in target format, this allows you to skip its compression, conversion and resizing. Processing of all other formats will be still performed.')
 			.addToggle(toggle =>
 				toggle
 					.setValue(this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat)
@@ -6462,3 +6991,4 @@ class ProcessCurrentNote extends Modal {
 		contentEl.empty();
 	}
 }
+

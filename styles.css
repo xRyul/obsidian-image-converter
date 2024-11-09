@@ -1068,7 +1068,7 @@
 
 /* Edge hover style */
 [data-resize-edge="true"] {
-    outline: 10px solid rgba(223, 176, 242, 0.51) !important;
+    outline: 10px solid var(--interactive-accent) !important;
     cursor: nwse-resize !important;
 }
 
@@ -1129,4 +1129,14 @@
     padding: 10px;
     border: 1px solid var(--background-modifier-border);
     border-radius: 5px;
+}
+
+
+/* /////
+ */
+
+.image-resize-enabled img {
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
 }
