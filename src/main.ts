@@ -134,7 +134,8 @@ interface ImageConvertSettings {
 
 	nondestructive_resizeMode: string,
 	nondestructive_resizeMode_customSize: string,
-	nondestructive_resizeMode_fitImage: string,  
+	nondestructive_resizeMode_fitImage: string,
+	nondestructive_enlarge_or_reduce: 'Always' | 'Reduce' | 'Enlarge';
 
 	resizeByDragging: boolean;
     resizeWithScrollwheel: boolean;
@@ -232,6 +233,7 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	nondestructive_resizeMode: "disabled",
 	nondestructive_resizeMode_customSize: "",
 	nondestructive_resizeMode_fitImage: "", 
+	nondestructive_enlarge_or_reduce: 'Always',
 	
 	resizeByDragging: true,
     resizeWithScrollwheel: true,
@@ -605,39 +607,11 @@ export default class ImageConvertPlugin extends Plugin {
 
 		// CLEAN external link and Apply custom size on external links: e.g.: | 100
 		// Check if the clipboard data is an external link
-		const linkPattern = /!\[(.*?)\]\((.*?)\)/;
-		if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" || this.settings.nondestructive_resizeMode === "fitImage") {
-			if (linkPattern.test(markdownImagefromClipboard)) {
-				// Handle the external link
-				const match = markdownImagefromClipboard.match(linkPattern);
-				if (match) {
-					let altText = match[1];
-					const currentLink = match[2];
-					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-					if (activeView) {
-						const editor = activeView.editor;
-						let imageSizeValue;
-						if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize") {
-							imageSizeValue = this.settings.nondestructive_resizeMode_customSize;
-						} else if (this.settings.nondestructive_resizeMode === "fitImage") {
-							imageSizeValue = this.settings.nondestructive_resizeMode_fitImage;
-						}
-						altText = altText.replace(/\|\d+(\|\d+)?/g, ''); // remove any sizing info from alt text
-						const newMarkdown = `![${altText}|${imageSizeValue}](${currentLink})`;
-						const lineNumber = editor.getCursor().line;
-						const lineContent = editor.getLine(lineNumber);
-
-						// Preserve existing elements e.g. order/unordered list, comment, code
-						// find the start and end position of the image link in the line
-						const startPos = lineContent.indexOf(`![${altText}`);
-						const endPos = lineContent.indexOf(')', startPos) + 1;
-
-						// update the size value in the image's markdown link
-						if (startPos !== -1 && endPos !== -1) {
-							editor.replaceRange(newMarkdown, { line: lineNumber, ch: startPos }, { line: lineNumber, ch: endPos });
-						}
-					}
-				}
+		if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" || 
+			this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_fitImage") {
+			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (activeView && markdownImagefromClipboard) {
+				this.handleExternalImageLink(markdownImagefromClipboard, activeView.editor);
 			}
 		}
 
@@ -756,43 +730,10 @@ export default class ImageConvertPlugin extends Plugin {
 
 			if (markdownImageFromDrop && 
 				(this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" || 
-				this.settings.nondestructive_resizeMode === "fitImage")) {
-				
-				const linkPattern = /!\[(.*?)\]\((.*?)\)/;
-				const match = markdownImageFromDrop.match(linkPattern);
-				
-				if (match) {
-					let altText = match[1];
-					const currentLink = match[2];
-					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-					
-					if (activeView) {
-						const editor = activeView.editor;
-						let imageSizeValue;
-						
-						if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize") {
-							imageSizeValue = this.settings.nondestructive_resizeMode_customSize;
-						} else if (this.settings.nondestructive_resizeMode === "fitImage") {
-							imageSizeValue = this.settings.nondestructive_resizeMode_fitImage;
-						}
-						
-						altText = altText.replace(/\|\d+(\|\d+)?/g, '');
-						const newMarkdown = `![${altText}|${imageSizeValue}](${currentLink})`;
-						
-						const cursor = editor.getCursor();
-						const lineContent = editor.getLine(cursor.line);
-						
-						const startPos = lineContent.indexOf(`![${altText}`);
-						const endPos = lineContent.indexOf(')', startPos) + 1;
-						
-						if (startPos !== -1 && endPos !== -1) {
-							editor.replaceRange(
-								newMarkdown,
-								{ line: cursor.line, ch: startPos },
-								{ line: cursor.line, ch: endPos }
-							);
-						}
-					}
+				this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_fitImage")) {
+				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (activeView) {
+					this.handleExternalImageLink(markdownImageFromDrop, activeView.editor);
 				}
 			}
 		}
@@ -993,7 +934,36 @@ export default class ImageConvertPlugin extends Plugin {
 			new Notice(`Failed to process file: ${file.name}`);
 		}
 	}
-
+	private handleExternalImageLink(markdownText: string, editor: Editor): void {
+		const linkPattern = /!\[(.*?)\]\((.*?)\)/;
+		const match = markdownText.match(linkPattern);
+		
+		if (!match) return;
+		
+		const [, altText, currentLink] = match; // Using comma to skip first element
+		const cleanAltText = altText.replace(/\|\d+(\|\d+)?/g, ''); // remove any sizing info
+		
+		let imageSizeValue = '';
+		if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize") {
+			imageSizeValue = this.settings.nondestructive_resizeMode_customSize;
+		} else if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_fitImage") {
+			imageSizeValue = this.settings.nondestructive_resizeMode_fitImage;
+		}
+		
+		const newMarkdown = `![${cleanAltText}|${imageSizeValue}](${currentLink})`;
+		
+		const lineContent = editor.getLine(editor.getCursor().line);
+		const startPos = lineContent.indexOf(`![${cleanAltText}`);
+		const endPos = lineContent.indexOf(')', startPos) + 1;
+		
+		if (startPos !== -1 && endPos !== -1) {
+			editor.replaceRange(
+				newMarkdown,
+				{ line: editor.getCursor().line, ch: startPos },
+				{ line: editor.getCursor().line, ch: endPos }
+			);
+		}
+	}
 
 	// Queue
 	/////////////////////////////////
@@ -1314,7 +1284,7 @@ export default class ImageConvertPlugin extends Plugin {
 			// So we could later pass it into custom sizing options etc. 
 			// Only check it if the setting for nondestructive_resizeMode_customSize or fitImage is enabled  as there are the only options currently need it
 			// Fit image = ensures images are never wider than the editor while preserving their original size if they're already smaller than the editor width.
-			if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" || this.settings.nondestructive_resizeMode === "fitImage") {
+			if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" || this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_fitImage") {
 				try {
 					this.widthSide = await getImageWidthSide(arrayBuffer);
 					const maxWidth = printEditorLineWidth(this.app);
@@ -1939,17 +1909,44 @@ export default class ImageConvertPlugin extends Plugin {
 	
 		// Create the link based on plugin settings
 		if (this.settings.useMdLinks) {
-			const size = this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" ? 
-				this.settings.nondestructive_resizeMode_customSize : 
-				this.settings.nondestructive_resizeMode === "fitImage" ? 
-				this.settings.nondestructive_resizeMode_fitImage : '';
-			
+			let size = '';
+			if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize") {
+				const targetSize = parseInt(this.settings.nondestructive_resizeMode_customSize);
+				const currentWidth = this.widthSide;
+	
+				if (currentWidth && targetSize) {
+					const shouldResize = (
+						this.settings.nondestructive_enlarge_or_reduce === 'Always' ||
+						(this.settings.nondestructive_enlarge_or_reduce === 'Reduce' && currentWidth > targetSize) ||
+						(this.settings.nondestructive_enlarge_or_reduce === 'Enlarge' && currentWidth < targetSize)
+					);
+	
+					size = shouldResize ? this.settings.nondestructive_resizeMode_customSize : '';
+				}
+			} else if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_fitImage") {
+				size = this.settings.nondestructive_resizeMode_fitImage;
+			}
+	
 			return size ? `![|${size}](${cleanPath})` : `![](${cleanPath})`;
 		} else {
-			const size = this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" ? 
-				this.settings.nondestructive_resizeMode_customSize : 
-				this.settings.nondestructive_resizeMode === "fitImage" ? 
-				this.settings.nondestructive_resizeMode_fitImage : '';
+			// Similar logic for wiki links
+			let size = '';
+			if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize") {
+				const targetSize = parseInt(this.settings.nondestructive_resizeMode_customSize);
+				const currentWidth = this.widthSide;
+	
+				if (currentWidth && targetSize) {
+					const shouldResize = (
+						this.settings.nondestructive_enlarge_or_reduce === 'Always' ||
+						(this.settings.nondestructive_enlarge_or_reduce === 'Reduce' && currentWidth > targetSize) ||
+						(this.settings.nondestructive_enlarge_or_reduce === 'Enlarge' && currentWidth < targetSize)
+					);
+	
+					size = shouldResize ? this.settings.nondestructive_resizeMode_customSize : '';
+				}
+			} else if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_fitImage") {
+				size = this.settings.nondestructive_resizeMode_fitImage;
+			}
 	
 			return size ? `![[${cleanPath}|${size}]]` : `![[${cleanPath}]]`;
 		}
@@ -5755,8 +5752,8 @@ export class ImageConvertTab extends PluginSettingTab {
 				.addDropdown((dropdown) =>
 					dropdown
 						.addOptions({
-							disabled: "None",
-							fitImage: "Fit Image",
+							nondestructive_resizeMode_disabled: "None",
+							nondestructive_resizeMode_fitImage: "Fit Image",
 							nondestructive_resizeMode_customSize: "Custom"
 						})
 						.setValue(this.plugin.settings.nondestructive_resizeMode)
@@ -5782,7 +5779,28 @@ export class ImageConvertTab extends PluginSettingTab {
 								await this.plugin.saveSettings();
 							});
 					});
+
+				// Add the new resize behavior setting
+				new Setting(settingsContainer)
+					.setName("Enlarge or Reduce ⓘ")
+					.setDesc("Controls how images are adjusted relative to target size:")
+					.setTooltip('• Reduce and Enlarge: Adjusts image to fit specified dimensions e.g.: small images upsized, large images downsized. For instance, when you want to keep all your images in the note rendered at the same dimensions equally. Example: Setting width to 800px will make a 400px image expand to 800px and a 1200px image shrink to 800px.\n\n• Reduce only: Only shrinks images if width is larger than the target size. Similarly to "Reduce and Enlarge" option, this is especially useful if you do not want small images to be stretched and pixelated - in particular when dealing with extra small sizes 10px - 200px. Example: With width set to 800px, a 400px image stays 400px while a 1200px image shrinks to 800px.\n\n• Enlarge only: Only enlarges images which have smaller width than target size. This is helpful when you want to upscale small images while keeping larger ones at their original dimensions. Example: With width set to 800px, a 400px image expands to 800px while a 1200px image stays 1200px.')
+					.setClass('settings-indent')
+					.addDropdown((dropdown) =>
+						dropdown
+							.addOptions({
+								'Always': 'Reduce and Enlarge',
+								'Reduce': 'Reduce Only',
+								'Enlarge': 'Enlarge Only'
+							})
+							.setValue(this.plugin.settings.nondestructive_enlarge_or_reduce)
+							.onChange(async (value: 'Always' | 'Reduce' | 'Enlarge') => {
+								this.plugin.settings.nondestructive_enlarge_or_reduce = value;
+								await this.plugin.saveSettings();
+							})
+					);
 			}
+		
 
 			// Resize by dragging (main toggle)
 			new Setting(settingsContainer)

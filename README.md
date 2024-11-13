@@ -100,18 +100,6 @@ Below is the table which shows how much quality we lose with each conversion. Th
 
 
 
-## To-do  
-
-- [FIX] No active-file on 1st drop. 
-- Add support for HEIC, TIF, PSD, AVIF.
-- Add basic Resize/Edit features.  
-    - Add auto background removal
-    - Add autoCrop with specific margins
-- Add better compression algorithms: mozJPEG, PngQUANT, OxiPNG, WEBP v2, JPEG XL~.
-- Add the ability for the user to choose/define custom NEW FILENAME.
-- Improve notification to add clarity on what is happening .
-- Improve conversion speed for large files 100MB+ .
-
 ## How to install
 
 1. Downlaod `main.js`, `styles.css`, `manifest.json` files from the latest release page.
