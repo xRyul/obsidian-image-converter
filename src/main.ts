@@ -63,7 +63,7 @@ interface DropInfo {
         size: number;
         type: string;
     }>;  // Add tracking for individual files
-    timeoutId?: NodeJS.Timeout;  // Track the timeout
+    timeoutId?: number;  // Track the timeout
 }
 
 // Define possible modifier keys
@@ -314,6 +314,7 @@ export default class ImageConvertPlugin extends Plugin {
 
 		// Wait for layout to be ready before registering events
 		this.app.workspace.onLayoutReady(() => {
+
 			// Initialize UI elements
 			this.progressEl = document.body.createDiv('image-converter-progress');
 			this.progressEl.style.display = 'none';
@@ -370,21 +371,21 @@ export default class ImageConvertPlugin extends Plugin {
 				const container = leaf.view.containerEl;
 				if (container.hasAttribute('data-image-converter-registered')) {
 					container.removeAttribute('data-image-converter-registered');
-					// Remove any specific view listeners
 					container.removeEventListener('dragover', this.handleDragOver, true);
 				}
 			});
 		});
+	
 		// Remove workspace-level listeners
 		const workspaceContainer = this.app.workspace.containerEl;
 		workspaceContainer.removeEventListener('paste', this.handlePaste);
 		workspaceContainer.removeEventListener('drop', this.handleDrop);
 		// Clean up any remaining timeouts
 		if (this.dropInfo?.timeoutId) {
-			clearTimeout(this.dropInfo.timeoutId);
+			window.clearTimeout(this.dropInfo.timeoutId);
 		}
 		if (this.isConversionPaused_statusTimeout) {
-			clearTimeout(this.isConversionPaused_statusTimeout);
+			window.clearTimeout(this.isConversionPaused_statusTimeout);
 		}
 	
 		// Clean up UI elements
@@ -423,7 +424,7 @@ export default class ImageConvertPlugin extends Plugin {
 		this.dragResize_cleanupResizeAttributes();
 		this.app.workspace.containerEl.removeClass('image-resize-enabled');
 		// Wait for any pending operations to complete
-		await new Promise(resolve => setTimeout(resolve, 100));
+		await new Promise(resolve => window.setTimeout(resolve, 100));
 
 	}
 
@@ -439,7 +440,7 @@ export default class ImageConvertPlugin extends Plugin {
 		
 		// Clear any existing timeouts
 		if (this.dropInfo?.timeoutId) {
-			clearTimeout(this.dropInfo.timeoutId);
+			window.clearTimeout(this.dropInfo.timeoutId);
 		}
 		
 		// Reset dropInfo
@@ -452,7 +453,7 @@ export default class ImageConvertPlugin extends Plugin {
 		new Notice('Image processing cancelled');
 		
 		// Reset kill switch after cleanup
-		setTimeout(() => {
+		window.setTimeout(() => {
 			this.isKillSwitchActive = false;
 		}, 1000);
 	}
@@ -460,6 +461,7 @@ export default class ImageConvertPlugin extends Plugin {
 	// Handle the initial drop/paste and put it in a queue
 	/* ------------------------------------------------------------- */
 	private registerEventHandlers() {
+
 		// Register workspace-level events
 		this.registerEvent(
 			this.app.workspace.on('editor-paste', (evt: ClipboardEvent, editor, view) => {
@@ -568,11 +570,11 @@ export default class ImageConvertPlugin extends Plugin {
 			totalProcessedFiles: 0,
 			batchId: this.batchId,
 			files: imageItems,
-			timeoutId: setTimeout(() => {
+			timeoutId: window.setTimeout(() => {
 				if (this.dropInfo?.batchId === this.batchId) {
 					const incompleteBatch = this.fileQueue.length > 0;
 					if (incompleteBatch) {
-						this.dropInfo.timeoutId = setTimeout(() => {
+						this.dropInfo.timeoutId = window.setTimeout(() => {
 							this.userAction = false;
 							this.batchStarted = false;
 							this.dropInfo = null;
@@ -633,7 +635,7 @@ export default class ImageConvertPlugin extends Plugin {
 		
 		// Clear any existing timeout
 		if (this.dropInfo?.timeoutId) {
-			clearTimeout(this.dropInfo.timeoutId);
+			window.clearTimeout(this.dropInfo.timeoutId);
 		}
 	
 		this.batchId = Date.now().toString();
@@ -651,7 +653,7 @@ export default class ImageConvertPlugin extends Plugin {
 					};
 				});
 		}
-	
+
 		// Calculate adaptive timeout based on file types and sizes
 		const calculateTimeout = (files: Array<{ name: string; size: number; type: string }>) => {
 			const BASE_TIMEOUT = 10000;  // 10 seconds base
@@ -687,13 +689,13 @@ export default class ImageConvertPlugin extends Plugin {
 			totalProcessedFiles: 0,
 			batchId: this.batchId,
 			files: imageFiles,
-			timeoutId: setTimeout(() => {
+			timeoutId: window.setTimeout(() => {
 				if (this.dropInfo?.batchId === this.batchId) {
 					// Instead of resetting, check if processing is still ongoing
 					const incompleteBatch = this.fileQueue.length > 0;
 					if (incompleteBatch) {
 						// Extend timeout if files are still being processed
-						this.dropInfo.timeoutId = setTimeout(() => {
+						this.dropInfo.timeoutId = window.setTimeout(() => {
 							this.userAction = false;
 							this.batchStarted = false;
 							this.dropInfo = null;
@@ -769,9 +771,10 @@ export default class ImageConvertPlugin extends Plugin {
 	private registerFileEvents() {
 		this.registerEvent(
 			this.app.vault.on('create', async (file: TFile) => {
+				
 				if (await this.isExternalOperation(file)) return;
 				if (this.isConversionPaused) return;
-	
+
 				const isMobile = Platform.isMobile;
 				if (!(file instanceof TFile) || !isImage(file)) return;
 	
@@ -792,6 +795,36 @@ export default class ImageConvertPlugin extends Plugin {
 	private async isExternalOperation(file: TFile): Promise<boolean> {
 		const app = this.app as ObsidianApp;
 		
+		// Common sync patterns for both mobile and desktop
+		const syncPatterns = [
+			'.sync-conflict',
+			'.git',
+			'.remote.',
+			'.sync/',
+			'.obsidian/plugins/remotely-save/',
+			'.obsidian/plugins/syncthing/'
+		];
+		
+		// Common sync plugins check for both mobile and desktop
+		const syncPlugins = ['remotely-save', 'syncthing', 'obsidian-git'];
+		const isAnySyncing = syncPlugins.some(pluginId => 
+			app.plugins.plugins[pluginId]?.isSyncing ||
+			app.plugins.plugins[pluginId]?.status === 'syncing'
+		);
+	
+		// Common checks for both platforms
+		const isSyncPath = syncPatterns.some(pattern => file.path.includes(pattern));
+		const wasRecentlyProcessed = this.processedFiles.some(
+			processedFile => processedFile.name === file.path
+		);
+	
+		if (Platform.isMobile) {
+			// Mobile-specific checks
+			// Return true only if it's a sync operation or was recently processed
+			return isSyncPath || isAnySyncing || wasRecentlyProcessed;
+		}
+	
+		// Desktop-specific checks
 		// Check if Obsidian window is not focused
 		if (!document.hasFocus()) {
 			return true;
@@ -802,33 +835,11 @@ export default class ImageConvertPlugin extends Plugin {
 			return true;
 		}
 		
-		// Check file path indicators for sync operations
-		const syncPatterns = [
-			'.sync-conflict',
-			'.git',
-			'.remote.',
-			'.sync/',
-			'.obsidian/plugins/remotely-save/',
-			'.obsidian/plugins/syncthing/'
-		];
-		
-		const isSyncPath = syncPatterns.some(pattern => file.path.includes(pattern));
-		
-		// Check sync plugin states
-		const syncPlugins = ['remotely-save', 'syncthing', 'obsidian-git'];
-		const isAnySyncing = syncPlugins.some(pluginId => 
-			app.plugins.plugins[pluginId]?.isSyncing ||
-			app.plugins.plugins[pluginId]?.status === 'syncing'
-		);
-	
-		// Check if file was recently processed to prevent double processing
-		const wasRecentlyProcessed = this.processedFiles.some(
-			processedFile => processedFile.name === file.path
-		);
-		
+		// Final check combining all conditions for desktop
 		return isSyncPath || isAnySyncing || wasRecentlyProcessed || !this.userAction;
 	}
 	private async handleMobileFileCreation(file: TFile) {
+
 		// Set batch parameters for single file processing
 		this.currentBatchTotal = 1;
 		this.batchStarted = true;
@@ -865,7 +876,7 @@ export default class ImageConvertPlugin extends Plugin {
 			}
 		} finally {
 			// Reset state after processing
-			setTimeout(() => {
+			window.setTimeout(() => {
 				this.userAction = false;
 				this.batchStarted = false;
 			}, 1000);
@@ -1017,7 +1028,7 @@ export default class ImageConvertPlugin extends Plugin {
 
 						if (isLargeFile || isComplexFormat) {
 							if (this.dropInfo.timeoutId) {
-								clearTimeout(this.dropInfo.timeoutId);
+								window.clearTimeout(this.dropInfo.timeoutId);
 							}
 
 							// Calculate extended timeout based on file characteristics
@@ -1026,7 +1037,7 @@ export default class ImageConvertPlugin extends Plugin {
 								(currentFile.size / (1024 * 1024)) * 2000 // 2 seconds per MB
 							) * (isComplexFormat ? 1.5 : 1); // 50% more time for complex formats
 
-							this.dropInfo.timeoutId = setTimeout(() => {
+							this.dropInfo.timeoutId = window.setTimeout(() => {
 								if (this.dropInfo?.batchId === currentBatchId) {
 									const remainingFiles = this.fileQueue.length;
 									if (remainingFiles > 0) {
@@ -1084,7 +1095,7 @@ export default class ImageConvertPlugin extends Plugin {
 							await Promise.race([
 								this.renameFile1(item.file),
 								new Promise((_, reject) =>
-									setTimeout(() => reject(new Error('Processing timeout')), timeoutDuration)
+									window.setTimeout(() => reject(new Error('Processing timeout')), timeoutDuration)
 								)
 							]);
 							success = true;
@@ -1094,7 +1105,7 @@ export default class ImageConvertPlugin extends Plugin {
 								throw error;
 							}
 							// Wait before retry
-							await new Promise(resolve => setTimeout(resolve, 1000));
+							await new Promise(resolve => window.setTimeout(resolve, 1000));
 						}
 					}
 	
@@ -1126,7 +1137,7 @@ export default class ImageConvertPlugin extends Plugin {
 				// Add small delay between files to prevent system overload
 				// Longer delay for large files
 				const delayTime = currentFileSize > 5 * 1024 * 1024 ? 500 : 100;
-				await new Promise(resolve => setTimeout(resolve, delayTime));
+				await new Promise(resolve => window.setTimeout(resolve, delayTime));
 			}
 		} finally {
 			// Only clean up if we're still on the same batch
@@ -1196,7 +1207,7 @@ export default class ImageConvertPlugin extends Plugin {
 		// Hide progress bar if processing is complete
 		if (current === total) {
 			// Add a small delay before hiding to show completion
-			setTimeout(() => this.hideProgressBar(), 1000);
+			window.setTimeout(() => this.hideProgressBar(), 1000);
 		}
     }
 	
@@ -2562,7 +2573,7 @@ export default class ImageConvertPlugin extends Plugin {
 		
 		// Clear any existing timeout for status bar removal
 		if (this.isConversionPaused_statusTimeout) {
-			clearTimeout(this.isConversionPaused_statusTimeout);
+			window.clearTimeout(this.isConversionPaused_statusTimeout);
 			this.isConversionPaused_statusTimeout = null;
 		}
 		
@@ -2685,7 +2696,7 @@ export default class ImageConvertPlugin extends Plugin {
 				new Notice(`Successfully processed ${imageCount} images.`);
 			}
 	
-			setTimeout(() => {
+			window.setTimeout(() => {
 				statusBarItemEl.setText('');
 			}, 5000);
 	
@@ -2993,7 +3004,7 @@ export default class ImageConvertPlugin extends Plugin {
 	
 			const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
 			statusBarItemEl.setText(`Finished processing ${imageCount} images, total time: ${totalTime} seconds`);
-			setTimeout(() => {
+			window.setTimeout(() => {
 				statusBarItemEl.setText('');
 			}, 5000);
 	
@@ -3685,10 +3696,10 @@ export default class ImageConvertPlugin extends Plugin {
 		func: T,
 		wait: number
 	): (...args: Parameters<T>) => void {
-		let timeout: NodeJS.Timeout;
+		let timeout: number;
 		return (...args: Parameters<T>) => {
-			clearTimeout(timeout);
-			timeout = setTimeout(() => func(...args), wait);
+			window.clearTimeout(timeout);
+			timeout = window.setTimeout(() => func(...args), wait);
 		};
 	}
 	
@@ -3701,7 +3712,7 @@ export default class ImageConvertPlugin extends Plugin {
 			if (!inThrottle) {
 				func(...args);
 				inThrottle = true;
-				setTimeout(() => inThrottle = false, limit);
+				window.setTimeout(() => inThrottle = false, limit);
 			}
 		};
 	}
