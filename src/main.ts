@@ -1,5 +1,5 @@
 // working 2
-import { App, View, MarkdownView, Notice, Plugin, TFile, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
+import { App, View, MarkdownView, Notice, ItemView, Plugin, TFile, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
 // Browsers use the MIME type, not the file extension this module allows 
 // us to be more precise when default MIME checking options fail
 import mime from "./mime.min.js"
@@ -314,7 +314,7 @@ export default class ImageConvertPlugin extends Plugin {
 
 		// Wait for layout to be ready before registering events
 		this.app.workspace.onLayoutReady(() => {
-
+			
 			// Initialize UI elements
 			this.progressEl = document.body.createDiv('image-converter-progress');
 			this.progressEl.style.display = 'none';
@@ -378,8 +378,8 @@ export default class ImageConvertPlugin extends Plugin {
 	
 		// Remove workspace-level listeners
 		const workspaceContainer = this.app.workspace.containerEl;
-		workspaceContainer.removeEventListener('paste', this.handlePaste);
-		workspaceContainer.removeEventListener('drop', this.handleDrop);
+		workspaceContainer.removeEventListener('paste', this.handlePaste, true);
+		workspaceContainer.removeEventListener('drop', this.handleDrop, true);
 		// Clean up any remaining timeouts
 		if (this.dropInfo?.timeoutId) {
 			window.clearTimeout(this.dropInfo.timeoutId);
@@ -460,55 +460,168 @@ export default class ImageConvertPlugin extends Plugin {
 
 	// Handle the initial drop/paste and put it in a queue
 	/* ------------------------------------------------------------- */
-	private registerEventHandlers() {
+	// private registerEventHandlers() {
 
+	// 	// Register workspace-level events
+	// 	this.registerEvent(
+	// 		this.app.workspace.on('editor-paste', (evt: ClipboardEvent, editor, view) => {
+	// 			if (this.shouldSkipEvent(evt)) return;
+	// 			this.handlePaste(evt);
+	// 		})
+	// 	);
+	
+	// 	this.registerEvent(
+	// 		this.app.workspace.on('editor-drop', (evt: DragEvent, editor, view) => {
+	// 			if (this.shouldSkipEvent(evt)) return;
+	// 			this.handleDrop(evt);
+	// 		})
+	// 	);
+	
+	// 	// Register DOM events using registerDomEvent
+	// 	const workspaceContainer = this.app.workspace.containerEl;
+		
+	// 	this.registerDomEvent(workspaceContainer, 'paste', (evt: ClipboardEvent) => {
+	// 		if (this.shouldSkipEvent(evt)) return;
+	// 		this.handlePaste(evt);
+	// 	}, { capture: true });
+
+	// 	this.registerDomEvent(workspaceContainer, 'drop', (evt: DragEvent) => {
+	// 		if (this.shouldSkipEvent(evt)) return;
+	// 		this.handleDrop(evt);
+	// 	}, { capture: true });
+
+	// 	// Register for specific view types
+	// 	const supportedViewTypes = ['markdown', 'canvas', 'excalidraw'];
+	// 	supportedViewTypes.forEach(viewType => {
+	// 		const leaves = this.app.workspace.getLeavesOfType(viewType);
+	// 		leaves.forEach(leaf => {
+	// 			const container = leaf.view.containerEl;
+	// 			if (!container.hasAttribute('data-image-converter-registered')) {
+	// 				container.setAttribute('data-image-converter-registered', 'true');
+					
+	// 				// Register dragover using registerDomEvent
+	// 				this.registerDomEvent(container, 'dragover', (e: DragEvent) => {
+	// 					e.preventDefault();
+	// 					e.stopPropagation();
+	// 				}, { capture: true });
+	// 			}
+	// 		});
+	// 	});
+	// }
+
+	private registerEventHandlers() {
 		// Register workspace-level events
 		this.registerEvent(
-			this.app.workspace.on('editor-paste', (evt: ClipboardEvent, editor, view) => {
+			this.app.workspace.on('editor-paste', async (evt: ClipboardEvent, editor, view) => {
 				if (this.shouldSkipEvent(evt)) return;
 				this.handlePaste(evt);
 			})
 		);
 	
 		this.registerEvent(
-			this.app.workspace.on('editor-drop', (evt: DragEvent, editor, view) => {
+			this.app.workspace.on('editor-drop', async (evt: DragEvent, editor, view) => {
 				if (this.shouldSkipEvent(evt)) return;
 				this.handleDrop(evt);
 			})
 		);
 	
-		// Register direct DOM events for the entire workspace
+		// Register DOM events for workspace container
 		const workspaceContainer = this.app.workspace.containerEl;
-		
-		// Use capture phase to ensure we catch events before they're handled by views
-		workspaceContainer.addEventListener('paste', (evt: ClipboardEvent) => {
-			if (this.shouldSkipEvent(evt)) return;
-			this.handlePaste(evt);
-		}, true); // true enables capture phase
+		this.registerDomEvent(workspaceContainer, 'paste', this.handlePaste.bind(this), { capture: true });
+		this.registerDomEvent(workspaceContainer, 'drop', this.handleDrop.bind(this), { capture: true });
 	
-		workspaceContainer.addEventListener('drop', (evt: DragEvent) => {
-			if (this.shouldSkipEvent(evt)) return;
-			this.handleDrop(evt);
-		}, true); // true enables capture phase
-	
-		// Register for specific view types
+		// Register for specific view types with proper type checking
 		const supportedViewTypes = ['markdown', 'canvas', 'excalidraw'];
 		supportedViewTypes.forEach(viewType => {
 			const leaves = this.app.workspace.getLeavesOfType(viewType);
-			leaves.forEach(leaf => {
-				const container = leaf.view.containerEl;
-				if (!container.hasAttribute('data-image-converter-registered')) {
-					container.setAttribute('data-image-converter-registered', 'true');
-					
-					// Add view-specific handlers if needed
-					container.addEventListener('dragover', (e: DragEvent) => {
-						e.preventDefault();
-						e.stopPropagation();
-					}, true);
+			leaves.forEach(async (leaf) => {
+				// Type-specific handling
+				if (viewType === 'markdown' && leaf.view instanceof MarkdownView) {
+					this.setupMarkdownViewHandlers(leaf.view);
+				} 
+				else if (viewType === 'canvas' && leaf.view instanceof ItemView) {
+					this.setupCanvasViewHandlers(leaf.view);
+				}
+				else if (viewType === 'excalidraw' && leaf.view instanceof ItemView) {
+					this.setupExcalidrawViewHandlers(leaf.view);
 				}
 			});
 		});
 	}
+	
+	private setupMarkdownViewHandlers(view: MarkdownView) {
+		const container = view.containerEl;
+		if (!container.hasAttribute('data-image-converter-registered')) {
+			container.setAttribute('data-image-converter-registered', 'true');
+			this.registerDomEvent(container, 'dragover', (e: DragEvent) => {
+				e.preventDefault();
+				e.stopPropagation();
+			}, { capture: true });
+		}
+	}
+	
+	private setupCanvasViewHandlers(view: ItemView) {
+		const container = view.containerEl;
+		if (!container.hasAttribute('data-image-converter-registered')) {
+			container.setAttribute('data-image-converter-registered', 'true');
+			this.registerDomEvent(container, 'dragover', (e: DragEvent) => {
+				e.preventDefault();
+				e.stopPropagation();
+			}, { capture: true });
+		}
+	}
+	
+	private setupExcalidrawViewHandlers(view: ItemView) {
+		const container = view.containerEl;
+		if (!container.hasAttribute('data-image-converter-registered')) {
+			container.setAttribute('data-image-converter-registered', 'true');
+			this.registerDomEvent(container, 'dragover', (e: DragEvent) => {
+				e.preventDefault();
+				e.stopPropagation();
+			}, { capture: true });
+		}
+	}
+
+
+	private shouldSkipEvent(evt: ClipboardEvent | DragEvent): boolean {
+		if (this.isConversionPaused || evt.defaultPrevented) {
+			return true;
+		}
+
+		const target = evt.target as HTMLElement;
+		const closestView = target.closest('.workspace-leaf-content');
+		if (!closestView) {
+			return true;
+		}
+
+		const viewType = closestView.getAttribute('data-type');
+
+		// Early return if not a supported view type
+		if (!viewType || !['markdown', 'canvas', 'excalidraw'].includes(viewType)) {
+			return true;
+		}
+
+		// Find the active leaf
+		const activeLeaf = this.app.workspace.getActiveViewOfType(MarkdownView)?.leaf ||
+			this.app.workspace.getLeavesOfType(viewType)[0];
+
+		if (!activeLeaf) {
+			return true;
+		}
+
+		// Type-specific checks
+		if (activeLeaf.view instanceof MarkdownView) {
+			return false;
+		}
+		if (activeLeaf.view instanceof ItemView &&
+			(activeLeaf.view.getViewType() === 'canvas' ||
+				activeLeaf.view.getViewType() === 'excalidraw')) {
+			return false;
+		}
+
+		return true;
+	}
+
 	private handlePaste(event: ClipboardEvent) {
 
 		this.userAction = true;
@@ -747,27 +860,27 @@ export default class ImageConvertPlugin extends Plugin {
 			this.updateProgressUI(0, imageFiles.length, 'Starting processing...');
 		}
 	}
-	private shouldSkipEvent(evt: ClipboardEvent | DragEvent): boolean {
+	// private shouldSkipEvent(evt: ClipboardEvent | DragEvent): boolean {
 
-		if (this.isConversionPaused || evt.defaultPrevented) {
-			return true;
-		}
+	// 	if (this.isConversionPaused || evt.defaultPrevented) {
+	// 		return true;
+	// 	}
 	
-		const target = evt.target as HTMLElement;
+	// 	const target = evt.target as HTMLElement;
 	
-		// Find the closest workspace leaf content
-		const closestView = target.closest('.workspace-leaf-content');
+	// 	// Find the closest workspace leaf content
+	// 	const closestView = target.closest('.workspace-leaf-content');
 	
-		if (!closestView) {
-			return true;
-		}
+	// 	if (!closestView) {
+	// 		return true;
+	// 	}
 	
-		const viewType = closestView.getAttribute('data-type');
+	// 	const viewType = closestView.getAttribute('data-type');
 	
-		const shouldSkip = !['markdown', 'canvas', 'excalidraw'].includes(viewType || '');
+	// 	const shouldSkip = !['markdown', 'canvas', 'excalidraw'].includes(viewType || '');
 	
-		return shouldSkip;
-	}
+	// 	return shouldSkip;
+	// }
 	private registerFileEvents() {
 		this.registerEvent(
 			this.app.vault.on('create', async (file: TFile) => {
@@ -1173,7 +1286,10 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
     private updateProgressUI(current: number, total: number, fileName: string) {
-        if (!this.progressEl) return;
+		if (!this.progressEl || this.isConversionPaused) {
+			this.hideProgressBar();
+			return;
+		}
 
         // Use dropInfo if available for consistent counting
         if (this.dropInfo) {
@@ -1216,6 +1332,10 @@ export default class ImageConvertPlugin extends Plugin {
 			this.progressEl.style.display = 'none';
 			this.progressEl.empty();
 		}
+		if (this.rafId) {
+			cancelAnimationFrame(this.rafId);
+			this.rafId = null;
+		}
 	}
 	
 	private showProgressBar() {
@@ -1244,7 +1364,8 @@ export default class ImageConvertPlugin extends Plugin {
     }
 
     private showBatchSummary() {
-        if (this.processedFiles.length === 0) return;  // Don't show empty summary
+		// Don't show empty summary
+        if (this.processedFiles.length === 0) return;
 
         const totalSaved = this.totalSizeBeforeBytes - this.totalSizeAfterBytes;
         const overallRatio = ((-totalSaved / this.totalSizeBeforeBytes) * 100).toFixed(1);
@@ -2585,13 +2706,29 @@ export default class ImageConvertPlugin extends Plugin {
 		if (this.isConversionPaused) {
 			this.statusBarItemEl.setText('Image Conversion: Paused ⏸️');
 			new Notice('Image conversion paused');
-			// Clear current queue if any
+			
+			// Clear current queue and state
 			this.fileQueue = [];
 			this.isProcessingQueue = false;
+			
+			// Reset batch processing state
+			if (this.dropInfo) {
+				const timeoutId = (this.dropInfo as DropInfo).timeoutId;
+				if (typeof timeoutId === 'number') {
+					window.clearTimeout(timeoutId);
+				}
+				this.dropInfo = null;
+			}
+			
+			this.batchStarted = false;
+			this.userAction = false;
+			
+			// Ensure progress bar is hidden
 			this.hideProgressBar();
 		} else {
 			this.statusBarItemEl.setText('Image Conversion: Active ▶️');
 			new Notice('Image conversion resumed');
+			
 			// Remove status bar item after 5 seconds
 			this.isConversionPaused_statusTimeout = window.setTimeout(() => {
 				if (this.statusBarItemEl) {
