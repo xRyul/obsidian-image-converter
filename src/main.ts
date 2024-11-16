@@ -1,8 +1,10 @@
 // working 2
-import { App, View, MarkdownView, Notice, ItemView, Plugin, TFile, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
+import { App, View, MarkdownView, Notice, ItemView, Plugin, TFile, Scope, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
 // Browsers use the MIME type, not the file extension this module allows 
 // us to be more precise when default MIME checking options fail
 import mime from "./mime.min.js"
+
+import { Canvas, FabricImage, IText, FabricObject, PencilBrush, ActiveSelection, Point } from 'fabric';
 
 /*
 
@@ -344,6 +346,12 @@ export default class ImageConvertPlugin extends Plugin {
 	
 			// Register context menu
 			this.registerContextMenu();
+
+			// Initialize Fabric.js defaults
+			FabricObject.prototype.transparentCorners = false;
+			FabricObject.prototype.cornerColor = '#108ee9';
+			FabricObject.prototype.cornerStyle = 'circle';
+
 		});
 	
 		// Register escape key handler
@@ -3424,6 +3432,9 @@ export default class ImageConvertPlugin extends Plugin {
 		}
 	
 		const target = (event.target as Element);
+		if (!(target instanceof HTMLImageElement)) {
+			return; // Exit if not an image
+		}
 
 		const img = event.target as HTMLImageElement;
 		const rect = img.getBoundingClientRect();
@@ -3577,12 +3588,49 @@ export default class ImageConvertPlugin extends Plugin {
 					});
 			});
 
+			// Add annotate option
+			menu.addItem((item) => {
+				item
+					.setTitle('Annotate Image')
+					.setIcon('pencil')
+					.onClick(async () => {
+						try {
+							// Get the image file from the vault
+							const rootFolder = this.app.vault.getName();
+							let imagePath = img.getAttribute('src');
+							
+							if (imagePath) {
+								// Find the position of the root folder in the path
+								const rootFolderIndex = imagePath.indexOf(rootFolder);
+			
+								// Remove everything before the root folder
+								if (rootFolderIndex !== -1) {
+									imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
+								}
+			
+								// Remove the query string and decode the path
+								imagePath = decodeURIComponent(imagePath.split('?')[0]);
+			
+								const file = this.app.vault.getAbstractFileByPath(imagePath);
+								if (file instanceof TFile) {
+									new ImageAnnotationModal(this.app, this, file).open();
+								} else {
+									new Notice('Unable to locate image file');
+								}
+							}
+						} catch (error) {
+							new Notice('Error opening annotation editor');
+							console.error(error);
+						}
+					});
+			});
 
+        
 			menu.showAtPosition({ x: event.pageX, y: event.pageY });
 			
 
-			// Prevent the default context menu from appearing
-			event.preventDefault();
+			// // Prevent the default context menu from appearing
+			// event.preventDefault();
 		}
 
 	}
@@ -7158,3 +7206,1436 @@ class ProcessCurrentNote extends Modal {
 	}
 }
 
+class ImageAnnotationModal extends Modal {
+    private canvas: Canvas;
+    private file: TFile;
+    private plugin: ImageConvertPlugin;
+    private isDrawingMode = false;
+	private isTextMode = false;
+	private textButton: ButtonComponent | undefined;
+	private isTextEditingBlocked = false;
+
+	private readonly brushSizes = [2, 4, 8, 12, 16, 24]; // 6 preset sizes
+	private readonly brushOpacities = [0.2, 0.4, 0.6, 0.8, 0.9, 1.0]; // 6 preset opacities
+	private currentBrushSizeIndex = 2; // Default to middle size
+    private currentOpacityIndex = 5; // Default to full opacity
+
+	private dominantColors: string[] = [];
+    private complementaryColors: string[][] = [];
+
+    private isResizing = false;
+    private minWidth = 400;
+    private minHeight = 300;
+    private resizeHandle: HTMLDivElement | null = null;
+	
+    private isPanning = false;
+	private isSpacebarDown = false; // Add this new property
+    private lastPanPoint: { x: number; y: number } | null = null;
+    private currentZoom = 1;
+    private readonly minZoom = 0.1;
+    private readonly maxZoom = 10;
+	
+	constructor(app: App, plugin: ImageConvertPlugin, imageFile: TFile) {
+		super(app);
+		this.plugin = plugin;
+		this.file = imageFile;
+		this.modalEl.addClass('image-annotation-modal');
+	
+		// Ensure close button works
+		const closeButton = this.modalEl.querySelector('.modal-close-button');
+		if (closeButton) {
+			closeButton.addEventListener('click', (e) => {
+				e.stopPropagation();
+				this.close();
+			});
+		}
+
+		// Create a new scope for handling shortcuts
+		this.scope = new Scope();
+		
+		// Register our custom scope
+		this.scope.register([], 'Escape', (e: KeyboardEvent) => {
+			e.preventDefault();
+			e.stopPropagation();
+			
+			const activeObject = this.canvas?.getActiveObject();
+			if (activeObject instanceof IText && activeObject.isEditing) {
+				activeObject.exitEditing();
+			}
+			return false;
+		});
+		
+		// Prevent default handlers
+		this.preventDefaultHandlers();
+	}
+
+    async onOpen() {
+        const { contentEl } = this;
+        contentEl.style.padding = '0';
+        contentEl.style.overflow = 'hidden';
+
+        const modalContainer = contentEl.createDiv('modal-container');
+		this.setupResizable();
+		this.setupToolbar(modalContainer);
+		
+        const canvasContainer = modalContainer.createDiv('canvas-container');
+        const canvasEl = canvasContainer.createEl('canvas');
+
+        try {
+            const arrayBuffer = await this.app.vault.readBinary(this.file);
+            const blob = new Blob([arrayBuffer]);
+            const blobUrl = URL.createObjectURL(blob);
+
+            const img = new Image();
+            img.onload = () => {
+				// Calculate dimensions to fit the window while maintaining aspect ratio
+				const padding = 80;
+				const toolbarHeight = 60;
+				
+				// Calculate maximum available space
+				const maxWidth = window.innerWidth * 0.9 - padding;
+				const maxHeight = window.innerHeight * 0.9 - padding - toolbarHeight;
+				
+				// Set canvas dimensions to maximum available space
+				const canvasWidth = maxWidth;
+				const canvasHeight = maxHeight;
+				
+				// Initialize canvas with full dimensions
+				this.canvas = new Canvas(canvasEl, {
+					width: canvasWidth,
+					height: canvasHeight,
+					backgroundColor: 'transparent', // Light gray background to show canvas bounds
+					isDrawingMode: false
+				});
+
+				// Calculate image scaling to fit within canvas while maintaining aspect ratio
+				const scale = Math.min(
+					canvasWidth / img.width,
+					canvasHeight / img.height
+				) * 0.8; // Scale down slightly to leave margin
+
+				// Add the image to canvas
+				const fabricImg = new FabricImage(img, {
+					selectable: false,
+					evented: false,
+					scaleX: scale,
+					scaleY: scale,
+					objectCaching: false,
+					opacity: 1,
+					erasable: false
+				});
+
+				this.canvas.add(fabricImg);
+
+				this.centerFabricImage(fabricImg);
+				
+				// Set modal dimensions
+				this.modalEl.style.width = `${canvasWidth + padding}px`;
+				this.modalEl.style.height = `${canvasHeight + padding + toolbarHeight}px`;
+				
+				this.analyzeImageColors(img);
+				this.setupZoomAndPan();
+				// ////////////////////////////////////////////////////////////////////////
+				// Initialize drawing brush
+				this.initializeCanvasEventHandlers();
+
+				// Prevent default behaviors that might interfere
+				this.modalEl.addEventListener('mousedown', (e) => {
+					if (e.target === this.modalEl) {
+						e.preventDefault();
+						e.stopPropagation();
+					}
+				});
+				// Prevent keyboard events from bubbling up to Obsidian
+				this.modalEl.addEventListener('keydown', (e: KeyboardEvent) => {
+					e.preventDefault();
+					e.stopPropagation();
+				}, true);
+
+				this.modalEl.addEventListener('keyup', (e: KeyboardEvent) => {
+					e.preventDefault();
+					e.stopPropagation();
+				}, true);
+
+				this.setupSelectionEvents();
+
+                URL.revokeObjectURL(blobUrl);
+                this.canvas.renderAll();
+
+            };
+
+            img.src = blobUrl;
+
+        } catch (error) {
+            console.error('Error loading image:', error);
+            new Notice('Error loading image');
+            return;
+        }
+    }
+	
+	private centerFabricImage(fabricImg: FabricImage) {
+		if (!this.canvas) return;
+	
+		// Get canvas dimensions with defaults
+		const canvasWidth = this.canvas.width ?? 0;
+		const canvasHeight = this.canvas.height ?? 0;
+	
+		// Get image dimensions with defaults
+		const imageWidth = fabricImg.width ?? 0;
+		const imageHeight = fabricImg.height ?? 0;
+		const scaleX = fabricImg.scaleX ?? 1;
+		const scaleY = fabricImg.scaleY ?? 1;
+	
+		// Calculate centered position
+		const left = (canvasWidth - imageWidth * scaleX) / 2;
+		const top = (canvasHeight - imageHeight * scaleY) / 2;
+	
+		// Set the position
+		fabricImg.set({
+			left,
+			top
+		});
+	}
+
+
+	private toggleObjectSelection(selectable: boolean) {
+		if (this.canvas) {
+			this.canvas.selection = selectable;
+			this.canvas.forEachObject((obj: FabricObject) => {
+				if (obj instanceof IText) {
+					// Always keep text objects selectable and evented
+					obj.selectable = true;
+					obj.evented = true;
+				} else if (obj.type !== 'image') {
+					obj.selectable = selectable;
+					obj.evented = selectable;
+				}
+			});
+			this.canvas.requestRenderAll();
+		}
+	}
+	
+	private updateDrawingModeUI(isDrawing: boolean) {
+		this.isDrawingMode = isDrawing;
+		this.canvas.isDrawingMode = isDrawing;
+		
+		if (!isDrawing) {
+			// Ensure proper object selection when disabling drawing mode
+			this.toggleObjectSelection(true);
+		}
+		
+		if (this.drawButton) {
+			if (isDrawing) {
+				this.drawButton.setButtonText('Stop Drawing');
+				this.drawButton.buttonEl.addClass('is-active');
+			} else {
+				this.drawButton.setButtonText('Draw');
+				this.drawButton.buttonEl.removeClass('is-active');
+			}
+		}
+		
+		// Ensure canvas is updated
+		this.canvas.requestRenderAll();
+	}
+	
+	private toggleDrawingMode(drawBtn?: ButtonComponent) {
+		if (!this.canvas) return;
+		
+		// If text mode is active, disable it first
+		if (this.isTextMode) {
+			this.toggleTextMode();
+		}
+		
+		const activeObject = this.canvas.getActiveObject();
+		if (activeObject instanceof IText && activeObject.isEditing) {
+			return;
+		}
+		
+		this.updateDrawingModeUI(!this.isDrawingMode);
+		
+		if (this.isDrawingMode) {
+			if (!this.canvas.freeDrawingBrush) {
+				this.canvas.freeDrawingBrush = new PencilBrush(this.canvas);
+			}
+			
+			this.canvas.freeDrawingBrush.width = this.brushSizes[this.currentBrushSizeIndex];
+			this.updateBrushColor();
+			this.toggleObjectSelection(false);
+		} else {
+			this.toggleObjectSelection(true);
+		}
+	}
+	private hexToRgba(hex: string, opacity: number): string {
+		// Remove the hash if present
+		hex = hex.replace('#', '');
+		
+		// Parse the hex values
+		const r = parseInt(hex.substring(0, 2), 16);
+		const g = parseInt(hex.substring(2, 4), 16);
+		const b = parseInt(hex.substring(4, 6), 16);
+		
+		// Return rgba string
+		return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+	}
+
+	private createColorSwatches() {
+		const colorPickerWrapper = this.modalEl.querySelector('.color-picker-wrapper');
+		if (!colorPickerWrapper) return;
+	
+		// Remove existing swatches if any
+		const existingSwatches = colorPickerWrapper.querySelector('.color-swatches');
+		if (existingSwatches) {
+			existingSwatches.remove();
+		}
+	
+		const swatchesContainer = colorPickerWrapper.createDiv('color-swatches');
+	
+		// Predefined color rows
+		const grayScaleColors = ['#000000', '#ffffff', '#d1d3d4', '#a7a9acCC', '#808285', '#58595b'];
+		const paletteColors = ['#ff80ff', '#ffc680', '#ffff80', '#80ff9e', '#80d6ff', '#bcb3ff'];
+	
+		// Create grayscale row
+		const grayScaleRow = swatchesContainer.createDiv('color-row');
+		grayScaleRow.createSpan('row-label').setText('Grayscale:');
+		const grayScaleSwatches = grayScaleRow.createDiv('swatches-container');
+		grayScaleColors.forEach(color => {
+			const swatch = grayScaleSwatches.createDiv('color-swatch preset');
+			swatch.style.backgroundColor = color;
+			swatch.setAttribute('title', color);
+			swatch.addEventListener('click', () => {
+				const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
+				if (colorPicker) {
+					colorPicker.value = color;
+					this.updateBrushColor();
+				}
+			});
+		});
+	
+		// Create palette row
+		const paletteRow = swatchesContainer.createDiv('color-row');
+		paletteRow.createSpan('row-label').setText('Palette:');
+		const paletteSwatches = paletteRow.createDiv('swatches-container');
+		paletteColors.forEach(color => {
+			const swatch = paletteSwatches.createDiv('color-swatch preset');
+			swatch.style.backgroundColor = color;
+			swatch.setAttribute('title', color);
+			swatch.addEventListener('click', () => {
+				const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
+				if (colorPicker) {
+					colorPicker.value = color;
+					this.updateBrushColor();
+				}
+			});
+		});
+	
+		// Sort dominant colors by luminosity
+		const colorPairs = this.dominantColors.map((dominantColor, index) => ({
+			dominant: dominantColor,
+			complementary: this.complementaryColors[index][0],
+			luminosity: this.getLuminosity(dominantColor)
+		})).sort((a, b) => a.luminosity - b.luminosity);
+	
+		// Create dominant colors row
+		const dominantRow = swatchesContainer.createDiv('color-row');
+		dominantRow.createSpan('row-label').setText('Dominant:');
+		const dominantSwatches = dominantRow.createDiv('swatches-container');
+		colorPairs.forEach(pair => {
+			const swatch = dominantSwatches.createDiv('color-swatch dominant');
+			swatch.style.backgroundColor = pair.dominant;
+			swatch.setAttribute('title', pair.dominant);
+			swatch.addEventListener('click', () => {
+				const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
+				if (colorPicker) {
+					colorPicker.value = pair.dominant;
+					this.updateBrushColor();
+				}
+			});
+		});
+	
+		// Create complementary colors row
+		const complementaryRow = swatchesContainer.createDiv('color-row');
+		complementaryRow.createSpan('row-label').setText('180:');
+		const complementarySwatches = complementaryRow.createDiv('swatches-container');
+		colorPairs.forEach(pair => {
+			const swatch = complementarySwatches.createDiv('color-swatch complementary');
+			swatch.style.backgroundColor = pair.complementary;
+			swatch.setAttribute('title', pair.complementary);
+			swatch.addEventListener('click', () => {
+				const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
+				if (colorPicker) {
+					const rgb = this.hslToRgb(pair.complementary);
+					const hex = this.rgbToHex(rgb.r, rgb.g, rgb.b);
+					colorPicker.value = hex;
+					this.updateBrushColor();
+				}
+			});
+		});
+	}
+
+	private updateBrushColor() {
+		if (!this.canvas?.freeDrawingBrush) return;
+		
+		const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
+		if (!colorPicker) return;
+	
+		const currentColor = colorPicker.value;
+		const currentOpacity = this.brushOpacities[this.currentOpacityIndex];
+		
+		this.canvas.freeDrawingBrush.color = this.hexToRgba(currentColor, currentOpacity);
+	}
+	// Separate method to create and add text
+	private createAndAddText(color: string, x: number, y: number) {
+		if (this.isTextEditingBlocked) {
+			console.debug('Text creation blocked');
+			return;
+		}
+	
+		try {
+			const text = new IText('Type here', {
+				left: x,
+				top: y,
+				fontSize: 20,
+				fill: color,
+				selectable: true,
+				evented: true,
+				editable: true,
+				hasControls: true,
+				hasBorders: true,
+				centeredScaling: true,
+				originX: 'center',
+				originY: 'center'
+			});
+	
+			this.canvas?.add(text);
+			this.canvas?.setActiveObject(text);
+			
+			// Force render before entering edit mode
+			this.canvas?.requestRenderAll();
+			
+			// Small delay before entering edit mode
+			setTimeout(() => {
+				text.enterEditing();
+				text.selectAll();
+				this.canvas?.requestRenderAll();
+			}, 50);
+	
+		} catch (error) {
+			console.error('Error in createAndAddText:', error);
+			this.isTextEditingBlocked = false;
+		}
+	}
+
+	private recoverTextEditing() {
+		if (!this.canvas) return;
+		
+		this.isTextEditingBlocked = false;
+		this.isDrawingMode = false;
+		this.canvas.isDrawingMode = false;
+		
+		const activeObject = this.canvas.getActiveObject();
+		if (activeObject instanceof IText) {
+			activeObject.selectable = true;
+			activeObject.evented = true;
+			activeObject.editable = true;
+		}
+		
+		this.canvas.requestRenderAll();
+	}
+
+	private clearAll() {
+		if (!this.canvas) return;
+		
+		// Show confirmation dialog
+		const confirm = window.confirm('Are you sure you want to clear all annotations?');
+		if (!confirm) return;
+	
+		const objects = this.canvas.getObjects();
+		// Remove all objects except the background image (first object)
+		objects.slice(1).forEach(obj => this.canvas.remove(obj));
+		this.canvas.requestRenderAll();
+	}
+
+	private registerHotkeys() {
+		this.scope.register(['Mod'], 'S', (evt: KeyboardEvent) => {
+			evt.preventDefault();
+			this.saveAnnotation();
+		});
+	
+		this.scope.register([], 'B', (evt: KeyboardEvent) => {
+			// Check if we're currently editing text
+			if (this.canvas) {
+				const activeObject = this.canvas.getActiveObject();
+				if (activeObject instanceof IText && activeObject.isEditing) {
+					return true; // Allow normal typing when editing text
+				}
+			}
+			evt.preventDefault();
+			// If text mode is active, disable it first
+			if (this.isTextMode) {
+				this.toggleTextMode();
+			}
+			this.toggleDrawingMode(this.drawButton);
+			return false;
+		});
+	
+		this.scope.register([], 'T', (evt: KeyboardEvent) => {
+			// Check if we're currently editing text
+			if (this.canvas) {
+				const activeObject = this.canvas.getActiveObject();
+				if (activeObject instanceof IText && activeObject.isEditing) {
+					return true; // Allow normal typing when editing text
+				}
+			}
+			evt.preventDefault();
+			// If drawing mode is active, disable it first
+			if (this.isDrawingMode) {
+				this.updateDrawingModeUI(false);
+			}
+			// Just disable drawing mode
+			this.toggleTextMode();
+			return false;
+		});
+
+		// Add delete/backspace handler
+		this.scope.register([], 'Delete', (evt: KeyboardEvent) => {
+			evt.preventDefault();
+			this.deleteSelectedObjects();
+			return false;
+		});
+
+		this.scope.register([], 'Backspace', (evt: KeyboardEvent) => {
+			const activeObject = this.canvas?.getActiveObject();
+			if (activeObject instanceof IText && activeObject.isEditing) {
+				return true; // Allow normal backspace behavior when editing text
+			}
+			evt.preventDefault();
+			this.deleteSelectedObjects();
+			return false;
+		});
+
+	}
+
+	private drawButton: ButtonComponent | undefined = undefined; // Add this as a class property
+	
+	private setupToolbar(container: HTMLElement) {
+		const toolbar = container.createDiv('annotation-toolbar');
+	
+		// Create tool groups
+		const drawingGroup = toolbar.createDiv('annotation-toolbar-group drawing-group');
+		const brushControls = toolbar.createDiv('annotation-toolbar-group brush-controls');
+		const utilityGroup = toolbar.createDiv('annotation-toolbar-group');
+	
+		// Left section container for drawing tools and colors
+		const leftSection = drawingGroup.createDiv('left-section');
+	
+		// Create a column container for drawing tools
+		const drawingToolsColumn = leftSection.createDiv('drawing-tools-column');
+	
+		// Drawing button
+		this.drawButton = new ButtonComponent(drawingToolsColumn)
+			.setTooltip('Draw (B)')
+			.setIcon('pencil')
+			.onClick(() => {
+				this.toggleDrawingMode(this.drawButton);
+			});
+	
+		// Text button in the same column
+		this.textButton = new ButtonComponent(drawingToolsColumn)
+			.setTooltip('Add Text (T)')
+			.setIcon('text')
+			.onClick(() => {
+				this.toggleTextMode();
+			});
+		// Add zoom controls to utility group
+		new ButtonComponent(drawingToolsColumn)
+			.setTooltip('Reset Zoom (1:1)')
+			.setIcon('search')
+			.onClick(() => this.resetZoom());
+		// Add color picker right next to drawing tools
+		const colorPickerWrapper = leftSection.createDiv('color-picker-wrapper');
+		const colorPicker = colorPickerWrapper.createEl('input', {
+			type: 'color',
+			value: '#ff0000'
+		});
+		colorPicker.addClass('color-picker');
+	
+		// Update color picker event listener
+		colorPicker.addEventListener('input', () => {
+			this.updateBrushColor();
+			
+			if (this.canvas) {
+				const activeObject = this.canvas.getActiveObject();
+				if (activeObject && activeObject instanceof IText) {
+					activeObject.set('fill', colorPicker.value);
+					this.canvas.requestRenderAll();
+				}
+			}
+		});
+		
+		// Brush controls
+		const brushControlsColumn = brushControls.createDiv('brush-controls-column');
+		this.createSizeButtons(brushControlsColumn);
+		this.createOpacityButtons(brushControlsColumn);
+	
+		// Utility tools
+		new ButtonComponent(utilityGroup)
+			.setTooltip('Clear All')
+			.setIcon('trash')
+			.onClick(() => this.clearAll());
+	
+		const saveBtn = new ButtonComponent(utilityGroup)
+			.setTooltip('Save (Ctrl/Cmd + S)')
+			.setIcon('checkmark')
+			.onClick(() => this.saveAnnotation());
+		
+		saveBtn.buttonEl.addClass('mod-cta');
+	
+		new ButtonComponent(utilityGroup)
+			.setTooltip('Recover Text Editing')
+			.setIcon('refresh-cw')
+			.onClick(() => this.recoverTextEditing());
+	
+		this.registerHotkeys();
+	}
+
+
+
+	private toggleTextMode() {
+		// If drawing mode is active, disable it first
+		if (this.isDrawingMode) {
+			this.updateDrawingModeUI(false);
+		}
+		
+		this.isTextMode = !this.isTextMode;
+		
+		// Update Text Button UI
+		if (this.textButton) {
+			if (this.isTextMode) {
+				// this.textButton.setButtonText('Stop Text');
+				this.textButton.buttonEl.addClass('is-active');
+			} else {
+				// this.textButton.setButtonText('Add Text');
+				this.textButton.buttonEl.removeClass('is-active');
+			}
+		}
+		
+		// Update canvas state
+		if (this.canvas) {
+			this.canvas.isDrawingMode = false;
+			this.toggleObjectSelection(true);
+		}
+	}
+
+	
+	private createSizeButtons(container: HTMLElement) {
+		const brushControlsColumn = container.createDiv('brush-controls-column');
+		
+		// Size controls
+		const sizeButtonsContainer = brushControlsColumn.createDiv('size-buttons-container');
+		const sizeLabel = sizeButtonsContainer.createDiv('control-label');
+		sizeLabel.setText('Size:');
+		
+		const sizeButtonContainer = sizeButtonsContainer.createDiv('button-group');
+		
+		this.brushSizes.forEach((size, index) => {
+			const button = new ButtonComponent(sizeButtonContainer)
+				.setButtonText(size.toString())
+				.onClick(() => {
+					this.currentBrushSizeIndex = index;
+					if (this.canvas?.freeDrawingBrush) {
+						this.canvas.freeDrawingBrush.width = this.brushSizes[this.currentBrushSizeIndex];
+					}
+					sizeButtonContainer.querySelectorAll('button').forEach(btn => 
+						btn.removeClass('is-active'));
+					button.buttonEl.addClass('is-active');
+				});
+				
+			if (index === this.currentBrushSizeIndex) {
+				button.buttonEl.addClass('is-active');
+			}
+		});
+	}
+	
+	private createOpacityButtons(container: HTMLElement) {
+		// Get the existing brush-controls-column or create it if it doesn't exist
+		let brushControlsColumn = container.querySelector('.brush-controls-column');
+		if (!brushControlsColumn) {
+			brushControlsColumn = container.createDiv('brush-controls-column');
+		}
+		
+		const opacityButtonsContainer = brushControlsColumn.createDiv('opacity-buttons-container');
+		const opacityLabel = opacityButtonsContainer.createDiv('control-label');
+		opacityLabel.setText('Opacity:');
+		
+		const opacityButtonContainer = opacityButtonsContainer.createDiv('button-group');
+		
+		this.brushOpacities.forEach((opacity, index) => {
+			const button = new ButtonComponent(opacityButtonContainer)
+				.setButtonText((opacity * 100).toString() + '%')
+				.onClick(() => {
+					this.currentOpacityIndex = index;
+					this.updateBrushColor();
+					opacityButtonContainer.querySelectorAll('button').forEach(btn => 
+						btn.removeClass('is-active'));
+					button.buttonEl.addClass('is-active');
+				});
+				
+			if (index === this.currentOpacityIndex) {
+				button.buttonEl.addClass('is-active');
+			}
+		});
+	}
+
+
+    private setupSelectionEvents() {
+        if (!this.canvas) return;
+    }
+
+	private deleteSelectedObjects() {
+		if (!this.canvas) return;
+	
+		const activeObject = this.canvas.getActiveObject();
+		if (!activeObject) return;
+	
+		// Allow normal backspace behavior when editing text
+		if (activeObject instanceof IText && activeObject.isEditing) {
+			return;
+		}
+	
+		// Perform deletion for non-text editing cases
+		if (activeObject.type === 'activeSelection') {
+			const activeSelection = activeObject as ActiveSelection;
+			const objects = activeSelection.getObjects();
+			objects.forEach(obj => {
+				if (!(obj instanceof FabricImage)) {
+					this.canvas?.remove(obj);
+				}
+			});
+			this.canvas.discardActiveObject();
+		} else {
+			if (!(activeObject instanceof FabricImage)) {
+				this.canvas.remove(activeObject);
+			}
+		}
+	
+		this.canvas.requestRenderAll();
+	}
+	
+	async saveAnnotation() {
+		if (!this.canvas) return;
+		
+		try {
+			// Get all objects
+			const objects = this.canvas.getObjects();
+			if (objects.length === 0) return;
+	
+			// Get the background image (first object)
+			const backgroundImage = objects[0] as FabricImage;
+			if (!backgroundImage) return;
+	
+			// Calculate image boundaries
+			const imageBounds = this.calculateImageBounds(backgroundImage);
+	
+			// Calculate bounds of annotations (excluding background image)
+			const annotationBounds = objects.slice(1).reduce((acc, obj) => {
+				const objBounds = obj.getBoundingRect();
+				return {
+					left: Math.min(acc.left, objBounds.left),
+					top: Math.min(acc.top, objBounds.top),
+					right: Math.max(acc.right, objBounds.left + objBounds.width),
+					bottom: Math.max(acc.bottom, objBounds.top + objBounds.height)
+				};
+			}, { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
+	
+			// Check if annotations extend beyond image boundaries
+			const hasExternalAnnotations = 
+				annotationBounds.left < imageBounds.left ||
+				annotationBounds.top < imageBounds.top ||
+				annotationBounds.right > imageBounds.right ||
+				annotationBounds.bottom > imageBounds.bottom;
+	
+			// Set final bounds based on whether we need to trim or not
+			const finalBounds = hasExternalAnnotations ? {
+				left: Math.min(imageBounds.left, annotationBounds.left),
+				top: Math.min(imageBounds.top, annotationBounds.top),
+				right: Math.max(imageBounds.right, annotationBounds.right),
+				bottom: Math.max(imageBounds.bottom, annotationBounds.bottom)
+			} : imageBounds;
+	
+			// Add padding only if we have external annotations
+			const padding = hasExternalAnnotations ? 20 : 0;
+			const width = finalBounds.right - finalBounds.left + (padding * 2);
+			const height = finalBounds.bottom - finalBounds.top + (padding * 2);
+	
+			// Convert to data URL with the calculated dimensions
+			const dataUrl = this.canvas.toDataURL({
+				format: 'png',
+				quality: 1,
+				multiplier: 1,
+				enableRetinaScaling: true,
+				left: finalBounds.left - padding,
+				top: finalBounds.top - padding,
+				width: width,
+				height: height
+			});
+	
+			const response = await fetch(dataUrl);
+			const blob = await response.blob();
+			const arrayBuffer = await blob.arrayBuffer();
+			
+			await this.app.vault.modifyBinary(this.file, arrayBuffer);
+	
+			// Update any displayed images
+			const imgs = document.querySelectorAll(`img[src*="${this.file.path}"]`) as NodeListOf<HTMLImageElement>;
+			imgs.forEach(img => {
+				const currentSrc = img.src;
+				img.src = currentSrc.split('?')[0] + '?' + Date.now();
+			});
+	
+			setTimeout(() => this.close(), 100);
+		} catch (error) {
+			console.error('Save error:', error);
+		}
+	}
+
+
+	private calculateImageBounds(backgroundImage: FabricImage): {
+		left: number;
+		top: number;
+		right: number;
+		bottom: number;
+	} {
+		// Provide default values if properties are undefined
+		const left = backgroundImage.left ?? 0;
+		const top = backgroundImage.top ?? 0;
+		const width = backgroundImage.width ?? 0;
+		const height = backgroundImage.height ?? 0;
+		const scaleX = backgroundImage.scaleX ?? 1;
+		const scaleY = backgroundImage.scaleY ?? 1;
+	
+		return {
+			left,
+			top,
+			right: left + (width * scaleX),
+			bottom: top + (height * scaleY)
+		};
+	}
+
+	private initializeCanvasEventHandlers() {
+		if (!this.canvas) return;
+		
+		// Initialize drawing brush
+		this.canvas.freeDrawingBrush = new PencilBrush(this.canvas);
+		this.canvas.freeDrawingBrush.width = this.brushSizes[this.currentBrushSizeIndex];
+
+
+		// Initialize with opacity
+		const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
+		if (colorPicker) {
+			this.updateBrushColor();
+		}
+
+
+		// Mouse down handler with improved state management
+		this.canvas.on('mouse:down', (opt) => {
+			const target = opt.target;
+			// logState('mouse:down', target);
+			
+			if (target instanceof IText) {
+				this.updateDrawingModeUI(false);
+				this.isTextEditingBlocked = false;
+				target.selectable = true;
+				target.evented = true;
+			}
+		});
+	
+		// Enhanced text editing handlers
+		this.canvas.on('text:editing:entered', (opt) => {
+			const textObject = opt.target;
+			// logState('text:editing:entered', textObject);
+			
+			if (textObject) {
+				this.isTextEditingBlocked = false;
+				this.updateDrawingModeUI(false);
+				textObject.selectable = true;
+				textObject.evented = true;
+			}
+		});
+	
+		this.canvas.on('text:editing:exited', (opt) => {
+			const textObject = opt.target;
+			// logState('text:editing:exited', textObject);
+			
+			if (textObject) {
+				this.isTextEditingBlocked = false;
+				textObject.selectable = true;
+				textObject.evented = true;
+			}
+		});
+	
+		// Enhanced double click handler
+		this.canvas.on('mouse:dblclick', (opt) => {
+			if (!this.isTextMode || this.isDrawingMode || this.isTextEditingBlocked) {
+				console.debug('Blocked text creation - not in text mode or text editing blocked');
+				return;
+			}
+	
+			const target = opt.target;
+			if (target instanceof IText) {
+				this.isTextEditingBlocked = false;
+				target.enterEditing();
+				target.selectAll();
+				this.canvas?.requestRenderAll();
+				return;
+			}
+	
+			try {
+				const pointer = this.canvas.getScenePoint(opt.e);
+				const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
+				const currentColor = colorPicker ? colorPicker.value : '#ff0000';
+				this.createAndAddText(currentColor, pointer.x, pointer.y);
+			} catch (error) {
+				console.error('Error creating text:', error);
+				this.isTextEditingBlocked = false; // Reset block on error
+			}
+		});
+	
+		// Add a periodic state check
+		setInterval(() => {
+			const activeObject = this.canvas?.getActiveObject();
+			if (activeObject instanceof IText && !activeObject.isEditing && this.isTextEditingBlocked) {
+				console.debug('Resetting blocked text editing state');
+				this.isTextEditingBlocked = false;
+			}
+		}, 5000);
+	}
+
+	private preventDefaultHandlers() {
+		// Create a whitelist of elements we want to allow events on
+		const shouldAllowEvent = (e: Event): boolean => {
+			const target = e.target as HTMLElement;
+			return (
+				target.tagName.toLowerCase() === 'canvas' || // Allow canvas events
+				target.closest('.annotation-toolbar') !== null || // Allow toolbar events
+				target.closest('.color-picker-wrapper') !== null || // Allow color picker events
+				target.closest('.modal-close-button') !== null || // Allow close button events
+				target.hasClass('modal-close-button') // Alternative class check for close button
+			);
+		};
+	
+		// More precise event handling
+		const handleEvent = (e: Event) => {
+			if (!shouldAllowEvent(e)) {
+				e.stopPropagation();
+			}
+		};
+	
+		// Handle keyboard events separately
+		const handleKeyboard = (e: KeyboardEvent) => {
+			const activeObject = this.canvas?.getActiveObject();
+			
+			// Allow text editing when IText is active
+			if (activeObject instanceof IText && activeObject.isEditing) {
+				return; // Let the event through for text editing
+			}
+	
+			// Handle specific keyboard shortcuts
+			if (this.isHandledKey(e)) {
+				e.preventDefault();
+				e.stopPropagation();
+				return;
+			}
+	
+			// Let other keyboard events through to the canvas
+			if (shouldAllowEvent(e)) {
+				return;
+			}
+	
+			// Stop propagation for non-canvas events
+			e.stopPropagation();
+		};
+	
+		// Add event listeners with proper targeting
+		this.modalEl.addEventListener('mousedown', handleEvent, true);
+		this.modalEl.addEventListener('mousemove', handleEvent, true);
+		this.modalEl.addEventListener('mouseup', handleEvent, true);
+		this.modalEl.addEventListener('click', handleEvent, true);
+		this.modalEl.addEventListener('dblclick', handleEvent, true);
+		
+		// Keyboard events
+		this.modalEl.addEventListener('keydown', handleKeyboard, true);
+		this.modalEl.addEventListener('keyup', handleKeyboard, true);
+	
+		// Store the handlers for cleanup
+		this._boundHandleEvent = handleEvent;
+		this._boundHandleKeyboard = handleKeyboard;
+	}
+	
+	private isHandledKey(e: KeyboardEvent): boolean {
+		// Don't handle delete/backspace when editing text
+		const activeObject = this.canvas?.getActiveObject();
+		if (activeObject instanceof IText && activeObject.isEditing) {
+			return false;
+		}
+	
+		return (
+			(e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' || // Save
+			e.key === 'Escape' || // Close/refresh
+			(!this.isTextEditing() && (
+				e.key === 'Delete' || // Delete
+				e.key === 'Backspace' || // Backspace
+				e.key.toLowerCase() === 'b' || // Drawing mode
+				e.key.toLowerCase() === 't' // Text mode
+			))
+		);
+	}
+	
+	private isTextEditing(): boolean {
+		const activeObject = this.canvas?.getActiveObject();
+		return !!(activeObject instanceof IText && activeObject.isEditing);
+	}
+	
+	// Add these as class properties
+	private _boundHandleEvent: ((e: Event) => void) | null = null;
+	private _boundHandleKeyboard: ((e: KeyboardEvent) => void) | null = null;
+
+
+	private async analyzeImageColors(img: HTMLImageElement): Promise<void> {
+        // Create a temporary canvas for analysis
+        const tempCanvas = document.createElement('canvas');
+        const ctx = tempCanvas.getContext('2d');
+        if (!ctx) return;
+
+        // Set canvas size to match image
+        tempCanvas.width = img.width;
+        tempCanvas.height = img.height;
+
+        // Draw image to canvas
+        ctx.drawImage(img, 0, 0);
+
+        // Get image data
+        const imageData = ctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+        const pixels = imageData.data;
+
+        // Create color map
+        const colorMap = new Map<string, number>();
+
+        // Sample every 4th pixel for performance
+        for (let i = 0; i < pixels.length; i += 16) {
+            const r = pixels[i];
+            const g = pixels[i + 1];
+            const b = pixels[i + 2];
+            const a = pixels[i + 3];
+
+            // Skip transparent pixels
+            if (a < 128) continue;
+
+            // Quantize colors to reduce the number of unique colors
+            const quantizedR = Math.round(r / 32) * 32;
+            const quantizedG = Math.round(g / 32) * 32;
+            const quantizedB = Math.round(b / 32) * 32;
+
+            const hex = this.rgbToHex(quantizedR, quantizedG, quantizedB);
+            colorMap.set(hex, (colorMap.get(hex) || 0) + 1);
+        }
+
+        // Convert map to array and sort by frequency
+        const sortedColors = Array.from(colorMap.entries())
+            .map(([color, count]) => ({ color, count }))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 6)
+            .map(item => item.color);
+
+        this.dominantColors = sortedColors;
+        this.complementaryColors = sortedColors.map(color => this.getComplementaryColors(color));
+
+        // Create color swatches
+        this.createColorSwatches();
+    }
+	private getLuminosity(color: string): number {
+		const rgb = this.hexToRgb(color);
+		// Using relative luminance formula
+		return 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
+	}
+    private rgbToHex(r: number, g: number, b: number): string {
+        return '#' + [r, g, b].map(x => {
+            const hex = x.toString(16);
+            return hex.length === 1 ? '0' + hex : hex;
+        }).join('');
+    }
+
+    private hexToRgb(hex: string): { r: number, g: number, b: number } {
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return result ? {
+            r: parseInt(result[1], 16),
+            g: parseInt(result[2], 16),
+            b: parseInt(result[3], 16)
+        } : { r: 0, g: 0, b: 0 };
+    }
+	private getComplementaryColors(hex: string): string[] {
+		const rgb = this.hexToRgb(hex);
+		const hsl = this.rgbToHsl(rgb.r, rgb.g, rgb.b);
+	
+		// Return only the complementary color at 180 degrees
+		return [this.hslToString((hsl.h + 180) % 360, hsl.s, hsl.l)];
+	}
+    private rgbToHsl(r: number, g: number, b: number): { h: number, s: number, l: number } {
+        r /= 255;
+        g /= 255;
+        b /= 255;
+
+        const max = Math.max(r, g, b);
+        const min = Math.min(r, g, b);
+        let h = 0;
+        let s = 0;
+        const l = (max + min) / 2;
+
+        if (max !== min) {
+            const d = max - min;
+            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+
+            switch (max) {
+                case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                case g: h = (b - r) / d + 2; break;
+                case b: h = (r - g) / d + 4; break;
+            }
+
+            h *= 60;
+        }
+
+        // Convert s and l to percentages
+        s = s * 100;
+        const lPercent = l * 100;
+
+        return { h, s: s, l: lPercent };
+    }
+	private hslToString(h: number, s: number, l: number): string {
+        // Ensure h is between 0 and 360
+        h = h % 360;
+        if (h < 0) h += 360;
+
+        // Keep s and l as percentages
+        return `hsl(${Math.round(h)}, ${Math.round(s)}%, ${Math.round(l)}%)`;
+    }
+	private hslToRgb(hslStr: string): { r: number, g: number, b: number } {
+        const matches = hslStr.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
+        if (!matches) return { r: 0, g: 0, b: 0 };
+
+        const h = parseInt(matches[1]) / 360;
+        const s = parseInt(matches[2]) / 100;
+        const l = parseInt(matches[3]) / 100;
+
+        let r, g, b;
+
+        if (s === 0) {
+            r = g = b = l;
+        } else {
+            const hue2rgb = (p: number, q: number, t: number) => {
+                if (t < 0) t += 1;
+                if (t > 1) t -= 1;
+                if (t < 1/6) return p + (q - p) * 6 * t;
+                if (t < 1/2) return q;
+                if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                return p;
+            };
+
+            const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+            const p = 2 * l - q;
+
+            r = hue2rgb(p, q, h + 1/3);
+            g = hue2rgb(p, q, h);
+            b = hue2rgb(p, q, h - 1/3);
+        }
+
+        return {
+            r: Math.round(r * 255),
+            g: Math.round(g * 255),
+            b: Math.round(b * 255)
+        };
+    }
+
+    // Add to your existing onOpen method, after creating modalContainer
+    private setupResizable() {
+        // Add resize handle
+        this.resizeHandle = this.modalEl.createDiv('modal-resize-handle');
+        this.resizeHandle.innerHTML = '⋮⋮'; // Or use any icon you prefer
+
+        // Add resize functionality
+        this.resizeHandle.addEventListener('mousedown', this.startResize.bind(this));
+        document.addEventListener('mousemove', this.resize.bind(this));
+        document.addEventListener('mouseup', this.stopResize.bind(this));
+
+        // Add resize class to modal
+        this.modalEl.addClass('resizable-modal');
+    }
+
+    private startResize(e: MouseEvent) {
+        this.isResizing = true;
+        this.modalEl.addClass('is-resizing');
+        e.preventDefault();
+    }
+
+	private resize(e: MouseEvent) {
+		if (!this.isResizing || !this.canvas) return;
+	
+		const modalRect = this.modalEl.getBoundingClientRect();
+		const newWidth = Math.max(this.minWidth, e.clientX - modalRect.left);
+		const newHeight = Math.max(this.minHeight, e.clientY - modalRect.top);
+	
+		this.modalEl.style.width = `${newWidth}px`;
+		this.modalEl.style.height = `${newHeight}px`;
+	
+		const toolbar = this.modalEl.querySelector('.annotation-toolbar') as HTMLElement;
+		const toolbarHeight = toolbar?.offsetHeight ?? 0;
+		const padding = 40;
+	
+		// Update canvas size
+		this.canvas.setDimensions({
+			width: newWidth - padding,
+			height: newHeight - toolbarHeight - padding
+		});
+	
+		// Get background image
+		const backgroundImage = this.canvas.getObjects()[0] as FabricImage;
+		if (backgroundImage) {
+			// Safely get image dimensions with defaults
+			const imageWidth = backgroundImage.width ?? 1;  // Use 1 to avoid division by zero
+			const imageHeight = backgroundImage.height ?? 1;
+	
+			// Calculate scale safely
+			const scale = Math.min(
+				(newWidth - padding) / imageWidth,
+				(newHeight - toolbarHeight - padding) / imageHeight
+			) * 0.8; // Keep some margin
+	
+			backgroundImage.set({
+				scaleX: scale,
+				scaleY: scale
+			});
+		}
+	
+		// Keep all objects within visible canvas area
+		const canvasWidth = this.canvas.width ?? 0;
+		const canvasHeight = this.canvas.height ?? 0;
+	
+		this.canvas.getObjects().slice(1).forEach(obj => {
+			const objBounds = obj.getBoundingRect();
+			
+			// Ensure object stays within canvas bounds
+			if (objBounds.left < 0) {
+				obj.set('left', 0);
+			}
+			if (objBounds.top < 0) {
+				obj.set('top', 0);
+			}
+			if (objBounds.left + objBounds.width > canvasWidth) {
+				obj.set('left', Math.max(0, canvasWidth - objBounds.width));
+			}
+			if (objBounds.top + objBounds.height > canvasHeight) {
+				obj.set('top', Math.max(0, canvasHeight - objBounds.height));
+			}
+		});
+	
+		this.canvas.requestRenderAll();
+	}
+
+    private stopResize() {
+        this.isResizing = false;
+        this.modalEl.removeClass('is-resizing');
+    }
+
+
+
+	private setupZoomAndPan() {
+		if (!this.canvas) return;
+	
+		// Zoom with mouse wheel (keep existing code)
+		this.canvas.on('mouse:wheel', (opt) => {
+			const event = opt.e as WheelEvent;
+			event.preventDefault();
+			event.stopPropagation();
+	
+			// Use getScenePoint instead of getPointer
+			const point = this.canvas.getScenePoint(event);
+			const delta = event.deltaY;
+			let newZoom = this.currentZoom * (delta > 0 ? 0.95 : 1.05);
+			
+			newZoom = Math.min(Math.max(newZoom, this.minZoom), this.maxZoom);
+			
+			if (newZoom !== this.currentZoom) {
+				this.zoomToPoint(point, newZoom);
+			}
+		});
+	
+		// Update spacebar handling
+		document.addEventListener('keydown', (e) => {
+			if (e.code === 'Space') {
+				// Check if we're editing text
+				const activeObject = this.canvas.getActiveObject();
+				if (activeObject instanceof IText && activeObject.isEditing) {
+					return; // Allow normal spacebar behavior for text editing
+				}
+	
+				if (!this.isSpacebarDown) {
+					e.preventDefault();
+					this.isSpacebarDown = true;
+					this.canvas.defaultCursor = 'grab';
+					
+					// Temporarily disable drawing and text modes
+					if (this.isDrawingMode) {
+						this.canvas.isDrawingMode = false;
+					}
+				}
+			}
+		});
+	
+		document.addEventListener('keyup', (e) => {
+			if (e.code === 'Space') {
+				// Check if we're editing text
+				const activeObject = this.canvas.getActiveObject();
+				if (activeObject instanceof IText && activeObject.isEditing) {
+					return; // Allow normal spacebar behavior for text editing
+				}
+	
+				e.preventDefault();
+				this.isSpacebarDown = false;
+				this.isPanning = false;
+				this.lastPanPoint = null;
+				this.canvas.defaultCursor = 'default';
+				
+				// Restore drawing mode if it was active
+				if (this.isDrawingMode) {
+					this.canvas.isDrawingMode = true;
+				}
+			}
+		});
+	
+		// Update mouse events
+		this.canvas.on('mouse:down', (opt) => {
+			if (this.isSpacebarDown && opt.e) {
+				this.isPanning = true;
+				this.canvas.defaultCursor = 'grabbing';
+				const event = opt.e as MouseEvent;
+				this.lastPanPoint = { x: event.clientX, y: event.clientY };
+			}
+		});
+	
+		this.canvas.on('mouse:move', (opt) => {
+			if (!this.isPanning || !this.lastPanPoint || !opt.e) return;
+			
+			const event = opt.e as MouseEvent;
+			const currentPoint = { x: event.clientX, y: event.clientY };
+			
+			const deltaX = currentPoint.x - this.lastPanPoint.x;
+			const deltaY = currentPoint.y - this.lastPanPoint.y;
+			
+			this.canvas.relativePan(new Point(deltaX, deltaY));
+			this.lastPanPoint = currentPoint;
+		});
+	
+		this.canvas.on('mouse:up', () => {
+			if (this.isPanning) {
+				this.isPanning = false;
+				this.lastPanPoint = null;
+				this.canvas.defaultCursor = this.isSpacebarDown ? 'grab' : 'default';
+			}
+		});
+	}
+	
+	private zoomToPoint(point: Point, newZoom: number) {
+		if (!this.canvas) return;
+	
+		const scaleFactor = newZoom / this.currentZoom;
+		this.currentZoom = newZoom;
+	
+		// Update to use viewport transform directly
+		const vpt = this.canvas.viewportTransform;
+		if (!vpt) return;
+	
+		const canvasPoint = {
+			x: point.x - vpt[4],
+			y: point.y - vpt[5]
+		};
+	
+		this.canvas.setViewportTransform([
+			newZoom, 0, 0, newZoom,
+			point.x - canvasPoint.x * scaleFactor,
+			point.y - canvasPoint.y * scaleFactor
+		]);
+	
+		this.canvas.requestRenderAll();
+	}
+
+	private resetZoom() {
+		if (!this.canvas) return;
+		
+		this.currentZoom = 1;
+		this.canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+		this.canvas.requestRenderAll();
+	}
+
+	// Update the cleanup method
+	private cleanup() {
+		if (this.canvas) {
+			this.canvas.off();
+			this.canvas.dispose();
+		}
+	
+		// Remove event listeners using stored bound handlers
+		if (this._boundHandleEvent) {
+			this.modalEl.removeEventListener('mousedown', this._boundHandleEvent, true);
+			this.modalEl.removeEventListener('mousemove', this._boundHandleEvent, true);
+			this.modalEl.removeEventListener('mouseup', this._boundHandleEvent, true);
+			this.modalEl.removeEventListener('click', this._boundHandleEvent, true);
+			this.modalEl.removeEventListener('dblclick', this._boundHandleEvent, true);
+		}
+	
+		if (this._boundHandleKeyboard) {
+			this.modalEl.removeEventListener('keydown', this._boundHandleKeyboard, true);
+			this.modalEl.removeEventListener('keyup', this._boundHandleKeyboard, true);
+		}
+	
+		// Clear references
+		this._boundHandleEvent = null;
+		this._boundHandleKeyboard = null;
+
+		// Reset states
+		this.isTextEditingBlocked = false;
+		this.isDrawingMode = false;
+		this.isTextMode = false;
+
+
+		// Reset UI
+		if (this.drawButton) {
+			this.drawButton.buttonEl.removeClass('is-active');
+		}
+		if (this.textButton) {
+			this.textButton.buttonEl.removeClass('is-active');
+		}
+
+		// Reset zoom
+		if (this.canvas) {
+			this.resetZoom();
+		}
+
+		this.isPanning = false;
+		this.isSpacebarDown = false;
+		this.lastPanPoint = null;
+		
+		if (this.canvas) {
+			this.canvas.defaultCursor = 'default';
+		}
+
+	}
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
+		this.cleanup();
+
+		// Remove resize listeners
+		document.removeEventListener('mousemove', this.resize.bind(this));
+		document.removeEventListener('mouseup', this.stopResize.bind(this));
+
+    }
+}

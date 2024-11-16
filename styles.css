@@ -1140,3 +1140,402 @@
     -webkit-user-select: none;
     user-select: none;
 }
+
+
+
+/* //////// */
+
+/* Modal styling */
+.image-annotation-modal {
+    max-width: 95vw;
+    max-height: 95vh;
+    margin: auto;
+    border-radius: var(--radius-l);
+    box-shadow: var(--shadow-l);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.modal-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    gap: 10px;
+    padding: 10px;
+}
+
+.image-annotation-modal .modal-container {
+    background-color: var(--background-primary);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    position: relative;
+}
+
+.canvas-container {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: var(--background-secondary);
+    border-radius: var(--radius-m);
+    overflow: hidden;
+    position: relative;
+}
+
+/* Toolbar styling */
+.annotation-toolbar {
+    position: relative; /* Changed from absolute */
+    top: auto;
+    left: auto;
+    transform: none;
+    display: flex;
+    flex-wrap: wrap; /* Allow wrapping on smaller screens */
+    justify-content: center;
+    gap: 8px;
+    padding: 8px;
+    background-color: var(--background-secondary);
+    border-radius: var(--radius-m);
+}
+.canvas-container canvas {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+.annotation-toolbar button {
+    background-color: var(--interactive-normal);
+    border: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: background-color 0.2s ease;
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+}
+
+.button-group {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.button-group button {
+    padding: 4px 8px;
+    min-width: 36px;
+    height: 24px;
+    font-size: 12px;
+}
+
+.button-group button.is-active {
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.control-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+}
+
+.size-buttons-container,
+.opacity-buttons-container {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.color-swatches {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px;
+}
+
+.color-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.row-label {
+    font-size: 12px;
+    min-width: 70px;
+}
+
+.swatches-container {
+    display: flex;
+    gap: 8px;
+}
+
+.color-column {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.section-label {
+    font-size: 12px;
+    margin-bottom: 4px;
+}
+
+.dominant-container {
+    display: flex;
+    gap: 8px;
+}
+
+.color-column {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.color-swatch {
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+
+.color-swatch:hover {
+    transform: scale(1.1);
+}
+
+.color-separator {
+    height: 1px;
+    margin: 4px 0;
+}
+
+.dominant-section {
+    display: flex;
+    flex-direction: column;
+}
+
+.resizable-modal {
+    position: relative;
+    resize: both;
+    overflow: hidden;
+}
+
+.modal-resize-handle {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 20px;
+    height: 20px;
+    cursor: se-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: var(--text-muted);
+    user-select: none;
+    z-index: 100;
+}
+
+.is-resizing {
+    user-select: none;
+}
+
+.canvas-container {
+    transition: width 0.1s ease, height 0.1s ease;
+    background: var(--background-secondary);
+    overflow: hidden;
+    position: relative;
+    border: 1px solid var(--background-modifier-border);
+}
+
+/* Add checkerboard pattern for transparent areas */
+.canvas-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-image: linear-gradient(45deg, var(--background-modifier-border) 25%, transparent 25%),
+        linear-gradient(-45deg, var(--background-modifier-border) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, var(--background-modifier-border) 75%),
+        linear-gradient(-45deg, transparent 75%, var(--background-modifier-border) 75%);
+    background-size: 20px 20px;
+    background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+    opacity: 0;
+    pointer-events: all;
+    z-index: 0;
+}
+
+/* Hover states */
+.annotation-toolbar button:hover {
+    background-color: var(--interactive-hover);
+}
+
+/* Active state for buttons */
+.annotation-toolbar button.is-active {
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.annotation-toolbar button svg {
+    width: 16px;
+    height: 16px;
+}
+
+.annotation-toolbar-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px;
+    min-width: auto; /* Remove fixed width */
+}
+
+.annotation-toolbar input[type="color"] {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.annotation-toolbar-group:last-child {
+    border-right: none;
+}
+
+
+.left-section {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.drawing-tools-column {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.toolbar-separator {
+    width: 1px;
+    height: 100%;
+    background-color: var(--background-modifier-border);
+    margin: 0 8px;
+}
+
+
+.drawing-group {
+    display: flex;
+    align-items: center;
+}
+
+.color-picker-wrapper {
+    display: flex;
+    align-items: center;
+    padding: 2px;
+}
+
+.color-picker {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-s);
+    cursor: pointer;
+}
+
+.color-picker::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.color-picker::-webkit-color-swatch {
+    border: none;
+    border-radius: var(--radius-s);
+}
+
+.color-picker::-moz-color-swatch {
+    border: 2px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+}
+
+.color-picker:hover {
+    opacity: 0.8;
+}
+
+.image-annotation-modal .annotation-toolbar-group {
+    display: flex;
+    gap: 4px;
+    padding: 0 8px;
+    border-right: 1px solid var(--background-modifier-border);
+}
+
+.image-annotation-modal .annotation-toolbar-group:last-child {
+    border-right: none;
+}
+
+.image-annotation-modal button.is-active {
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.image-annotation-modal button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.image-annotation-modal .canvas-container {
+    position: relative;
+}
+
+.image-annotation-modal .canvas-container textarea {
+    position: absolute;
+    pointer-events: auto;
+}
+
+
+/* Optional: Add hover effect for delete icon */
+.image-annotation-modal .canvas-container:hover .delete-icon {
+    opacity: 1;
+}
+
+/* Save button styling */
+.annotation-toolbar button.mod-cta {
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.annotation-toolbar button.mod-cta:hover {
+    background-color: var(--interactive-accent-hover);
+}
+/* Mobile-specific adjustments */
+@media (max-width: 768px) {
+    .annotation-toolbar {
+        padding: 4px;
+        gap: 4px;
+    }
+
+    .annotation-toolbar button {
+        padding: 6px;
+    }
+
+    .annotation-toolbar button svg {
+        width: 14px;
+        height: 14px;
+    }
+
+    .slider-container {
+        min-width: 100px;
+    }
+
+    .brush-controls {
+        flex-direction: column;
+        padding-left: 4px;
+        margin-left: 4px;
+    }
+}
