@@ -865,7 +865,7 @@
 /*  */
 
 /* Progress bar container */
-.progress-container {
+.image-converter-progress .progress-container {
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -876,12 +876,12 @@
     margin: 10px 0;
 }
 
-.progress-container.hidden {
+.image-converter-progress .progress-container.hidden {
     display: none;
 }
 
 /* Progress text */
-.progress-text {
+.image-converter-progress .progress-text {
     font-size: var(--font-ui-small);
     color: var(--text-muted);
     margin-bottom: 4px;
@@ -898,7 +898,7 @@
 }
 
 /* Progress bar */
-.progress-bar {
+.image-converter-progress .progress-bar {
     width: 100%;
     height: 4px;
     background-color: var(--background-modifier-border);
@@ -908,7 +908,7 @@
 }
 
 /* Progress fill */
-.progress-fill {
+.image-converter-progress .progress-fill {
     height: 100%;
     background-color: var(--interactive-accent);
     border-radius: 2px;
@@ -917,22 +917,22 @@
 }
 
 /* Use CSS custom properties for progress */
-.progress-fill[data-progress] {
+.image-converter-progress .progress-fill[data-progress] {
     width: calc(var(--progress-percentage, 0) * 1%);
 }
 
 /* Update the progress using attribute */
-.progress-fill[data-progress="0"] { --progress-percentage: 0; }
-.progress-fill[data-progress="10"] { --progress-percentage: 10; }
-.progress-fill[data-progress="20"] { --progress-percentage: 20; }
-.progress-fill[data-progress="30"] { --progress-percentage: 30; }
-.progress-fill[data-progress="40"] { --progress-percentage: 40; }
-.progress-fill[data-progress="50"] { --progress-percentage: 50; }
-.progress-fill[data-progress="60"] { --progress-percentage: 60; }
-.progress-fill[data-progress="70"] { --progress-percentage: 70; }
-.progress-fill[data-progress="80"] { --progress-percentage: 80; }
-.progress-fill[data-progress="90"] { --progress-percentage: 90; }
-.progress-fill[data-progress="100"] { --progress-percentage: 100; }
+.image-converter-progress .progress-fill[data-progress="0"] { --progress-percentage: 0; }
+.image-converter-progress .progress-fill[data-progress="10"] { --progress-percentage: 10; }
+.image-converter-progress .progress-fill[data-progress="20"] { --progress-percentage: 20; }
+.image-converter-progress .progress-fill[data-progress="30"] { --progress-percentage: 30; }
+.image-converter-progress .progress-fill[data-progress="40"] { --progress-percentage: 40; }
+.image-converter-progress .progress-fill[data-progress="50"] { --progress-percentage: 50; }
+.image-converter-progress .progress-fill[data-progress="60"] { --progress-percentage: 60; }
+.image-converter-progress .progress-fill[data-progress="70"] { --progress-percentage: 70; }
+.image-converter-progress .progress-fill[data-progress="80"] { --progress-percentage: 80; }
+.image-converter-progress .progress-fill[data-progress="90"] { --progress-percentage: 90; }
+.image-converter-progress .progress-fill[data-progress="100"] { --progress-percentage: 100; }
 
 
 
