@@ -1222,8 +1222,6 @@
 
 .button-group {
     display: flex;
-    gap: 4px;
-    margin-top: 4px;
 }
 
 .button-group button {
@@ -1248,7 +1246,6 @@
 .opacity-buttons-container {
     display: flex;
     flex-direction: column;
-    gap: 4px;
 }
 
 .color-swatches {

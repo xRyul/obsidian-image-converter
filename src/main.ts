@@ -1,10 +1,10 @@
 // working 2
-import { App, View, MarkdownView, Notice, ItemView, Plugin, TFile, Scope, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
+import { App, View, MarkdownView, Notice, ItemView, FileView, Plugin, TFile, Scope, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
 // Browsers use the MIME type, not the file extension this module allows 
 // us to be more precise when default MIME checking options fail
 import mime from "./mime.min.js"
 
-import { Canvas, FabricImage, IText, FabricObject, PencilBrush, ActiveSelection, Point } from 'fabric';
+import { Canvas, FabricImage, IText, FabricObject, PencilBrush, ActiveSelection, Point, util, Path, TEvent, TBrushEventData } from 'fabric';
 
 /*
 
@@ -3565,10 +3565,44 @@ export default class ImageConvertPlugin extends Plugin {
 										if (file instanceof TFile && isImage(file)) {
 											// Replace the image
 											await this.app.vault.modifyBinary(file, buffer);
-											// Refresh the image
-											if (img.src) {
-												const newSrc = img.src + (img.src.includes('?') ? '&' : '?') + new Date().getTime();
-												img.src = newSrc;
+											
+											// Refresh all views that might be showing this image
+											const leaves = this.app.workspace.getLeavesOfType('markdown');
+											for (const leaf of leaves) {
+												const view = leaf.view;
+												if (view instanceof MarkdownView) {
+													// Store current state
+													const currentState = leaf.getViewState();
+													// const editor = view.editor;
+													// const cursorPosition = editor.getCursor();
+													// const scrollInfo = editor.getScrollInfo();
+										
+													// Force refresh by switching views
+													await leaf.setViewState({
+														type: 'empty',
+														state: {}
+													});
+										
+													// Switch back to the original view
+													await leaf.setViewState(currentState);
+										
+													// Restore cursor and scroll position
+													// editor.setCursor(cursorPosition);
+													// editor.scrollTo(scrollInfo.left, scrollInfo.top);
+												}
+											}
+										
+											// Additionally, refresh any image views of this file
+											const imageLeaves = this.app.workspace.getLeavesOfType('image');
+											for (const leaf of imageLeaves) {
+												const view = leaf.view;
+												if (view instanceof FileView && view.file === file) {
+													// Refresh the image view
+													await leaf.setViewState({
+														type: 'image',
+														state: { file: file.path }
+													});
+												}
 											}
 										}
 									}
@@ -3598,19 +3632,17 @@ export default class ImageConvertPlugin extends Plugin {
 							// Get the image file from the vault
 							const rootFolder = this.app.vault.getName();
 							let imagePath = img.getAttribute('src');
-							
 							if (imagePath) {
 								// Find the position of the root folder in the path
 								const rootFolderIndex = imagePath.indexOf(rootFolder);
-			
+
 								// Remove everything before the root folder
 								if (rootFolderIndex !== -1) {
 									imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
 								}
-			
 								// Remove the query string and decode the path
 								imagePath = decodeURIComponent(imagePath.split('?')[0]);
-			
+
 								const file = this.app.vault.getAbstractFileByPath(imagePath);
 								if (file instanceof TFile) {
 									new ImageAnnotationModal(this.app, this, file).open();
@@ -7206,14 +7238,32 @@ class ProcessCurrentNote extends Modal {
 	}
 }
 
+
+enum ToolMode {
+    None,
+    Draw,
+    Text,
+    Arrow
+}
+
 class ImageAnnotationModal extends Modal {
     private canvas: Canvas;
     private file: TFile;
     private plugin: ImageConvertPlugin;
+
+
+	private currentTool: ToolMode = ToolMode.None;
+	private drawButton: ButtonComponent | undefined = undefined;
+	private textButton: ButtonComponent | undefined;
+	private arrowButton: ButtonComponent | undefined;
     private isDrawingMode = false;
 	private isTextMode = false;
-	private textButton: ButtonComponent | undefined;
+	private isArrowMode = false;
 	private isTextEditingBlocked = false;
+	private _previousStates: { drawingMode: boolean; } | null = null;
+	private boundKeyDownHandler: (e: KeyboardEvent) => void;
+	private boundKeyUpHandler: (e: KeyboardEvent) => void;
+
 
 	private readonly brushSizes = [2, 4, 8, 12, 16, 24]; // 6 preset sizes
 	private readonly brushOpacities = [0.2, 0.4, 0.6, 0.8, 0.9, 1.0]; // 6 preset opacities
@@ -7235,6 +7285,10 @@ class ImageAnnotationModal extends Modal {
     private readonly minZoom = 0.1;
     private readonly maxZoom = 10;
 	
+	private undoStack: string[] = [];
+    private redoStack: string[] = [];
+    private isUndoRedoAction = false;
+    private maxStackSize = 50; // Limit stack size to prevent memory issues
 	constructor(app: App, plugin: ImageConvertPlugin, imageFile: TFile) {
 		super(app);
 		this.plugin = plugin;
@@ -7249,6 +7303,10 @@ class ImageAnnotationModal extends Modal {
 				this.close();
 			});
 		}
+
+		// Bind the event handlers in the constructor
+		this.boundKeyDownHandler = this.handleKeyDown.bind(this);
+		this.boundKeyUpHandler = this.handleKeyUp.bind(this);
 
 		// Create a new scope for handling shortcuts
 		this.scope = new Scope();
@@ -7288,6 +7346,8 @@ class ImageAnnotationModal extends Modal {
 
             const img = new Image();
             img.onload = () => {
+				this.undoStack = [JSON.stringify([])];
+				this.redoStack = [];
 				// Calculate dimensions to fit the window while maintaining aspect ratio
 				const padding = 80;
 				const toolbarHeight = 60;
@@ -7296,10 +7356,12 @@ class ImageAnnotationModal extends Modal {
 				const maxWidth = window.innerWidth * 0.9 - padding;
 				const maxHeight = window.innerHeight * 0.9 - padding - toolbarHeight;
 				
+
 				// Set canvas dimensions to maximum available space
 				const canvasWidth = maxWidth;
 				const canvasHeight = maxHeight;
 				
+
 				// Initialize canvas with full dimensions
 				this.canvas = new Canvas(canvasEl, {
 					width: canvasWidth,
@@ -7313,6 +7375,7 @@ class ImageAnnotationModal extends Modal {
 					canvasWidth / img.width,
 					canvasHeight / img.height
 				) * 0.8; // Scale down slightly to leave margin
+
 
 				// Add the image to canvas
 				const fabricImg = new FabricImage(img, {
@@ -7335,6 +7398,7 @@ class ImageAnnotationModal extends Modal {
 				
 				this.analyzeImageColors(img);
 				this.setupZoomAndPan();
+				this.initializeUndoRedo();
 				// ////////////////////////////////////////////////////////////////////////
 				// Initialize drawing brush
 				this.initializeCanvasEventHandlers();
@@ -7397,39 +7461,20 @@ class ImageAnnotationModal extends Modal {
 		});
 	}
 
-
-	private toggleObjectSelection(selectable: boolean) {
-		if (this.canvas) {
-			this.canvas.selection = selectable;
-			this.canvas.forEachObject((obj: FabricObject) => {
-				if (obj instanceof IText) {
-					// Always keep text objects selectable and evented
-					obj.selectable = true;
-					obj.evented = true;
-				} else if (obj.type !== 'image') {
-					obj.selectable = selectable;
-					obj.evented = selectable;
-				}
-			});
-			this.canvas.requestRenderAll();
-		}
-	}
 	
 	private updateDrawingModeUI(isDrawing: boolean) {
 		this.isDrawingMode = isDrawing;
 		this.canvas.isDrawingMode = isDrawing;
 		
-		if (!isDrawing) {
-			// Ensure proper object selection when disabling drawing mode
-			this.toggleObjectSelection(true);
-		}
+		// Update object interactivity based on new drawing mode state
+		this.updateObjectInteractivity();
 		
 		if (this.drawButton) {
 			if (isDrawing) {
-				this.drawButton.setButtonText('Stop Drawing');
+				// this.drawButton.setButtonText('Stop Drawing');
 				this.drawButton.buttonEl.addClass('is-active');
 			} else {
-				this.drawButton.setButtonText('Draw');
+				// this.drawButton.setButtonText('Draw');
 				this.drawButton.buttonEl.removeClass('is-active');
 			}
 		}
@@ -7438,50 +7483,86 @@ class ImageAnnotationModal extends Modal {
 		this.canvas.requestRenderAll();
 	}
 	
-	private toggleDrawingMode(drawBtn?: ButtonComponent) {
+	private updateObjectInteractivity() {
 		if (!this.canvas) return;
-		
-		// If text mode is active, disable it first
-		if (this.isTextMode) {
-			this.toggleTextMode();
-		}
-		
-		const activeObject = this.canvas.getActiveObject();
-		if (activeObject instanceof IText && activeObject.isEditing) {
-			return;
-		}
-		
-		this.updateDrawingModeUI(!this.isDrawingMode);
-		
-		if (this.isDrawingMode) {
-			if (!this.canvas.freeDrawingBrush) {
-				this.canvas.freeDrawingBrush = new PencilBrush(this.canvas);
+	
+		this.canvas.forEachObject(obj => {
+			if (obj instanceof FabricImage) {
+				// Background image is never interactive
+				obj.selectable = false;
+				obj.evented = false;
+			} else if (obj instanceof IText) {
+				if (this.isDrawingMode) {
+					// In drawing mode, text objects should still be editable but not selectable
+					obj.selectable = false;
+					obj.evented = true;  // Keep evented true for text
+					obj.editable = true; // Ensure text remains editable
+				} else {
+					// In other modes, text objects are fully interactive
+					obj.selectable = true;
+					obj.evented = true;
+					obj.editable = true;
+				}
+			} else {
+				// For all other objects (drawings)
+				if (this.isTextMode) {
+					// In text mode, drawings shouldn't be interactive
+					obj.selectable = false;
+					obj.evented = false;
+				} else {
+					// In other modes, drawings are interactive unless in drawing mode
+					obj.selectable = !this.isDrawingMode;
+					obj.evented = !this.isDrawingMode;
+				}
 			}
-			
-			this.canvas.freeDrawingBrush.width = this.brushSizes[this.currentBrushSizeIndex];
-			this.updateBrushColor();
-			this.toggleObjectSelection(false);
-		} else {
-			this.toggleObjectSelection(true);
-		}
+		});
+	
+		// Update canvas selection property
+		this.canvas.selection = !this.isDrawingMode && !this.isTextMode;
+		this.canvas.requestRenderAll();
 	}
-	private hexToRgba(hex: string, opacity: number): string {
-		// Remove the hash if present
-		hex = hex.replace('#', '');
-		
-		// Parse the hex values
-		const r = parseInt(hex.substring(0, 2), 16);
-		const g = parseInt(hex.substring(2, 4), 16);
-		const b = parseInt(hex.substring(4, 6), 16);
-		
-		// Return rgba string
-		return `rgba(${r}, ${g}, ${b}, ${opacity})`;
-	}
+
 
 	private createColorSwatches() {
 		const colorPickerWrapper = this.modalEl.querySelector('.color-picker-wrapper');
 		if (!colorPickerWrapper) return;
 	
+		const updateObjectColor = (color: string) => {
+			const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
+			if (colorPicker) {
+				colorPicker.value = color;
+				
+				// Update brush color for drawing mode
+				this.updateBrushColor();
+				
+				// Update selected object(s) color
+				if (this.canvas) {
+					const activeObject = this.canvas.getActiveObject();
+					if (activeObject) {
+						if (activeObject.type === 'activeselection') {
+							// Handle multiple selection
+							const selection = activeObject as ActiveSelection;
+							selection.getObjects().forEach(obj => {
+								if (obj instanceof IText) {
+									obj.set('fill', color);
+								} else {
+									obj.set('stroke', this.hexToRgba(color, this.brushOpacities[this.currentOpacityIndex]));
+								}
+							});
+						} else {
+							// Handle single object
+							if (activeObject instanceof IText) {
+								activeObject.set('fill', color);
+							} else {
+								activeObject.set('stroke', this.hexToRgba(color, this.brushOpacities[this.currentOpacityIndex]));
+							}
+						}
+						this.canvas.requestRenderAll();
+					}
+				}
+			}
+		};
+		
 		// Remove existing swatches if any
 		const existingSwatches = colorPickerWrapper.querySelector('.color-swatches');
 		if (existingSwatches) {
@@ -7502,13 +7583,7 @@ class ImageAnnotationModal extends Modal {
 			const swatch = grayScaleSwatches.createDiv('color-swatch preset');
 			swatch.style.backgroundColor = color;
 			swatch.setAttribute('title', color);
-			swatch.addEventListener('click', () => {
-				const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
-				if (colorPicker) {
-					colorPicker.value = color;
-					this.updateBrushColor();
-				}
-			});
+			swatch.addEventListener('click', () => updateObjectColor(color));
 		});
 	
 		// Create palette row
@@ -7519,13 +7594,7 @@ class ImageAnnotationModal extends Modal {
 			const swatch = paletteSwatches.createDiv('color-swatch preset');
 			swatch.style.backgroundColor = color;
 			swatch.setAttribute('title', color);
-			swatch.addEventListener('click', () => {
-				const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
-				if (colorPicker) {
-					colorPicker.value = color;
-					this.updateBrushColor();
-				}
-			});
+			swatch.addEventListener('click', () => updateObjectColor(color));
 		});
 	
 		// Sort dominant colors by luminosity
@@ -7540,34 +7609,24 @@ class ImageAnnotationModal extends Modal {
 		dominantRow.createSpan('row-label').setText('Dominant:');
 		const dominantSwatches = dominantRow.createDiv('swatches-container');
 		colorPairs.forEach(pair => {
-			const swatch = dominantSwatches.createDiv('color-swatch dominant');
-			swatch.style.backgroundColor = pair.dominant;
-			swatch.setAttribute('title', pair.dominant);
-			swatch.addEventListener('click', () => {
-				const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
-				if (colorPicker) {
-					colorPicker.value = pair.dominant;
-					this.updateBrushColor();
-				}
-			});
+			const dominantSwatch = dominantSwatches.createDiv('color-swatch dominant');
+			dominantSwatch.style.backgroundColor = pair.dominant;
+			dominantSwatch.setAttribute('title', pair.dominant);
+			dominantSwatch.addEventListener('click', () => updateObjectColor(pair.dominant));
 		});
-	
+
 		// Create complementary colors row
 		const complementaryRow = swatchesContainer.createDiv('color-row');
 		complementaryRow.createSpan('row-label').setText('180:');
 		const complementarySwatches = complementaryRow.createDiv('swatches-container');
 		colorPairs.forEach(pair => {
-			const swatch = complementarySwatches.createDiv('color-swatch complementary');
-			swatch.style.backgroundColor = pair.complementary;
-			swatch.setAttribute('title', pair.complementary);
-			swatch.addEventListener('click', () => {
-				const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
-				if (colorPicker) {
-					const rgb = this.hslToRgb(pair.complementary);
-					const hex = this.rgbToHex(rgb.r, rgb.g, rgb.b);
-					colorPicker.value = hex;
-					this.updateBrushColor();
-				}
+			const complementarySwatch = complementarySwatches.createDiv('color-swatch complementary');
+			complementarySwatch.style.backgroundColor = pair.complementary;
+			complementarySwatch.setAttribute('title', pair.complementary);
+			complementarySwatch.addEventListener('click', () => {
+				const rgb = this.hslToRgb(pair.complementary);
+				const hex = this.rgbToHex(rgb.r, rgb.g, rgb.b);
+				updateObjectColor(hex);
 			});
 		});
 	}
@@ -7582,8 +7641,9 @@ class ImageAnnotationModal extends Modal {
 		const currentOpacity = this.brushOpacities[this.currentOpacityIndex];
 		
 		this.canvas.freeDrawingBrush.color = this.hexToRgba(currentColor, currentOpacity);
+		this.canvas.freeDrawingBrush.width = this.brushSizes[this.currentBrushSizeIndex];
 	}
-	// Separate method to create and add text
+
 	private createAndAddText(color: string, x: number, y: number) {
 		if (this.isTextEditingBlocked) {
 			console.debug('Text creation blocked');
@@ -7625,35 +7685,22 @@ class ImageAnnotationModal extends Modal {
 		}
 	}
 
-	private recoverTextEditing() {
-		if (!this.canvas) return;
+	// private recoverTextEditing() {
+	// 	if (!this.canvas) return;
 		
-		this.isTextEditingBlocked = false;
-		this.isDrawingMode = false;
-		this.canvas.isDrawingMode = false;
+	// 	this.isTextEditingBlocked = false;
+	// 	this.isDrawingMode = false;
+	// 	this.canvas.isDrawingMode = false;
 		
-		const activeObject = this.canvas.getActiveObject();
-		if (activeObject instanceof IText) {
-			activeObject.selectable = true;
-			activeObject.evented = true;
-			activeObject.editable = true;
-		}
+	// 	const activeObject = this.canvas.getActiveObject();
+	// 	if (activeObject instanceof IText) {
+	// 		activeObject.selectable = true;
+	// 		activeObject.evented = true;
+	// 		activeObject.editable = true;
+	// 	}
 		
-		this.canvas.requestRenderAll();
-	}
-
-	private clearAll() {
-		if (!this.canvas) return;
-		
-		// Show confirmation dialog
-		const confirm = window.confirm('Are you sure you want to clear all annotations?');
-		if (!confirm) return;
-	
-		const objects = this.canvas.getObjects();
-		// Remove all objects except the background image (first object)
-		objects.slice(1).forEach(obj => this.canvas.remove(obj));
-		this.canvas.requestRenderAll();
-	}
+	// 	this.canvas.requestRenderAll();
+	// }
 
 	private registerHotkeys() {
 		this.scope.register(['Mod'], 'S', (evt: KeyboardEvent) => {
@@ -7661,6 +7708,47 @@ class ImageAnnotationModal extends Modal {
 			this.saveAnnotation();
 		});
 	
+		// Add CMD/CTRL + A handler
+		this.scope.register(['Mod'], 'A', (evt: KeyboardEvent) => {
+			// Check if we're currently editing text
+			if (this.canvas) {
+				const activeObject = this.canvas.getActiveObject();
+				if (activeObject instanceof IText && activeObject.isEditing) {
+					return true; // Allow normal typing when editing text
+				}
+			}
+			evt.preventDefault();
+			this.selectAll();
+			return false;
+		});
+
+		this.scope.register(['Mod'], 'Z', (evt: KeyboardEvent) => {
+			evt.preventDefault();
+			if (evt.shiftKey) {
+				console.log('Redo triggered');
+				this.redo();
+			} else {
+				console.log('Undo triggered');
+				this.undo();
+			}
+			return false;
+		});
+		
+		this.scope.register(['Mod', 'Shift'], 'Z', (evt: KeyboardEvent) => {
+			evt.preventDefault();
+			console.log('Redo triggered (shift)');
+			this.redo();
+			return false;
+		});
+
+		this.scope.register([], 'A', (evt: KeyboardEvent) => {
+			if (this.isTextEditing()) return true;
+			evt.preventDefault();
+			this.switchTool(this.currentTool === ToolMode.Arrow ? ToolMode.None : ToolMode.Arrow);
+			return false;
+		});
+	
+
 		this.scope.register([], 'B', (evt: KeyboardEvent) => {
 			// Check if we're currently editing text
 			if (this.canvas) {
@@ -7715,8 +7803,82 @@ class ImageAnnotationModal extends Modal {
 
 	}
 
-	private drawButton: ButtonComponent | undefined = undefined; // Add this as a class property
 	
+	
+
+
+	private switchTool(newTool: ToolMode) {
+		// Disable all tools first
+		this.isDrawingMode = false;
+		this.isTextMode = false;
+		this.isArrowMode = false;
+		
+		// Remove active class from all tool buttons
+		if (this.drawButton) this.drawButton.buttonEl.removeClass('is-active');
+		if (this.textButton) this.textButton.buttonEl.removeClass('is-active');
+		if (this.arrowButton) this.arrowButton.buttonEl.removeClass('is-active');
+		
+		// Enable the selected tool
+		switch (newTool) {
+			case ToolMode.Draw:
+				this.isDrawingMode = true;
+				if (this.drawButton) this.drawButton.buttonEl.addClass('is-active');
+				if (this.canvas) {
+					this.canvas.isDrawingMode = true;
+					this.canvas.freeDrawingBrush = new PencilBrush(this.canvas);
+					this.updateBrushColor();
+					// Set initial brush width for drawing
+					this.canvas.freeDrawingBrush.width = this.brushSizes[this.currentBrushSizeIndex];
+				}
+				break;
+				
+			case ToolMode.Text:
+				this.isTextMode = true;
+				if (this.textButton) this.textButton.buttonEl.addClass('is-active');
+				if (this.canvas) {
+					this.canvas.isDrawingMode = false;
+				}
+				break;
+				
+			case ToolMode.Arrow:
+				this.isArrowMode = true;
+				if (this.arrowButton) this.arrowButton.buttonEl.addClass('is-active');
+				if (this.canvas) {
+					this.canvas.isDrawingMode = true;
+					const arrowBrush = new ArrowBrush(this.canvas);
+					this.canvas.freeDrawingBrush = arrowBrush;
+					this.updateBrushColor();
+					// Set initial brush width for arrow
+					arrowBrush.width = this.brushSizes[this.currentBrushSizeIndex];
+				}
+				break;
+				
+			case ToolMode.None:
+				if (this.canvas) {
+					this.canvas.isDrawingMode = false;
+				}
+				break;
+		}
+		
+		this.currentTool = newTool;
+		this.updateObjectInteractivity();
+	}
+
+	private toggleDrawingMode(drawBtn?: ButtonComponent) {
+		const newTool = this.currentTool === ToolMode.Draw ? ToolMode.None : ToolMode.Draw;
+		this.switchTool(newTool);
+	}
+	
+	private toggleTextMode() {
+		const newTool = this.currentTool === ToolMode.Text ? ToolMode.None : ToolMode.Text;
+		this.switchTool(newTool);
+	}
+	
+	private toggleArrowMode(arrowBtn?: ButtonComponent) {
+		const newTool = this.currentTool === ToolMode.Arrow ? ToolMode.None : ToolMode.Arrow;
+		this.switchTool(newTool);
+	}
+
 	private setupToolbar(container: HTMLElement) {
 		const toolbar = container.createDiv('annotation-toolbar');
 	
@@ -7739,18 +7901,28 @@ class ImageAnnotationModal extends Modal {
 				this.toggleDrawingMode(this.drawButton);
 			});
 	
+		const arrowButton = new ButtonComponent(drawingToolsColumn)
+			.setTooltip('Arrow (A)')
+			.setIcon('arrow-right')
+			.onClick(() => {
+				this.toggleArrowMode(arrowButton);
+			});
+		this.arrowButton = arrowButton;
+
 		// Text button in the same column
 		this.textButton = new ButtonComponent(drawingToolsColumn)
 			.setTooltip('Add Text (T)')
-			.setIcon('text')
+			.setIcon('type')
 			.onClick(() => {
 				this.toggleTextMode();
 			});
+
 		// Add zoom controls to utility group
 		new ButtonComponent(drawingToolsColumn)
 			.setTooltip('Reset Zoom (1:1)')
 			.setIcon('search')
 			.onClick(() => this.resetZoom());
+
 		// Add color picker right next to drawing tools
 		const colorPickerWrapper = leftSection.createDiv('color-picker-wrapper');
 		const colorPicker = colorPickerWrapper.createEl('input', {
@@ -7790,43 +7962,17 @@ class ImageAnnotationModal extends Modal {
 		
 		saveBtn.buttonEl.addClass('mod-cta');
 	
-		new ButtonComponent(utilityGroup)
-			.setTooltip('Recover Text Editing')
-			.setIcon('refresh-cw')
-			.onClick(() => this.recoverTextEditing());
+
+		// new ButtonComponent(utilityGroup)
+		// 	.setTooltip('Recover Text Editing')
+		// 	.setIcon('refresh-cw')
+		// 	.onClick(() => this.recoverTextEditing());
 	
 		this.registerHotkeys();
 	}
 
 
 
-	private toggleTextMode() {
-		// If drawing mode is active, disable it first
-		if (this.isDrawingMode) {
-			this.updateDrawingModeUI(false);
-		}
-		
-		this.isTextMode = !this.isTextMode;
-		
-		// Update Text Button UI
-		if (this.textButton) {
-			if (this.isTextMode) {
-				// this.textButton.setButtonText('Stop Text');
-				this.textButton.buttonEl.addClass('is-active');
-			} else {
-				// this.textButton.setButtonText('Add Text');
-				this.textButton.buttonEl.removeClass('is-active');
-			}
-		}
-		
-		// Update canvas state
-		if (this.canvas) {
-			this.canvas.isDrawingMode = false;
-			this.toggleObjectSelection(true);
-		}
-	}
-
-	
 	private createSizeButtons(container: HTMLElement) {
 		const brushControlsColumn = container.createDiv('brush-controls-column');
 		
@@ -7887,6 +8033,7 @@ class ImageAnnotationModal extends Modal {
 	}
 
 
+
     private setupSelectionEvents() {
         if (!this.canvas) return;
     }
@@ -7901,18 +8048,23 @@ class ImageAnnotationModal extends Modal {
 		if (activeObject instanceof IText && activeObject.isEditing) {
 			return;
 		}
-	
-		// Perform deletion for non-text editing cases
-		if (activeObject.type === 'activeSelection') {
+
+		// Handle multiple selection
+		if (activeObject.type === 'activeselection') {
 			const activeSelection = activeObject as ActiveSelection;
-			const objects = activeSelection.getObjects();
-			objects.forEach(obj => {
+			const objectsToRemove = activeSelection.getObjects();
+			
+			// Remove each object in the selection except background image
+			objectsToRemove.forEach(obj => {
 				if (!(obj instanceof FabricImage)) {
 					this.canvas?.remove(obj);
 				}
 			});
+			
+			// Clear the selection
 			this.canvas.discardActiveObject();
 		} else {
+			// Handle single object deletion
 			if (!(activeObject instanceof FabricImage)) {
 				this.canvas.remove(activeObject);
 			}
@@ -7921,105 +8073,7 @@ class ImageAnnotationModal extends Modal {
 		this.canvas.requestRenderAll();
 	}
 	
-	async saveAnnotation() {
-		if (!this.canvas) return;
-		
-		try {
-			// Get all objects
-			const objects = this.canvas.getObjects();
-			if (objects.length === 0) return;
-	
-			// Get the background image (first object)
-			const backgroundImage = objects[0] as FabricImage;
-			if (!backgroundImage) return;
-	
-			// Calculate image boundaries
-			const imageBounds = this.calculateImageBounds(backgroundImage);
-	
-			// Calculate bounds of annotations (excluding background image)
-			const annotationBounds = objects.slice(1).reduce((acc, obj) => {
-				const objBounds = obj.getBoundingRect();
-				return {
-					left: Math.min(acc.left, objBounds.left),
-					top: Math.min(acc.top, objBounds.top),
-					right: Math.max(acc.right, objBounds.left + objBounds.width),
-					bottom: Math.max(acc.bottom, objBounds.top + objBounds.height)
-				};
-			}, { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
-	
-			// Check if annotations extend beyond image boundaries
-			const hasExternalAnnotations = 
-				annotationBounds.left < imageBounds.left ||
-				annotationBounds.top < imageBounds.top ||
-				annotationBounds.right > imageBounds.right ||
-				annotationBounds.bottom > imageBounds.bottom;
-	
-			// Set final bounds based on whether we need to trim or not
-			const finalBounds = hasExternalAnnotations ? {
-				left: Math.min(imageBounds.left, annotationBounds.left),
-				top: Math.min(imageBounds.top, annotationBounds.top),
-				right: Math.max(imageBounds.right, annotationBounds.right),
-				bottom: Math.max(imageBounds.bottom, annotationBounds.bottom)
-			} : imageBounds;
-	
-			// Add padding only if we have external annotations
-			const padding = hasExternalAnnotations ? 20 : 0;
-			const width = finalBounds.right - finalBounds.left + (padding * 2);
-			const height = finalBounds.bottom - finalBounds.top + (padding * 2);
-	
-			// Convert to data URL with the calculated dimensions
-			const dataUrl = this.canvas.toDataURL({
-				format: 'png',
-				quality: 1,
-				multiplier: 1,
-				enableRetinaScaling: true,
-				left: finalBounds.left - padding,
-				top: finalBounds.top - padding,
-				width: width,
-				height: height
-			});
-	
-			const response = await fetch(dataUrl);
-			const blob = await response.blob();
-			const arrayBuffer = await blob.arrayBuffer();
-			
-			await this.app.vault.modifyBinary(this.file, arrayBuffer);
-	
-			// Update any displayed images
-			const imgs = document.querySelectorAll(`img[src*="${this.file.path}"]`) as NodeListOf<HTMLImageElement>;
-			imgs.forEach(img => {
-				const currentSrc = img.src;
-				img.src = currentSrc.split('?')[0] + '?' + Date.now();
-			});
-	
-			setTimeout(() => this.close(), 100);
-		} catch (error) {
-			console.error('Save error:', error);
-		}
-	}
 
-
-	private calculateImageBounds(backgroundImage: FabricImage): {
-		left: number;
-		top: number;
-		right: number;
-		bottom: number;
-	} {
-		// Provide default values if properties are undefined
-		const left = backgroundImage.left ?? 0;
-		const top = backgroundImage.top ?? 0;
-		const width = backgroundImage.width ?? 0;
-		const height = backgroundImage.height ?? 0;
-		const scaleX = backgroundImage.scaleX ?? 1;
-		const scaleY = backgroundImage.scaleY ?? 1;
-	
-		return {
-			left,
-			top,
-			right: left + (width * scaleX),
-			bottom: top + (height * scaleY)
-		};
-	}
 
 	private initializeCanvasEventHandlers() {
 		if (!this.canvas) return;
@@ -8035,7 +8089,33 @@ class ImageAnnotationModal extends Modal {
 			this.updateBrushColor();
 		}
 
+		// Add handler for when a path is completed
+		this.canvas.on('path:created', () => {
+			if (!this.isUndoRedoAction) {
+				this.saveState();
+			}
+		});
+		this.canvas.on('object:added', (e) => {
+			this.updateObjectInteractivity();
+			if (e.target instanceof FabricImage || this.isUndoRedoAction) return;
+			if (!(e.target.type === 'path')) { // Only save state for non-path objects
+				console.log('Object added, saving state');
+				this.saveState();
+			}
+		});
 
+
+		this.canvas.on('object:modified', (e) => {
+			// Don't save state for background image or during undo/redo
+			if (e.target instanceof FabricImage || this.isUndoRedoAction) return;
+			this.saveState();
+		});
+		
+		this.canvas.on('object:removed', (e) => {
+			// Don't save state for background image or during undo/redo
+			if (e.target instanceof FabricImage || this.isUndoRedoAction) return;
+			this.saveState();
+		});
 		// Mouse down handler with improved state management
 		this.canvas.on('mouse:down', (opt) => {
 			const target = opt.target;
@@ -8114,12 +8194,19 @@ class ImageAnnotationModal extends Modal {
 		// Create a whitelist of elements we want to allow events on
 		const shouldAllowEvent = (e: Event): boolean => {
 			const target = e.target as HTMLElement;
+			
+			// If we're editing text, allow all keyboard events
+			const activeObject = this.canvas?.getActiveObject();
+			if (activeObject instanceof IText && activeObject.isEditing && e instanceof KeyboardEvent) {
+				return true;
+			}
+	
 			return (
-				target.tagName.toLowerCase() === 'canvas' || // Allow canvas events
-				target.closest('.annotation-toolbar') !== null || // Allow toolbar events
-				target.closest('.color-picker-wrapper') !== null || // Allow color picker events
-				target.closest('.modal-close-button') !== null || // Allow close button events
-				target.hasClass('modal-close-button') // Alternative class check for close button
+				target.tagName.toLowerCase() === 'canvas' ||
+				target.closest('.annotation-toolbar') !== null ||
+				target.closest('.color-picker-wrapper') !== null ||
+				target.closest('.modal-close-button') !== null ||
+				target.hasClass('modal-close-button')
 			);
 		};
 	
@@ -8134,9 +8221,14 @@ class ImageAnnotationModal extends Modal {
 		const handleKeyboard = (e: KeyboardEvent) => {
 			const activeObject = this.canvas?.getActiveObject();
 			
-			// Allow text editing when IText is active
+			// Always allow text editing events
 			if (activeObject instanceof IText && activeObject.isEditing) {
-				return; // Let the event through for text editing
+				// Only handle specific shortcuts like Ctrl+S
+				if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+					e.preventDefault();
+					e.stopPropagation();
+				}
+				return;
 			}
 	
 			// Handle specific keyboard shortcuts
@@ -8172,20 +8264,24 @@ class ImageAnnotationModal extends Modal {
 	}
 	
 	private isHandledKey(e: KeyboardEvent): boolean {
-		// Don't handle delete/backspace when editing text
+		// Don't handle any keys when editing text
 		const activeObject = this.canvas?.getActiveObject();
 		if (activeObject instanceof IText && activeObject.isEditing) {
 			return false;
 		}
 	
 		return (
-			(e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' || // Save
+			(e.ctrlKey || e.metaKey) && (
+				e.key.toLowerCase() === 's' || // Save
+				e.key.toLowerCase() === 'a'    // Select all
+			) ||
 			e.key === 'Escape' || // Close/refresh
 			(!this.isTextEditing() && (
 				e.key === 'Delete' || // Delete
 				e.key === 'Backspace' || // Backspace
 				e.key.toLowerCase() === 'b' || // Drawing mode
-				e.key.toLowerCase() === 't' // Text mode
+				e.key.toLowerCase() === 't' || // Text mode
+				e.key.toLowerCase() === 'a' // Arrow mode
 			))
 		);
 	}
@@ -8195,11 +8291,23 @@ class ImageAnnotationModal extends Modal {
 		return !!(activeObject instanceof IText && activeObject.isEditing);
 	}
 	
-	// Add these as class properties
+
 	private _boundHandleEvent: ((e: Event) => void) | null = null;
 	private _boundHandleKeyboard: ((e: KeyboardEvent) => void) | null = null;
 
 
+	private hexToRgba(hex: string, opacity: number): string {
+		// Remove the hash if present
+		hex = hex.replace('#', '');
+		
+		// Parse the hex values
+		const r = parseInt(hex.substring(0, 2), 16);
+		const g = parseInt(hex.substring(2, 4), 16);
+		const b = parseInt(hex.substring(4, 6), 16);
+		
+		// Return rgba string
+		return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+	}
 	private async analyzeImageColors(img: HTMLImageElement): Promise<void> {
         // Create a temporary canvas for analysis
         const tempCanvas = document.createElement('canvas');
@@ -8263,7 +8371,6 @@ class ImageAnnotationModal extends Modal {
             return hex.length === 1 ? '0' + hex : hex;
         }).join('');
     }
-
     private hexToRgb(hex: string): { r: number, g: number, b: number } {
         const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
         return result ? {
@@ -8353,6 +8460,8 @@ class ImageAnnotationModal extends Modal {
             b: Math.round(b * 255)
         };
     }
+
+
 
     // Add to your existing onOpen method, after creating modalContainer
     private setupResizable() {
@@ -8467,48 +8576,9 @@ class ImageAnnotationModal extends Modal {
 			}
 		});
 	
-		// Update spacebar handling
-		document.addEventListener('keydown', (e) => {
-			if (e.code === 'Space') {
-				// Check if we're editing text
-				const activeObject = this.canvas.getActiveObject();
-				if (activeObject instanceof IText && activeObject.isEditing) {
-					return; // Allow normal spacebar behavior for text editing
-				}
-	
-				if (!this.isSpacebarDown) {
-					e.preventDefault();
-					this.isSpacebarDown = true;
-					this.canvas.defaultCursor = 'grab';
-					
-					// Temporarily disable drawing and text modes
-					if (this.isDrawingMode) {
-						this.canvas.isDrawingMode = false;
-					}
-				}
-			}
-		});
-	
-		document.addEventListener('keyup', (e) => {
-			if (e.code === 'Space') {
-				// Check if we're editing text
-				const activeObject = this.canvas.getActiveObject();
-				if (activeObject instanceof IText && activeObject.isEditing) {
-					return; // Allow normal spacebar behavior for text editing
-				}
-	
-				e.preventDefault();
-				this.isSpacebarDown = false;
-				this.isPanning = false;
-				this.lastPanPoint = null;
-				this.canvas.defaultCursor = 'default';
-				
-				// Restore drawing mode if it was active
-				if (this.isDrawingMode) {
-					this.canvas.isDrawingMode = true;
-				}
-			}
-		});
+		// Add event listeners using the bound handlers
+		document.addEventListener('keydown', this.boundKeyDownHandler);
+		document.addEventListener('keyup', this.boundKeyUpHandler);
 	
 		// Update mouse events
 		this.canvas.on('mouse:down', (opt) => {
@@ -8542,6 +8612,78 @@ class ImageAnnotationModal extends Modal {
 		});
 	}
 	
+
+	private handleKeyDown(e: KeyboardEvent) {
+		if (e.code === 'Space') {
+			// Check if we're editing text or if there's an active text object
+			const activeObject = this.canvas?.getActiveObject();
+			if (activeObject instanceof IText) {
+				if (activeObject.isEditing) {
+					return; // Allow normal spacebar behavior for text editing
+				}
+			}
+	
+			// Prevent default only if we're not editing text
+			if (!this.isSpacebarDown) {
+				e.preventDefault();
+				this.isSpacebarDown = true;
+				this.canvas.defaultCursor = 'grab';
+				
+				// Store previous drawing mode state
+				const wasDrawingMode = this.isDrawingMode;
+				
+				// Temporarily disable drawing and text modes
+				if (this.isDrawingMode) {
+					this.canvas.isDrawingMode = false;
+				}
+	
+				// Store these states to restore them later
+				this._previousStates = {
+					drawingMode: wasDrawingMode
+				};
+			}
+		}
+
+		// Add undo/redo handling
+		if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+			e.preventDefault();
+			e.stopPropagation();
+			
+			if (e.shiftKey) {
+				this.redo();
+			} else {
+				this.undo();
+			}
+		}
+	}
+	
+	private handleKeyUp(e: KeyboardEvent) {
+		if (e.code === 'Space') {
+			// Check if we're editing text or if there's an active text object
+			const activeObject = this.canvas?.getActiveObject();
+			if (activeObject instanceof IText) {
+				if (activeObject.isEditing) {
+					return; // Allow normal spacebar behavior for text editing
+				}
+			}
+	
+			e.preventDefault();
+			this.isSpacebarDown = false;
+			this.isPanning = false;
+			this.lastPanPoint = null;
+			this.canvas.defaultCursor = 'default';
+			
+			// Restore previous states
+			if (this._previousStates?.drawingMode) {
+				this.canvas.isDrawingMode = true;
+				this.isDrawingMode = true;
+			}
+			
+			this._previousStates = null;
+		}
+	}
+
+
 	private zoomToPoint(point: Point, newZoom: number) {
 		if (!this.canvas) return;
 	
@@ -8574,6 +8716,312 @@ class ImageAnnotationModal extends Modal {
 		this.canvas.requestRenderAll();
 	}
 
+
+	private initializeUndoRedo() {
+		// Initialize with an empty state
+		this.undoStack = [JSON.stringify([])];
+		this.redoStack = [];
+	}
+
+	private saveState() {
+		if (!this.canvas || this.isUndoRedoAction) {
+			console.log('Skipping state save - isUndoRedoAction:', this.isUndoRedoAction);
+			return;
+		}
+	
+		// Save an empty state initially if this is the first state
+		if (this.undoStack.length === 0) {
+			this.undoStack.push(JSON.stringify([]));
+		}
+	
+		const objects = this.canvas.getObjects().slice(1);
+		const newState = JSON.stringify(objects.map(obj => obj.toObject()));
+		
+		// Don't save if it's the same as the last state
+		if (this.undoStack[this.undoStack.length - 1] === newState) {
+			console.log('Skipping duplicate state');
+			return;
+		}
+	
+		this.undoStack.push(newState);
+		this.redoStack = []; // Clear redo stack when new action is performed
+		
+	}
+	
+	private async undo() {
+		if (!this.canvas || this.undoStack.length <= 1) { // Changed from 0 to 1 because of initial empty state
+			console.log('Cannot undo: no more states');
+			return;
+		}
+	
+		this.isUndoRedoAction = true;
+	
+		try {
+			// Get current state before making any changes
+			const currentState = this.undoStack.pop(); // Remove current state
+			if (currentState) {
+				this.redoStack.push(currentState); // Save it to redo stack
+			}
+	
+			// Get the previous state (which we'll restore to)
+			const previousState = this.undoStack[this.undoStack.length - 1];
+			
+			// Clear current objects (except background)
+			const objectsToRemove = this.canvas.getObjects().slice(1);
+			objectsToRemove.forEach(obj => this.canvas.remove(obj));
+	
+			// Restore previous state
+			if (previousState) {
+				const objects = JSON.parse(previousState);
+				for (const objData of objects) {
+					const enlivenedObjects = await util.enlivenObjects([objData]);
+					enlivenedObjects.forEach(obj => {
+						if (obj instanceof FabricObject) {
+							this.canvas.add(obj);
+						}
+					});
+				}
+			}
+	
+			this.canvas.requestRenderAll();
+			
+	
+		} catch (error) {
+			console.error('Error during undo:', error);
+		} finally {
+			this.isUndoRedoAction = false;
+		}
+	}
+	
+	private async redo() {
+		if (!this.canvas || this.redoStack.length === 0) {
+			console.log('Cannot redo: no more states');
+			return;
+		}
+	
+		this.isUndoRedoAction = true;
+	
+		try {
+			// Get the next state from redo stack
+			const nextState = this.redoStack.pop();
+			if (!nextState) return;
+	
+			// Save current state to undo stack
+			const currentObjects = this.canvas.getObjects().slice(1);
+			const currentState = JSON.stringify(currentObjects.map(obj => obj.toObject()));
+			this.undoStack.push(currentState);
+			
+			// Clear current objects (except background)
+			const objectsToRemove = this.canvas.getObjects().slice(1);
+			objectsToRemove.forEach(obj => this.canvas.remove(obj));
+	
+			// Restore the next state
+			const objects = JSON.parse(nextState);
+			for (const objData of objects) {
+				const enlivenedObjects = await util.enlivenObjects([objData]);
+				enlivenedObjects.forEach(obj => {
+					if (obj instanceof FabricObject) {
+						this.canvas.add(obj);
+					}
+				});
+			}
+	
+			this.canvas.requestRenderAll();
+			
+	
+		} catch (error) {
+			console.error('Error during redo:', error);
+		} finally {
+			this.isUndoRedoAction = false;
+		}
+	}
+	
+
+	private clearAll() {
+		if (!this.canvas) return;
+		
+		// Show confirmation dialog
+		const confirm = window.confirm('Are you sure you want to clear all annotations?');
+		if (!confirm) return;
+	
+		const objects = this.canvas.getObjects();
+		// Remove all objects except the background image (first object)
+		objects.slice(1).forEach(obj => this.canvas.remove(obj));
+		this.canvas.requestRenderAll();
+	}
+
+	private selectAll() {
+		if (!this.canvas) return;
+	
+		// Get all objects except the background image
+		const objects = this.canvas.getObjects().slice(1);
+		if (objects.length === 0) return;
+	
+		// If we're in drawing or text mode, temporarily disable it
+		const wasDrawingMode = this.isDrawingMode;
+		const wasTextMode = this.isTextMode;
+	
+		if (wasDrawingMode) {
+			this.updateDrawingModeUI(false);
+		}
+		if (wasTextMode) {
+			this.toggleTextMode();
+		}
+	
+		// Create a selection of all objects
+		if (objects.length === 1) {
+			// If there's only one object, select it directly
+			this.canvas.setActiveObject(objects[0]);
+		} else {
+			// If there are multiple objects, create a multiple selection
+			const activeSelection = new ActiveSelection(objects, {
+				canvas: this.canvas
+			});
+			this.canvas.setActiveObject(activeSelection);
+		}
+	
+		this.canvas.requestRenderAll();
+	
+		// Restore previous modes if necessary
+		if (wasDrawingMode) {
+			this.updateDrawingModeUI(true);
+		}
+		if (wasTextMode) {
+			this.toggleTextMode();
+		}
+	}
+
+
+	async saveAnnotation() {
+		if (!this.canvas) return;
+		
+		try {
+			// Get all objects
+			const objects = this.canvas.getObjects();
+			if (objects.length === 0) return;
+	
+			// Get the background image (first object)
+			const backgroundImage = objects[0] as FabricImage;
+			if (!backgroundImage) return;
+	
+
+			// Store original image dimensions
+			const originalWidth = backgroundImage.width ?? 0;
+			const originalHeight = backgroundImage.height ?? 0;
+			const scale = {
+				x: backgroundImage.scaleX ?? 1,
+				y: backgroundImage.scaleY ?? 1
+			};
+
+			// GOOD
+
+			// Use original dimensions for export calculations
+			const displayWidth = originalWidth * scale.x;
+			const displayHeight = originalHeight * scale.y;
+
+			
+			// Calculate the background image bounds
+			const bgBounds = {
+				left: backgroundImage.left ?? 0,
+				top: backgroundImage.top ?? 0,
+				right: (backgroundImage.left ?? 0) + displayWidth,
+				bottom: (backgroundImage.top ?? 0) + displayHeight
+			};
+
+				
+			// Calculate bounds of annotations only (excluding background image)
+			const annotationBounds = objects.slice(1).reduce((acc, obj) => {
+				const objBounds = obj.getBoundingRect();
+				return {
+					left: Math.min(acc.left, objBounds.left),
+					top: Math.min(acc.top, objBounds.top),
+					right: Math.max(acc.right, objBounds.left + objBounds.width),
+					bottom: Math.max(acc.bottom, objBounds.top + objBounds.height)
+				};
+			}, { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
+
+			// If there are annotations, merge their bounds with background bounds
+			const finalBounds = objects.length > 1 ? {
+				left: Math.min(bgBounds.left, annotationBounds.left),
+				top: Math.min(bgBounds.top, annotationBounds.top),
+				right: Math.max(bgBounds.right, annotationBounds.right),
+				bottom: Math.max(bgBounds.bottom, annotationBounds.bottom)
+			} : bgBounds;
+	
+
+			const finalBounds_width = finalBounds.right - finalBounds.left;
+			const finalBounds_height = finalBounds.bottom - finalBounds.top;
+
+			const scaleToOriginal = originalWidth / displayWidth;
+
+			// Calculate dimensions
+			// const width = Math.ceil(finalBounds_width * scaleToOriginal);
+			// const height = Math.ceil(finalBounds_height * scaleToOriginal);
+	
+			// Reset zoom and viewport temporarily
+			const currentVPT = [...this.canvas.viewportTransform] as [number, number, number, number, number, number];
+			this.canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+	
+			// Export with high quality settings
+			const dataUrl = this.canvas.toDataURL({
+				format: 'png',
+				quality: 1,
+				multiplier: scaleToOriginal,
+				left: finalBounds.left,
+				top: finalBounds.top,
+				width: finalBounds_width,
+				height: finalBounds_height,
+				enableRetinaScaling: false
+			});
+
+			
+			// Restore viewport transform
+			this.canvas.setViewportTransform(currentVPT);
+	
+			// Save the image...
+			const response = await fetch(dataUrl);
+			const blob = await response.blob();
+			const arrayBuffer = await blob.arrayBuffer();
+			
+			await this.app.vault.modifyBinary(this.file, arrayBuffer);
+	
+			// Get the active view
+			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!activeView) return;
+
+			// Store current cursor position and scroll
+			// const editor = activeView.editor;
+			// const cursorPosition = editor.getCursor();
+			// const scrollInfo = editor.getScrollInfo();
+
+			// Get the current leaf using getMostRecentLeaf (or getLeaf for specific cases)
+			const leaf = this.app.workspace.getMostRecentLeaf();
+			if (leaf) {
+				// Store current state
+				const currentState = leaf.getViewState();
+				
+				// Switch to a different view type temporarily
+				await leaf.setViewState({
+					type: 'empty',
+					state: {}
+				});
+
+				// Switch back to the original view
+				await leaf.setViewState(currentState);
+
+				// // Restore cursor and scroll position
+				// editor.setCursor(cursorPosition);
+				// editor.scrollTo(scrollInfo.left, scrollInfo.top);
+			}
+
+			// Close the modal
+			this.close();
+		} catch (error) {
+			console.error('Save error:', error);
+			new Notice('Error saving image');
+		}
+	}
+	
 	// Update the cleanup method
 	private cleanup() {
 		if (this.canvas) {
@@ -8581,6 +9029,10 @@ class ImageAnnotationModal extends Modal {
 			this.canvas.dispose();
 		}
 	
+		// Remove the keyboard event listeners
+		document.removeEventListener('keydown', this.boundKeyDownHandler);
+		document.removeEventListener('keyup', this.boundKeyUpHandler);
+		
 		// Remove event listeners using stored bound handlers
 		if (this._boundHandleEvent) {
 			this.modalEl.removeEventListener('mousedown', this._boundHandleEvent, true);
@@ -8603,6 +9055,7 @@ class ImageAnnotationModal extends Modal {
 		this.isTextEditingBlocked = false;
 		this.isDrawingMode = false;
 		this.isTextMode = false;
+		this._previousStates = null;
 
 
 		// Reset UI
@@ -8625,6 +9078,14 @@ class ImageAnnotationModal extends Modal {
 		if (this.canvas) {
 			this.canvas.defaultCursor = 'default';
 		}
+		this.undoStack = [];
+		this.redoStack = [];
+		this.isUndoRedoAction = false;
+
+		this.isArrowMode = false;
+		if (this.arrowButton) {
+			this.arrowButton.buttonEl.removeClass('is-active');
+		}
 
 	}
 
@@ -8637,5 +9098,239 @@ class ImageAnnotationModal extends Modal {
 		document.removeEventListener('mousemove', this.resize.bind(this));
 		document.removeEventListener('mouseup', this.stopResize.bind(this));
 
+    }
+}
+
+class ArrowBrush extends PencilBrush {
+    private points: Point[] = [];
+    private readonly minDistance = 3;
+    private currentPath: Path | null = null;
+    private currentArrowHead: Path | null = null;
+    
+    constructor(canvas: Canvas) {
+        super(canvas);
+        // Initialize with default width if not set
+        if (!this.width) {
+            this.width = 8; // Default width
+        }
+    }
+
+    onMouseDown(pointer: Point, ev: TBrushEventData): void {
+        this.points = [pointer];
+        this.currentPath = null;
+        this.currentArrowHead = null;
+    }
+
+    onMouseMove(pointer: Point, ev: TBrushEventData): void {
+        if (!this.points.length) return;
+
+        const lastPoint = this.points[this.points.length - 1];
+        const distance = Math.sqrt(
+            Math.pow(pointer.x - lastPoint.x, 2) + 
+            Math.pow(pointer.y - lastPoint.y, 2)
+        );
+        
+        if (distance >= this.minDistance) {
+            this.points.push(pointer);
+            
+            // Remove previous preview
+            if (this.currentPath) {
+                this.canvas.remove(this.currentPath);
+            }
+            if (this.currentArrowHead) {
+                this.canvas.remove(this.currentArrowHead);
+            }
+
+            // Create new preview
+            this.currentPath = this.createSmoothedPath();
+            this.currentArrowHead = this.createArrowHead();
+
+            if (this.currentPath) {
+                this.canvas.add(this.currentPath);
+            }
+            if (this.currentArrowHead) {
+                this.canvas.add(this.currentArrowHead);
+            }
+
+            this.canvas.requestRenderAll();
+        }
+    }
+
+    onMouseUp({ e }: TEvent<MouseEvent | PointerEvent | TouchEvent>): boolean {
+        if (this.points.length >= 2) {
+            // Remove preview paths
+            if (this.currentPath) {
+                this.canvas.remove(this.currentPath);
+            }
+            if (this.currentArrowHead) {
+                this.canvas.remove(this.currentArrowHead);
+            }
+
+            // Create final paths
+            const finalPath = this.createSmoothedPath();
+            const finalArrowHead = this.createArrowHead();
+
+            if (finalPath) {
+                this.canvas.add(finalPath);
+            }
+            if (finalArrowHead) {
+                this.canvas.add(finalArrowHead);
+            }
+
+            this.canvas.requestRenderAll();
+        }
+        
+        // Clear for next stroke
+        this.points = [];
+        this.currentPath = null;
+        this.currentArrowHead = null;
+        
+        return false;
+    }
+
+    private createSmoothedPath(): Path | null {
+        if (this.points.length < 2) return null;
+
+        try {
+            // Simplify points first
+            const simplifiedPoints = this.simplifyPoints(this.points, 50);
+            
+            // Generate control points for smooth curve
+            const controlPoints = this.getControlPoints(simplifiedPoints);
+            
+            // Build the SVG path
+            let pathData = `M ${simplifiedPoints[0].x} ${simplifiedPoints[0].y}`;
+            
+            for (let i = 0; i < controlPoints.length - 1; i++) {
+                const cp = controlPoints[i];
+                const nextCp = controlPoints[i + 1];
+                pathData += ` C ${cp.cp2x} ${cp.cp2y} ${nextCp.cp1x} ${nextCp.cp1y} ${nextCp.x} ${nextCp.y}`;
+            }
+
+            return new Path(pathData, {
+                stroke: this.color,
+                strokeWidth: this.width,
+                fill: '',
+                strokeLineCap: 'round',
+                strokeLineJoin: 'round',
+                selectable: false,
+                evented: false
+            });
+        } catch (error) {
+            console.error('Error creating smoothed path:', error);
+            return null;
+        }
+    }
+
+    private simplifyPoints(points: Point[], tolerance: number): Point[] {
+        if (points.length <= 2) return points;
+
+        const simplified: Point[] = [points[0]];
+        let prevPoint = points[0];
+
+        for (let i = 1; i < points.length - 1; i++) {
+            const point = points[i];
+            const nextPoint = points[i + 1];
+
+            const d1 = Math.hypot(point.x - prevPoint.x, point.y - prevPoint.y);
+            const d2 = Math.hypot(nextPoint.x - point.x, nextPoint.y - point.y);
+
+            if (d1 + d2 > tolerance) {
+                simplified.push(point);
+                prevPoint = point;
+            }
+        }
+
+        simplified.push(points[points.length - 1]);
+        return simplified;
+    }
+
+    private getControlPoints(points: Point[]): Array<{
+        x: number;
+        y: number;
+        cp1x: number;
+        cp1y: number;
+        cp2x: number;
+        cp2y: number;
+    }> {
+        const smoothing = 0.2; // Adjust this value to control curve smoothness (0.2 - 0.3 works well)
+        const result = [];
+
+        for (let i = 0; i < points.length; i++) {
+            const curr = points[i];
+            const prev = points[i - 1] || curr;
+            const next = points[i + 1] || curr;
+
+            // Calculate control points
+            const dx = next.x - prev.x;
+            const dy = next.y - prev.y;
+
+            const cp1x = curr.x - dx * smoothing;
+            const cp1y = curr.y - dy * smoothing;
+            const cp2x = curr.x + dx * smoothing;
+            const cp2y = curr.y + dy * smoothing;
+
+            result.push({
+                x: curr.x,
+                y: curr.y,
+                cp1x,
+                cp1y,
+                cp2x,
+                cp2y
+            });
+        }
+
+        return result;
+    }
+
+    private getAverageDirection(points: Point[], sampleSize = 5): { angle: number; endPoint: Point } {
+        const lastPoints = points.slice(-sampleSize);
+        if (lastPoints.length < 2) return { angle: 0, endPoint: points[points.length - 1] };
+
+        // Use the last two points for direction
+        const p1 = lastPoints[lastPoints.length - 2];
+        const p2 = lastPoints[lastPoints.length - 1];
+        
+        const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+
+        return {
+            angle,
+            endPoint: p2
+        };
+    }
+
+    private createArrowHead(): Path | null {
+        try {
+            if (this.points.length < 2) return null;
+
+            const { angle, endPoint } = this.getAverageDirection(this.points);
+
+            // Calculate arrow head size based on brush width
+            const arrowLength = Math.max(this.width * 2, 10);
+            const arrowWidth = Math.max(this.width, 5);
+            const arrowAngle = Math.PI / 6; // 30 degrees
+
+            // Calculate arrow head points
+            const x1 = endPoint.x - arrowLength * Math.cos(angle - arrowAngle);
+            const y1 = endPoint.y - arrowLength * Math.sin(angle - arrowAngle);
+            const x2 = endPoint.x - arrowLength * Math.cos(angle + arrowAngle);
+            const y2 = endPoint.y - arrowLength * Math.sin(angle + arrowAngle);
+
+            // Create the arrow head path data
+            const arrowPath = `M ${endPoint.x} ${endPoint.y} L ${x1} ${y1} M ${endPoint.x} ${endPoint.y} L ${x2} ${y2}`;
+
+            return new Path(arrowPath, {
+                stroke: this.color,
+                strokeWidth: arrowWidth,
+                fill: '',
+                strokeLineCap: 'round',
+                strokeLineJoin: 'round',
+                selectable: false,
+                evented: false
+            });
+        } catch (error) {
+            console.error('Error creating arrow head:', error);
+            return null;
+        }
     }
 }
