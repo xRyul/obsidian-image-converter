@@ -1,10 +1,27 @@
 // working 2
-import { App, View, MarkdownView, Notice, ItemView, FileView, Plugin, TFile, Scope, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
+import { App, View, MarkdownView, Notice, ItemView, DropdownComponent, FileView, Plugin, TFile, Scope, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
 // Browsers use the MIME type, not the file extension this module allows 
 // us to be more precise when default MIME checking options fail
 import mime from "./mime.min.js"
 
-import { Canvas, FabricImage, IText, FabricObject, PencilBrush, ActiveSelection, Point, util, Path, TEvent, TBrushEventData, ImageFormat } from 'fabric';
+import { Canvas, FabricImage, IText, FabricObject, PencilBrush, ActiveSelection, Point, Pattern, util, Path, TEvent, TBrushEventData, ImageFormat } from 'fabric';
+
+type BlendMode = 
+    | 'source-over'
+    | 'multiply'
+    | 'screen'
+    | 'overlay'
+    | 'darken'
+    | 'lighten'
+    | 'color-dodge'
+    | 'color-burn'
+    | 'hard-light'
+    | 'soft-light'
+    | 'difference'
+    | 'exclusion';
+
+type BackgroundOptions = readonly ['transparent', '#ffffff', '#000000', 'grid', 'dots'];
+type BackgroundType = BackgroundOptions[number];
 
 /*
 
@@ -3629,34 +3646,65 @@ export default class ImageConvertPlugin extends Plugin {
 					.setIcon('pencil')
 					.onClick(async () => {
 						try {
-							// Get the image file from the vault
-							const rootFolder = this.app.vault.getName();
-							let imagePath = img.getAttribute('src');
-							if (imagePath) {
-								// Find the position of the root folder in the path
-								const rootFolderIndex = imagePath.indexOf(rootFolder);
-
-								// Remove everything before the root folder
-								if (rootFolderIndex !== -1) {
-									imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
-								}
-								// Remove the query string and decode the path
-								imagePath = decodeURIComponent(imagePath.split('?')[0]);
-
-								const file = this.app.vault.getAbstractFileByPath(imagePath);
-								if (file instanceof TFile) {
-									new ImageAnnotationModal(this.app, this, file).open();
-								} else {
-									new Notice('Unable to locate image file');
-								}
+							// Get the active markdown view
+							const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+							if (!activeView) {
+								new Notice('No active markdown view');
+								return;
+							}
+			
+							// Get the current file (note) being viewed
+							const currentFile = activeView.file;
+							if (!currentFile) {
+								new Notice('No current file found');
+								return;
+							}
+			
+							// Get the filename from the src attribute
+							const srcAttribute = img.getAttribute('src');
+							if (!srcAttribute) {
+								new Notice('No source attribute found');
+								return;
+							}
+			
+							// Extract just the filename
+							const filename = decodeURIComponent(srcAttribute.split('?')[0].split('/').pop() || '');
+							// console.log('Extracted filename:', filename);
+			
+							// Search for the file in the vault
+							const matchingFiles = this.app.vault.getFiles().filter(file => 
+								file.name === filename
+							);
+			
+							if (matchingFiles.length === 0) {
+								console.error('No matching files found for:', filename);
+								new Notice(`Unable to find image: ${filename}`);
+								return;
+							}
+			
+							// If multiple matches, try to find the one in the same folder as the current note
+							const file = matchingFiles.length === 1 
+								? matchingFiles[0] 
+								: matchingFiles.find(f => {
+									// Get the parent folder of the current file
+									const parentPath = currentFile.parent?.path;
+									return parentPath 
+										? f.path.startsWith(parentPath) 
+										: false;
+								}) || matchingFiles[0];
+			
+							if (file instanceof TFile) {
+								// console.log('Found file:', file.path);
+								new ImageAnnotationModal(this.app, this, file).open();
+							} else {
+								new Notice('Unable to locate image file');
 							}
 						} catch (error) {
-							new Notice('Error opening annotation editor');
-							console.error(error);
+							console.error('Image location error:', error);
+							new Notice('Error processing image path');
 						}
 					});
 			});
-
         
 			menu.showAtPosition({ x: event.pageX, y: event.pageY });
 			
@@ -7263,12 +7311,28 @@ class ImageAnnotationModal extends Modal {
 	private _previousStates: { drawingMode: boolean; } | null = null;
 	private boundKeyDownHandler: (e: KeyboardEvent) => void;
 	private boundKeyUpHandler: (e: KeyboardEvent) => void;
-
+	private preserveObjectStacking = true;
 
 	private readonly brushSizes = [2, 4, 8, 12, 16, 24]; // 6 preset sizes
 	private readonly brushOpacities = [0.2, 0.4, 0.6, 0.8, 0.9, 1.0]; // 6 preset opacities
 	private currentBrushSizeIndex = 2; // Default to middle size
     private currentOpacityIndex = 5; // Default to full opacity
+
+	private readonly blendModes: BlendMode[] = [
+		'source-over',    // Normal
+		'multiply',
+		'screen',
+		'overlay',
+		'darken',
+		'lighten',
+		'color-dodge',
+		'color-burn',
+		'hard-light',
+		'soft-light',
+		'difference',
+		'exclusion'
+	];
+	private currentBlendMode: BlendMode = 'source-over';
 
 	private dominantColors: string[] = [];
     private complementaryColors: string[][] = [];
@@ -7289,6 +7353,12 @@ class ImageAnnotationModal extends Modal {
     private redoStack: string[] = [];
     private isUndoRedoAction = false;
     private maxStackSize = 50; // Limit stack size to prevent memory issues
+
+
+	private currentBackground: BackgroundType = 'transparent';
+	private readonly backgroundOptions: BackgroundOptions = ['transparent', '#ffffff', '#000000', 'grid', 'dots'] as const;
+	private backgroundDropdown: HTMLElement | null = null;
+
 	constructor(app: App, plugin: ImageConvertPlugin, imageFile: TFile) {
 		super(app);
 		this.plugin = plugin;
@@ -7367,7 +7437,8 @@ class ImageAnnotationModal extends Modal {
 					width: canvasWidth,
 					height: canvasHeight,
 					backgroundColor: 'transparent', // Light gray background to show canvas bounds
-					isDrawingMode: false
+					isDrawingMode: false,
+					preserveObjectStacking: this.preserveObjectStacking
 				});
 
 				// Calculate image scaling to fit within canvas while maintaining aspect ratio
@@ -7383,9 +7454,11 @@ class ImageAnnotationModal extends Modal {
 					evented: false,
 					scaleX: scale,
 					scaleY: scale,
-					objectCaching: false,
+					objectCaching: true,
 					opacity: 1,
-					erasable: false
+					erasable: false,
+					crossOrigin: 'anonymous', // Add this line
+					strokeWidth: 0
 				});
 
 				this.canvas.add(fabricImg);
@@ -7436,6 +7509,7 @@ class ImageAnnotationModal extends Modal {
             return;
         }
     }
+	
 	
 	private centerFabricImage(fabricImg: FabricImage) {
 		if (!this.canvas) return;
@@ -7495,8 +7569,8 @@ class ImageAnnotationModal extends Modal {
 				if (this.isDrawingMode) {
 					// In drawing mode, text objects should still be editable but not selectable
 					obj.selectable = false;
-					obj.evented = true;  // Keep evented true for text
-					obj.editable = true; // Ensure text remains editable
+					obj.evented = false;  // Keep evented true for text
+					obj.editable = false; // true = Ensure text remains editable
 				} else {
 					// In other modes, text objects are fully interactive
 					obj.selectable = true;
@@ -7948,21 +8022,53 @@ class ImageAnnotationModal extends Modal {
 		const brushControlsColumn = brushControls.createDiv('brush-controls-column');
 		this.createSizeButtons(brushControlsColumn);
 		this.createOpacityButtons(brushControlsColumn);
-	
+		this.createBlendModeButtons(brushControlsColumn);
+
+		// Add layer control buttons
+		const layerControls = brushControlsColumn.createDiv('layer-controls');
+		layerControls.createDiv('control-label').setText('Layer:');
+		const layerButtonContainer = layerControls.createDiv('button-group');
+
+		// Bring to front button
+		new ButtonComponent(layerButtonContainer)
+			.setTooltip('Bring to Front')
+			.setIcon('arrow-up-to-line')
+			.onClick(() => this.bringToFront());
+
+		// Bring forward buttoncreateBackgroundControls
+		new ButtonComponent(layerButtonContainer)
+			.setTooltip('Bring Forward')
+			.setIcon('arrow-up')
+			.onClick(() => this.bringForward());
+
+		// Send backward button
+		new ButtonComponent(layerButtonContainer)
+			.setTooltip('Send Backward')
+			.setIcon('arrow-down')
+			.onClick(() => this.sendBackward());
+
+		// Send to back button
+		new ButtonComponent(layerButtonContainer)
+			.setTooltip('Send to Back')
+			.setIcon('arrow-down-to-line')
+			.onClick(() => this.sendToBack());
+		
+					
 		// Utility tools
 		new ButtonComponent(utilityGroup)
 			.setTooltip('Clear All')
 			.setIcon('trash')
 			.onClick(() => this.clearAll());
 	
+		this.createBackgroundControls(utilityGroup);
+		
 		const saveBtn = new ButtonComponent(utilityGroup)
 			.setTooltip('Save (Ctrl/Cmd + S)')
 			.setIcon('checkmark')
 			.onClick(() => this.saveAnnotation());
-		
-		saveBtn.buttonEl.addClass('mod-cta');
-	
 
+		saveBtn.buttonEl.addClass('mod-cta');
+		
 		// new ButtonComponent(utilityGroup)
 		// 	.setTooltip('Recover Text Editing')
 		// 	.setIcon('refresh-cw')
@@ -8003,7 +8109,6 @@ class ImageAnnotationModal extends Modal {
 	}
 	
 	private createOpacityButtons(container: HTMLElement) {
-		// Get the existing brush-controls-column or create it if it doesn't exist
 		let brushControlsColumn = container.querySelector('.brush-controls-column');
 		if (!brushControlsColumn) {
 			brushControlsColumn = container.createDiv('brush-controls-column');
@@ -8020,7 +8125,29 @@ class ImageAnnotationModal extends Modal {
 				.setButtonText((opacity * 100).toString() + '%')
 				.onClick(() => {
 					this.currentOpacityIndex = index;
+					
+					// Update brush color for drawing mode
 					this.updateBrushColor();
+					
+					// Update selected object(s) opacity
+					if (this.canvas) {
+						const activeObject = this.canvas.getActiveObject();
+						if (activeObject) {
+							if (activeObject.type === 'activeselection') {
+								// Handle multiple selection
+								const selection = activeObject as ActiveSelection;
+								selection.getObjects().forEach(obj => {
+									this.updateObjectOpacity(obj, opacity);
+								});
+								selection.dirty = true;
+							} else {
+								// Handle single object
+								this.updateObjectOpacity(activeObject, opacity);
+							}
+							this.canvas.requestRenderAll();
+						}
+					}
+					
 					opacityButtonContainer.querySelectorAll('button').forEach(btn => 
 						btn.removeClass('is-active'));
 					button.buttonEl.addClass('is-active');
@@ -8031,6 +8158,206 @@ class ImageAnnotationModal extends Modal {
 			}
 		});
 	}
+	// Add this helper method to update object opacity
+	private updateObjectOpacity(obj: FabricObject, opacity: number) {
+		if (obj instanceof IText) {
+			// For text objects, update fill opacity
+			const currentColor = obj.get('fill') as string;
+			if (currentColor.startsWith('rgba')) {
+				obj.set('fill', this.updateRgbaOpacity(currentColor, opacity));
+			} else {
+				obj.set('fill', this.hexToRgba(currentColor, opacity));
+			}
+		} else {
+			// For other objects (paths, arrows), update stroke opacity
+			const currentStroke = obj.get('stroke') as string;
+			if (currentStroke.startsWith('rgba')) {
+				obj.set('stroke', this.updateRgbaOpacity(currentStroke, opacity));
+			} else {
+				obj.set('stroke', this.hexToRgba(currentStroke, opacity));
+			}
+		}
+		obj.dirty = true;
+	}
+
+	// Add this helper method to update rgba opacity
+	private updateRgbaOpacity(rgba: string, newOpacity: number): string {
+		const matches = rgba.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*[\d.]+)?\)/);
+		if (matches) {
+			const [, r, g, b] = matches;
+			return `rgba(${r}, ${g}, ${b}, ${newOpacity})`;
+		}
+		return rgba;
+	}
+
+
+	private createBlendModeButtons(container: HTMLElement) {
+		const blendModesContainer = container.createDiv('blend-modes-container');
+		const blendModeLabel = blendModesContainer.createDiv('control-label');
+		blendModeLabel.setText('Blend:');
+		
+		// Create a dropdown container
+		const dropdownContainer = blendModesContainer.createDiv('dropdown-container');
+	
+		// Create friendly names mapping
+		const friendlyNames: Record<BlendMode, string> = {
+			'source-over': 'Normal',
+			'multiply': 'Multiply',
+			'screen': 'Screen',
+			'overlay': 'Overlay',
+			'darken': 'Darken',
+			'lighten': 'Lighten',
+			'color-dodge': 'Dodge',
+			'color-burn': 'Burn',
+			'hard-light': 'Hard Light',
+			'soft-light': 'Soft Light',
+			'difference': 'Difference',
+			'exclusion': 'Exclusion'
+		} as Record<BlendMode, string>;
+	
+		// Create the dropdown
+		const dropdown = new DropdownComponent(dropdownContainer);
+		
+		// Add options to the dropdown
+		this.blendModes.forEach((mode) => {
+			dropdown.addOption(mode, friendlyNames[mode]);
+		});
+	
+		// Set initial value
+		dropdown.setValue(this.currentBlendMode);
+	
+		// Add change handler
+		dropdown.onChange((value) => {
+			const mode = value as BlendMode;
+			this.currentBlendMode = mode;
+			
+			// Update brush blend mode
+			if (this.canvas?.freeDrawingBrush) {
+				(this.canvas.freeDrawingBrush as any).globalCompositeOperation = mode;
+			}
+			
+			// Update selected object(s)
+			if (this.canvas) {
+				const activeObject = this.canvas.getActiveObject();
+				if (activeObject) {
+					if (activeObject.type === 'activeselection') {
+						// Handle multiple selection
+						const selection = activeObject as ActiveSelection;
+						selection.getObjects().forEach(obj => {
+							if (!(obj instanceof FabricImage)) {
+								obj.globalCompositeOperation = mode;
+							}
+						});
+						selection.dirty = true;
+					} else if (!(activeObject instanceof FabricImage)) {
+						activeObject.globalCompositeOperation = mode;
+					}
+					this.canvas.requestRenderAll();
+				}
+			}
+		});
+	}
+
+
+	private bringToFront() {
+		if (!this.canvas) return;
+		const activeObject = this.canvas.getActiveObject();
+		if (!activeObject) return;
+	
+		if (activeObject.type === 'activeselection') {
+			// Handle multiple selection
+			const selection = activeObject as ActiveSelection;
+			selection.getObjects().forEach(obj => {
+				this.canvas?.bringObjectToFront(obj);
+			});
+			// Ensure selection stays on top
+			this.canvas.bringObjectToFront(selection);
+		} else {
+			this.canvas.bringObjectToFront(activeObject);
+		}
+		this.canvas.requestRenderAll();
+		this.saveState();
+	}
+	
+	private bringForward() {
+		if (!this.canvas) return;
+		const activeObject = this.canvas.getActiveObject();
+		if (!activeObject) return;
+	
+		if (activeObject.type === 'activeselection') {
+			// Handle multiple selection
+			const selection = activeObject as ActiveSelection;
+			selection.getObjects().forEach(obj => {
+				this.canvas?.bringObjectForward(obj);
+			});
+			// Ensure selection stays on top
+			this.canvas.bringObjectForward(selection);
+		} else {
+			this.canvas.bringObjectForward(activeObject);
+		}
+		this.canvas.requestRenderAll();
+		this.saveState();
+	}
+	
+	private sendBackward() {
+		if (!this.canvas) return;
+		const activeObject = this.canvas.getActiveObject();
+		if (!activeObject) return;
+	
+		if (activeObject.type === 'activeselection') {
+			// Handle multiple selection
+			const selection = activeObject as ActiveSelection;
+			// Process objects in reverse order to maintain relative positions
+			selection.getObjects().reverse().forEach(obj => {
+				this.canvas?.sendObjectBackwards(obj);
+			});
+			// Ensure selection follows
+			this.canvas.sendObjectBackwards(selection);
+		} else {
+			this.canvas.sendObjectBackwards(activeObject);
+		}
+		this.canvas.requestRenderAll();
+		this.saveState();
+	}
+	
+	private sendToBack() {
+		if (!this.canvas) return;
+		const activeObject = this.canvas.getActiveObject();
+		if (!activeObject) return;
+	
+		if (activeObject.type === 'activeselection') {
+			// Handle multiple selection
+			const selection = activeObject as ActiveSelection;
+			// Process objects in reverse order to maintain relative positions
+			selection.getObjects().reverse().forEach(obj => {
+				this.canvas?.sendObjectToBack(obj);
+				// Move it just in front of the background image
+				if (obj !== selection) {
+					const objects = this.canvas?.getObjects() || [];
+					const index = objects.indexOf(obj);
+					if (index > 1) {
+						this.canvas?.moveObjectTo(obj, 1);
+					}
+				}
+			});
+			// Ensure selection follows
+			this.canvas.sendObjectToBack(selection);
+		} else {
+			this.canvas.sendObjectToBack(activeObject);
+			// Move it just in front of the background image
+			const objects = this.canvas.getObjects();
+			const index = objects.indexOf(activeObject);
+			if (index > 1) {
+				this.canvas.moveObjectTo(activeObject, 1);
+			}
+		}
+		this.canvas.requestRenderAll();
+		this.saveState();
+	}
+
+
+
+
 
 
 
@@ -8081,7 +8408,8 @@ class ImageAnnotationModal extends Modal {
 		// Initialize drawing brush
 		this.canvas.freeDrawingBrush = new PencilBrush(this.canvas);
 		this.canvas.freeDrawingBrush.width = this.brushSizes[this.currentBrushSizeIndex];
-
+		// Set the blend mode on the brush using type assertion
+		(this.canvas.freeDrawingBrush as any).globalCompositeOperation = this.currentBlendMode;
 
 		// Initialize with opacity
 		const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
@@ -8090,8 +8418,13 @@ class ImageAnnotationModal extends Modal {
 		}
 
 		// Add handler for when a path is completed
-		this.canvas.on('path:created', () => {
+		this.canvas.on('path:created', (e: any) => {
 			if (!this.isUndoRedoAction) {
+				// Set the blend mode on the created path
+				if (e.path) {
+					e.path.globalCompositeOperation = this.currentBlendMode;
+					this.canvas?.requestRenderAll();
+				}
 				this.saveState();
 			}
 		});
@@ -8554,16 +8887,17 @@ class ImageAnnotationModal extends Modal {
 
 
 
+
+
 	private setupZoomAndPan() {
 		if (!this.canvas) return;
 	
-		// Zoom with mouse wheel (keep existing code)
+		// Zoom with mouse wheel
 		this.canvas.on('mouse:wheel', (opt) => {
 			const event = opt.e as WheelEvent;
 			event.preventDefault();
 			event.stopPropagation();
-	
-			// Use getScenePoint instead of getPointer
+
 			const point = this.canvas.getScenePoint(event);
 			const delta = event.deltaY;
 			let newZoom = this.currentZoom * (delta > 0 ? 0.95 : 1.05);
@@ -8571,7 +8905,23 @@ class ImageAnnotationModal extends Modal {
 			newZoom = Math.min(Math.max(newZoom, this.minZoom), this.maxZoom);
 			
 			if (newZoom !== this.currentZoom) {
+				// Get background image before zooming
+				const backgroundImage = this.canvas.getObjects()[0] as FabricImage;
+				
+				// Disable object caching temporarily
+				if (backgroundImage) {
+					backgroundImage.objectCaching = false;
+				}
+
 				this.zoomToPoint(point, newZoom);
+
+				// Re-enable object caching after a short delay
+				setTimeout(() => {
+					if (backgroundImage) {
+						backgroundImage.objectCaching = true;
+						this.canvas?.requestRenderAll();
+					}
+				}, 100);
 			}
 		});
 	
@@ -8689,23 +9039,67 @@ class ImageAnnotationModal extends Modal {
 		const scaleFactor = newZoom / this.currentZoom;
 		this.currentZoom = newZoom;
 	
-		// Update to use viewport transform directly
-		const vpt = this.canvas.viewportTransform;
+		// Get current viewport transform
+		const vpt = [...this.canvas.viewportTransform];
 		if (!vpt) return;
 	
+		// Calculate new viewport transform
 		const canvasPoint = {
 			x: point.x - vpt[4],
 			y: point.y - vpt[5]
 		};
 	
-		this.canvas.setViewportTransform([
-			newZoom, 0, 0, newZoom,
-			point.x - canvasPoint.x * scaleFactor,
-			point.y - canvasPoint.y * scaleFactor
-		]);
+		// Update viewport transform with better precision
+		const newVpt: [number, number, number, number, number, number] = [
+			newZoom,    // 0: horizontal scaling
+			0,          // 1: horizontal skewing
+			0,          // 2: vertical skewing
+			newZoom,    // 3: vertical scaling
+			point.x - canvasPoint.x * scaleFactor,  // 4: horizontal moving
+			point.y - canvasPoint.y * scaleFactor   // 5: vertical moving
+		];
 	
+		// Apply new transform
+		this.canvas.setViewportTransform(newVpt);
+		this.enforceViewportBounds();
+	
+		// Force background image to update
+		const backgroundImage = this.canvas.getObjects()[0] as FabricImage;
+		if (backgroundImage) {
+			backgroundImage.setCoords();
+		}
+	
+		// Request multiple renders to ensure proper update
 		this.canvas.requestRenderAll();
+		
+		// Additional render after a short delay
+		setTimeout(() => {
+			this.canvas?.requestRenderAll();
+		}, 50);
 	}
+
+	private enforceViewportBounds() {
+		if (!this.canvas) return;
+	
+		const vpt = this.canvas.viewportTransform;
+		if (!vpt) return;
+	
+		// Get canvas dimensions
+		const canvasWidth = this.canvas.width ?? 0;
+		const canvasHeight = this.canvas.height ?? 0;
+	
+		// Calculate maximum allowed panning based on zoom
+		const zoom = this.currentZoom;
+		const maxX = canvasWidth * (1 - zoom);
+		const maxY = canvasHeight * (1 - zoom);
+	
+		// Constrain viewport transform
+		vpt[4] = Math.min(Math.max(vpt[4], maxX), 0);
+		vpt[5] = Math.min(Math.max(vpt[5], maxY), 0);
+	
+		this.canvas.setViewportTransform(vpt);
+	}
+
 
 	private resetZoom() {
 		if (!this.canvas) return;
@@ -8714,6 +9108,147 @@ class ImageAnnotationModal extends Modal {
 		this.canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
 		this.canvas.requestRenderAll();
 	}
+
+
+	private createBackgroundControls(container: HTMLElement) {
+		// Create the button
+		const bgButton = new ButtonComponent(container)
+			.setTooltip('Background')
+			.setIcon('layout-template')
+			.onClick((e: MouseEvent) => {
+				e.stopPropagation();
+				this.toggleBackgroundDropdown(bgButton.buttonEl);
+			});
+	
+		// Create dropdown (initially hidden)
+		this.backgroundDropdown = container.createDiv('background-dropdown');
+		this.backgroundDropdown.style.display = 'none';
+	
+		this.backgroundOptions.forEach(option => {
+			const item = this.backgroundDropdown!.createDiv('background-option');
+			
+			switch (option) {
+				case 'transparent': {
+					item.createDiv('option-icon').innerHTML = `<svg viewBox="0 0 100 100" width="20" height="20">
+						<rect x="0" y="0" width="50" height="50" fill="#ccc"/>
+						<rect x="50" y="50" width="50" height="50" fill="#ccc"/>
+					</svg>`;
+					break;
+				}
+				case 'grid': {
+					item.createDiv('option-icon').innerHTML = `<svg viewBox="0 0 100 100" width="20" height="20">
+						<path d="M0 0 L100 0 M0 50 L100 50 M50 0 L50 100" stroke="#000" stroke-width="10"/>
+					</svg>`;
+					break;
+				}
+				case 'dots': {
+					item.createDiv('option-icon').innerHTML = `<svg viewBox="0 0 100 100" width="20" height="20">
+						<circle cx="50" cy="50" r="10"/>
+					</svg>`;
+					break;
+				}
+				default: {
+					const preview = item.createDiv('color-preview');
+					preview.style.backgroundColor = option;
+				}
+			}
+	
+			item.addEventListener('click', (e) => {
+				e.stopPropagation();
+				const activeObject = this.canvas?.getActiveObject();
+				if (activeObject instanceof IText && activeObject.isEditing) return;
+				
+				this.setBackground(option);
+				this.hideBackgroundDropdown();
+			});
+	
+			if (option === this.currentBackground) {
+				item.addClass('is-active');
+			}
+		});
+	
+		// Close dropdown when clicking outside
+		document.addEventListener('click', () => {
+			this.hideBackgroundDropdown();
+		});
+	}
+
+	private createBackgroundPattern(type: BackgroundType): string | Pattern {
+		if (type === 'grid' || type === 'dots') {
+			const patternCanvas = document.createElement('canvas');
+			const ctx = patternCanvas.getContext('2d');
+			if (!ctx) return 'transparent';
+	
+			patternCanvas.width = 20;
+			patternCanvas.height = 20;
+	
+			switch (type) {
+				case 'grid': {
+					ctx.strokeStyle = '#ddd';
+					ctx.lineWidth = 1;
+					ctx.beginPath();
+					ctx.moveTo(0, 0);
+					ctx.lineTo(20, 0);
+					ctx.moveTo(0, 0);
+					ctx.lineTo(0, 20);
+					ctx.stroke();
+					return new Pattern({
+						source: patternCanvas,
+						repeat: 'repeat'
+					});
+				}
+				case 'dots': {
+					ctx.fillStyle = '#ddd';
+					ctx.beginPath();
+					ctx.arc(10, 10, 1, 0, Math.PI * 2);
+					ctx.fill();
+					return new Pattern({
+						source: patternCanvas,
+						repeat: 'repeat'
+					});
+				}
+			}
+		}
+		return type;
+	}
+
+	private toggleBackgroundDropdown(buttonEl: HTMLElement) {
+		if (!this.backgroundDropdown) return;
+	
+		if (this.backgroundDropdown.style.display === 'none') {
+			// Position dropdown below button
+			const rect = buttonEl.getBoundingClientRect();
+			this.backgroundDropdown.style.top = `${rect.bottom + 5}px`;
+			this.backgroundDropdown.style.left = `${rect.left}px`;
+			this.backgroundDropdown.style.display = 'block';
+		} else {
+			this.hideBackgroundDropdown();
+		}
+	}
+	
+	private hideBackgroundDropdown() {
+		if (this.backgroundDropdown) {
+			this.backgroundDropdown.style.display = 'none';
+		}
+	}
+
+	private setBackground(type: BackgroundType) {
+		if (!this.canvas) return;
+	
+		const pattern = this.createBackgroundPattern(type);
+		
+		// Use the correct property to set background
+		this.canvas.backgroundColor = pattern;
+		this.canvas.requestRenderAll();
+	
+		this.currentBackground = type;
+	
+		// Update UI
+		const buttons = this.modalEl.querySelectorAll('.background-controls .button-group button');
+		buttons.forEach(btn => btn.removeClass('is-active'));
+		buttons[this.backgroundOptions.indexOf(type)]?.addClass('is-active');
+	}
+
 
 
 	private initializeUndoRedo() {
@@ -8895,17 +9430,22 @@ class ImageAnnotationModal extends Modal {
 		if (!this.canvas) return;
 		
 		try {
+			// Store original preserveObjectStacking value
+			const originalStacking = this.canvas.preserveObjectStacking;
+			// Temporarily disable preserveObjectStacking for export
+			this.canvas.preserveObjectStacking = false;
+
 			const originalFileExtension = this.file.extension.toLowerCase();
 			const objects = this.canvas.getObjects();
 			if (objects.length === 0) return;
 	
-			// Get the background image (first object)
-			const backgroundImage = objects[0] as FabricImage;
+			// Find the background image (it's the only FabricImage in our canvas)
+			const backgroundImage = objects.find(obj => obj instanceof FabricImage) as FabricImage;
 			if (!backgroundImage) return;
 	
 			// Force render to ensure all objects are properly positioned
 			this.canvas.renderAll();
-			await new Promise(resolve => setTimeout(resolve, 100)); // Small delay to ensure render
+			await new Promise(resolve => setTimeout(resolve, 100));
 	
 			// Store original image dimensions and scale
 			const originalWidth = backgroundImage.width ?? 0;
@@ -8932,7 +9472,7 @@ class ImageAnnotationModal extends Modal {
 			let maxY = bgBottom;
 	
 			// Include annotations in bounds calculation
-			const annotations = objects.slice(1);
+			const annotations = objects.filter(obj => obj !== backgroundImage);
 			if (annotations.length > 0) {
 				annotations.forEach(obj => {
 					if (!obj.visible) return;
@@ -9047,7 +9587,9 @@ class ImageAnnotationModal extends Modal {
 				await leaf.setViewState(currentState);
 
 			}
-
+			// Restore original preserveObjectStacking value
+			this.canvas.preserveObjectStacking = originalStacking;
+			this.canvas.requestRenderAll();
 			// Close the modal
 			this.close();
 		} catch (error) {
