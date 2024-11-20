@@ -4,7 +4,7 @@ import { App, View, MarkdownView, Notice, ItemView, FileView, Plugin, TFile, Sco
 // us to be more precise when default MIME checking options fail
 import mime from "./mime.min.js"
 
-import { Canvas, FabricImage, IText, FabricObject, PencilBrush, ActiveSelection, Point, util, Path, TEvent, TBrushEventData } from 'fabric';
+import { Canvas, FabricImage, IText, FabricObject, PencilBrush, ActiveSelection, Point, util, Path, TEvent, TBrushEventData, ImageFormat } from 'fabric';
 
 /*
 
@@ -8099,7 +8099,6 @@ class ImageAnnotationModal extends Modal {
 			this.updateObjectInteractivity();
 			if (e.target instanceof FabricImage || this.isUndoRedoAction) return;
 			if (!(e.target.type === 'path')) { // Only save state for non-path objects
-				console.log('Object added, saving state');
 				this.saveState();
 			}
 		});
@@ -8896,7 +8895,7 @@ class ImageAnnotationModal extends Modal {
 		if (!this.canvas) return;
 		
 		try {
-			// Get all objects
+			const originalFileExtension = this.file.extension.toLowerCase();
 			const objects = this.canvas.getObjects();
 			if (objects.length === 0) return;
 	
@@ -8904,95 +8903,133 @@ class ImageAnnotationModal extends Modal {
 			const backgroundImage = objects[0] as FabricImage;
 			if (!backgroundImage) return;
 	
-
-			// Store original image dimensions
+			// Force render to ensure all objects are properly positioned
+			this.canvas.renderAll();
+			await new Promise(resolve => setTimeout(resolve, 100)); // Small delay to ensure render
+	
+			// Store original image dimensions and scale
 			const originalWidth = backgroundImage.width ?? 0;
 			const originalHeight = backgroundImage.height ?? 0;
 			const scale = {
 				x: backgroundImage.scaleX ?? 1,
 				y: backgroundImage.scaleY ?? 1
 			};
-
-			// GOOD
-
-			// Use original dimensions for export calculations
+	
+			// Calculate actual displayed dimensions
 			const displayWidth = originalWidth * scale.x;
 			const displayHeight = originalHeight * scale.y;
-
-			
-			// Calculate the background image bounds
-			const bgBounds = {
-				left: backgroundImage.left ?? 0,
-				top: backgroundImage.top ?? 0,
-				right: (backgroundImage.left ?? 0) + displayWidth,
-				bottom: (backgroundImage.top ?? 0) + displayHeight
-			};
-
-				
-			// Calculate bounds of annotations only (excluding background image)
-			const annotationBounds = objects.slice(1).reduce((acc, obj) => {
-				const objBounds = obj.getBoundingRect();
-				return {
-					left: Math.min(acc.left, objBounds.left),
-					top: Math.min(acc.top, objBounds.top),
-					right: Math.max(acc.right, objBounds.left + objBounds.width),
-					bottom: Math.max(acc.bottom, objBounds.top + objBounds.height)
-				};
-			}, { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
-
-			// If there are annotations, merge their bounds with background bounds
-			const finalBounds = objects.length > 1 ? {
-				left: Math.min(bgBounds.left, annotationBounds.left),
-				top: Math.min(bgBounds.top, annotationBounds.top),
-				right: Math.max(bgBounds.right, annotationBounds.right),
-				bottom: Math.max(bgBounds.bottom, annotationBounds.bottom)
-			} : bgBounds;
 	
-
-			const finalBounds_width = finalBounds.right - finalBounds.left;
-			const finalBounds_height = finalBounds.bottom - finalBounds.top;
-
-			const scaleToOriginal = originalWidth / displayWidth;
-
-			// Calculate dimensions
-			// const width = Math.ceil(finalBounds_width * scaleToOriginal);
-			// const height = Math.ceil(finalBounds_height * scaleToOriginal);
+			// Get background image bounds with safety checks
+			const bgLeft = backgroundImage.left ?? 0;
+			const bgTop = backgroundImage.top ?? 0;
+			const bgRight = bgLeft + displayWidth;
+			const bgBottom = bgTop + displayHeight;
+	
+			// Initialize bounds with background image
+			let minX = bgLeft;
+			let minY = bgTop;
+			let maxX = bgRight;
+			let maxY = bgBottom;
+	
+			// Include annotations in bounds calculation
+			const annotations = objects.slice(1);
+			if (annotations.length > 0) {
+				annotations.forEach(obj => {
+					if (!obj.visible) return;
+					
+					// Get object's absolute bounds
+					const objBounds = obj.getBoundingRect();
+					
+					// Update bounds only if they're valid numbers
+					if (isFinite(objBounds.left)) minX = Math.min(minX, objBounds.left);
+					if (isFinite(objBounds.top)) minY = Math.min(minY, objBounds.top);
+					if (isFinite(objBounds.width)) maxX = Math.max(maxX, objBounds.left + objBounds.width);
+					if (isFinite(objBounds.height)) maxY = Math.max(maxY, objBounds.top + objBounds.height);
+				});
+			}
+	
+			// Ensure bounds include at least the background image
+			minX = Math.min(minX, bgLeft);
+			minY = Math.min(minY, bgTop);
+			maxX = Math.max(maxX, bgRight);
+			maxY = Math.max(maxY, bgBottom);
+	
+			// Calculate final dimensions
+			const finalWidth = maxX - minX;
+			const finalHeight = maxY - minY;
+	
+			// Safety check for dimensions
+			if (finalWidth <= 0 || finalHeight <= 0) {
+				throw new Error('Invalid export dimensions');
+			}
+	
+			// Calculate scale to maintain original resolution
+			const scaleToOriginal = Math.max(
+				originalWidth / displayWidth,
+				originalHeight / displayHeight
+			);
 	
 			// Reset zoom and viewport temporarily
 			const currentVPT = [...this.canvas.viewportTransform] as [number, number, number, number, number, number];
 			this.canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
-	
-			// Export with high quality settings
+			this.canvas.setZoom(1);
+
+			// Ensure all objects are visible
+			objects.forEach(obj => {
+				obj.setCoords();
+				obj.visible = true;
+			});
+			
+			// Force another render
+			this.canvas.renderAll();
+			await new Promise(resolve => setTimeout(resolve, 100));
+
+			// Export with corrected dimensions
 			const dataUrl = this.canvas.toDataURL({
-				format: 'png',
+				format: originalFileExtension as ImageFormat,
 				quality: 1,
 				multiplier: scaleToOriginal,
-				left: finalBounds.left,
-				top: finalBounds.top,
-				width: finalBounds_width,
-				height: finalBounds_height,
-				enableRetinaScaling: false
+				left: minX,
+				top: minY,
+				width: finalWidth,
+				height: finalHeight,
+				enableRetinaScaling: true
 			});
-
-			
+	
 			// Restore viewport transform
 			this.canvas.setViewportTransform(currentVPT);
-	
-			// Save the image...
+			this.canvas.renderAll();
+
+			// Continue with saving...
+			// Validate the dataUrl
+			if (!dataUrl || dataUrl === 'data:,') {
+				throw new Error('Invalid export data');
+			}
+
+			// Save the image with validation
 			const response = await fetch(dataUrl);
+			if (!response.ok) {
+				throw new Error('Failed to process export data');
+			}
+
 			const blob = await response.blob();
+			if (blob.size === 0) {
+				throw new Error('Export produced empty image');
+
+			}
+
 			const arrayBuffer = await blob.arrayBuffer();
-			
 			await this.app.vault.modifyBinary(this.file, arrayBuffer);
+			
+			// Success notification
+			new Notice('Image saved successfully');
+
 	
 			// Get the active view
 			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (!activeView) return;
 
-			// Store current cursor position and scroll
-			// const editor = activeView.editor;
-			// const cursorPosition = editor.getCursor();
-			// const scrollInfo = editor.getScrollInfo();
+
 
 			// Get the current leaf using getMostRecentLeaf (or getLeaf for specific cases)
 			const leaf = this.app.workspace.getMostRecentLeaf();
@@ -9009,9 +9046,6 @@ class ImageAnnotationModal extends Modal {
 				// Switch back to the original view
 				await leaf.setViewState(currentState);
 
-				// // Restore cursor and scroll position
-				// editor.setCursor(cursorPosition);
-				// editor.scrollTo(scrollInfo.left, scrollInfo.top);
 			}
 
 			// Close the modal
