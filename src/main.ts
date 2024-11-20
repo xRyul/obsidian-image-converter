@@ -3722,6 +3722,8 @@ export default class ImageConvertPlugin extends Plugin {
 	/* Drag Resize */
 	/* ------------------------------------------------------------- */
 	private initializeDragResize() {
+		if (Platform.isMobile) { return; }
+
 		this.registerDomEvent(document, 'mousedown', this.dragResize_handleMouseDown.bind(this));
 		this.registerDomEvent(document, 'mousemove', this.dragResize_handleMouseMove.bind(this));
 		this.registerDomEvent(document, 'mouseup', this.dragResize_handleMouseUp.bind(this));
@@ -3762,7 +3764,7 @@ export default class ImageConvertPlugin extends Plugin {
 
 	private dragResize_handleMouseDown(event: MouseEvent) {
 		if (!this.settings.resizeByDragging) return;
-
+		if (Platform.isMobile) { return; }
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		const target = event.target as HTMLElement;
 		// Early return if disabled or in reading mode without permission
@@ -3799,7 +3801,7 @@ export default class ImageConvertPlugin extends Plugin {
 
 	private dragResize_handleMouseMove = (event: MouseEvent) => {
 		if (!this.settings.resizeByDragging) return;
-	
+		if (Platform.isMobile) { return; }
 		if (this.resizeState.isResizing && this.resizeState.element) {
 			if (this.rafId) {
 				cancelAnimationFrame(this.rafId);
@@ -3816,6 +3818,7 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
 	private dragResize_handleMouseUp() {
+		if (Platform.isMobile) { return; }
 		if (this.resizeState.element) {
 			// Clean up all resize-related attributes
 			this.resizeState.element.removeAttribute('data-resize-edge');
@@ -3835,6 +3838,7 @@ export default class ImageConvertPlugin extends Plugin {
 
 	private dragResize_handleMouseOut = (event: MouseEvent) => {
 		if (!this.settings.resizeByDragging) return;
+		if (Platform.isMobile) { return; }
 		const target = event.target as HTMLElement;
 		if (this.dragResize_isValidTarget(target) && !this.resizeState.isResizing) {
 			target.removeAttribute('data-resize-edge');
@@ -3843,7 +3847,7 @@ export default class ImageConvertPlugin extends Plugin {
 
     private dragResize_updateElementSize(newWidth: number, newHeight: number) {
         if (!this.resizeState.element) return;
-
+		if (Platform.isMobile) { return; }
         if (this.resizeState.element instanceof HTMLImageElement) {
             this.resizeState.element.style.width = `${newWidth}px`;
             this.resizeState.element.style.height = `${newHeight}px`;
@@ -3924,6 +3928,7 @@ export default class ImageConvertPlugin extends Plugin {
 	
 	// Add cleanup method to remove any lingering attributes
 	private dragResize_cleanupResizeAttributes() {
+		if (Platform.isMobile) { return; }
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!activeView) return;
 
@@ -3935,6 +3940,7 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 	
 	private handleNonResizingMouseMove = this.debounce((event: MouseEvent) => {
+		if (Platform.isMobile) { return; }
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!activeView || 
 			(activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode)) {
@@ -4013,6 +4019,7 @@ export default class ImageConvertPlugin extends Plugin {
 				"wheel",
 				"img, video",
 				(event: WheelEvent) => {
+					if (Platform.isMobile) { return; }
 					if (!this.settings.resizeWithScrollwheel) return;
 					
 					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -4079,6 +4086,7 @@ export default class ImageConvertPlugin extends Plugin {
 				"mouseover",
 				"img, video",
 				(event: MouseEvent) => {
+					if (Platform.isMobile) { return; }
 					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 					if (!activeView) return;
 					// Check if resizing is enabled for Reading Mode
@@ -4104,7 +4112,8 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
     private scrollwheelresize_updateCursorPosition(editor: Editor, imageName: string | null) {
-        if (!imageName) return;  // Early return if imageName is null
+        if (Platform.isMobile) { return; }
+		if (!imageName) return;  // Early return if imageName is null
 
         const cursorPos = editor.getCursor();
         const lineContent = editor.getLine(cursorPos.line);
