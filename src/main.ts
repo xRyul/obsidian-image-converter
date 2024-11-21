@@ -23,6 +23,14 @@ type BlendMode =
 type BackgroundOptions = readonly ['transparent', '#ffffff', '#000000', 'grid', 'dots'];
 type BackgroundType = BackgroundOptions[number];
 
+interface ToolPreset {
+	size: number;
+    color: string;
+    opacity: number;
+    blendMode: BlendMode;
+}
+
+
 /*
 
 UTIF, HEIC, and probe modules - Instead of always loading it,
@@ -169,6 +177,11 @@ interface ImageConvertSettings {
 	useMdLinks: boolean;
 	useRelativePath: boolean;
 	
+	annotationPresets: {
+        drawing: ToolPreset[];
+        arrow: ToolPreset[];
+        text: ToolPreset[];
+    };
 }
 
 interface SettingsTab {
@@ -264,7 +277,28 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	cursorPosition: 'back',
 
 	useMdLinks: false,
-	useRelativePath: false
+	useRelativePath: false,
+
+    annotationPresets: {
+        drawing: Array(3).fill({
+            color: '#000000',
+            opacity: 1,
+            blendMode: 'source-over' as BlendMode,
+            size: 2  // Add default size
+        }),
+        arrow: Array(3).fill({
+            color: '#000000',
+            opacity: 1,
+            blendMode: 'source-over' as BlendMode,
+            size: 8  // Add default size
+        }),
+        text: Array(3).fill({
+            color: '#000000',
+            opacity: 1,
+            blendMode: 'source-over' as BlendMode,
+            size: 24  // Add default size (for text, this is fontSize)
+        })
+    }
 }
 
 export default class ImageConvertPlugin extends Plugin {
@@ -7712,6 +7746,8 @@ class ImageAnnotationModal extends Modal {
 				updateObjectColor(hex);
 			});
 		});
+
+		this.createPresetButtons(swatchesContainer);
 	}
 
 	private updateBrushColor() {
@@ -7945,6 +7981,12 @@ class ImageAnnotationModal extends Modal {
 		
 		this.currentTool = newTool;
 		this.updateObjectInteractivity();
+		// Show/hide preset buttons based on tool
+		const presetContainer = this.modalEl.querySelector('.preset-buttons');
+		if (presetContainer instanceof HTMLElement) {
+			presetContainer.style.display = newTool === ToolMode.None ? 'none' : 'flex';
+			this.updatePresetButtons();
+		}
 	}
 
 	private toggleDrawingMode(drawBtn?: ButtonComponent) {
@@ -7961,6 +8003,138 @@ class ImageAnnotationModal extends Modal {
 		const newTool = this.currentTool === ToolMode.Arrow ? ToolMode.None : ToolMode.Arrow;
 		this.switchTool(newTool);
 	}
+
+
+	// Add this method to create preset buttons
+	private createPresetButtons(container: Element) {
+		// Cast container to HTMLElement
+		const containerEl = container as HTMLElement;
+		const presetContainer = containerEl.createDiv('preset-buttons');
+		presetContainer.style.display = 'none';
+		
+		// Create 3 preset buttons
+		for (let i = 0; i < 3; i++) {
+			const presetButton = presetContainer.createDiv(`preset-button preset-${i + 1}`);
+			presetButton.createDiv('preset-color');
+			presetButton.createSpan('preset-number').setText(`${i + 1}`);
+			
+			presetButton.addEventListener('click', (e) => {
+				if (e.shiftKey) {
+					this.savePreset(i);
+				} else {
+					this.loadPreset(i);
+				}
+			});
+			
+			presetButton.setAttribute('title', 'Click to load, Shift+Click to save');
+		}
+		
+		return presetContainer;
+	}
+
+	// Add these methods to handle preset functionality
+	private async savePreset(index: number) {
+		const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
+		if (!colorPicker) return;
+	
+		const preset: ToolPreset = {
+			size: this.brushSizes[this.currentBrushSizeIndex],
+			color: colorPicker.value,
+			opacity: this.brushOpacities[this.currentOpacityIndex],
+			blendMode: this.currentBlendMode
+		};
+	
+		// Save to appropriate tool preset array in plugin settings
+		if (this.isDrawingMode) {
+			this.plugin.settings.annotationPresets.drawing[index] = preset;
+		} else if (this.isArrowMode) {
+			this.plugin.settings.annotationPresets.arrow[index] = preset;
+		} else if (this.isTextMode) {
+			this.plugin.settings.annotationPresets.text[index] = preset;
+		}
+	
+		// Save settings
+		await this.plugin.saveSettings();
+	
+		this.updatePresetButtons();
+		new Notice(`Preset ${index + 1} saved`);
+	}
+
+	private loadPreset(index: number) {
+		let preset: ToolPreset;
+		
+		if (this.isDrawingMode) {
+			preset = this.plugin.settings.annotationPresets.drawing[index];
+		} else if (this.isArrowMode) {
+			preset = this.plugin.settings.annotationPresets.arrow[index];
+		} else if (this.isTextMode) {
+			preset = this.plugin.settings.annotationPresets.text[index];
+		} else {
+			return;
+		}
+	
+		// Apply color
+		const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
+		if (colorPicker) {
+			colorPicker.value = preset.color;
+		}
+	
+		// Find and click the appropriate opacity button
+		const opacityIndex = this.brushOpacities.indexOf(preset.opacity);
+		if (opacityIndex !== -1) {
+			this.currentOpacityIndex = opacityIndex;
+			const opacityButtons = this.modalEl.querySelectorAll('.opacity-buttons-container button');
+			const button = opacityButtons[opacityIndex];
+			if (button instanceof HTMLElement) {
+				button.click();
+			}
+		}
+	
+		// Apply size
+		const sizeIndex = this.brushSizes.indexOf(preset.size);
+		if (sizeIndex !== -1) {
+			this.currentBrushSizeIndex = sizeIndex;
+			const sizeButtons = this.modalEl.querySelectorAll('.size-buttons-container button');
+			const button = sizeButtons[sizeIndex];
+			if (button instanceof HTMLElement) {
+				button.click();
+			}
+		}
+
+		// Set blend mode
+		this.currentBlendMode = preset.blendMode;
+		const blendModeDropdown = this.modalEl.querySelector('.blend-modes-container select') as HTMLSelectElement;
+		if (blendModeDropdown) {
+			blendModeDropdown.value = preset.blendMode;
+		}
+	
+		this.updateBrushColor();
+	}
+
+	private updatePresetButtons() {
+		const presetButtons = this.modalEl.querySelectorAll('.preset-button');
+		const currentPresets = this.isDrawingMode ? this.plugin.settings.annotationPresets.drawing :
+			this.isArrowMode ? this.plugin.settings.annotationPresets.arrow :
+				this.isTextMode ? this.plugin.settings.annotationPresets.text : null;
+
+		if (!currentPresets) return;
+
+		presetButtons.forEach((button, index) => {
+			const colorDiv = button.querySelector('.preset-color') as HTMLDivElement;
+			if (colorDiv) {
+				colorDiv.style.backgroundColor = currentPresets[index].color;
+				colorDiv.style.opacity = currentPresets[index].opacity.toString();
+			}
+		});
+	}
+
+
+
+
+
+
+
+
 
 	private setupToolbar(container: HTMLElement) {
 		const toolbar = container.createDiv('annotation-toolbar');
@@ -8026,7 +8200,7 @@ class ImageAnnotationModal extends Modal {
 				}
 			}
 		});
-		
+
 		// Brush controls
 		const brushControlsColumn = brushControls.createDiv('brush-controls-column');
 		this.createSizeButtons(brushControlsColumn);
@@ -8088,6 +8262,12 @@ class ImageAnnotationModal extends Modal {
 
 
 
+
+
+
+
+
+
 	private createSizeButtons(container: HTMLElement) {
 		const brushControlsColumn = container.createDiv('brush-controls-column');
 		
@@ -8131,7 +8311,7 @@ class ImageAnnotationModal extends Modal {
 		
 		this.brushOpacities.forEach((opacity, index) => {
 			const button = new ButtonComponent(opacityButtonContainer)
-				.setButtonText((opacity * 100).toString() + '%')
+				.setButtonText((opacity * 100).toString() + '') // removed percentage from buttons
 				.onClick(() => {
 					this.currentOpacityIndex = index;
 					
