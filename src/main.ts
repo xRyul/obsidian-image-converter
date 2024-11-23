@@ -20,7 +20,7 @@ type BlendMode =
     | 'difference'
     | 'exclusion';
 
-type ExtendedImageFormat = ImageFormat | 'webp'; // extend the default jpeg and png types supported by FABRICjs to also include webp
+type ExtendedImageFormat = ImageFormat | 'webp' | 'avif'; // extend the default jpeg and png types supported by FABRICjs to also include webp
 type BackgroundOptions = readonly ['transparent', '#ffffff', '#000000', 'grid', 'dots'];
 type BackgroundType = BackgroundOptions[number];
 
@@ -920,27 +920,7 @@ export default class ImageConvertPlugin extends Plugin {
 			this.updateProgressUI(0, imageFiles.length, 'Starting processing...');
 		}
 	}
-	// private shouldSkipEvent(evt: ClipboardEvent | DragEvent): boolean {
 
-	// 	if (this.isConversionPaused || evt.defaultPrevented) {
-	// 		return true;
-	// 	}
-	
-	// 	const target = evt.target as HTMLElement;
-	
-	// 	// Find the closest workspace leaf content
-	// 	const closestView = target.closest('.workspace-leaf-content');
-	
-	// 	if (!closestView) {
-	// 		return true;
-	// 	}
-	
-	// 	const viewType = closestView.getAttribute('data-type');
-	
-	// 	const shouldSkip = !['markdown', 'canvas', 'excalidraw'].includes(viewType || '');
-	
-	// 	return shouldSkip;
-	// }
 	private registerFileEvents() {
 		this.registerEvent(
 			this.app.vault.on('create', async (file: TFile) => {
@@ -9638,19 +9618,21 @@ class ImageAnnotationModal extends Modal {
 
 			// Get MIME type from the file
 			const mimeType = mime.getType(this.file.name) || `image/${this.file.extension}`;
-
 			if (!mimeType) throw new Error('Unable to determine file type');
 	
-			// Convert MIME type to Fabric.js format
-			const formatMap: { [key: string]: ExtendedImageFormat } = {
-				'image/jpeg': 'jpeg',
-				'image/jpg': 'jpeg',
-				'image/png': 'png',
-				'image/webp': 'webp'
-			};
+			// Determine export format, defaulting to PNG for unsupported types
+			let exportFormat: ExtendedImageFormat = 'png';
 			
-			const exportFormat = formatMap[mimeType];
-			if (!exportFormat) throw new Error('Unsupported image format');
+			// Only override if it's one of our supported formats
+			if (mimeType === 'image/jpeg' || mimeType === 'image/jpg') {
+				exportFormat = 'jpeg';
+			} else if (mimeType === 'image/png') {
+				exportFormat = 'png';
+			} else if (mimeType === 'image/webp') {
+				exportFormat = 'webp';
+			} else if (mimeType === 'image/avif') {
+				exportFormat = 'avif'
+			}
 
 			const objects = this.canvas.getObjects();
 			if (objects.length === 0) return;
