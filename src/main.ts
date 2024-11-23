@@ -20,6 +20,7 @@ type BlendMode =
     | 'difference'
     | 'exclusion';
 
+type ExtendedImageFormat = ImageFormat | 'webp'; // extend the default jpeg and png types supported by FABRICjs to also include webp
 type BackgroundOptions = readonly ['transparent', '#ffffff', '#000000', 'grid', 'dots'];
 type BackgroundType = BackgroundOptions[number];
 
@@ -974,7 +975,9 @@ export default class ImageConvertPlugin extends Plugin {
 			'.remote.',
 			'.sync/',
 			'.obsidian/plugins/remotely-save/',
-			'.obsidian/plugins/syncthing/'
+			'.obsidian/plugins/syncthing/',
+			'sync-index',
+			'.obsidian-git'
 		];
 		
 		// Common sync plugins check for both mobile and desktop
@@ -1006,9 +1009,16 @@ export default class ImageConvertPlugin extends Plugin {
 		if (!this.userAction) {
 			return true;
 		}
-		
+
+		// Time-based debounce check
+		const now = Date.now();
+		const isRecentlyProcessed = Boolean(
+			this.lastProcessedTime && 
+			(now - this.lastProcessedTime) < 1000
+		);
+
 		// Final check combining all conditions for desktop
-		return isSyncPath || isAnySyncing || wasRecentlyProcessed || !this.userAction;
+		return isSyncPath || isAnySyncing || wasRecentlyProcessed || !this.userAction || isRecentlyProcessed;
 	}
 	private async handleMobileFileCreation(file: TFile) {
 
@@ -9621,10 +9631,27 @@ class ImageAnnotationModal extends Modal {
 		try {
 			// Store original preserveObjectStacking value
 			const originalStacking = this.canvas.preserveObjectStacking;
+			
 			// Temporarily disable preserveObjectStacking for export
 			this.canvas.preserveObjectStacking = false;
 
-			const originalFileExtension = this.file.extension.toLowerCase();
+
+			// Get MIME type from the file
+			const mimeType = mime.getType(this.file.name) || `image/${this.file.extension}`;
+
+			if (!mimeType) throw new Error('Unable to determine file type');
+	
+			// Convert MIME type to Fabric.js format
+			const formatMap: { [key: string]: ExtendedImageFormat } = {
+				'image/jpeg': 'jpeg',
+				'image/jpg': 'jpeg',
+				'image/png': 'png',
+				'image/webp': 'webp'
+			};
+			
+			const exportFormat = formatMap[mimeType];
+			if (!exportFormat) throw new Error('Unsupported image format');
+
 			const objects = this.canvas.getObjects();
 			if (objects.length === 0) return;
 	
@@ -9715,7 +9742,7 @@ class ImageAnnotationModal extends Modal {
 
 			// Export with corrected dimensions
 			const dataUrl = this.canvas.toDataURL({
-				format: originalFileExtension as ImageFormat,
+				format: exportFormat as ImageFormat,
 				quality: 1,
 				multiplier: scaleToOriginal,
 				left: minX,
