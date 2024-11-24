@@ -9854,6 +9854,7 @@ class ImageAnnotationModal extends Modal {
 		if (!this.canvas) return;
 		
 		try {
+			new Notice("1")
 			// Store original preserveObjectStacking value
 			const originalStacking = this.canvas.preserveObjectStacking;
 			
@@ -9951,7 +9952,7 @@ class ImageAnnotationModal extends Modal {
 				originalWidth / displayWidth,
 				originalHeight / displayHeight
 			);
-	
+
 			// Reset zoom and viewport temporarily
 			const currentVPT = [...this.canvas.viewportTransform] as [number, number, number, number, number, number];
 			this.canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
@@ -9966,42 +9967,122 @@ class ImageAnnotationModal extends Modal {
 			// Force another render
 			this.canvas.renderAll();
 			await new Promise(resolve => setTimeout(resolve, 100));
-
-			// Export with corrected dimensions
-			const dataUrl = this.canvas.toDataURL({
-				format: exportFormat as ImageFormat,
-				quality: 1,
-				multiplier: scaleToOriginal,
-				left: minX,
-				top: minY,
-				width: finalWidth,
-				height: finalHeight,
-				enableRetinaScaling: true
-			});
 	
+
+			// Try multiple export methods
+			let arrayBuffer: ArrayBuffer | null = null;
+
+			// Method 1: Try toBlob first
+			try {
+
+				// First create the canvas element at original scale
+				const canvasElement = this.canvas.toCanvasElement(scaleToOriginal);
+				
+				// Create a temporary canvas for cropping
+				const tempCanvas = document.createElement('canvas');
+				tempCanvas.width = finalWidth * scaleToOriginal;
+				tempCanvas.height = finalHeight * scaleToOriginal;
+				const tempCtx = tempCanvas.getContext('2d');
+	
+				if (tempCtx) {
+				
+					// Draw the portion we want to keep
+					tempCtx.drawImage(
+						canvasElement,
+						minX * scaleToOriginal, 
+						minY * scaleToOriginal, 
+						finalWidth * scaleToOriginal, 
+						finalHeight * scaleToOriginal,
+						0, 0, 
+						tempCanvas.width, 
+						tempCanvas.height
+					);
+	
+					// Convert to blob
+					arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+						tempCanvas.toBlob((blob: Blob | null) => {
+					
+							if (blob) {
+								blob.arrayBuffer().then(resolve).catch(reject);
+							} else {
+						
+								reject(new Error('Blob creation failed'));
+							}
+						}, mimeType, 1);
+					});
+				}
+			} catch (e) {
+				console.log('toCanvasElement method failed, trying alternative...', e);
+			}
+
+	
+			// Method 2: Try toDataURL if toBlob failed
+			if (!arrayBuffer) {
+		
+				try {
+				
+					const dataUrl = this.canvas.toDataURL({
+						format: exportFormat as ImageFormat,
+						quality: 1,
+						multiplier: scaleToOriginal,
+						left: minX,
+						top: minY,
+						width: finalWidth,
+						height: finalHeight,
+						enableRetinaScaling: true
+					});
+					
+					if (!dataUrl || dataUrl === 'data:,') {
+						throw new Error('Invalid data URL');
+					}
+
+					arrayBuffer = base64ToArrayBuffer(dataUrl);
+				} catch (e) {
+					console.log('toDataURL method failed, trying alternative...', e);
+				}
+			}
+
+			// Method 3: Try canvas drawing fallback
+			if (!arrayBuffer) {
+				new Notice("6")
+				try {
+					const nativeCanvas = this.canvas.getElement();
+					const tempCanvas = document.createElement('canvas');
+					tempCanvas.width = finalWidth * scaleToOriginal;
+					tempCanvas.height = finalHeight * scaleToOriginal;
+					const tempCtx = tempCanvas.getContext('2d');
+					new Notice("7")
+					if (tempCtx) {
+						new Notice("8")
+						tempCtx.drawImage(
+							nativeCanvas,
+							minX, minY, finalWidth, finalHeight,
+							0, 0, tempCanvas.width, tempCanvas.height
+						);
+						
+						const blob = await new Promise<Blob>((resolve, reject) => {
+							tempCanvas.toBlob((b: Blob | null) => {
+								if (b) resolve(b);
+								else reject(new Error('Blob creation failed'));
+							}, mimeType, 1);
+						});
+						arrayBuffer = await blob.arrayBuffer();
+					}
+				} catch (e) {
+					console.log('Native canvas fallback failed', e);
+				}
+			}
+
+			// If all methods failed, throw error
+			if (!arrayBuffer) {
+				throw new Error('All export methods failed');
+			}
+
+			
 			// Restore viewport transform
 			this.canvas.setViewportTransform(currentVPT);
 			this.canvas.renderAll();
 
-			// Continue with saving...
-			// Validate the dataUrl
-			if (!dataUrl || dataUrl === 'data:,') {
-				throw new Error('Invalid export data');
-			}
-
-			// Save the image with validation
-			const response = await fetch(dataUrl);
-			if (!response.ok) {
-				throw new Error('Failed to process export data');
-			}
-
-			const blob = await response.blob();
-			if (blob.size === 0) {
-				throw new Error('Export produced empty image');
-
-			}
-
-			const arrayBuffer = await blob.arrayBuffer();
 			await this.app.vault.modifyBinary(this.file, arrayBuffer);
 			
 			// Success notification
