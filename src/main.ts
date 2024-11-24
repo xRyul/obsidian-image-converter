@@ -56,15 +56,6 @@ declare module 'obsidian' {
     }
 }
 
-interface ObsidianApp extends App {
-    plugins: {
-        plugins: {
-            [key: string]: any;
-        };
-    };
-}
-
-
 interface Listener {
 	(this: Document, ev: Event): void;
 }
@@ -92,6 +83,12 @@ interface DropInfo {
         type: string;
     }>;  // Add tracking for individual files
     timeoutId?: number;  // Track the timeout
+}
+
+interface ProcessedFileInfo {
+    path: string;
+    timestamp: number;
+    size: number;
 }
 
 // Define possible modifier keys
@@ -330,7 +327,10 @@ export default class ImageConvertPlugin extends Plugin {
     private totalSizeBeforeBytes = 0;
     private totalSizeAfterBytes = 0;
     private processedFiles: { name: string; savedBytes: number }[] = [];
+	private isSyncOperation = false;
+	private mobileProcessedFiles: Map<string, ProcessedFileInfo> = new Map();
 
+	
 	private statusBarItemEl: HTMLElement | null = null;
 	private counters: Map<string, number> = new Map();
 	private userAction = false;
@@ -375,7 +375,6 @@ export default class ImageConvertPlugin extends Plugin {
 		
 			// Register commands
 			this.registerCommands();
-			
 			
 			// Register all event handlers
 			this.registerEventHandlers();
@@ -488,6 +487,118 @@ export default class ImageConvertPlugin extends Plugin {
 
 	}
 
+	private async testSyncBehavior() {
+		this.isSyncOperation = true;
+		new Notice("🔄 Aggressive sync test started");
+
+		const createTestImage = async (name: string, size: { width: number, height: number }): Promise<ArrayBuffer> => {
+			const canvas = document.createElement('canvas');
+			canvas.width = size.width;
+			canvas.height = size.height;
+			const ctx = canvas.getContext('2d');
+			if (!ctx) throw new Error('Could not get canvas context');
+
+			// Create more complex test images
+			ctx.fillStyle = '#' + Math.floor(Math.random() * 16777215).toString(16);
+			ctx.fillRect(0, 0, size.width, size.height);
+
+			// Add some shapes
+			ctx.beginPath();
+			ctx.arc(size.width / 2, size.height / 2, Math.min(size.width, size.height) / 4, 0, 2 * Math.PI);
+			ctx.fillStyle = '#' + Math.floor(Math.random() * 16777215).toString(16);
+			ctx.fill();
+
+			// Convert to blob with different quality settings
+			return new Promise((resolve, reject) => {
+				canvas.toBlob(async (blob) => {
+					if (!blob) reject('Failed to create blob');
+					const arrayBuffer = await blob!.arrayBuffer();
+					resolve(arrayBuffer);
+				}, 'image/jpeg', Math.random() * 0.5 + 0.5); // Random quality between 0.5 and 1.0
+			});
+		};
+
+		try {
+			// Create test scenarios with different image sizes and operations
+			const testScenarios = [
+				{ name: 'small_test1.jpg', size: { width: 100, height: 100 } },
+				{ name: 'medium_test2.jpg', size: { width: 500, height: 500 } },
+				{ name: 'large_test3.jpg', size: { width: 1000, height: 1000 } },
+				{ name: 'wide_test4.jpg', size: { width: 1200, height: 600 } },
+				{ name: 'tall_test5.jpg', size: { width: 600, height: 1200 } }
+			];
+
+			for (const scenario of testScenarios) {
+				const path = `attachments/${scenario.name}`;
+
+				// Create initial image
+				const imageData = await createTestImage(scenario.name, scenario.size);
+				await this.app.vault.createBinary(path, imageData);
+				await new Promise(resolve => setTimeout(resolve, 200));
+
+				// Simulate multiple rapid sync operations
+				for (let i = 0; i < 3; i++) {
+					// Read, delete, and recreate rapidly
+					const tempData = await this.app.vault.readBinary(
+						this.app.vault.getAbstractFileByPath(path) as TFile
+					);
+					await this.app.vault.delete(
+						this.app.vault.getAbstractFileByPath(path) as TFile
+					);
+					await new Promise(resolve => setTimeout(resolve, 50)); // Shorter delay
+					await this.app.vault.createBinary(path, tempData);
+
+					// Sometimes modify the file immediately after creation
+					if (Math.random() > 0.5) {
+						const newData = await createTestImage(scenario.name, scenario.size);
+						await this.app.vault.delete(
+							this.app.vault.getAbstractFileByPath(path) as TFile
+						);
+						await this.app.vault.createBinary(path, newData);
+					}
+				}
+
+				// Simulate concurrent operations
+				await Promise.all([
+					this.app.vault.read(this.app.vault.getAbstractFileByPath(path) as TFile),
+					this.app.vault.read(this.app.vault.getAbstractFileByPath(path) as TFile),
+					new Promise(resolve => setTimeout(resolve, 100))
+				]);
+			}
+
+			// Final rapid-fire test
+			await Promise.all(testScenarios.map(async (scenario) => {
+				const path = `attachments/${scenario.name}`;
+				const newData = await createTestImage(scenario.name, scenario.size);
+				return this.app.vault.createBinary(path, newData);
+			}));
+
+		} catch (error) {
+			console.error('Error in aggressive sync test:', error);
+			new Notice("❌ Sync test failed: " + error.message);
+		} finally {
+			// Cleanup
+			setTimeout(async () => {
+				this.isSyncOperation = false;
+
+				// Optional: Clean up test files
+				const testFiles = this.app.vault.getFiles()
+					.filter(file => file.path.startsWith('attachments/') &&
+						file.path.includes('test'));
+
+				for (const file of testFiles) {
+					try {
+						await this.app.vault.delete(file);
+					} catch (e) {
+						console.error('Cleanup error:', e);
+					}
+				}
+
+				new Notice("✅ Aggressive sync test completed");
+			}, 2000);
+		}
+	}
+	
 
 	private activateKillSwitch() {
 		this.isKillSwitchActive = true;
@@ -517,57 +628,6 @@ export default class ImageConvertPlugin extends Plugin {
 			this.isKillSwitchActive = false;
 		}, 1000);
 	}
-
-	// Handle the initial drop/paste and put it in a queue
-	/* ------------------------------------------------------------- */
-	// private registerEventHandlers() {
-
-	// 	// Register workspace-level events
-	// 	this.registerEvent(
-	// 		this.app.workspace.on('editor-paste', (evt: ClipboardEvent, editor, view) => {
-	// 			if (this.shouldSkipEvent(evt)) return;
-	// 			this.handlePaste(evt);
-	// 		})
-	// 	);
-	
-	// 	this.registerEvent(
-	// 		this.app.workspace.on('editor-drop', (evt: DragEvent, editor, view) => {
-	// 			if (this.shouldSkipEvent(evt)) return;
-	// 			this.handleDrop(evt);
-	// 		})
-	// 	);
-	
-	// 	// Register DOM events using registerDomEvent
-	// 	const workspaceContainer = this.app.workspace.containerEl;
-		
-	// 	this.registerDomEvent(workspaceContainer, 'paste', (evt: ClipboardEvent) => {
-	// 		if (this.shouldSkipEvent(evt)) return;
-	// 		this.handlePaste(evt);
-	// 	}, { capture: true });
-
-	// 	this.registerDomEvent(workspaceContainer, 'drop', (evt: DragEvent) => {
-	// 		if (this.shouldSkipEvent(evt)) return;
-	// 		this.handleDrop(evt);
-	// 	}, { capture: true });
-
-	// 	// Register for specific view types
-	// 	const supportedViewTypes = ['markdown', 'canvas', 'excalidraw'];
-	// 	supportedViewTypes.forEach(viewType => {
-	// 		const leaves = this.app.workspace.getLeavesOfType(viewType);
-	// 		leaves.forEach(leaf => {
-	// 			const container = leaf.view.containerEl;
-	// 			if (!container.hasAttribute('data-image-converter-registered')) {
-	// 				container.setAttribute('data-image-converter-registered', 'true');
-					
-	// 				// Register dragover using registerDomEvent
-	// 				this.registerDomEvent(container, 'dragover', (e: DragEvent) => {
-	// 					e.preventDefault();
-	// 					e.stopPropagation();
-	// 				}, { capture: true });
-	// 			}
-	// 		});
-	// 	});
-	// }
 
 	private registerEventHandlers() {
 		// Register workspace-level events
@@ -792,6 +852,10 @@ export default class ImageConvertPlugin extends Plugin {
 
 		/* ----------------------------------------------------------------------------*/
 		/* ----------------------------------------------------------------------------*/
+		setTimeout(() => {
+            this.userAction = false;
+        }, 2000);
+
 	}
 	private handleDrop(event: DragEvent) {
 
@@ -919,6 +983,11 @@ export default class ImageConvertPlugin extends Plugin {
 		if (this.settings.showProgress) {
 			this.updateProgressUI(0, imageFiles.length, 'Starting processing...');
 		}
+
+		setTimeout(() => {
+            this.userAction = false;
+        }, 2000);
+
 	}
 
 	private registerFileEvents() {
@@ -946,9 +1015,13 @@ export default class ImageConvertPlugin extends Plugin {
 		);
 	}
 	private async isExternalOperation(file: TFile): Promise<boolean> {
-		const app = this.app as ObsidianApp;
-		
-		// Common sync patterns for both mobile and desktop
+		const now = Date.now();
+
+		// First check: if we're in a sync operation, always return true
+		if (this.isSyncOperation) {
+			return true;
+		}
+
 		const syncPatterns = [
 			'.sync-conflict',
 			'.git',
@@ -959,63 +1032,87 @@ export default class ImageConvertPlugin extends Plugin {
 			'sync-index',
 			'.obsidian-git'
 		];
-		
-		// Common sync plugins check for both mobile and desktop
-		const syncPlugins = ['remotely-save', 'syncthing', 'obsidian-git'];
-		const isAnySyncing = syncPlugins.some(pluginId => 
-			app.plugins.plugins[pluginId]?.isSyncing ||
-			app.plugins.plugins[pluginId]?.status === 'syncing'
-		);
-	
-		// Common checks for both platforms
+
 		const isSyncPath = syncPatterns.some(pattern => file.path.includes(pattern));
 		const wasRecentlyProcessed = this.processedFiles.some(
 			processedFile => processedFile.name === file.path
 		);
-	
+
 		if (Platform.isMobile) {
-			// Mobile-specific checks
-			// Return true only if it's a sync operation or was recently processed
-			return isSyncPath || isAnySyncing || wasRecentlyProcessed;
-		}
-	
-		// Desktop-specific checks
-		// Check if Obsidian window is not focused
-		if (!document.hasFocus()) {
-			return true;
-		}
-	
-		// Check if this is a file system operation without user interaction
-		if (!this.userAction) {
-			return true;
+			try {
+				const fileStats = await this.app.vault.adapter.stat(file.path);
+				const fileSize = fileStats?.size || 0;
+
+				const processedInfo = this.mobileProcessedFiles.get(file.path);
+
+				// Enhanced sync detection
+				const isRecentOperation = now - this.lastProcessedTime < 2000;
+				const isSyncOperation = isRecentOperation && processedInfo;
+
+				// If we have processed this file before
+				if (processedInfo) {
+					// Check if it's the same file (same size and recent timestamp)
+					const isSameFile = processedInfo.size === fileSize &&
+						(now - processedInfo.timestamp) < 5000;
+
+					if (isSameFile || isSyncOperation) {
+						return true; // Skip processing
+					}
+				}
+
+				// Additional check for test images
+				if (file.path.startsWith('attachments/test')) {
+					const timeSinceLastProcess = now - this.lastProcessedTime;
+					if (timeSinceLastProcess < 1000) {
+						return true;
+					}
+				}
+
+				return isSyncPath || wasRecentlyProcessed;
+			} catch (error) {
+				console.error('Error checking file stats:', error);
+				return true; // Skip processing on error
+			}
 		}
 
-		// Time-based debounce check
-		const now = Date.now();
-		const isRecentlyProcessed = Boolean(
-			this.lastProcessedTime && 
-			(now - this.lastProcessedTime) < 1000
-		);
-
-		// Final check combining all conditions for desktop
-		return isSyncPath || isAnySyncing || wasRecentlyProcessed || !this.userAction || isRecentlyProcessed;
+		// Desktop-specific checks with enhanced sync detection
+		return !this.userAction ||
+			isSyncPath ||
+			wasRecentlyProcessed ||
+			this.isSyncOperation;
 	}
-	private async handleMobileFileCreation(file: TFile) {
+	
 
-		// Set batch parameters for single file processing
-		this.currentBatchTotal = 1;
-		this.batchStarted = true;
-		this.userAction = true; // Force userAction to true for mobile
-	
-		// Generate new batch ID
-		this.batchId = Date.now().toString();
-	
+
+
+	private async handleMobileFileCreation(file: TFile) {
 		try {
-			// Add to queue with mobile-specific context
+			const fileStats = await this.app.vault.adapter.stat(file.path);
+			const fileSize = fileStats?.size || 0;
+			
+			// Check if this is truly a new file
+			const processedInfo = this.mobileProcessedFiles.get(file.path);
+			if (processedInfo && processedInfo.size === fileSize) {
+				return;
+			}
+	
+			// Add to tracking with file info
+			this.mobileProcessedFiles.set(file.path, {
+				path: file.path,
+				timestamp: Date.now(),
+				size: fileSize
+			});
+	
+			// Set batch parameters
+			this.currentBatchTotal = 1;
+			this.batchStarted = true;
+			this.batchId = Date.now().toString();
+	
+			// Add to queue
 			this.fileQueue.push({ 
 				file,
 				addedAt: Date.now(),
-				viewType: 'markdown', // Mobile attachments typically in markdown
+				viewType: 'markdown',
 				originalName: file.name,
 				originalPath: file.path,
 				processed: false,
@@ -1023,25 +1120,21 @@ export default class ImageConvertPlugin extends Plugin {
 			});
 			
 			await this.processQueue();
-
-			// Verify processing success
-			const processedFile = await this.app.vault.adapter.stat(file.path);
-			if (!processedFile) {
-				throw new Error('File not found after processing');
-			}
-
+	
+			// Update last processed time
+			this.lastProcessedTime = Date.now();
+	
+			// Clean up after delay
+			setTimeout(() => {
+				this.mobileProcessedFiles.delete(file.path);
+			}, 5000);
+	
 		} catch (error) {
 			console.error('Error processing mobile file:', error);
-			// Only show notice for actual failures, not successful conversions
+			this.mobileProcessedFiles.delete(file.path);
 			if (!await this.app.vault.adapter.exists(file.path)) {
 				new Notice(`Failed to process mobile file: ${file.name}`);
 			}
-		} finally {
-			// Reset state after processing
-			window.setTimeout(() => {
-				this.userAction = false;
-				this.batchStarted = false;
-			}, 1000);
 		}
 	}
 	private async handleDesktopFileCreation(file: TFile) {
@@ -2734,6 +2827,12 @@ export default class ImageConvertPlugin extends Plugin {
 			id: 'toggle-image-conversion',
 			name: 'Toggle Image Conversion (Pause/Resume)',
 			callback: () => this.command_toggleConversion()
+		});
+
+		this.addCommand({
+			id: 'test-sync-behavior',
+			name: 'Test Sync Behavior',
+			callback: () => this.testSyncBehavior()
 		});
 	}
 
@@ -4594,7 +4693,6 @@ async function convertToWebP(
         if (!allowLargerFiles) {
             const validResults = results.filter(result => result.size <= file.size);
             if (validResults.length > 0) {
-                console.log(`Using ${validResults[0].type} method (smallest size)`);
                 return validResults[0].data;
             }
             // If no valid results, return original file
@@ -4602,7 +4700,6 @@ async function convertToWebP(
         }
 
         // Return the smallest result
-        console.log(`Using ${results[0].type} method (smallest size)`);
         return results[0].data;
 
     } catch (error) {
@@ -4751,7 +4848,6 @@ async function convertToJPG(
         if (!allowLargerFiles) {
             const validResults = results.filter(result => result.size <= file.size);
             if (validResults.length > 0) {
-                console.log(`Using ${validResults[0].type} method (smallest size)`);
                 return validResults[0].data;
             }
             // If no valid results, return original file
@@ -4759,7 +4855,6 @@ async function convertToJPG(
         }
 
         // Return the smallest result
-        console.log(`Using ${results[0].type} method (smallest size)`);
         return results[0].data;
 
     } catch (error) {
@@ -4913,7 +5008,6 @@ async function convertToPNG(
         if (!allowLargerFiles) {
             const smallerResults = validResults.filter(result => result.size <= file.size);
             if (smallerResults.length > 0) {
-                console.log(`Using ${smallerResults[0].type} method (smallest size)`);
                 return smallerResults[0].data;
             }
             // If no valid results, return original file
@@ -4921,7 +5015,6 @@ async function convertToPNG(
         }
 
         // Return the smallest result
-        console.log(`Using ${validResults[0].type} method (smallest size)`);
         return validResults[0].data;
 
     } catch (error) {
@@ -5702,6 +5795,10 @@ export class ImageConvertTab extends PluginSettingTab {
 					.onChange(async value => {
 						this.plugin.settings.convertTo = value;
 						await this.plugin.saveSettings();
+						// Refresh the output settings to show/hide the "Replace" option
+						if (this.activeTab === 'output') {
+							this.displayOutputSettings();
+						}
 					})
 			);
 
@@ -5925,24 +6022,27 @@ export class ImageConvertTab extends PluginSettingTab {
 	
 		this.filenameSettingsContainer = container.createDiv('filename-settings');
 	
-		new Setting(container)
-			.setName("If an output file already exists")
-			.setDesc("Replace - to replace already existing file in the destination with a new file.\
-				Rename - automatically add '-1, -2 -3 etc.' suffix to the end of file")
-			.addDropdown((dropdown) =>
-				dropdown
-					.addOptions({
-						duplicate_replace: "Replace",
-						duplicate_rename: "Rename"
-					})
-					.setValue(this.plugin.settings.manage_duplicate_filename)
-					.onChange(async (value) => {
-						this.plugin.settings.manage_duplicate_filename = value;
-						await this.plugin.saveSettings();
-						this.updateFilenameSettings();
-						this.updateConsolidatedPreview();
-					})
-			);
+		// Only show the duplicate file management setting if convertTo is not 'disabled'
+		if (this.plugin.settings.convertTo !== 'disabled') {
+			new Setting(container)
+				.setName("If an output file already exists")
+				.setDesc("Replace - to replace already existing file in the destination with a new file.\
+					Rename - automatically add '-1, -2 -3 etc.' suffix to the end of file")
+				.addDropdown((dropdown) =>
+					dropdown
+						.addOptions({
+							duplicate_replace: "Replace",
+							duplicate_rename: "Rename"
+						})
+						.setValue(this.plugin.settings.manage_duplicate_filename)
+						.onChange(async (value) => {
+							this.plugin.settings.manage_duplicate_filename = value;
+							await this.plugin.saveSettings();
+							this.updateFilenameSettings();
+							this.updateConsolidatedPreview();
+						})
+				);
+		}
 	
 		new Setting(container)
 			.setName('Use Markdown links')
@@ -9854,7 +9954,7 @@ class ImageAnnotationModal extends Modal {
 		if (!this.canvas) return;
 		
 		try {
-			new Notice("1")
+
 			// Store original preserveObjectStacking value
 			const originalStacking = this.canvas.preserveObjectStacking;
 			
