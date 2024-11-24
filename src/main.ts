@@ -4377,7 +4377,91 @@ async function handleHeicImage(
 	}
 }
 
-function convertToWebP(
+
+// We're working with the original blob at the beginning, but the crucial 
+// part is HOW we're creating the new compressed version. The path we take
+// to create the compressed version (toDataURL vs toBlob) can result in 
+// different compression algorithms being used internally by the browser.
+// THIS is IMPORTANT FOR MOBILE.
+async function compressOriginalImage(
+    file: Blob, 
+    quality: number,
+    destructive_resizeMode: string,
+    destructive_desiredWidth: number,
+    destructive_desiredHeight: number,
+    destructive_desiredLongestEdge: number,
+    destructive_enlarge_or_reduce: 'Always' | 'Reduce' | 'Enlarge'
+): Promise<ArrayBuffer> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        const reader = new FileReader();
+
+        reader.onload = (e) => {
+            img.onload = () => {
+                const { imageWidth, imageHeight, aspectRatio } = calculateDesiredDimensions(
+                    img,
+                    destructive_resizeMode,
+                    destructive_desiredWidth,
+                    destructive_desiredHeight,
+                    destructive_desiredLongestEdge,
+                    destructive_enlarge_or_reduce
+                );
+
+                const canvas = document.createElement('canvas');
+                canvas.width = imageWidth;
+                canvas.height = imageHeight;
+
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    reject(new Error('Failed to get canvas context'));
+                    return;
+                }
+
+                ctx.save();
+                ctx.translate(canvas.width / 2, canvas.height / 2);
+
+                const drawWidth = destructive_resizeMode === 'Fill'
+                    ? Math.min(img.naturalWidth, img.naturalHeight * aspectRatio)
+                    : img.naturalWidth;
+                const drawHeight = destructive_resizeMode === 'Fill'
+                    ? Math.min(img.naturalHeight, img.naturalWidth / aspectRatio)
+                    : img.naturalHeight;
+
+                ctx.drawImage(
+                    img,
+                    0, 0,
+                    drawWidth, drawHeight,
+                    -imageWidth / 2, -imageHeight / 2,
+                    imageWidth, imageHeight
+                );
+                ctx.restore();
+				
+				const blobType = file.type || 'image/jpeg';
+
+                // Use original format instead of hardcoding JPEG
+                canvas.toBlob(
+                    (blob) => {
+                        if (!blob) {
+                            reject(new Error('Failed to create blob'));
+                            return;
+                        }
+                        blob.arrayBuffer().then(resolve).catch(reject);
+                    },
+                    blobType,
+                    quality
+                );
+            };
+
+            img.onerror = () => reject(new Error('Failed to load image'));
+            img.src = e.target?.result as string;
+        };
+
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+    });
+}
+
+async function convertToWebP(
     file: Blob,
     quality: number,
     destructive_resizeMode: string,
@@ -4387,100 +4471,148 @@ function convertToWebP(
     destructive_enlarge_or_reduce: 'Always' | 'Reduce' | 'Enlarge',
     allowLargerFiles: boolean
 ): Promise<ArrayBuffer> {
-	// If quality is 1 and no resize needed, return original
-	if (quality === 1 && destructive_resizeMode === 'None') {
-		return file.arrayBuffer();
-	}
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = (e) => {
-            if (!e.target?.result) {
-                reject(new Error('Failed to load file'));
-                return;
-            }
+    // Early return if no processing needed
+    if (quality === 1 && destructive_resizeMode === 'None') {
+        return file.arrayBuffer();
+    }
 
+    // Helper function to setup canvas with image
+    const setupCanvas = async (imageData: string): Promise<{
+        canvas: HTMLCanvasElement;
+        context: CanvasRenderingContext2D;
+    }> => {
+        return new Promise((resolve, reject) => {
             const image = new Image();
             image.onload = () => {
-                try {
-                    // Adjust quality for mobile devices
-                    let adjustedQuality = quality;
-                    const maxSize = 1024 * 1024; // 1MB
-                    if (file.size <= maxSize && Platform.isMobile) {
-                        adjustedQuality = Math.max(quality, 0.85);
-                    }
+                const { imageWidth, imageHeight, aspectRatio } = calculateDesiredDimensions(
+                    image,
+                    destructive_resizeMode,
+                    destructive_desiredWidth,
+                    destructive_desiredHeight,
+                    destructive_desiredLongestEdge,
+                    destructive_enlarge_or_reduce
+                );
 
-                    const { imageWidth, imageHeight, aspectRatio } = calculateDesiredDimensions(
-                        image,
-                        destructive_resizeMode,
-                        destructive_desiredWidth,
-                        destructive_desiredHeight,
-                        destructive_desiredLongestEdge,
-                        destructive_enlarge_or_reduce
-                    );
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d', {
+                    willReadFrequently: false
+                });
 
-                    const canvas = document.createElement('canvas');
-                    const context = canvas.getContext('2d');
-                    if (!context) {
-                        reject(new Error('Failed to get canvas context'));
-                        return;
-                    }
-
-                    canvas.width = imageWidth;
-                    canvas.height = imageHeight;
-                    context.save();
-                    context.translate(canvas.width / 2, canvas.height / 2);
-
-                    const drawWidth = destructive_resizeMode === 'Fill'
-                        ? Math.min(image.naturalWidth, image.naturalHeight * aspectRatio)
-                        : image.naturalWidth;
-                    const drawHeight = destructive_resizeMode === 'Fill'
-                        ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio)
-                        : image.naturalHeight;
-
-                    context.drawImage(
-                        image,
-                        0, 0,
-                        drawWidth, drawHeight,
-                        -imageWidth / 2, -imageHeight / 2,
-                        imageWidth, imageHeight
-                    );
-                    context.restore();
-
-                    const webpData = canvas.toDataURL('image/webp', adjustedQuality);
-                    const convertedBuffer = base64ToArrayBuffer(webpData);
-
-                    if (!allowLargerFiles && convertedBuffer.byteLength > file.size) {
-                        // Return original file if converted is larger and not allowed
-                        const originalReader = new FileReader();
-                        originalReader.onloadend = () => {
-                            if (originalReader.result instanceof ArrayBuffer) {
-                                resolve(originalReader.result);
-                            }
-                        };
-                        originalReader.readAsArrayBuffer(file);
-                    } else {
-                        resolve(convertedBuffer);
-                    }
-                } catch (error) {
-                    console.error('WebP conversion error:', error);
-                    // Fallback to original file
-                    reader.readAsArrayBuffer(file);
-                    reader.onloadend = () => {
-                        if (reader.result instanceof ArrayBuffer) {
-                            resolve(reader.result);
-                        }
-                    };
+                if (!context) {
+                    reject(new Error('Failed to get canvas context'));
+                    return;
                 }
+
+                canvas.width = imageWidth;
+                canvas.height = imageHeight;
+
+                const drawWidth = destructive_resizeMode === 'Fill'
+                    ? Math.min(image.naturalWidth, image.naturalHeight * aspectRatio)
+                    : image.naturalWidth;
+                const drawHeight = destructive_resizeMode === 'Fill'
+                    ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio)
+                    : image.naturalHeight;
+
+                context.drawImage(
+                    image,
+                    0, 0,
+                    drawWidth, drawHeight,
+                    0, 0,
+                    imageWidth, imageHeight
+                );
+
+                resolve({ canvas, context });
             };
             image.onerror = () => reject(new Error('Failed to load image'));
-            image.src = e.target.result.toString();
-        };
-        reader.onerror = () => reject(new Error('Failed to read file'));
-        reader.readAsDataURL(file);
-    });
+            image.src = imageData;
+        });
+    };
+
+    try {
+        // Read file as data URL once
+        const imageData = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = (e) => resolve(e.target?.result as string);
+            reader.onerror = () => reject(new Error('Failed to read file'));
+            reader.readAsDataURL(file);
+        });
+
+        // Setup canvas
+        const { canvas } = await setupCanvas(imageData);
+
+        // Try both conversion methods in parallel
+        const [blobResult, dataUrlResult] = await Promise.all([
+            // Method 1: toBlob approach
+            new Promise<ArrayBuffer>((resolve) => {
+                canvas.toBlob(
+                    async (blob) => {
+                        if (!blob) {
+                            resolve(new ArrayBuffer(0));
+                            return;
+                        }
+                        resolve(await blob.arrayBuffer());
+                    },
+                    'image/webp',
+                    quality
+                );
+            }),
+
+            // Method 2: toDataURL approach
+            new Promise<ArrayBuffer>((resolve) => {
+                const webpData = canvas.toDataURL('image/webp', quality);
+                resolve(base64ToArrayBuffer(webpData));
+            })
+        ]);
+
+        // Get original format compression as well
+
+		// We're working with the original blob at the beginning,but the crucial 
+		// part is HOW we're creating the new compressed version. The path we take
+		// to create the compressed version (toDataURL vs toBlob) can result in 
+		// different compression algorithms being used internally by the browser.
+        const originalCompressed = await compressOriginalImage(
+            file,
+            quality,
+            destructive_resizeMode,
+            destructive_desiredWidth,
+            destructive_desiredHeight,
+            destructive_desiredLongestEdge,
+            destructive_enlarge_or_reduce
+        );
+
+        // Compare all results and choose the smallest one
+        const results = [
+            { type: 'blob', data: blobResult, size: blobResult.byteLength },
+            { type: 'dataUrl', data: dataUrlResult, size: dataUrlResult.byteLength },
+            { type: 'original', data: originalCompressed, size: originalCompressed.byteLength }
+        ].filter(result => result.size > 0);
+
+        // Sort by size
+        results.sort((a, b) => a.size - b.size);
+
+        // If we don't allow larger files, filter out results larger than original
+        if (!allowLargerFiles) {
+            const validResults = results.filter(result => result.size <= file.size);
+            if (validResults.length > 0) {
+                console.log(`Using ${validResults[0].type} method (smallest size)`);
+                return validResults[0].data;
+            }
+            // If no valid results, return original file
+            return file.arrayBuffer();
+        }
+
+        // Return the smallest result
+        console.log(`Using ${results[0].type} method (smallest size)`);
+        return results[0].data;
+
+    } catch (error) {
+        console.error('Conversion error:', error);
+        // Fallback to original file
+        return file.arrayBuffer();
+    }
 }
 
-function convertToJPG(
+async function convertToJPG(
     file: Blob,
     quality: number,
     destructive_resizeMode: string,
@@ -4490,102 +4622,154 @@ function convertToJPG(
     destructive_enlarge_or_reduce: 'Always' | 'Reduce' | 'Enlarge',
     allowLargerFiles: boolean
 ): Promise<ArrayBuffer> {
-	// If quality is 1 and no resize needed, return original
-	if (quality === 1 && destructive_resizeMode === 'None') {
-		return file.arrayBuffer();
-	}
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = (e) => {
-            if (!e.target?.result) {
-                reject(new Error('Failed to load file'));
-                return;
-            }
+    // Early return if no processing needed
+    if (quality === 1 && destructive_resizeMode === 'None') {
+        return file.arrayBuffer();
+    }
 
+    // Helper function to setup canvas with image
+    const setupCanvas = async (imageData: string): Promise<{
+        canvas: HTMLCanvasElement;
+        context: CanvasRenderingContext2D;
+    }> => {
+        return new Promise((resolve, reject) => {
             const image = new Image();
             image.onload = () => {
-                try {
-                    // Adjust quality for mobile devices
-                    let adjustedQuality = quality;
-                    const maxSize = 1024 * 1024; // 1MB
-                    if (file.size <= maxSize && Platform.isMobile) {
-                        adjustedQuality = Math.max(quality, 0.85);
-                    }
+                const { imageWidth, imageHeight, aspectRatio } = calculateDesiredDimensions(
+                    image,
+                    destructive_resizeMode,
+                    destructive_desiredWidth,
+                    destructive_desiredHeight,
+                    destructive_desiredLongestEdge,
+                    destructive_enlarge_or_reduce
+                );
 
-                    const { imageWidth, imageHeight, aspectRatio } = calculateDesiredDimensions(
-                        image,
-                        destructive_resizeMode,
-                        destructive_desiredWidth,
-                        destructive_desiredHeight,
-                        destructive_desiredLongestEdge,
-                        destructive_enlarge_or_reduce
-                    );
+                const canvas = document.createElement('canvas');
+                // For JPG, we definitely want to disable alpha
+                const context = canvas.getContext('2d', {
+                    willReadFrequently: false,
+                    alpha: false // JPG doesn't support alpha, so we can disable it
+                });
 
-                    const canvas = document.createElement('canvas');
-                    const context = canvas.getContext('2d');
-                    if (!context) {
-                        reject(new Error('Failed to get canvas context'));
-                        return;
-                    }
-
-                    canvas.width = imageWidth;
-                    canvas.height = imageHeight;
-                    context.save();
-                    context.translate(canvas.width / 2, canvas.height / 2);
-
-                    // Optional: Set white background for JPG
-                    // context.fillStyle = '#FFFFFF';
-                    // context.fillRect(-imageWidth / 2, -imageHeight / 2, imageWidth, imageHeight);
-
-                    const drawWidth = destructive_resizeMode === 'Fill'
-                        ? Math.min(image.naturalWidth, image.naturalHeight * aspectRatio)
-                        : image.naturalWidth;
-                    const drawHeight = destructive_resizeMode === 'Fill'
-                        ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio)
-                        : image.naturalHeight;
-
-                    context.drawImage(
-                        image,
-                        0, 0,
-                        drawWidth, drawHeight,
-                        -imageWidth / 2, -imageHeight / 2,
-                        imageWidth, imageHeight
-                    );
-                    context.restore();
-
-                    const jpegData = canvas.toDataURL('image/jpeg', adjustedQuality);
-                    const convertedBuffer = base64ToArrayBuffer(jpegData);
-
-                    if (!allowLargerFiles && convertedBuffer.byteLength > file.size) {
-                        const originalReader = new FileReader();
-                        originalReader.onloadend = () => {
-                            if (originalReader.result instanceof ArrayBuffer) {
-                                resolve(originalReader.result);
-                            }
-                        };
-                        originalReader.readAsArrayBuffer(file);
-                    } else {
-                        resolve(convertedBuffer);
-                    }
-                } catch (error) {
-                    console.error('JPEG conversion error:', error);
-                    reader.readAsArrayBuffer(file);
-                    reader.onloadend = () => {
-                        if (reader.result instanceof ArrayBuffer) {
-                            resolve(reader.result);
-                        }
-                    };
+                if (!context) {
+                    reject(new Error('Failed to get canvas context'));
+                    return;
                 }
+
+                canvas.width = imageWidth;
+                canvas.height = imageHeight;
+
+                // Fill with white background (for transparent PNGs)
+                // context.fillStyle = '#FFFFFF';
+                // context.fillRect(0, 0, canvas.width, canvas.height);
+
+                const drawWidth = destructive_resizeMode === 'Fill'
+                    ? Math.min(image.naturalWidth, image.naturalHeight * aspectRatio)
+                    : image.naturalWidth;
+                const drawHeight = destructive_resizeMode === 'Fill'
+                    ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio)
+                    : image.naturalHeight;
+
+                context.drawImage(
+                    image,
+                    0, 0,
+                    drawWidth, drawHeight,
+                    0, 0,
+                    imageWidth, imageHeight
+                );
+
+                resolve({ canvas, context });
             };
             image.onerror = () => reject(new Error('Failed to load image'));
-            image.src = e.target.result.toString();
-        };
-        reader.onerror = () => reject(new Error('Failed to read file'));
-        reader.readAsDataURL(file);
-    });
+            image.src = imageData;
+        });
+    };
+
+    try {
+        // Read file as data URL once
+        const imageData = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = (e) => resolve(e.target?.result as string);
+            reader.onerror = () => reject(new Error('Failed to read file'));
+            reader.readAsDataURL(file);
+        });
+
+        // Setup canvas
+        const { canvas } = await setupCanvas(imageData);
+
+        // Try both conversion methods in parallel
+        const [blobResult, dataUrlResult] = await Promise.all([
+            // Method 1: toBlob approach
+            new Promise<ArrayBuffer>((resolve) => {
+                canvas.toBlob(
+                    async (blob) => {
+                        if (!blob) {
+                            resolve(new ArrayBuffer(0));
+                            return;
+                        }
+                        resolve(await blob.arrayBuffer());
+                    },
+                    'image/jpeg',
+                    quality
+                );
+            }),
+
+            // Method 2: toDataURL approach
+            new Promise<ArrayBuffer>((resolve) => {
+                const jpegData = canvas.toDataURL('image/jpeg', quality);
+                resolve(base64ToArrayBuffer(jpegData));
+            })
+        ]);
+
+        // Get original format compression as well
+        const originalCompressed = await compressOriginalImage(
+            file,
+            quality,
+            destructive_resizeMode,
+            destructive_desiredWidth,
+            destructive_desiredHeight,
+            destructive_desiredLongestEdge,
+            destructive_enlarge_or_reduce
+        );
+
+        // Compare all results and choose the smallest one
+        const results = [
+            { type: 'blob', data: blobResult, size: blobResult.byteLength },
+            { type: 'dataUrl', data: dataUrlResult, size: dataUrlResult.byteLength },
+            // Only include original compression if the input wasn't already JPEG
+            ...(file.type !== 'image/jpeg' ? [{ 
+                type: 'original', 
+                data: originalCompressed, 
+                size: originalCompressed.byteLength 
+            }] : [])
+        ].filter(result => result.size > 0);
+
+        // Sort by size
+        results.sort((a, b) => a.size - b.size);
+
+        // If we don't allow larger files, filter out results larger than original
+        if (!allowLargerFiles) {
+            const validResults = results.filter(result => result.size <= file.size);
+            if (validResults.length > 0) {
+                console.log(`Using ${validResults[0].type} method (smallest size)`);
+                return validResults[0].data;
+            }
+            // If no valid results, return original file
+            return file.arrayBuffer();
+        }
+
+        // Return the smallest result
+        console.log(`Using ${results[0].type} method (smallest size)`);
+        return results[0].data;
+
+    } catch (error) {
+        console.error('Conversion error:', error);
+        // Fallback to original file
+        return file.arrayBuffer();
+    }
 }
 
-function convertToPNG(
+async function convertToPNG(
     file: Blob,
     colorDepth: number,
     destructive_resizeMode: string,
@@ -4595,95 +4779,156 @@ function convertToPNG(
     destructive_enlarge_or_reduce: 'Always' | 'Reduce' | 'Enlarge',
     allowLargerFiles: boolean
 ): Promise<ArrayBuffer> {
-    // If colorDepth is 1 and no resize needed, return original
+    // Early return if no processing needed
     if (colorDepth === 1 && destructive_resizeMode === 'None') {
         return file.arrayBuffer();
     }
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = (e) => {
-            if (!e.target?.result) {
-                reject(new Error('Failed to load file'));
-                return;
-            }
 
+    // Helper function to setup canvas with image
+    const setupCanvas = async (imageData: string): Promise<{
+        canvas: HTMLCanvasElement;
+        context: CanvasRenderingContext2D;
+    }> => {
+        return new Promise((resolve, reject) => {
             const image = new Image();
             image.onload = () => {
-                try {
-                    const { imageWidth, imageHeight, aspectRatio } = calculateDesiredDimensions(
-                        image,
-                        destructive_resizeMode,
-                        destructive_desiredWidth,
-                        destructive_desiredHeight,
-                        destructive_desiredLongestEdge,
-                        destructive_enlarge_or_reduce
-                    );
+                const { imageWidth, imageHeight, aspectRatio } = calculateDesiredDimensions(
+                    image,
+                    destructive_resizeMode,
+                    destructive_desiredWidth,
+                    destructive_desiredHeight,
+                    destructive_desiredLongestEdge,
+                    destructive_enlarge_or_reduce
+                );
 
-                    const canvas = document.createElement('canvas');
-                    const context = canvas.getContext('2d');
-                    if (!context) {
-                        reject(new Error('Failed to get canvas context'));
-                        return;
-                    }
+                const canvas = document.createElement('canvas');
+                // For PNG, we want to keep alpha channel
+                const context = canvas.getContext('2d', {
+                    willReadFrequently: colorDepth < 1, // Only if we need color reduction
+                    alpha: true
+                });
 
-                    canvas.width = imageWidth;
-                    canvas.height = imageHeight;
-                    context.save();
-                    context.translate(canvas.width / 2, canvas.height / 2);
-
-                    const drawWidth = destructive_resizeMode === 'Fill'
-                        ? Math.min(image.naturalWidth, image.naturalHeight * aspectRatio)
-                        : image.naturalWidth;
-                    const drawHeight = destructive_resizeMode === 'Fill'
-                        ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio)
-                        : image.naturalHeight;
-
-                    context.drawImage(
-                        image,
-                        0, 0,
-                        drawWidth, drawHeight,
-                        -imageWidth / 2, -imageHeight / 2,
-                        imageWidth, imageHeight
-                    );
-                    context.restore();
-
-                    // Apply color depth reduction if needed
-                    if (colorDepth < 1) {
-                        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-                        const reducedImageData = reduceColorDepth(imageData, colorDepth);
-                        context.putImageData(reducedImageData, 0, 0);
-                    }
-
-                    const pngData = canvas.toDataURL('image/png');
-                    const convertedBuffer = base64ToArrayBuffer(pngData);
-
-                    if (!allowLargerFiles && convertedBuffer.byteLength > file.size) {
-                        const originalReader = new FileReader();
-                        originalReader.onloadend = () => {
-                            if (originalReader.result instanceof ArrayBuffer) {
-                                resolve(originalReader.result);
-                            }
-                        };
-                        originalReader.readAsArrayBuffer(file);
-                    } else {
-                        resolve(convertedBuffer);
-                    }
-                } catch (error) {
-                    console.error('PNG conversion error:', error);
-                    reader.readAsArrayBuffer(file);
-                    reader.onloadend = () => {
-                        if (reader.result instanceof ArrayBuffer) {
-                            resolve(reader.result);
-                        }
-                    };
+                if (!context) {
+                    reject(new Error('Failed to get canvas context'));
+                    return;
                 }
+
+                canvas.width = imageWidth;
+                canvas.height = imageHeight;
+
+                const drawWidth = destructive_resizeMode === 'Fill'
+                    ? Math.min(image.naturalWidth, image.naturalHeight * aspectRatio)
+                    : image.naturalWidth;
+                const drawHeight = destructive_resizeMode === 'Fill'
+                    ? Math.min(image.naturalHeight, image.naturalWidth / aspectRatio)
+                    : image.naturalHeight;
+
+                context.drawImage(
+                    image,
+                    0, 0,
+                    drawWidth, drawHeight,
+                    0, 0,
+                    imageWidth, imageHeight
+                );
+
+                // Apply color depth reduction if needed
+                if (colorDepth < 1) {
+                    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                    const reducedImageData = reduceColorDepth(imageData, colorDepth);
+                    context.putImageData(reducedImageData, 0, 0);
+                }
+
+                resolve({ canvas, context });
             };
             image.onerror = () => reject(new Error('Failed to load image'));
-            image.src = e.target.result.toString();
-        };
-        reader.onerror = () => reject(new Error('Failed to read file'));
-        reader.readAsDataURL(file);
-    });
+            image.src = imageData;
+        });
+    };
+
+    try {
+        // Read file as data URL once
+        const imageData = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = (e) => resolve(e.target?.result as string);
+            reader.onerror = () => reject(new Error('Failed to read file'));
+            reader.readAsDataURL(file);
+        });
+
+        // Setup canvas
+        const { canvas } = await setupCanvas(imageData);
+
+        // Try both conversion methods in parallel
+        const [blobResult, dataUrlResult] = await Promise.all([
+            // Method 1: toBlob approach
+            new Promise<ArrayBuffer>((resolve) => {
+                canvas.toBlob(
+                    async (blob) => {
+                        if (!blob) {
+                            resolve(new ArrayBuffer(0));
+                            return;
+                        }
+                        resolve(await blob.arrayBuffer());
+                    },
+                    'image/png'
+                );
+            }),
+
+            // Method 2: toDataURL approach
+            new Promise<ArrayBuffer>((resolve) => {
+                const pngData = canvas.toDataURL('image/png');
+                resolve(base64ToArrayBuffer(pngData));
+            })
+        ]);
+
+        // For PNG, we might want to try additional optimization methods
+        const results = [
+            { type: 'blob', data: blobResult, size: blobResult.byteLength },
+            { type: 'dataUrl', data: dataUrlResult, size: dataUrlResult.byteLength }
+        ];
+
+        // If input wasn't PNG, add original format as comparison
+        if (file.type !== 'image/png') {
+            const originalCompressed = await compressOriginalImage(
+                file,
+                1, // PNG doesn't use quality parameter
+                destructive_resizeMode,
+                destructive_desiredWidth,
+                destructive_desiredHeight,
+                destructive_desiredLongestEdge,
+                destructive_enlarge_or_reduce
+            );
+            results.push({
+                type: 'original',
+                data: originalCompressed,
+                size: originalCompressed.byteLength
+            });
+        }
+
+        // Filter out empty results and sort by size
+        const validResults = results
+            .filter(result => result.size > 0)
+            .sort((a, b) => a.size - b.size);
+
+        // If we don't allow larger files, filter out results larger than original
+        if (!allowLargerFiles) {
+            const smallerResults = validResults.filter(result => result.size <= file.size);
+            if (smallerResults.length > 0) {
+                console.log(`Using ${smallerResults[0].type} method (smallest size)`);
+                return smallerResults[0].data;
+            }
+            // If no valid results, return original file
+            return file.arrayBuffer();
+        }
+
+        // Return the smallest result
+        console.log(`Using ${validResults[0].type} method (smallest size)`);
+        return validResults[0].data;
+
+    } catch (error) {
+        console.error('PNG conversion error:', error);
+        // Fallback to original file
+        return file.arrayBuffer();
+    }
 }
 
 function calculateDesiredDimensions(
