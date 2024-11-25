@@ -25,6 +25,7 @@ Supported image formats: WEBP, JPG, PNG, HEIC, TIF
 - Ability to resize original image via right click context menu
 	- <img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/3367b41c-63fa-4a1c-a616-8561e467eef7" width="600px">
 
+- Image annotation and markup tool. Draw, write, scribble, annotate, markup on top of images right inside Obsidian.
 
 
 ## Quick Summary for Image Compression
@@ -109,3 +110,4 @@ Below is the table which shows how much quality we lose with each conversion. Th
 
 # Credits
 - This repo is heavily inspired by https://github.com/musug/obsidian-paste-png-to-jpeg musug has created an amazing ground work for the project, but sadly who has gone AWOL leaving the project behind without fixing some major issues. Hence, this is an attempt to rejuvenate the project.
+- FabriJS 💖 https://fabricjs.com/

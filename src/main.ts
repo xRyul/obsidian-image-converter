@@ -6,6 +6,29 @@ import mime from "./mime.min.js"
 
 import { Canvas, FabricImage, IText, FabricObject, PencilBrush, ActiveSelection, Point, Pattern, util, Path, TEvent, TBrushEventData, ImageFormat } from 'fabric';
 
+// MIT License
+
+// Copyright (c) 2020 Fabric.js
+
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+
 type BlendMode = 
     | 'source-over'
     | 'multiply'
@@ -89,6 +112,8 @@ interface ProcessedFileInfo {
     path: string;
     timestamp: number;
     size: number;
+    platform: 'mobile' | 'desktop';  // Track which platform processed the file
+    hash?: string;                   // Optional hash for additional verification
 }
 
 // Define possible modifier keys
@@ -1018,6 +1043,7 @@ export default class ImageConvertPlugin extends Plugin {
 		const now = Date.now();
 
 		// First check: if we're in a sync operation, always return true
+		// The isSyncOperation flag helps distinguish API operations from user actions.
 		if (this.isSyncOperation) {
 			return true;
 		}
@@ -1038,48 +1064,39 @@ export default class ImageConvertPlugin extends Plugin {
 			processedFile => processedFile.name === file.path
 		);
 
-		if (Platform.isMobile) {
-			try {
-				const fileStats = await this.app.vault.adapter.stat(file.path);
-				const fileSize = fileStats?.size || 0;
-
-				const processedInfo = this.mobileProcessedFiles.get(file.path);
-
-				// Enhanced sync detection
+		try {
+			const fileStats = await this.app.vault.adapter.stat(file.path);
+			const fileSize = fileStats?.size || 0;
+			const processedInfo = this.mobileProcessedFiles.get(file.path);
+			const currentPlatform = Platform.isMobile ? 'mobile' : 'desktop';
+	
+			// If file was processed on the other platform, skip processing
+			if (processedInfo && processedInfo.platform !== currentPlatform) {
+				return true;
+			}
+	
+			if (Platform.isMobile) {
 				const isRecentOperation = now - this.lastProcessedTime < 2000;
 				const isSyncOperation = isRecentOperation && processedInfo;
-
-				// If we have processed this file before
+	
 				if (processedInfo) {
-					// Check if it's the same file (same size and recent timestamp)
 					const isSameFile = processedInfo.size === fileSize &&
 						(now - processedInfo.timestamp) < 5000;
-
+	
 					if (isSameFile || isSyncOperation) {
-						return true; // Skip processing
-					}
-				}
-
-				// Additional check for test images
-				if (file.path.startsWith('attachments/test')) {
-					const timeSinceLastProcess = now - this.lastProcessedTime;
-					if (timeSinceLastProcess < 1000) {
 						return true;
 					}
 				}
-
+	
 				return isSyncPath || wasRecentlyProcessed;
-			} catch (error) {
-				console.error('Error checking file stats:', error);
-				return true; // Skip processing on error
 			}
+	
+			// Desktop-specific checks
+			return !this.userAction || isSyncPath || wasRecentlyProcessed;
+		} catch (error) {
+			console.error('Error checking file stats:', error);
+			return true;
 		}
-
-		// Desktop-specific checks with enhanced sync detection
-		return !this.userAction ||
-			isSyncPath ||
-			wasRecentlyProcessed ||
-			this.isSyncOperation;
 	}
 	
 
@@ -1090,25 +1107,23 @@ export default class ImageConvertPlugin extends Plugin {
 			const fileStats = await this.app.vault.adapter.stat(file.path);
 			const fileSize = fileStats?.size || 0;
 			
-			// Check if this is truly a new file
 			const processedInfo = this.mobileProcessedFiles.get(file.path);
 			if (processedInfo && processedInfo.size === fileSize) {
 				return;
 			}
 	
-			// Add to tracking with file info
+			// Add to tracking with platform info
 			this.mobileProcessedFiles.set(file.path, {
 				path: file.path,
 				timestamp: Date.now(),
-				size: fileSize
+				size: fileSize,
+				platform: Platform.isMobile ? 'mobile' : 'desktop'
 			});
 	
-			// Set batch parameters
 			this.currentBatchTotal = 1;
 			this.batchStarted = true;
 			this.batchId = Date.now().toString();
 	
-			// Add to queue
 			this.fileQueue.push({ 
 				file,
 				addedAt: Date.now(),
@@ -1120,14 +1135,12 @@ export default class ImageConvertPlugin extends Plugin {
 			});
 			
 			await this.processQueue();
-	
-			// Update last processed time
 			this.lastProcessedTime = Date.now();
 	
-			// Clean up after delay
+			// Longer retention for cross-platform sync
 			setTimeout(() => {
 				this.mobileProcessedFiles.delete(file.path);
-			}, 5000);
+			}, 10000); // Increased to 10 seconds
 	
 		} catch (error) {
 			console.error('Error processing mobile file:', error);
@@ -1564,7 +1577,7 @@ export default class ImageConvertPlugin extends Plugin {
 					const maxWidth = printEditorLineWidth(this.app);
 					if (this.widthSide !== null && typeof maxWidth === 'number') {
 						this.settings.nondestructive_resizeMode_fitImage = (this.widthSide < maxWidth ? this.widthSide : maxWidth).toString();
-						await this.saveSettings();
+						// await this.saveSettings();
 					}
 				} catch (error) {
 					console.error('Could not determine image dimensions, using default settings');
