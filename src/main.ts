@@ -235,7 +235,7 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	convertToPNG: false,
 	convertTo: 'webp',
 	quality: 0.75,
-	allowLargerFiles: true,
+	allowLargerFiles: false,
 
 	baseTimeout: 20000,
 	timeoutPerMB: 1000,
@@ -354,7 +354,8 @@ export default class ImageConvertPlugin extends Plugin {
     private processedFiles: { name: string; savedBytes: number }[] = [];
 	private isSyncOperation = false;
 	private mobileProcessedFiles: Map<string, ProcessedFileInfo> = new Map();
-
+    private registeredContainers = new Set<string>();
+    private lastDropTime = 0;
 	
 	private statusBarItemEl: HTMLElement | null = null;
 	private counters: Map<string, number> = new Map();
@@ -390,17 +391,18 @@ export default class ImageConvertPlugin extends Plugin {
 		// Load settings first
 		await this.loadSettings();
 		this.addSettingTab(new ImageConvertTab(this.app, this));
-
+		// Add periodic cleanup
+		this.registerInterval(
+			window.setInterval(() => this.cleanupProcessedFiles(), 30000)
+		);
 		// Wait for layout to be ready before registering events
 		this.app.workspace.onLayoutReady(() => {
-			
 			// Initialize UI elements
 			this.progressEl = document.body.createDiv('image-converter-progress');
 			this.progressEl.style.display = 'none';
 		
 			// Register commands
 			this.registerCommands();
-			
 			// Register all event handlers
 			this.registerEventHandlers();
 	
@@ -490,6 +492,9 @@ export default class ImageConvertPlugin extends Plugin {
 		// Remove the resize class from workspace
 		this.app.workspace.containerEl.removeClass('image-resize-enabled');	
 
+		this.clearExistingHandlers();
+		this.registeredContainers.clear();
+		
 		// Clear all internal states
 		this.dragResize_cleanupResizeAttributes();
 		this.fileQueue = [];
@@ -624,6 +629,142 @@ export default class ImageConvertPlugin extends Plugin {
 		}
 	}
 	
+	private async testCrossPlatformSync() {
+		try {
+			// Start with clean state
+			this.cleanup();
+
+	
+			const testDir = 'test-sync';
+			if (!await this.app.vault.adapter.exists(testDir)) {
+				await this.app.vault.createFolder(testDir);
+			}
+	
+			const createTestImage = async (name: string): Promise<ArrayBuffer> => {
+				const canvas = document.createElement('canvas');
+				canvas.width = 100;
+				canvas.height = 100;
+				const ctx = canvas.getContext('2d');
+				if (!ctx) throw new Error('Could not get canvas context');
+				ctx.fillStyle = '#' + Math.floor(Math.random()*16777215).toString(16);
+				ctx.fillRect(0, 0, 100, 100);
+				
+				return new Promise((resolve, reject) => {
+					canvas.toBlob(async (blob) => {
+						if (!blob) reject('Failed to create blob');
+						const arrayBuffer = await blob!.arrayBuffer();
+						resolve(arrayBuffer);
+					}, 'image/jpeg', 0.95);
+				});
+			};
+	
+			// Test sequence with debug info
+			console.log("=== Starting Cross-Platform Sync Test ===");
+			new Notice("Starting cross-platform sync test");
+	
+			// Save original platform state
+			const originalPlatform = Platform.isMobile;
+	
+			// 1. Desktop Phase
+			console.log("Desktop Phase Starting");
+			(Platform as any).isMobile = false;
+			this.userAction = true; // Simulate user action on desktop
+			
+			const desktopImageName = `${testDir}/desktop-created.jpg`;
+			const desktopImageData = await createTestImage(desktopImageName);
+			
+			console.log("Creating desktop file...");
+			const desktopFile = await this.app.vault.createBinary(desktopImageName, desktopImageData);
+			console.log("Desktop file created:", desktopFile.path);
+			
+			// Wait for processing
+			await new Promise(resolve => setTimeout(resolve, 2000));
+			console.log("Desktop processed files:", Array.from(this.mobileProcessedFiles.entries()));
+	
+			// 2. Mobile Phase
+			console.log("\nMobile Phase Starting");
+			(Platform as any).isMobile = true;
+			this.userAction = true; // Simulate user action on mobile
+			
+			// Simulate mobile creation
+			const mobileImageName = `${testDir}/mobile-created.jpg`;
+			const mobileImageData = await createTestImage(mobileImageName);
+			
+			console.log("Creating mobile file...");
+			const mobileFile = await this.app.vault.createBinary(mobileImageName, mobileImageData);
+			console.log("Mobile file created:", mobileFile.path);
+	
+			// Simulate mobile attachment
+			this.fileQueue.push({
+				file: mobileFile,
+				addedAt: Date.now(),
+				viewType: 'markdown',
+				originalName: mobileFile.name,
+				originalPath: mobileFile.path,
+				processed: false,
+				isMobileAttachment: true
+			});
+	
+			await this.processQueue();
+			await new Promise(resolve => setTimeout(resolve, 2000));
+			this.cleanup();
+			console.log("Mobile processed files:", Array.from(this.mobileProcessedFiles.entries()));
+	
+			// 3. Cross-platform verification
+			console.log("\nVerifying Cross-Platform Results");
+			const results = {
+				desktopProcessed: this.mobileProcessedFiles.has(desktopImageName),
+				mobileProcessed: this.mobileProcessedFiles.has(mobileImageName),
+				platformCounts: new Map<string, number>(),
+				processedFiles: Array.from(this.mobileProcessedFiles.entries()).map(([path, info]) => ({
+					path,
+					platform: info.platform,
+					timestamp: new Date(info.timestamp).toISOString()
+				}))
+			};
+	
+			this.mobileProcessedFiles.forEach((info) => {
+				const count = results.platformCounts.get(info.platform) || 0;
+				results.platformCounts.set(info.platform, count + 1);
+			});
+	
+			console.log('Test Results:', JSON.stringify(results, null, 2));
+			new Notice(`Test complete. Check console for results.`);
+	
+			// Cleanup
+			try {
+				const testFolder = this.app.vault.getAbstractFileByPath(testDir);
+				if (testFolder) {
+					await this.app.vault.delete(testFolder);
+				}
+			} catch (e) {
+				console.error('Cleanup error:', e);
+			}
+	
+			// Restore original state
+			(Platform as any).isMobile = originalPlatform;
+			this.userAction = false;
+			this.batchStarted = false;
+	
+		} catch (error) {
+			console.error('Cross-platform sync test failed:', error);
+			this.cleanup();
+			new Notice(`Test failed: ${error.message}`);
+			throw error;
+		}
+	}
+	// Add cleanup method
+	private cleanup() {
+		this.isProcessingQueue = false;
+		this.batchStarted = false;
+		this.userAction = false;
+		this.dropInfo = null;
+		this.fileQueue = [];
+		this.hideProgressBar();
+		this.processedFiles = [];
+		this.totalSizeBeforeBytes = 0;
+		this.totalSizeAfterBytes = 0;
+	}
 
 	private activateKillSwitch() {
 		this.isKillSwitchActive = true;
@@ -656,42 +797,71 @@ export default class ImageConvertPlugin extends Plugin {
 
 	private registerEventHandlers() {
 		// Register workspace-level events
-		this.registerEvent(
-			this.app.workspace.on('editor-paste', async (evt: ClipboardEvent, editor, view) => {
-				if (this.shouldSkipEvent(evt)) return;
-				this.handlePaste(evt);
-			})
-		);
-	
-		this.registerEvent(
-			this.app.workspace.on('editor-drop', async (evt: DragEvent, editor, view) => {
-				if (this.shouldSkipEvent(evt)) return;
-				this.handleDrop(evt);
-			})
-		);
-	
-		// Register DOM events for workspace container
 		const workspaceContainer = this.app.workspace.containerEl;
-		this.registerDomEvent(workspaceContainer, 'paste', this.handlePaste.bind(this), { capture: true });
-		this.registerDomEvent(workspaceContainer, 'drop', this.handleDrop.bind(this), { capture: true });
+		
+		if (!this.registeredContainers.has('workspace')) {
+			// Paste event
+			this.registerEvent(
+				this.app.workspace.on('editor-paste', async (evt: ClipboardEvent, editor, view) => {
+					if (this.shouldSkipEvent(evt)) return;
+					await this.handlePaste(evt);
+				})
+			);
 	
-		// Register for specific view types with proper type checking
+			// Drop event
+			this.registerEvent(
+				this.app.workspace.on('editor-drop', async (evt: DragEvent, editor, view) => {
+					if (this.shouldSkipEvent(evt)) return;
+					await this.handleDrop(evt);
+				})
+			);
+	
+
+			// Direct DOM events for additional coverage: This is for OBSIDIAN CANVAS and EXCALIDRAW
+			this.registerDomEvent(workspaceContainer, 'paste', async (evt: ClipboardEvent) => {
+				if (this.shouldSkipEvent(evt)) return;
+				await this.handlePaste(evt);
+			}, { capture: true });
+	
+			this.registerDomEvent(workspaceContainer, 'drop', async (evt: DragEvent) => {
+				if (this.shouldSkipEvent(evt)) return;
+				await this.handleDrop(evt);
+			}, { capture: true });
+	
+			this.registeredContainers.add('workspace');
+		}
+	
+		// Register for specific view types
 		const supportedViewTypes = ['markdown', 'canvas', 'excalidraw'];
 		supportedViewTypes.forEach(viewType => {
 			const leaves = this.app.workspace.getLeavesOfType(viewType);
-			leaves.forEach(async (leaf) => {
-				// Type-specific handling
-				if (viewType === 'markdown' && leaf.view instanceof MarkdownView) {
-					this.setupMarkdownViewHandlers(leaf.view);
-				} 
-				else if (viewType === 'canvas' && leaf.view instanceof ItemView) {
-					this.setupCanvasViewHandlers(leaf.view);
-				}
-				else if (viewType === 'excalidraw' && leaf.view instanceof ItemView) {
-					this.setupExcalidrawViewHandlers(leaf.view);
+			leaves.forEach((leaf, index) => {
+				// Use a combination of viewType and container element's data-id or index
+				const containerId = `${viewType}-${leaf.getViewState().state?.file || index}`;
+				
+				if (!this.registeredContainers.has(containerId)) {
+					this.setupViewHandlers(leaf.view, viewType);
+					this.registeredContainers.add(containerId);
 				}
 			});
 		});
+	}
+	
+	private clearExistingHandlers() {
+		// Clear container registrations when switching notes
+		this.registeredContainers.clear();
+	}
+	
+	private setupViewHandlers(view: View, viewType: string) {
+		const container = view.containerEl;
+		if (!container.hasAttribute('data-image-converter-registered')) {
+			container.setAttribute('data-image-converter-registered', 'true');
+			
+			// Remove preventDefault from dragover
+			this.registerDomEvent(container, 'dragover', (e: DragEvent) => {
+				// Let Obsidian handle the dragover behavior
+			}, { capture: true });
+		}
 	}
 	
 	private setupMarkdownViewHandlers(view: MarkdownView) {
@@ -729,10 +899,11 @@ export default class ImageConvertPlugin extends Plugin {
 
 
 	private shouldSkipEvent(evt: ClipboardEvent | DragEvent): boolean {
+
 		if (this.isConversionPaused || evt.defaultPrevented) {
 			return true;
 		}
-
+		
 		const target = evt.target as HTMLElement;
 		const closestView = target.closest('.workspace-leaf-content');
 		if (!closestView) {
@@ -884,6 +1055,11 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 	private handleDrop(event: DragEvent) {
 
+		// Debounce check
+		const now = Date.now();
+		if (now - this.lastDropTime < 100) return;
+		this.lastDropTime = now;
+
 		this.userAction = true;
 		this.batchStarted = true;
 
@@ -1018,19 +1194,18 @@ export default class ImageConvertPlugin extends Plugin {
 	private registerFileEvents() {
 		this.registerEvent(
 			this.app.vault.on('create', async (file: TFile) => {
-				
-				if (await this.isExternalOperation(file)) return;
+				if (!(file instanceof TFile) || !isImage(file)) return;
 				if (this.isConversionPaused) return;
 
-				const isMobile = Platform.isMobile;
-				if (!(file instanceof TFile) || !isImage(file)) return;
-	
+				if (await this.isExternalOperation(file)) return;
 				// For multiple files, we want to maintain the batch state
 				if (!this.batchStarted) {
 					this.batchStarted = true;
 					this.userAction = true;
 				}
 				
+				const isMobile = Platform.isMobile;
+
 				if (isMobile) {
 					await this.handleMobileFileCreation(file);
 				} else {
@@ -1041,11 +1216,14 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 	private async isExternalOperation(file: TFile): Promise<boolean> {
 		const now = Date.now();
-
-		// First check: if we're in a sync operation, always return true
-		// The isSyncOperation flag helps distinguish API operations from user actions.
+	
 		if (this.isSyncOperation) {
 			return true;
+		}
+		const fileStats = await this.app.vault.adapter.stat(file.path);
+		if (Platform.isMobile && fileStats &&
+			(Date.now() - fileStats.ctime) < 3000) {
+			return false;
 		}
 
 		const syncPatterns = [
@@ -1058,43 +1236,40 @@ export default class ImageConvertPlugin extends Plugin {
 			'sync-index',
 			'.obsidian-git'
 		];
-
+	
 		const isSyncPath = syncPatterns.some(pattern => file.path.includes(pattern));
-		const wasRecentlyProcessed = this.processedFiles.some(
-			processedFile => processedFile.name === file.path
-		);
-
+	
 		try {
-			const fileStats = await this.app.vault.adapter.stat(file.path);
-			const fileSize = fileStats?.size || 0;
+			// Get both the processed info and current file stats
 			const processedInfo = this.mobileProcessedFiles.get(file.path);
-			const currentPlatform = Platform.isMobile ? 'mobile' : 'desktop';
-	
-			// If file was processed on the other platform, skip processing
-			if (processedInfo && processedInfo.platform !== currentPlatform) {
-				return true;
-			}
-	
+			
+			// If on mobile, be very strict about sync detection
 			if (Platform.isMobile) {
-				const isRecentOperation = now - this.lastProcessedTime < 2000;
-				const isSyncOperation = isRecentOperation && processedInfo;
-	
+				// If we have processed info, this is likely a synced file
 				if (processedInfo) {
-					const isSameFile = processedInfo.size === fileSize &&
-						(now - processedInfo.timestamp) < 5000;
-	
-					if (isSameFile || isSyncOperation) {
+					// If it was processed on desktop or within the last 30 seconds
+					if (processedInfo.platform === 'desktop' || 
+						(now - processedInfo.timestamp) < 30000) {
 						return true;
 					}
 				}
 	
-				return isSyncPath || wasRecentlyProcessed;
+				// If there's no user action, treat it as a sync
+				if (!this.userAction) {
+					return true;
+				}
 			}
 	
-			// Desktop-specific checks
-			return !this.userAction || isSyncPath || wasRecentlyProcessed;
+			// If on desktop
+			if (!Platform.isMobile) {
+				if (!this.userAction || isSyncPath) {
+					return true;
+				}
+			}
+	
+			return isSyncPath;
 		} catch (error) {
-			console.error('Error checking file stats:', error);
+			console.error('Error in isExternalOperation:', error);
 			return true;
 		}
 	}
@@ -1104,49 +1279,104 @@ export default class ImageConvertPlugin extends Plugin {
 
 	private async handleMobileFileCreation(file: TFile) {
 		try {
+			// Get file stats early
 			const fileStats = await this.app.vault.adapter.stat(file.path);
-			const fileSize = fileStats?.size || 0;
-			
-			const processedInfo = this.mobileProcessedFiles.get(file.path);
-			if (processedInfo && processedInfo.size === fileSize) {
+			if (!fileStats) {
+				console.error('Could not get file stats for:', file.path);
+				new Notice(`Could not get file stats for: ${file.name}`);
 				return;
 			}
 	
-			// Add to tracking with platform info
+			// Check if this is a new file (created within last few seconds)
+			const isNewFile = (Date.now() - fileStats.ctime) < 3000;
+	
+			// If it's a new file on mobile, set userAction true
+			if (Platform.isMobile && isNewFile) {
+				this.userAction = true;
+			}
+	
+			// Check processed info
+			const processedInfo = this.mobileProcessedFiles.get(file.path);
+			
+			// Skip if recently processed on desktop
+			if (processedInfo && 
+				processedInfo.platform === 'desktop' && 
+				(Date.now() - processedInfo.timestamp) < 30000) {
+				return;
+			}
+	
+			// If it's not a new file and not user action, skip
+			if (!isNewFile && !this.userAction) {
+				return;
+			}
+	
+			// Add to tracking
 			this.mobileProcessedFiles.set(file.path, {
 				path: file.path,
 				timestamp: Date.now(),
-				size: fileSize,
-				platform: Platform.isMobile ? 'mobile' : 'desktop'
+				size: fileStats.size,
+				platform: 'mobile'
 			});
 	
-			this.currentBatchTotal = 1;
-			this.batchStarted = true;
-			this.batchId = Date.now().toString();
+			// Initialize batch if needed
+			if (!this.batchStarted) {
+				this.currentBatchTotal = 1;
+				this.batchId = Date.now().toString();
+				this.batchStarted = true;
+			}
 	
-			this.fileQueue.push({ 
+			// Get active view type
+			const activeView = this.getActiveView();
+			if (!activeView) {
+				console.error('No active view found');
+				return;
+			}
+			const viewType = activeView.getViewType() || 'markdown';
+	
+			// Add to queue with more detailed tracking
+			const queueItem: QueueItem = { 
 				file,
 				addedAt: Date.now(),
-				viewType: 'markdown',
+				viewType: viewType as 'markdown' | 'canvas' | 'excalidraw',
+				parentFile: viewType !== 'markdown' ? (activeView as any).file : undefined,
 				originalName: file.name,
 				originalPath: file.path,
 				processed: false,
 				isMobileAttachment: true
-			});
-			
-			await this.processQueue();
-			this.lastProcessedTime = Date.now();
+			};
 	
-			// Longer retention for cross-platform sync
-			setTimeout(() => {
-				this.mobileProcessedFiles.delete(file.path);
-			}, 10000); // Increased to 10 seconds
+			this.fileQueue.push(queueItem);
+	
+			// Process immediately for new files on mobile
+			if (isNewFile && Platform.isMobile) {
+				try {
+					await this.processQueue();
+				} catch (processError) {
+					console.error('Error in processQueue:', processError);
+					new Notice(`Error processing queue for ${file.name}: ${processError.message}`);
+				}
+			}
 	
 		} catch (error) {
-			console.error('Error processing mobile file:', error);
-			this.mobileProcessedFiles.delete(file.path);
-			if (!await this.app.vault.adapter.exists(file.path)) {
-				new Notice(`Failed to process mobile file: ${file.name}`);
+			console.error('Error in handleMobileFileCreation:', error);
+			if (error instanceof Error) {
+				new Notice(`Failed to process mobile file ${file.name}: ${error.message}`);
+			} else {
+				new Notice(`Failed to process mobile file ${file.name}`);
+			}
+		} finally {
+			// Cleanup
+			setTimeout(() => {
+				this.mobileProcessedFiles.delete(file.path);
+				this.userAction = false;
+			}, 2000);
+		}
+	}
+	private cleanupProcessedFiles() {
+		const now = Date.now();
+		for (const [path, info] of this.mobileProcessedFiles.entries()) {
+			if (now - info.timestamp > 30000) { // 30 seconds
+				this.mobileProcessedFiles.delete(path);
 			}
 		}
 	}
@@ -1154,6 +1384,15 @@ export default class ImageConvertPlugin extends Plugin {
 		if (!this.userAction) return;
 	
 		try {
+
+			// Add to tracking immediately with desktop platform info
+			this.mobileProcessedFiles.set(file.path, {
+				path: file.path,
+				timestamp: Date.now(),
+				size: (await this.app.vault.adapter.stat(file.path))?.size || 0,
+				platform: 'desktop'  // Explicitly mark as desktop
+			});
+
 			// Generate hash for duplicate detection
 			const sourceHash = await this.generateSourceHash(file);
 	
@@ -1207,7 +1446,10 @@ export default class ImageConvertPlugin extends Plugin {
 			});
 	
 			await this.processQueue();
-	
+			
+			setTimeout(() => {
+				this.mobileProcessedFiles.delete(file.path);
+			}, 30000); // Increased to 30 seconds to better handle slow syncs
 		} catch (error) {
 			console.error('Error processing desktop file:', error);
 			new Notice(`Failed to process file: ${file.name}`);
@@ -1280,7 +1522,7 @@ export default class ImageConvertPlugin extends Plugin {
 					this.fileQueue.shift();
 					continue;
 				}
-
+			
 				// Extend timeout for large or complex files
 				if (this.dropInfo?.batchId === currentBatchId) {
 					const currentFileIndex = this.dropInfo.totalProcessedFiles;
@@ -1323,6 +1565,16 @@ export default class ImageConvertPlugin extends Plugin {
 
 	
 				try {
+					// Before processing, mark the file
+					if (!Platform.isMobile) {
+						this.mobileProcessedFiles.set(item.file.path, {
+							path: item.file.path,
+							timestamp: Date.now(),
+							size: (await this.app.vault.adapter.stat(item.file.path))?.size || 0,
+							platform: 'desktop'
+						});
+					}
+
 					// Kill switch check before processing each file
 					if (this.isKillSwitchActive) {
 						break;
@@ -1413,7 +1665,8 @@ export default class ImageConvertPlugin extends Plugin {
 				this.isProcessingQueue = false;
 	
 				// Show summary and cleanup only if batch is complete
-				if (!this.isKillSwitchActive && this.dropInfo?.totalProcessedFiles === this.dropInfo?.totalExpectedFiles) {
+				if (!this.isKillSwitchActive && 
+					this.dropInfo?.totalProcessedFiles === this.dropInfo?.totalExpectedFiles) {
 					if (this.settings.showSummary && this.processedFiles.length > 0) {
 						this.showBatchSummary();
 					}
@@ -1426,20 +1679,30 @@ export default class ImageConvertPlugin extends Plugin {
 	
 					this.hideProgressBar();
 				}
-
+	
 				// Additional check for empty queue
 				if (this.fileQueue.length === 0) {
 					this.hideProgressBar();
 				}
-
-				// Trigger garbage collection hint
-				if (global.gc) {
-					global.gc();
-				}
+	
+				// Safe garbage collection hint
+				this.triggerGarbageCollection();
 			}
 		}
 	}
 
+	private triggerGarbageCollection() {
+		try {
+			// Check if we're in a Node.js environment with global.gc available
+			if (typeof global !== 'undefined' && global.gc) {
+				global.gc();
+			}
+		} catch (e) {
+			// Silently ignore if gc is not available
+			console.debug('Garbage collection not available');
+		}
+	}
+	
     private updateProgressUI(current: number, total: number, fileName: string) {
 		if (!this.progressEl || this.isConversionPaused) {
 			this.hideProgressBar();
@@ -2847,6 +3110,14 @@ export default class ImageConvertPlugin extends Plugin {
 			name: 'Test Sync Behavior',
 			callback: () => this.testSyncBehavior()
 		});
+
+		this.addCommand({
+			id: 'test-cross-sync',
+			name: 'Test cross sync',
+			callback: () => this.testCrossPlatformSync()
+		});
+
+		
 	}
 
 	// Toogle to Pause / Continue image conversion
