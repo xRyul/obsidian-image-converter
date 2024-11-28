@@ -519,255 +519,6 @@ export default class ImageConvertPlugin extends Plugin {
 
 	}
 
-	// private async testSyncBehavior() {
-	// 	this.isSyncOperation = true;
-	// 	new Notice("🔄 Aggressive sync test started");
-
-	// 	const createTestImage = async (name: string, size: { width: number, height: number }): Promise<ArrayBuffer> => {
-	// 		const canvas = document.createElement('canvas');
-	// 		canvas.width = size.width;
-	// 		canvas.height = size.height;
-	// 		const ctx = canvas.getContext('2d');
-	// 		if (!ctx) throw new Error('Could not get canvas context');
-
-	// 		// Create more complex test images
-	// 		ctx.fillStyle = '#' + Math.floor(Math.random() * 16777215).toString(16);
-	// 		ctx.fillRect(0, 0, size.width, size.height);
-
-	// 		// Add some shapes
-	// 		ctx.beginPath();
-	// 		ctx.arc(size.width / 2, size.height / 2, Math.min(size.width, size.height) / 4, 0, 2 * Math.PI);
-	// 		ctx.fillStyle = '#' + Math.floor(Math.random() * 16777215).toString(16);
-	// 		ctx.fill();
-
-	// 		// Convert to blob with different quality settings
-	// 		return new Promise((resolve, reject) => {
-	// 			canvas.toBlob(async (blob) => {
-	// 				if (!blob) reject('Failed to create blob');
-	// 				const arrayBuffer = await blob!.arrayBuffer();
-	// 				resolve(arrayBuffer);
-	// 			}, 'image/jpeg', Math.random() * 0.5 + 0.5); // Random quality between 0.5 and 1.0
-	// 		});
-	// 	};
-
-	// 	try {
-	// 		// Create test scenarios with different image sizes and operations
-	// 		const testScenarios = [
-	// 			{ name: 'small_test1.jpg', size: { width: 100, height: 100 } },
-	// 			{ name: 'medium_test2.jpg', size: { width: 500, height: 500 } },
-	// 			{ name: 'large_test3.jpg', size: { width: 1000, height: 1000 } },
-	// 			{ name: 'wide_test4.jpg', size: { width: 1200, height: 600 } },
-	// 			{ name: 'tall_test5.jpg', size: { width: 600, height: 1200 } }
-	// 		];
-
-	// 		for (const scenario of testScenarios) {
-	// 			const path = `attachments/${scenario.name}`;
-
-	// 			// Create initial image
-	// 			const imageData = await createTestImage(scenario.name, scenario.size);
-	// 			await this.app.vault.createBinary(path, imageData);
-	// 			await new Promise(resolve => setTimeout(resolve, 200));
-
-	// 			// Simulate multiple rapid sync operations
-	// 			for (let i = 0; i < 3; i++) {
-	// 				// Read, delete, and recreate rapidly
-	// 				const tempData = await this.app.vault.readBinary(
-	// 					this.app.vault.getAbstractFileByPath(path) as TFile
-	// 				);
-	// 				await this.app.vault.delete(
-	// 					this.app.vault.getAbstractFileByPath(path) as TFile
-	// 				);
-	// 				await new Promise(resolve => setTimeout(resolve, 50)); // Shorter delay
-	// 				await this.app.vault.createBinary(path, tempData);
-
-	// 				// Sometimes modify the file immediately after creation
-	// 				if (Math.random() > 0.5) {
-	// 					const newData = await createTestImage(scenario.name, scenario.size);
-	// 					await this.app.vault.delete(
-	// 						this.app.vault.getAbstractFileByPath(path) as TFile
-	// 					);
-	// 					await this.app.vault.createBinary(path, newData);
-	// 				}
-	// 			}
-
-	// 			// Simulate concurrent operations
-	// 			await Promise.all([
-	// 				this.app.vault.read(this.app.vault.getAbstractFileByPath(path) as TFile),
-	// 				this.app.vault.read(this.app.vault.getAbstractFileByPath(path) as TFile),
-	// 				new Promise(resolve => setTimeout(resolve, 100))
-	// 			]);
-	// 		}
-
-	// 		// Final rapid-fire test
-	// 		await Promise.all(testScenarios.map(async (scenario) => {
-	// 			const path = `attachments/${scenario.name}`;
-	// 			const newData = await createTestImage(scenario.name, scenario.size);
-	// 			return this.app.vault.createBinary(path, newData);
-	// 		}));
-
-	// 	} catch (error) {
-	// 		console.error('Error in aggressive sync test:', error);
-	// 		new Notice("❌ Sync test failed: " + error.message);
-	// 	} finally {
-	// 		// Cleanup
-	// 		setTimeout(async () => {
-	// 			this.isSyncOperation = false;
-
-	// 			// Optional: Clean up test files
-	// 			const testFiles = this.app.vault.getFiles()
-	// 				.filter(file => file.path.startsWith('attachments/') &&
-	// 					file.path.includes('test'));
-
-	// 			for (const file of testFiles) {
-	// 				try {
-	// 					await this.app.vault.delete(file);
-	// 				} catch (e) {
-	// 					console.error('Cleanup error:', e);
-	// 				}
-	// 			}
-
-	// 			new Notice("✅ Aggressive sync test completed");
-	// 		}, 2000);
-	// 	}
-	// }
-	
-	// private async testCrossPlatformSync() {
-	// 	try {
-	// 		// Start with clean state
-	// 		this.cleanup();
-
-	
-	// 		const testDir = 'test-sync';
-	// 		if (!await this.app.vault.adapter.exists(testDir)) {
-	// 			await this.app.vault.createFolder(testDir);
-	// 		}
-	
-	// 		const createTestImage = async (name: string): Promise<ArrayBuffer> => {
-	// 			const canvas = document.createElement('canvas');
-	// 			canvas.width = 100;
-	// 			canvas.height = 100;
-	// 			const ctx = canvas.getContext('2d');
-	// 			if (!ctx) throw new Error('Could not get canvas context');
-	// 			ctx.fillStyle = '#' + Math.floor(Math.random()*16777215).toString(16);
-	// 			ctx.fillRect(0, 0, 100, 100);
-				
-	// 			return new Promise((resolve, reject) => {
-	// 				canvas.toBlob(async (blob) => {
-	// 					if (!blob) reject('Failed to create blob');
-	// 					const arrayBuffer = await blob!.arrayBuffer();
-	// 					resolve(arrayBuffer);
-	// 				}, 'image/jpeg', 0.95);
-	// 			});
-	// 		};
-	
-	// 		// Test sequence with debug info
-	// 		console.log("=== Starting Cross-Platform Sync Test ===");
-	// 		new Notice("Starting cross-platform sync test");
-	
-	// 		// Save original platform state
-	// 		const originalPlatform = Platform.isMobile;
-	
-	// 		// 1. Desktop Phase
-	// 		console.log("Desktop Phase Starting");
-	// 		(Platform as any).isMobile = false;
-	// 		this.userAction = true; // Simulate user action on desktop
-			
-	// 		const desktopImageName = `${testDir}/desktop-created.jpg`;
-	// 		const desktopImageData = await createTestImage(desktopImageName);
-			
-	// 		console.log("Creating desktop file...");
-	// 		const desktopFile = await this.app.vault.createBinary(desktopImageName, desktopImageData);
-	// 		console.log("Desktop file created:", desktopFile.path);
-			
-	// 		// Wait for processing
-	// 		await new Promise(resolve => setTimeout(resolve, 2000));
-	// 		console.log("Desktop processed files:", Array.from(this.mobileProcessedFiles.entries()));
-	
-	// 		// 2. Mobile Phase
-	// 		console.log("\nMobile Phase Starting");
-	// 		(Platform as any).isMobile = true;
-	// 		this.userAction = true; // Simulate user action on mobile
-			
-	// 		// Simulate mobile creation
-	// 		const mobileImageName = `${testDir}/mobile-created.jpg`;
-	// 		const mobileImageData = await createTestImage(mobileImageName);
-			
-	// 		console.log("Creating mobile file...");
-	// 		const mobileFile = await this.app.vault.createBinary(mobileImageName, mobileImageData);
-	// 		console.log("Mobile file created:", mobileFile.path);
-	
-	// 		// Simulate mobile attachment
-	// 		this.fileQueue.push({
-	// 			file: mobileFile,
-	// 			addedAt: Date.now(),
-	// 			viewType: 'markdown',
-	// 			originalName: mobileFile.name,
-	// 			originalPath: mobileFile.path,
-	// 			processed: false,
-	// 			isMobileAttachment: true
-	// 		});
-	
-	// 		await this.processQueue();
-	// 		await new Promise(resolve => setTimeout(resolve, 2000));
-	// 		this.cleanup();
-	// 		console.log("Mobile processed files:", Array.from(this.mobileProcessedFiles.entries()));
-	
-	// 		// 3. Cross-platform verification
-	// 		console.log("\nVerifying Cross-Platform Results");
-	// 		const results = {
-	// 			desktopProcessed: this.mobileProcessedFiles.has(desktopImageName),
-	// 			mobileProcessed: this.mobileProcessedFiles.has(mobileImageName),
-	// 			platformCounts: new Map<string, number>(),
-	// 			processedFiles: Array.from(this.mobileProcessedFiles.entries()).map(([path, info]) => ({
-	// 				path,
-	// 				platform: info.platform,
-	// 				timestamp: new Date(info.timestamp).toISOString()
-	// 			}))
-	// 		};
-	
-	// 		this.mobileProcessedFiles.forEach((info) => {
-	// 			const count = results.platformCounts.get(info.platform) || 0;
-	// 			results.platformCounts.set(info.platform, count + 1);
-	// 		});
-	
-	// 		console.log('Test Results:', JSON.stringify(results, null, 2));
-	// 		new Notice(`Test complete. Check console for results.`);
-	
-	// 		// Cleanup
-	// 		try {
-	// 			const testFolder = this.app.vault.getAbstractFileByPath(testDir);
-	// 			if (testFolder) {
-	// 				await this.app.vault.delete(testFolder);
-	// 			}
-	// 		} catch (e) {
-	// 			console.error('Cleanup error:', e);
-	// 		}
-	
-	// 		// Restore original state
-	// 		(Platform as any).isMobile = originalPlatform;
-	// 		this.userAction = false;
-	// 		this.batchStarted = false;
-	
-	// 	} catch (error) {
-	// 		console.error('Cross-platform sync test failed:', error);
-	// 		this.cleanup();
-	// 		new Notice(`Test failed: ${error.message}`);
-	// 		throw error;
-	// 	}
-	// }
-	// // Add cleanup method
-	// private cleanup() {
-	// 	this.isProcessingQueue = false;
-	// 	this.batchStarted = false;
-	// 	this.userAction = false;
-	// 	this.dropInfo = null;
-	// 	this.fileQueue = [];
-	// 	this.hideProgressBar();
-	// 	this.processedFiles = [];
-	// 	this.totalSizeBeforeBytes = 0;
-	// 	this.totalSizeAfterBytes = 0;
-	// }
-
 	private activateKillSwitch() {
 		this.isKillSwitchActive = true;
 		this.isProcessingQueue = false;
@@ -866,39 +617,6 @@ export default class ImageConvertPlugin extends Plugin {
 		}
 	}
 	
-	// private setupMarkdownViewHandlers(view: MarkdownView) {
-	// 	const container = view.containerEl;
-	// 	if (!container.hasAttribute('data-image-converter-registered')) {
-	// 		container.setAttribute('data-image-converter-registered', 'true');
-	// 		this.registerDomEvent(container, 'dragover', (e: DragEvent) => {
-	// 			e.preventDefault();
-	// 			e.stopPropagation();
-	// 		}, { capture: true });
-	// 	}
-	// }
-	
-	// private setupCanvasViewHandlers(view: ItemView) {
-	// 	const container = view.containerEl;
-	// 	if (!container.hasAttribute('data-image-converter-registered')) {
-	// 		container.setAttribute('data-image-converter-registered', 'true');
-	// 		this.registerDomEvent(container, 'dragover', (e: DragEvent) => {
-	// 			e.preventDefault();
-	// 			e.stopPropagation();
-	// 		}, { capture: true });
-	// 	}
-	// }
-	
-	// private setupExcalidrawViewHandlers(view: ItemView) {
-	// 	const container = view.containerEl;
-	// 	if (!container.hasAttribute('data-image-converter-registered')) {
-	// 		container.setAttribute('data-image-converter-registered', 'true');
-	// 		this.registerDomEvent(container, 'dragover', (e: DragEvent) => {
-	// 			e.preventDefault();
-	// 			e.stopPropagation();
-	// 		}, { capture: true });
-	// 	}
-	// }
-
 
 	private shouldSkipEvent(evt: ClipboardEvent | DragEvent): boolean {
 
@@ -1292,8 +1010,6 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 	
 
-
-
 	private async handleMobileFileCreation(file: TFile) {
 		try {
 			// Get file stats early
@@ -1429,28 +1145,29 @@ export default class ImageConvertPlugin extends Plugin {
 				isQualityOnly: isQualityOnlyOperation  
 			});
 
-			// Generate hash for duplicate detection
-			const sourceHash = await this.generateSourceHash(file);
-	
-			// Handle duplicates based on settings
-			if (this.fileHashes.has(sourceHash)) {
-				const duplicateHandling = this.settings.manage_duplicate_filename;
-	
-				switch (duplicateHandling) {
-					case "duplicate_replace":
-						// Continue processing, treating it as a new entry
-						break;
-					case "duplicate_rename":
-						await this.renameFile1(file);
-						break;
-					default:
-						// Skip processing if neither option is selected
-						return;
-				}
-			} else {
-				// Add hash to our set since it's a new file
-				this.fileHashes.add(sourceHash);
+			// Get active view type and validate
+			const activeView = this.getActiveView();
+			const viewType = activeView?.getViewType();
+			
+			if (!this.isValidViewType(viewType)) return;
+
+			// Handle single file drops
+			if (!this.batchStarted) {
+				this.currentBatchTotal = 1;
+				this.batchId = Date.now().toString();
 			}
+
+			// Add to queue with desktop-specific context
+			const queueItem: QueueItem = {
+				file,
+				addedAt: Date.now(),
+				viewType: viewType as 'markdown' | 'canvas' | 'excalidraw',
+				parentFile: viewType !== 'markdown' ? (activeView as any).file : undefined,
+				originalName: file.name,
+				originalPath: file.path,
+				processed: false
+			};
+
 	
 			// Check if this file was already processed
 			const originalNameWithExt = file.name;
@@ -1458,34 +1175,17 @@ export default class ImageConvertPlugin extends Plugin {
 				return;
 			}
 	
-			// Get active view type and validate
-			const activeView = this.getActiveView();
-			const viewType = activeView?.getViewType();
-			
-			if (!this.isValidViewType(viewType)) return;
-	
-			// Handle single file drops
-			if (!this.batchStarted) {
-				this.currentBatchTotal = 1;
-				this.batchId = Date.now().toString();
-			}
-	
-			// Add to queue with desktop-specific context
-			this.fileQueue.push({ 
-				file,
-				addedAt: Date.now(),
-				viewType: viewType as 'markdown' | 'canvas' | 'excalidraw',
-				parentFile: viewType !== 'markdown' ? (activeView as any).file : undefined,
-				originalName: originalNameWithExt,
-				originalPath: file.path,
-				processed: false
-			});
-	
+			// Add to queue
+			this.fileQueue.push(queueItem);
+
+			// Start processing
 			await this.processQueue();
 			
+			// Cleanup
 			setTimeout(() => {
 				this.mobileProcessedFiles.delete(file.path);
-			}, 30000); // Increased to 30 seconds to better handle slow syncs
+			}, 30000);
+
 		} catch (error) {
 			console.error('Error processing desktop file:', error);
 			new Notice(`Failed to process file: ${file.name}`);
@@ -1545,7 +1245,7 @@ export default class ImageConvertPlugin extends Plugin {
 					// console.log('Processing killed by user (ESC pressed)');
 					break;
 				}
-				// Check if we're still processing the same batch
+				// Check batch consistency: Check if we're still processing the same batch
 				if (currentBatchId !== this.batchId) {
 					// console.log('Batch ID changed, starting new batch');
 					break;
@@ -1585,62 +1285,63 @@ export default class ImageConvertPlugin extends Plugin {
 					}
 				}
 
-				// Extend timeout for large or complex files
-				if (this.dropInfo?.batchId === currentBatchId) {
-					const currentFileIndex = this.dropInfo.totalProcessedFiles;
-					const currentFile = this.dropInfo.files[currentFileIndex];
+				// // Extend timeout for large or complex files
+				// if (this.dropInfo?.batchId === currentBatchId) {
+				// 	const currentFileIndex = this.dropInfo.totalProcessedFiles;
+				// 	const currentFile = this.dropInfo.files[currentFileIndex];
 
-					if (currentFile) {
-						// Get the MIME type using mime package if available
-						const mimeType = mime.getType(currentFile.name) || currentFile.type;
+				// 	if (currentFile) {
+				// 		// Get the MIME type using mime package if available
+				// 		const mimeType = mime.getType(currentFile.name) || currentFile.type;
 
-						// Check if the file is large or a complex format
-						const isLargeFile = currentFile.size > 10 * 1024 * 1024; // 10MB
-						const isComplexFormat = ['image/heic', 'image/tiff', 'image/png'].includes(mimeType);
+				// 		// Check if the file is large or a complex format
+				// 		const isLargeFile = currentFile.size > 10 * 1024 * 1024; // 10MB
+				// 		const isComplexFormat = ['image/heic', 'image/tiff', 'image/png'].includes(mimeType);
 
-						if (isLargeFile || isComplexFormat) {
-							if (this.dropInfo.timeoutId) {
-								window.clearTimeout(this.dropInfo.timeoutId);
-							}
+				// 		if (isLargeFile || isComplexFormat) {
+				// 			if (this.dropInfo.timeoutId) {
+				// 				window.clearTimeout(this.dropInfo.timeoutId);
+				// 			}
 
-							// Calculate extended timeout based on file characteristics
-							const extensionTime = Math.max(
-								30000, // minimum 30 seconds
-								(currentFile.size / (1024 * 1024)) * 2000 // 2 seconds per MB
-							) * (isComplexFormat ? 1.5 : 1); // 50% more time for complex formats
+				// 			// Calculate extended timeout based on file characteristics
+				// 			const extensionTime = Math.max(
+				// 				30000, // minimum 30 seconds
+				// 				(currentFile.size / (1024 * 1024)) * 2000 // 2 seconds per MB
+				// 			) * (isComplexFormat ? 1.5 : 1); // 50% more time for complex formats
 
-							this.dropInfo.timeoutId = window.setTimeout(() => {
-								if (this.dropInfo?.batchId === currentBatchId) {
-									const remainingFiles = this.fileQueue.length;
-									if (remainingFiles > 0) {
-										console.log(`Extended processing time for remaining ${remainingFiles} files`);
-									} else {
-										this.userAction = false;
-										this.batchStarted = false;
-										this.dropInfo = null;
-									}
-								}
-							}, extensionTime);
-						}
-					}
-				}
+				// 			this.dropInfo.timeoutId = window.setTimeout(() => {
+				// 				if (this.dropInfo?.batchId === currentBatchId) {
+				// 					const remainingFiles = this.fileQueue.length;
+				// 					if (remainingFiles > 0) {
+				// 						console.log(`Extended processing time for remaining ${remainingFiles} files`);
+				// 					} else {
+				// 						this.userAction = false;
+				// 						this.batchStarted = false;
+				// 						this.dropInfo = null;
+				// 					}
+				// 				}
+				// 			}, extensionTime);
+				// 		}
+				// 	}
+				// }
 
 	
 				try {
-					// Before processing, mark the file
-					if (!Platform.isMobile) {
-						this.mobileProcessedFiles.set(item.file.path, {
-							path: item.file.path,
-							timestamp: Date.now(),
-							size: (await this.app.vault.adapter.stat(item.file.path))?.size || 0,
-							platform: 'desktop'
-						});
-					}
+					// // Before processing, mark the file
+					// if (!Platform.isMobile) {
+					// 	this.mobileProcessedFiles.set(item.file.path, {
+					// 		path: item.file.path,
+					// 		timestamp: Date.now(),
+					// 		size: (await this.app.vault.adapter.stat(item.file.path))?.size || 0,
+					// 		platform: 'desktop'
+					// 	});
+					// }
 
-					// Kill switch check before processing each file
-					if (this.isKillSwitchActive) {
-						break;
-					}
+					// // Kill switch check before processing each file
+					// if (this.isKillSwitchActive) {
+					// 	break;
+					// }
+					
 					// Update progress before processing
 					if (this.settings.showProgress) {
 						this.updateProgressUI(
@@ -1675,9 +1376,10 @@ export default class ImageConvertPlugin extends Plugin {
 					while (attempts < maxAttempts && !success) {
 						try {
 							await Promise.race([
-								this.renameFile1(item.file),
+								this.renameFile1(item.file, item.parentFile),
 								new Promise((_, reject) =>
-									window.setTimeout(() => reject(new Error('Processing timeout')), timeoutDuration)
+									window.setTimeout(() => reject(new Error('Processing timeout')), 
+									timeoutDuration)
 								)
 							]);
 							success = true;
@@ -1687,7 +1389,6 @@ export default class ImageConvertPlugin extends Plugin {
 							if (attempts === maxAttempts) {
 								throw error;
 							}
-							// Wait before retry
 							await new Promise(resolve => window.setTimeout(resolve, 1000));
 						}
 					}
@@ -1831,16 +1532,16 @@ export default class ImageConvertPlugin extends Plugin {
 		}
 	}
 
-    private async generateSourceHash(file: TFile): Promise<string> {
-        const binary = await this.app.vault.readBinary(file);
+    // private async generateSourceHash(file: TFile): Promise<string> {
+    //     const binary = await this.app.vault.readBinary(file);
 
-        // Use a better hashing algorithm like SHA-256 for better collision resistance
-        const hashBuffer = await crypto.subtle.digest('SHA-256', binary);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    //     // Use a better hashing algorithm like SHA-256 for better collision resistance
+    //     const hashBuffer = await crypto.subtle.digest('SHA-256', binary);
+    //     const hashArray = Array.from(new Uint8Array(hashBuffer));
+    //     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
-        return hashHex; // Return the hexadecimal string of the hash
-    }
+    //     return hashHex; // Return the hexadecimal string of the hash
+    // }
 
 	/////////////////////////////////
 
@@ -1880,111 +1581,138 @@ export default class ImageConvertPlugin extends Plugin {
 
 	// Work on the file
 	/* ------------------------------------------------------------- */
-	async renameFile1(file: TFile, parentFile?: TFile): Promise<string> {   
-
-		// We want to ensure we get the specific file where the drop occurred (parentFile)
-		// If that's not available, we fall back to Obsidian's getActiveFile()
-		// parentFile is actually the TFile  associated with the view where the drop occurred.
+	async renameFile1(file: TFile, parentFile?: TFile): Promise<string> {
 		const activeFile = parentFile || this.app.workspace.getActiveFile();
-		if (!activeFile) {
-			throw new Error('No active file found');
-		}
-
+		if (!activeFile) throw new Error('No active file found');
+	
 		// Store original values 
 		const originalName = file.name;
-
-		// 1. Process the image and save it
-		const binary = await this.app.vault.readBinary(file);
-		const imgBlob = await this.processImage(file, binary);
-
-		if (imgBlob instanceof Blob) {
-			const arrayBuffer = await imgBlob.arrayBuffer();
-			await this.app.vault.modifyBinary(file, arrayBuffer);
-
-			// 2. while we are here - reading converted image, lets check its width too. 
-			// So we could later pass it into custom sizing options etc. 
-			// Only check it if the setting for nondestructive_resizeMode_customSize or fitImage is enabled  as there are the only options currently need it
-			// Fit image = ensures images are never wider than the editor while preserving their original size if they're already smaller than the editor width.
-			if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" || this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_fitImage") {
-				try {
-					this.widthSide = await getImageWidthSide(arrayBuffer);
-					const maxWidth = printEditorLineWidth(this.app);
-					if (this.widthSide !== null && typeof maxWidth === 'number') {
-						this.settings.nondestructive_resizeMode_fitImage = (this.widthSide < maxWidth ? this.widthSide : maxWidth).toString();
-						// await this.saveSettings();
+		let processedArrayBuffer: ArrayBuffer | undefined = undefined;
+	
+		try {
+			// 1. Determine if processing is needed
+			const needsProcessing = this.shouldProcessImage(file);
+	
+			// 2. Generate new name or keep original
+			let newName: string;
+			const keepingOriginal = this.settings.convertTo === 'disabled' && 
+				!this.needsResize() && 
+				this.settings.quality === 100 &&
+				!this.settings.useCustomRenaming; 
+			
+			if (keepingOriginal) {
+				newName = file.name;  // Keep original name
+			} else if (this.settings.autoRename || this.settings.useCustomRenaming) {
+				newName = await this.generateNewName(file, activeFile);
+			} else {
+				newName = await this.keepOrgName(file);
+			}
+	
+			// 3. Create folders and generate new path (This should happen regardless of renaming)
+			const basePath = await this.getBasePath(activeFile, file);
+			await this.ensureFolderExists(basePath);
+			
+			// Generate new path using either the new name or original name
+			const newPath = await this.createOutputFolders(newName, file, activeFile);
+			const normalizedPath = normalizePath(newPath);
+	
+			// 4. Process image if needed
+			if (needsProcessing) {
+				const binary = await this.app.vault.readBinary(file);
+				const imgBlob = await this.processImage(file, binary);
+				if (imgBlob instanceof Blob) {
+					processedArrayBuffer = await imgBlob.arrayBuffer();
+					await this.app.vault.modifyBinary(file, processedArrayBuffer);
+	
+					// Width check for resizing options
+					if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" ||
+						this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_fitImage") {
+						try {
+							this.widthSide = await getImageWidthSide(processedArrayBuffer);
+							const maxWidth = printEditorLineWidth(this.app);
+							if (this.widthSide !== null && typeof maxWidth === 'number') {
+								this.settings.nondestructive_resizeMode_fitImage =
+									(this.widthSide < maxWidth ? this.widthSide : maxWidth).toString();
+							}
+						} catch (error) {
+							console.error('Could not determine image dimensions:', error);
+						}
 					}
-				} catch (error) {
-					console.error('Could not determine image dimensions, using default settings');
 				}
 			}
-		}
-		// 3. check if renaming is needed
-		let newName: string;
-		const keepingOriginal = this.settings.convertTo === 'disabled' && 
-			!this.needsResize() && 
-			this.settings.quality === 100 &&
-			!this.settings.useCustomRenaming; 
-		
-		// Skip renaming only if keeping original AND custom renaming is not enabled
-		if (keepingOriginal) {
-			newName = file.name;
-		} else if (this.settings.autoRename || this.settings.useCustomRenaming) {
-			newName = await this.generateNewName(file, activeFile);
-		} else {
-			newName = await this.keepOrgName(file);
-		}
-
-		// Store original values 
-		// sourcePath indicates path of a note
-		const sourcePath = activeFile.path;
-		const linkText = this.makeLinkText(file, sourcePath);
-
-
-		// 4. Create all folders before the links! And make sure they exist before dealing with links! 
-		const generateNewPath = await this.createOutputFolders(newName, file, activeFile);
-		const newPath = normalizePath(generateNewPath); // Normalise new path. This helps us when dealing with paths generated by variables
-
-
-		// 5. Update file and document
-		// Only rename if the path actually changed
 	
-		await this.updateFileAndDocument(file, newPath, activeFile, sourcePath, linkText);
-		
-		// Show notification only if enabled AND the file was actually renamed
-		if (this.settings.showRenameNotice) {
-			new Notice(`Renamed: ${decodeURIComponent(originalName)} → ${decodeURIComponent(newName)}`);
+			// 5. Handle duplicates
+			const finalPath = await this.handleDuplicate(
+				file, 
+				normalizedPath, 
+				processedArrayBuffer
+			);
+	
+			// 6. Update file and document (This should happen even if name hasn't changed)
+			const sourcePath = activeFile.path;
+			const linkText = this.makeLinkText(file, sourcePath);
+			
+			// Always call updateFileAndDocument to ensure file is moved to correct location
+			await this.updateFileAndDocument(
+				file,
+				finalPath,
+				activeFile,
+				sourcePath,
+				linkText
+			);
+	
+			// 7. Show rename notice only if name actually changed
+			if (this.settings.showRenameNotice && originalName !== newName) {
+				new Notice(`Renamed: ${decodeURIComponent(originalName)} → ${decodeURIComponent(newName)}`);
+			}
+	
+			return finalPath;
+	
+		} catch (error) {
+			console.error('Error in renameFile1:', error);
+			throw error;
 		}
-
-
-		return newPath;
+	}
+	
+	// Helper function to determine if processing is needed
+	private shouldProcessImage(file: TFile): boolean {
+		return this.settings.convertTo !== 'disabled' ||
+			this.settings.quality !== 100 ||
+			this.needsResize() ||
+			this.settings.useCustomRenaming;
 	}
 
 	private async processImage(file: TFile, binary: ArrayBuffer): Promise<Blob> {
-		// Determine the MIME type using the mime module
-		const mimeType = mime.getType(file.extension) || `image/${file.extension}`;
-	
-		let imgBlob = new Blob([binary], { type: mimeType });
-	
-		// Handle special formats based on MIME type
-		if (mimeType === 'image/tiff') {
-			imgBlob = await handleTiffImage(binary);
-		} else if (mimeType === 'image/heic') {
-			imgBlob = await handleHeicImage(file, binary, this.settings, this.app);
-		}
-	
-		// Only process if we need to compress or resize
-		if (this.settings.convertTo === 'disabled') {
-			// If format is "Same as original"
-			if (this.settings.quality < 1 || this.needsResize()) {
-				// Process compression/resize while maintaining original format
-				imgBlob = await this.processOriginalFormat(imgBlob, file.extension);
-			}
-		} else {
-			// Convert to specified format
-			imgBlob = await this.convertImageFormat(imgBlob, file.extension);
-		}
+		try {
+			// Determine the MIME type using the mime module
+			const mimeType = mime.getType(file.extension) || `image/${file.extension}`;
 		
-		return imgBlob;
+			let imgBlob = new Blob([binary], { type: mimeType });
+		
+			// Handle special formats based on MIME type
+			if (mimeType === 'image/tiff') {
+				imgBlob = await handleTiffImage(binary);
+			} else if (mimeType === 'image/heic') {
+				imgBlob = await handleHeicImage(file, binary, this.settings, this.app);
+			}
+		
+			// Only process if we need to compress or resize
+			if (this.settings.convertTo === 'disabled') {
+				// If format is "Same as original"
+				if (this.settings.quality < 1 || this.needsResize()) {
+					// Process compression/resize while maintaining original format
+					imgBlob = await this.processOriginalFormat(imgBlob, file.extension);
+				}
+			} else {
+				// Convert to specified format
+				imgBlob = await this.convertImageFormat(imgBlob, file.extension);
+			}
+			
+			return imgBlob;
+		} catch (error) {
+			console.error('Error processing image:', error);
+			throw error;
+		}
 	}
 
 	private needsResize(): boolean {
@@ -2148,46 +1876,99 @@ export default class ImageConvertPlugin extends Plugin {
 		}
 	}
 
-	private async updateFileAndDocument(file: TFile, newPath: string, activeFile: TFile, sourcePath: string, linkText: string): Promise<void> {
+	private async handleDuplicate(file: TFile, path: string, processedContent?: ArrayBuffer): Promise<string> {
+		if (this.settings.manage_duplicate_filename === 'disabled') {
+			return path;
+		}
+	
+		try {
+			const exists = await this.fileExistsWithAnyCase(path);
+			if (!exists) {
+				return path;
+			}
+	
+			if (this.settings.manage_duplicate_filename === 'duplicate_replace') {
+				try {
+					const existingFile = await this.app.vault.getAbstractFileByPath(path);
+					if (existingFile instanceof TFile && processedContent) {
+						// First try to modify the existing file
+						try {
+							await this.app.vault.modifyBinary(existingFile, processedContent);
+							return path;
+						} catch (modifyError) {
+							// If modification fails, try delete and create
+							await this.app.vault.delete(existingFile, true);
+							await this.app.vault.createBinary(path, processedContent);
+							return path;
+						}
+					}
+				} catch (error) {
+					console.error('Error during file replacement:', error);
+					// If all else fails, try to create with a new name
+					const newPath = this.generateNewNameWithSuffix(path, 1);
+					await this.app.vault.createBinary(newPath, processedContent!);
+					return newPath;
+				}
+			}
+	
+			if (this.settings.manage_duplicate_filename === 'duplicate_rename') {
+				let newPath = path;
+				let suffix = 1;
+				while (await this.fileExistsWithAnyCase(newPath)) {
+					newPath = this.generateNewNameWithSuffix(path, suffix);
+					suffix++;
+				}
+				return newPath;
+			}
+	
+			return path;
+		} catch (error) {
+			console.error('Error handling duplicate:', error);
+			throw new Error(`Failed to handle duplicate file: ${error.message}`);
+		}
+	}
+	
+
+	private async updateFileAndDocument(
+		file: TFile,
+		newPath: string,
+		activeFile: TFile,
+		sourcePath: string,
+		linkText: string
+	): Promise<void> {
 		try {
 			const decodedNewPath = decodeURIComponent(newPath);
 			const normalizedNewPath = normalizePath(decodedNewPath);
-
-			// Add case conflict check
-			await this.checkForCaseConflicts(normalizedNewPath);
-			
-			// Get the actual case-sensitive path that exists on the filesystem
-			const actualPath = await this.getActualCasePath(normalizedNewPath);
-			let finalPath = actualPath || normalizedNewPath; // Use actual path if exists, otherwise use normalized
-
-
 	
-			// Check if the Destination Image File already exists if it does then add -1 etc.
-			// Handle duplicates
-			if (this.settings.convertTo !== 'disabled' && this.settings.manage_duplicate_filename !== 'disabled') {
-				if (this.settings.manage_duplicate_filename === 'duplicate_replace') {
-					if (await this.fileExistsWithAnyCase(finalPath)) {
-						const existingFile = await this.app.vault.getAbstractFileByPath(finalPath);
-						if (existingFile instanceof TFile) {
-							await this.app.vault.delete(existingFile);
+			await this.checkForCaseConflicts(normalizedNewPath);
+			const actualPath = await this.getActualCasePath(normalizedNewPath);
+			const finalPath = actualPath || normalizedNewPath;
+	
+			// Check if the file needs to be moved (different path) or renamed (different name)
+			const needsMove = this.getDirectoryPath(file.path) !== this.getDirectoryPath(finalPath);
+			const needsRename = !this.pathsAreEqual(file.path, finalPath);
+	
+			if (needsMove || needsRename) {
+				try {
+					// Handle existing file at destination
+					const existingFile = await this.app.vault.getAbstractFileByPath(finalPath);
+					if (existingFile instanceof TFile) {
+						if (this.settings.manage_duplicate_filename === 'duplicate_replace') {
+							await this.app.vault.delete(existingFile, true);
 						}
 					}
-				} else if (this.settings.manage_duplicate_filename === 'duplicate_rename') {
-					const originalPath = finalPath; // Save the original path before entering the loop
-					let suffix = 1;
-				
-					while (await this.fileExistsWithAnyCase(finalPath)) {
-						finalPath = this.generateNewNameWithSuffix(originalPath, suffix); // Use the original path to generate new names
-						suffix++;
-					}
+	
+					// Perform the move/rename operation
+					await this.app.vault.rename(file, finalPath);
+				} catch (error) {
+					console.error('Error during file operation:', error);
+					// Fallback to copy and delete
+					const binary = await this.app.vault.readBinary(file);
+					await this.app.vault.createBinary(finalPath, binary);
+					await this.app.vault.delete(file, true);
 				}
 			}
 
-			// Perform the rename
-			// Only perform rename if paths are different (case-insensitive comparison)
-			if (!this.pathsAreEqual(file.path, finalPath)) {
-				await this.app.vault.rename(file, finalPath);
-			}
 			// Create MARKDOWN link or WIKI link
 			const newLinkText = this.createImageLink(this.makeLinkText(file, sourcePath));
 
@@ -2198,10 +1979,10 @@ export default class ImageConvertPlugin extends Plugin {
 				return;
 			}
 
-			// PT1 of 2 Preserve the scroll position
+			// Preserve scroll position
 			const scrollInfo = editor.getScrollInfo() as { top: number; left: number };
 
-			// Multi-drop-rename
+			// Update links in the document
 			const cursor = editor.getCursor();
 			const currentLine = cursor.line;
 			const findText = this.escapeRegExp(linkText);
@@ -2211,55 +1992,64 @@ export default class ImageConvertPlugin extends Plugin {
 			const newContent = docContent.replace(regex, replaceText);
 			editor.setValue(newContent);
 
-			// Restore the scroll position
+			// Restore scroll position
 			editor.scrollTo(scrollInfo.left, scrollInfo.top);
 
-			// Scroll to the last image if rememberScrollPosition is disabled
+			// Handle scroll position based on settings
 			if (!this.settings.rememberScrollPosition) {
 				const lastLine = newContent.split('\n').length - 1;
-				editor.scrollIntoView({ from: { line: lastLine, ch: 0 }, to: { line: lastLine, ch: 0 } });
+				editor.scrollIntoView({
+					from: { line: lastLine, ch: 0 },
+					to: { line: lastLine, ch: 0 }
+				});
 			}
 
-			// Set the cursor position based on the setting
-			/* ---------------------------------------------------------*/
+			// Set cursor position based on settings
 			const lineContent = newContent.split('\n')[currentLine];
 			let newCursorPos;
 			if (this.settings.cursorPosition === 'front') {
-				// Find the index of newLinkText in the current line, not the entire document
 				const linkIndex = lineContent.indexOf(newLinkText);
-				// If link is found in current line, position cursor before it
-				if (linkIndex !== -1) {
-					newCursorPos = { line: currentLine, ch: linkIndex };
-				} else {
-					// Fallback to beginning of line if link not found
-					newCursorPos = { line: currentLine, ch: 0 };
-				}
+				newCursorPos = linkIndex !== -1
+					? { line: currentLine, ch: linkIndex }
+					: { line: currentLine, ch: 0 };
 			} else {
 				newCursorPos = { line: currentLine, ch: lineContent.length };
 			}
 
-			// Validate cursor position before setting
-			if (newCursorPos.line >= 0 &&
-				newCursorPos.line < editor.lineCount() &&
-				newCursorPos.ch >= 0 &&
-				newCursorPos.ch <= lineContent.length) {
+			// Validate and set cursor position
+			if (this.isValidCursorPosition(newCursorPos, editor, lineContent)) {
 				editor.setCursor(newCursorPos);
 			} else {
 				console.warn('Invalid cursor position, defaulting to start of line');
 				editor.setCursor({ line: currentLine, ch: 0 });
 			}
-			/* ---------------------------------------------------------*/
-			/* ---------------------------------------------------------*/
 
-			// Ensure the current line is in a visible position
-			editor.scrollIntoView({ from: { line: currentLine, ch: 0 }, to: { line: currentLine, ch: 0 } });
+			// Ensure current line is visible
+			editor.scrollIntoView({
+				from: { line: currentLine, ch: 0 },
+				to: { line: currentLine, ch: 0 }
+			});
+
 		} catch (err) {
 			console.error('Error during file update:', err);
-			// if (this.settings.showRenameNotice) {
-			// 	new Notice(`Failed to update ${file.name}: ${err}`);
-			// }
 			throw err;
 		}
+	}
+
+	// Helper function to validate cursor position
+	private isValidCursorPosition(
+		pos: { line: number; ch: number },
+		editor: Editor,
+		lineContent: string
+	): boolean {
+		return pos.line >= 0 &&
+			pos.line < editor.lineCount() &&
+			pos.ch >= 0 &&
+			pos.ch <= lineContent.length;
+	}
+	
+	private getDirectoryPath(fullPath: string): string {
+		return fullPath.substring(0, fullPath.lastIndexOf('/'));
 	}
 	
 	// ///////////// Helper for output management
