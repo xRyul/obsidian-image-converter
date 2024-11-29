@@ -905,9 +905,10 @@ export default class ImageConvertPlugin extends Plugin {
 			this.updateProgressUI(0, imageFiles.length, 'Starting processing...');
 		}
 
+		// Time for the file system to register the new files
 		setTimeout(() => {
             this.userAction = false;
-        }, 2000);
+        }, 3000);
 
 	}
 
