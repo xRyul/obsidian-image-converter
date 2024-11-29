@@ -1254,6 +1254,9 @@ export default class ImageConvertPlugin extends Plugin {
 				const item = this.fileQueue[0];
 				let currentFileSize = 0;
 
+				// Add the shouldProcess check here
+				const shouldProcess = this.shouldProcessImage(item.file);
+
 				// Check if this is a quality-only operation that was already processed
 				const isQualityOnlyOperation =
 					this.settings.convertTo === 'disabled' &&
@@ -1266,11 +1269,10 @@ export default class ImageConvertPlugin extends Plugin {
 					processedInfo.platform === 'desktop' &&
 					(Date.now() - processedInfo.timestamp) < 30000;
 
-				// Skip both processing and notifications for quality-only synced files
-				if (isQualityOnlyOperation && wasRecentlyProcessedOnDesktop) {
+				// Modify the condition to include shouldProcess
+				if (!shouldProcess && isQualityOnlyOperation && wasRecentlyProcessedOnDesktop) {
 					if (this.settings.useCustomRenaming) {
-						// If custom renaming is enabled, we want to proceed with processing
-						// console.log('Proceeding with processing due to custom renaming');
+						// If custom renaming is enabled, proceed with processing
 					} else {
 						this.fileQueue.shift(); // Remove from queue
 						
@@ -1582,6 +1584,7 @@ export default class ImageConvertPlugin extends Plugin {
 	// Work on the file
 	/* ------------------------------------------------------------- */
 	async renameFile1(file: TFile, parentFile?: TFile): Promise<string> {
+
 		const activeFile = parentFile || this.app.workspace.getActiveFile();
 		if (!activeFile) throw new Error('No active file found');
 	
@@ -1590,6 +1593,7 @@ export default class ImageConvertPlugin extends Plugin {
 		let processedArrayBuffer: ArrayBuffer | undefined = undefined;
 	
 		try {
+			
 			// 1. Determine if processing is needed
 			const needsProcessing = this.shouldProcessImage(file);
 	
@@ -1607,7 +1611,7 @@ export default class ImageConvertPlugin extends Plugin {
 			} else {
 				newName = await this.keepOrgName(file);
 			}
-	
+			
 			// 3. Create folders and generate new path (This should happen regardless of renaming)
 			const basePath = await this.getBasePath(activeFile, file);
 			await this.ensureFolderExists(basePath);
@@ -1665,7 +1669,7 @@ export default class ImageConvertPlugin extends Plugin {
 			if (this.settings.showRenameNotice && originalName !== newName) {
 				new Notice(`Renamed: ${decodeURIComponent(originalName)} → ${decodeURIComponent(newName)}`);
 			}
-	
+
 			return finalPath;
 	
 		} catch (error) {
@@ -1676,10 +1680,15 @@ export default class ImageConvertPlugin extends Plugin {
 	
 	// Helper function to determine if processing is needed
 	private shouldProcessImage(file: TFile): boolean {
-		return this.settings.convertTo !== 'disabled' ||
-			this.settings.quality !== 100 ||
+		// At least one of these conditions must be true for processing to occur
+		return (
+			this.settings.convertTo !== 'disabled' ||
+			this.settings.quality < 100 ||
 			this.needsResize() ||
-			this.settings.useCustomRenaming;
+			this.settings.useCustomRenaming ||
+			this.settings.attachmentLocation !== 'default' ||
+			this.settings.destructive_resizeMode !== 'None'
+		);
 	}
 
 	private async processImage(file: TFile, binary: ArrayBuffer): Promise<Blob> {
@@ -1939,7 +1948,7 @@ export default class ImageConvertPlugin extends Plugin {
 		try {
 			const decodedNewPath = decodeURIComponent(newPath);
 			const normalizedNewPath = normalizePath(decodedNewPath);
-	
+			
 			await this.checkForCaseConflicts(normalizedNewPath);
 			const actualPath = await this.getActualCasePath(normalizedNewPath);
 			const finalPath = actualPath || normalizedNewPath;
