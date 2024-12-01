@@ -367,6 +367,9 @@ export default class ImageConvertPlugin extends Plugin {
 	private isConversionPaused = false; // track the status, paused?
 	private isConversionPaused_statusTimeout: number | null = null; // hide status 
 
+	private isConversionDisabled = false;  // For complete plugin disable
+    private isProcessingDisabled = false;  // For conversion/compression/resize disable only
+
 	// Drag Resize
     private resizeState: {
         isResizing: boolean;
@@ -1387,6 +1390,7 @@ export default class ImageConvertPlugin extends Plugin {
 							]);
 							success = true;
 							this.actualProcessingOccurred = true;
+
 						} catch (error) {
 							attempts++;
 							if (attempts === maxAttempts) {
@@ -1448,6 +1452,24 @@ export default class ImageConvertPlugin extends Plugin {
 					this.totalSizeBeforeBytes = 0;
 					this.totalSizeAfterBytes = 0;
 					this.processedFiles = [];
+
+					// Refresh note
+					const leaf = this.app.workspace.getMostRecentLeaf();
+					if (leaf) {
+						// Store current state
+						const currentState = leaf.getViewState();
+						
+						// Switch to a different view type temporarily
+						await leaf.setViewState({
+							type: 'empty',
+							state: {}
+						});
+
+						// Switch back to the original view
+						await leaf.setViewState(currentState);
+
+					}
+
 				}
 	
 				this.hideProgressBar();
@@ -1591,20 +1613,94 @@ export default class ImageConvertPlugin extends Plugin {
 	// Work on the file
 	/* ------------------------------------------------------------- */
 	async renameFile1(file: TFile, parentFile?: TFile): Promise<string> {
-
+		// Step 0: Initial Setup
 		const activeFile = parentFile || this.app.workspace.getActiveFile();
 		if (!activeFile) throw new Error('No active file found');
 	
-		// Store original values 
+		// If plugin is completely disabled, return original path immediately
+		if (this.isConversionDisabled) {
+			return file.path;
+		}
+
+		// Store original values for comparison and recovery if needed
 		const originalName = file.name;
 		let processedArrayBuffer: ArrayBuffer | undefined = undefined;
 	
 		try {
-			
-			// 1. Determine if processing is needed
+			// Step 1: Check Processing Mode
+			// When processing is disabled, allow only renaming and non-destructive resizing
+			if (this.isProcessingDisabled) {
+				// Check if we need to do anything
+				const needsNonDestructiveResize =
+					(this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" ||
+						this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_fitImage");
+
+				const needsRenaming = this.settings.useCustomRenaming;
+
+				// If neither operation is needed, return original path
+				if (!needsNonDestructiveResize && !needsRenaming) {
+					return file.path;
+				}
+
+				// Generate new name if needed
+				const newName = needsRenaming ?
+					await this.generateNewName(file, activeFile) :
+					file.name;
+
+				// Setup paths
+				const basePath = await this.getBasePath(activeFile, file);
+				await this.ensureFolderExists(basePath);
+				const newPath = await this.createOutputFolders(newName, file, activeFile);
+				const normalizedPath = normalizePath(newPath);
+
+				// Handle non-destructive resize if needed
+				if (needsNonDestructiveResize) {
+					try {
+						// Get image dimensions without processing the image
+						const binary = await this.app.vault.readBinary(file);
+						this.widthSide = await getImageWidthSide(binary);
+						const maxWidth = printEditorLineWidth(this.app);
+
+						if (this.widthSide !== null && typeof maxWidth === 'number') {
+							this.settings.nondestructive_resizeMode_fitImage =
+								(this.widthSide < maxWidth ? this.widthSide : maxWidth).toString();
+						}
+					} catch (error) {
+						console.error('Could not determine image dimensions:', error);
+					}
+				}
+
+				// Handle duplicates without processing
+				const finalPath = await this.handleDuplicate(file, normalizedPath, undefined);
+
+				// Update file location and links
+				const linkText = this.makeLinkText(file, activeFile.path);
+				await this.updateFileAndDocument(
+					file,
+					finalPath,
+					activeFile,
+					activeFile.path,
+					linkText
+				);
+
+				// Show rename notice if applicable
+				if (this.settings.showRenameNotice && originalName !== newName) {
+					new Notice(`Renamed: ${decodeURIComponent(originalName)} → ${decodeURIComponent(newName)}`);
+				}
+
+				return finalPath;
+			}
+
+			// Regular processing continues here for enabled state
+			// Step 2: Determine if Processing Needed
 			const needsProcessing = this.shouldProcessImage(file);
-	
-			// 2. Generate new name or keep original
+
+
+
+				
+			// Step 2: Name Generation
+			// - Generate new name or keep original based on settings
+			// - This happens regardless of processing state
 			let newName: string;
 			const keepingOriginal = this.settings.convertTo === 'disabled' && 
 				!this.needsResize() && 
@@ -1619,23 +1715,28 @@ export default class ImageConvertPlugin extends Plugin {
 				newName = await this.keepOrgName(file);
 			}
 			
-			// 3. Create folders and generate new path (This should happen regardless of renaming)
+			// Step 3: Path Generation
+			// - Create necessary folders
+			// - Generate new path for file
+			// - This happens regardless of processing state
 			const basePath = await this.getBasePath(activeFile, file);
 			await this.ensureFolderExists(basePath);
 			
-			// Generate new path using either the new name or original name
 			const newPath = await this.createOutputFolders(newName, file, activeFile);
 			const normalizedPath = normalizePath(newPath);
 	
-			// 4. Process image if needed
+			// Step 4: Image Processing
+			// - Only process if needed and not disabled
 			if (needsProcessing) {
 				const binary = await this.app.vault.readBinary(file);
 				const imgBlob = await this.processImage(file, binary);
+				
 				if (imgBlob instanceof Blob) {
 					processedArrayBuffer = await imgBlob.arrayBuffer();
 					await this.app.vault.modifyBinary(file, processedArrayBuffer);
 	
-					// Width check for resizing options
+					// Step 4a: Width Calculation for Resizing
+					// - Calculate dimensions for non-destructive resize if enabled
 					if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" ||
 						this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_fitImage") {
 						try {
@@ -1652,18 +1753,21 @@ export default class ImageConvertPlugin extends Plugin {
 				}
 			}
 	
-			// 5. Handle duplicates
+			// Step 5: Duplicate Handling
+			// - Check for and handle duplicate filenames
+			// - This happens regardless of processing state
 			const finalPath = await this.handleDuplicate(
 				file, 
 				normalizedPath, 
 				processedArrayBuffer
 			);
 	
-			// 6. Update file and document (This should happen even if name hasn't changed)
+			// Step 6: File and Document Updates
+			// - Update file location and links in document
+			// - This happens regardless of processing state
 			const sourcePath = activeFile.path;
 			const linkText = this.makeLinkText(file, sourcePath);
 			
-			// Always call updateFileAndDocument to ensure file is moved to correct location
 			await this.updateFileAndDocument(
 				file,
 				finalPath,
@@ -1672,11 +1776,12 @@ export default class ImageConvertPlugin extends Plugin {
 				linkText
 			);
 	
-			// 7. Show rename notice only if name actually changed
+			// Step 7: Notifications
+			// - Show rename notice if name changed and notifications are enabled
 			if (this.settings.showRenameNotice && originalName !== newName) {
 				new Notice(`Renamed: ${decodeURIComponent(originalName)} → ${decodeURIComponent(newName)}`);
 			}
-
+	
 			return finalPath;
 	
 		} catch (error) {
@@ -1687,15 +1792,25 @@ export default class ImageConvertPlugin extends Plugin {
 	
 	// Helper function to determine if processing is needed
 	private shouldProcessImage(file: TFile): boolean {
-		// At least one of these conditions must be true for processing to occur
-		return (
-			this.settings.convertTo !== 'disabled' ||
-			this.settings.quality < 100 ||
-			this.needsResize() ||
-			this.settings.useCustomRenaming ||
-			this.settings.attachmentLocation !== 'default' ||
-			this.settings.destructive_resizeMode !== 'None'
-		);
+		// Check if plugin is completely disabled
+		if (this.isConversionDisabled) {
+			return false;
+		}
+	
+		// If processing is disabled, only check for non-destructive operations
+		if (this.isProcessingDisabled) {
+			return false; // We handle non-destructive resize separately
+		}
+	
+		// Check for destructive operations
+		const extension = file.extension.toLowerCase();
+		const targetFormat = this.settings.convertTo.toLowerCase();
+		
+		const needsConversion = targetFormat !== 'disabled' && extension !== targetFormat;
+		const needsQuality = this.settings.quality < 100;
+		const needsDestructiveResize = this.settings.destructive_resizeMode !== 'None';
+		
+		return needsConversion || needsQuality || needsDestructiveResize;
 	}
 
 	private async processImage(file: TFile, binary: ArrayBuffer): Promise<Blob> {
@@ -1732,10 +1847,10 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
 	private needsResize(): boolean {
-		return this.settings.destructive_resizeMode !== 'None' &&
-			(this.settings.destructive_desiredWidth > 0 ||
-				this.settings.destructive_desiredHeight > 0 ||
-				this.settings.destructive_desiredLongestEdge > 0);
+		return (
+			this.settings.destructive_resizeMode !== 'None' ||
+			this.settings.nondestructive_resizeMode !== 'disabled'
+		);
 	}
 
 	private async processOriginalFormat(imgBlob: Blob, extension: string): Promise<Blob> {
@@ -2988,76 +3103,89 @@ export default class ImageConvertPlugin extends Plugin {
 		});
 	
 		// Toggle conversion
+		// Enable/Disable all image processing and renaming
 		this.addCommand({
-			id: 'toggle-image-conversion',
-			name: 'Toggle Image Conversion (Pause/Resume)',
-			callback: () => this.command_toggleConversion()
+			id: 'toggle-plugin',
+			name: 'Enable/Disable all image processing and renaming',
+			callback: () => this.command_togglePlugin()
 		});
 
-		// this.addCommand({
-		// 	id: 'test-sync-behavior',
-		// 	name: 'Test Sync Behavior',
-		// 	callback: () => this.testSyncBehavior()
-		// });
-
-		// this.addCommand({
-		// 	id: 'test-cross-sync',
-		// 	name: 'Test cross sync',
-		// 	callback: () => this.testCrossPlatformSync()
-		// });
-
-		
+		// Pause/Continue image processing (Keep Renaming Active)
+		this.addCommand({
+			id: 'toggle-processing',
+			name: 'Pause/Continue image processing (Keep Renaming Active)',
+			callback: () => this.command_toggleProcessing()
+		});
 	}
 
-	// Toogle to Pause / Continue image conversion
-	private command_toggleConversion(): void {
-		this.isConversionPaused = !this.isConversionPaused;
+	// Split the functionality into two commands
+	private command_togglePlugin(): void {
+		this.isConversionDisabled = !this.isConversionDisabled;
 		
-		// Clear any existing timeout for status bar removal
-		if (this.isConversionPaused_statusTimeout) {
-			window.clearTimeout(this.isConversionPaused_statusTimeout);
-			this.isConversionPaused_statusTimeout = null;
-		}
-		
-		// Create status bar item if it doesn't exist
 		if (!this.statusBarItemEl) {
 			this.statusBarItemEl = this.addStatusBarItem();
 		}
 		
-		if (this.isConversionPaused) {
-			this.statusBarItemEl.setText('Image Conversion: Paused ⏸️');
-			new Notice('Image conversion paused');
+		if (this.isConversionDisabled) {
+			this.statusBarItemEl.setText('Image Plugin: Disabled ⏸️');
+			new Notice('Image plugin disabled');
 			
 			// Clear current queue and state
 			this.fileQueue = [];
 			this.isProcessingQueue = false;
+			this.clearProcessingState();
+		} else {
+			this.statusBarItemEl.setText('Image Plugin: Enabled ▶️');
+			new Notice('Image plugin enabled');
+			this.removeStatusBarAfterDelay();
+		}
+	}
+
+	private command_toggleProcessing(): void {
+		if (!this.isConversionDisabled) {
+			this.isProcessingDisabled = !this.isProcessingDisabled;
 			
-			// Reset batch processing state
-			if (this.dropInfo) {
-				const timeoutId = (this.dropInfo as DropInfo).timeoutId;
-				if (typeof timeoutId === 'number') {
-					window.clearTimeout(timeoutId);
-				}
-				this.dropInfo = null;
+			if (!this.statusBarItemEl) {
+				this.statusBarItemEl = this.addStatusBarItem();
 			}
 			
-			this.batchStarted = false;
-			this.userAction = false;
-			
-			// Ensure progress bar is hidden
-			this.hideProgressBar();
-		} else {
-			this.statusBarItemEl.setText('Image Conversion: Active ▶️');
-			new Notice('Image conversion resumed');
-			
-			// Remove status bar item after 5 seconds
-			this.isConversionPaused_statusTimeout = window.setTimeout(() => {
-				if (this.statusBarItemEl) {
-					this.statusBarItemEl.remove();
-					this.statusBarItemEl = null;
-				}
-			}, 5000);
+			if (this.isProcessingDisabled) {
+				this.statusBarItemEl.setText('Image Processing: Paused ⏸️ (Renaming & Non-destructive Resize Only)');
+				new Notice('Image processing paused (Only renaming & non-destructive resizing will be performed)');
+			} else {
+				this.statusBarItemEl.setText('Image Processing: Active ▶️');
+				new Notice('Full image processing resumed');
+			}
+			this.removeStatusBarAfterDelay();
 		}
+	}
+
+	private clearProcessingState(): void {
+		// Reset batch processing state
+		if (this.dropInfo) {
+			const timeoutId = (this.dropInfo as DropInfo).timeoutId;
+			if (typeof timeoutId === 'number') {
+				window.clearTimeout(timeoutId);
+			}
+			this.dropInfo = null;
+		}
+		
+		this.batchStarted = false;
+		this.userAction = false;
+		this.hideProgressBar();
+	}
+
+	private removeStatusBarAfterDelay(): void {
+		if (this.isConversionPaused_statusTimeout) {
+			window.clearTimeout(this.isConversionPaused_statusTimeout);
+		}
+		
+		this.isConversionPaused_statusTimeout = window.setTimeout(() => {
+			if (this.statusBarItemEl) {
+				this.statusBarItemEl.remove();
+				this.statusBarItemEl = null;
+			}
+		}, 5000);
 	}
 
 	// Command to open settings tab
@@ -8780,13 +8908,6 @@ class ImageAnnotationModal extends Modal {
 	
 		this.registerHotkeys();
 	}
-
-
-
-
-
-
-
 
 
 	private createSizeButtons(container: HTMLElement) {
