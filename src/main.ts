@@ -1475,48 +1475,54 @@ export default class ImageConvertPlugin extends Plugin {
 		}
 	}
 	
-    private updateProgressUI(current: number, total: number, fileName: string) {
+	private updateProgressUI(current: number, total: number, fileName: string) {
 		if (!this.settings.showProgress || !this.actualProcessingOccurred) return;
 		if (!this.progressEl || this.isConversionPaused) {
 			this.hideProgressBar();
 			return;
 		}
-
-        // Use dropInfo if available for consistent counting
-        if (this.dropInfo) {
-            total = this.dropInfo.totalExpectedFiles;
-            current = this.dropInfo.totalProcessedFiles + 1; // +1 for current file
-        }
-
-        // Ensure we never show more processed than total
-        current = Math.min(current, total);
-
-        // Only show progress UI if there are items to process
+	
+		// Use dropInfo if available for consistent counting
+		if (this.dropInfo) {
+			total = this.dropInfo.totalExpectedFiles;
+			current = this.dropInfo.totalProcessedFiles + 1; // +1 for current file
+		}
+	
+		// Ensure we never show more processed than total
+		current = Math.min(current, total);
+	
+		// Only show progress UI if there are items to process
 		if (total === 0) {
 			this.hideProgressBar();
 			return;
 		}
-
+	
 		this.showProgressBar();
 		this.progressEl.empty();
-
-        const progressText = this.progressEl.createDiv('progress-text');
-        progressText.setText(`Processing ${current} of ${total}`);
-        
-        const fileNameEl = this.progressEl.createDiv('file-name');
-        fileNameEl.setText(fileName);
-
-        const progressBar = this.progressEl.createDiv('progress-bar');
-        const progressFill = progressBar.createDiv('progress-fill');
-        const percentage = Math.min((current / total) * 100, 100);
-        progressFill.style.width = `${percentage}%`;
-
-		// Hide progress bar if processing is complete
-		if (current === total) {
-			// Add a small delay before hiding to show completion
-			window.setTimeout(() => this.hideProgressBar(), 1000);
+	
+		const progressText = this.progressEl.createDiv('progress-text');
+		progressText.setText(`Processing ${current} of ${total}`);
+		
+		const fileNameEl = this.progressEl.createDiv('file-name');
+		fileNameEl.setText(fileName);
+	
+		const progressBar = this.progressEl.createDiv('progress-bar');
+		const progressFill = progressBar.createDiv('progress-fill');
+		const percentage = Math.min((current / total) * 100, 100);
+		progressFill.style.width = `${percentage}%`;
+	
+		// Modified progress bar hiding logic
+		if (current === total && this.actualProcessingOccurred) {
+			// Add a longer delay before hiding to ensure file system catches up
+			window.setTimeout(() => {
+				// Double-check that processing is still complete when timeout fires
+				if (this.actualProcessingOccurred && 
+					this.dropInfo?.totalProcessedFiles === this.dropInfo?.totalExpectedFiles) {
+					this.hideProgressBar();
+				}
+			}, 2000); // Increased from 1000 to 2000ms
 		}
-    }
+	}
 	
 	private hideProgressBar() {
 		if (this.progressEl) {
@@ -3691,10 +3697,22 @@ export default class ImageConvertPlugin extends Plugin {
 	/* ------------------------------------------------------------- */
 
 	private registerContextMenu() {
-		this.register(
-			this.onElement(document, 'contextmenu', 'img', this.onContextMenu.bind(this))
+
+		this.registerDomEvent(
+			document,
+			'contextmenu',
+			(event: MouseEvent) => {
+				const target = event.target as HTMLElement;
+				
+				if (target instanceof HTMLImageElement) {
+					event.preventDefault();
+					event.stopPropagation();
+					this.onContextMenu(event);
+				}
+			},
+			true  // capture phase
 		);
-	
+		
 		this.registerEvent(
 			this.app.workspace.on("file-menu", (menu, file) => {
 				menu.addItem((item) => {
@@ -3721,6 +3739,7 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
 	onContextMenu(event: MouseEvent) {
+
 		// Prevent default context menu from being displayed
 		// event.preventDefault();
 		// If the 'Disable right-click context menu' setting is enabled, return immediately
@@ -3731,7 +3750,7 @@ export default class ImageConvertPlugin extends Plugin {
 		// Check if we're in Canvas view first
 		const activeView = this.getActiveView();
 		const isCanvasView = activeView?.getViewType() === 'canvas';
-	
+
 		// If we're in Canvas view, prevent default and return immediately
 		if (isCanvasView) {
 			event.preventDefault();
@@ -3744,264 +3763,261 @@ export default class ImageConvertPlugin extends Plugin {
 		}
 
 		const img = event.target as HTMLImageElement;
-		const rect = img.getBoundingClientRect();
-		const x = event.clientX - rect.left;
-		const y = event.clientY - rect.top;
-		const edgeSize = 30; // size of the edge in pixels
+
 
 		// Only show the context menu if the user right-clicks within the center of the image
-		if ((x > edgeSize && x < rect.width - edgeSize) && (y > edgeSize && y < rect.height - edgeSize)) {
-			// Create new Menu object
-			const menu = new Menu();
 
-			// Add option to copy image to clipboard
-			menu.addItem((item: MenuItem) =>
-				item
-					.setTitle('Copy Image')
-					.setIcon('copy')
-					.onClick(() => {
-						// Copy original image data to clipboard
-						const img = new Image();
-						img.crossOrigin = 'anonymous'; // Set crossOrigin to 'anonymous' for copying external images
-						const targetImg = event.target as HTMLImageElement; // Cast target to HTMLImageElement
-						img.onload = async function () {
+		// Create new Menu object
+		const menu = new Menu();
+
+		// Add option to copy image to clipboard
+		menu.addItem((item: MenuItem) =>
+			item
+				.setTitle('Copy Image')
+				.setIcon('copy')
+				.onClick(() => {
+					// Copy original image data to clipboard
+					const img = new Image();
+					img.crossOrigin = 'anonymous'; // Set crossOrigin to 'anonymous' for copying external images
+					const targetImg = event.target as HTMLImageElement; // Cast target to HTMLImageElement
+					img.onload = async function () {
+						const canvas = document.createElement('canvas');
+						canvas.width = img.naturalWidth;
+						canvas.height = img.naturalHeight;
+						const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+						ctx.drawImage(img, 0, 0);
+						const dataURL = canvas.toDataURL();
+						const response = await fetch(dataURL);
+						const blob = await response.blob();
+						const item = new ClipboardItem({ [blob.type]: blob });
+						await navigator.clipboard.write([item]);
+						new Notice('Image copied to clipboard');
+					};
+					img.src = targetImg.src; // Set src after setting crossOrigin
+				})
+		);
+
+		// Add option to copy Base64 encoded image into clipboard
+		menu.addItem((item: MenuItem) =>
+			item
+				.setTitle('Copy as Base64 encoded image')
+				.setIcon('copy')
+				.onClick(() => {
+					// Copy original image data to clipboard
+					const img = new Image();
+					img.crossOrigin = 'anonymous'; // Set crossOrigin to 'anonymous'
+					const targetImg = event.target as HTMLImageElement; // Cast target to HTMLImageElement
+					img.onload = async function () {
+						const canvas = document.createElement('canvas');
+						canvas.width = img.naturalWidth;
+						canvas.height = img.naturalHeight;
+						const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+						ctx.drawImage(img, 0, 0);
+						const dataURL = canvas.toDataURL();
+						await navigator.clipboard.writeText('<img src="' + dataURL + '"/>');
+						new Notice('Image copied to clipboard');
+					};
+					img.src = targetImg.src; // Set src after setting crossOrigin
+				})
+		);
+
+
+		// Add option to resize image
+		menu.addItem((item: MenuItem) =>
+			item
+				.setTitle('Resize Image')
+				.setIcon('image-file')
+				.onClick(async () => {
+					// Show resize image modal
+					const modal = new ResizeImageModal(this.app, async (width, height) => {
+						if (width || height) {
+							// Resize image data
+							const img = target as HTMLImageElement;
 							const canvas = document.createElement('canvas');
-							canvas.width = img.naturalWidth;
-							canvas.height = img.naturalHeight;
+							const aspectRatio = img.naturalWidth / img.naturalHeight;
+							if (width && !height) {
+								canvas.width = parseInt(width);
+								canvas.height = canvas.width / aspectRatio;
+							} else if (!width && height) {
+								canvas.height = parseInt(height);
+								canvas.width = canvas.height * aspectRatio;
+							} else {
+								const newWidth = parseInt(width);
+								const newHeight = parseInt(height);
+								const newAspectRatio = newWidth / newHeight;
+								if (newAspectRatio > aspectRatio) {
+									canvas.width = newHeight * aspectRatio;
+									canvas.height = newHeight;
+								} else {
+									canvas.width = newWidth;
+									canvas.height = newWidth / aspectRatio;
+								}
+							}
 							const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
-							ctx.drawImage(img, 0, 0);
+							ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 							const dataURL = canvas.toDataURL();
+
+							// Replace original image file with resized image data
 							const response = await fetch(dataURL);
 							const blob = await response.blob();
-							const item = new ClipboardItem({ [blob.type]: blob });
-							await navigator.clipboard.write([item]);
-							new Notice('Image copied to clipboard');
-						};
-						img.src = targetImg.src; // Set src after setting crossOrigin
-					})
-			);
+							const buffer = await blob.arrayBuffer();
 
-			// Add option to copy Base64 encoded image into clipboard
-			menu.addItem((item: MenuItem) =>
-				item
-					.setTitle('Copy as Base64 encoded image')
-					.setIcon('copy')
-					.onClick(() => {
-						// Copy original image data to clipboard
-						const img = new Image();
-						img.crossOrigin = 'anonymous'; // Set crossOrigin to 'anonymous'
-						const targetImg = event.target as HTMLImageElement; // Cast target to HTMLImageElement
-						img.onload = async function () {
-							const canvas = document.createElement('canvas');
-							canvas.width = img.naturalWidth;
-							canvas.height = img.naturalHeight;
-							const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
-							ctx.drawImage(img, 0, 0);
-							const dataURL = canvas.toDataURL();
-							await navigator.clipboard.writeText('<img src="' + dataURL + '"/>');
-							new Notice('Image copied to clipboard');
-						};
-						img.src = targetImg.src; // Set src after setting crossOrigin
-					})
-			);
-
-
-			// Add option to resize image
-			menu.addItem((item: MenuItem) =>
-				item
-					.setTitle('Resize Image')
-					.setIcon('image-file')
-					.onClick(async () => {
-						// Show resize image modal
-						const modal = new ResizeImageModal(this.app, async (width, height) => {
-							if (width || height) {
-								// Resize image data
-								const img = target as HTMLImageElement;
-								const canvas = document.createElement('canvas');
-								const aspectRatio = img.naturalWidth / img.naturalHeight;
-								if (width && !height) {
-									canvas.width = parseInt(width);
-									canvas.height = canvas.width / aspectRatio;
-								} else if (!width && height) {
-									canvas.height = parseInt(height);
-									canvas.width = canvas.height * aspectRatio;
-								} else {
-									const newWidth = parseInt(width);
-									const newHeight = parseInt(height);
-									const newAspectRatio = newWidth / newHeight;
-									if (newAspectRatio > aspectRatio) {
-										canvas.width = newHeight * aspectRatio;
-										canvas.height = newHeight;
-									} else {
-										canvas.width = newWidth;
-										canvas.height = newWidth / aspectRatio;
-									}
-								}
-								const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
-								ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-								const dataURL = canvas.toDataURL();
-
-								// Replace original image file with resized image data
-								const response = await fetch(dataURL);
-								const blob = await response.blob();
-								const buffer = await blob.arrayBuffer();
-
-								// Get file path from src attribute
-								// Get Vault Name
-								const rootFolder = this.app.vault.getName();
-								const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-								if (activeView) {
-									// Grab full path of an src, it will return full path including Drive letter etc.
-									// thus we need to get rid of anything what is not part of the vault
-									let imagePath = img.getAttribute('src');
-									if (imagePath) {
-										// Find the position of the root folder in the path
-										const rootFolderIndex = imagePath.indexOf(rootFolder);
-
-										// Remove everything before the root folder
-										if (rootFolderIndex !== -1) {
-											imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
-										}
-
-										// Remove the query string
-										imagePath = imagePath.split('?')[0];
-										// Decode percent-encoded characters
-										const decodedPath = decodeURIComponent(imagePath);
-
-										const file = this.app.vault.getAbstractFileByPath(decodedPath);
-										if (file instanceof TFile && isImage(file)) {
-											// Replace the image
-											await this.app.vault.modifyBinary(file, buffer);
-											
-											// Refresh all views that might be showing this image
-											const leaves = this.app.workspace.getLeavesOfType('markdown');
-											for (const leaf of leaves) {
-												const view = leaf.view;
-												if (view instanceof MarkdownView) {
-													// Store current state
-													const currentState = leaf.getViewState();
-													// const editor = view.editor;
-													// const cursorPosition = editor.getCursor();
-													// const scrollInfo = editor.getScrollInfo();
-										
-													// Force refresh by switching views
-													await leaf.setViewState({
-														type: 'empty',
-														state: {}
-													});
-										
-													// Switch back to the original view
-													await leaf.setViewState(currentState);
-										
-													// Restore cursor and scroll position
-													// editor.setCursor(cursorPosition);
-													// editor.scrollTo(scrollInfo.left, scrollInfo.top);
-												}
-											}
-										
-											// Additionally, refresh any image views of this file
-											const imageLeaves = this.app.workspace.getLeavesOfType('image');
-											for (const leaf of imageLeaves) {
-												const view = leaf.view;
-												if (view instanceof FileView && view.file === file) {
-													// Refresh the image view
-													await leaf.setViewState({
-														type: 'image',
-														state: { file: file.path }
-													});
-												}
-											}
-										}
-									}
-								}
-							}
-						});
-						modal.open();
-					})
-			);
-
-			// Delete (Image + md link)
-			menu.addItem((item) => {
-				item.setTitle('Delete Image from vault')
-					.setIcon('trash')
-					.onClick(async () => {
-						deleteImageFromVault(event, this.app);
-					});
-			});
-
-			// Add annotate option
-			menu.addItem((item) => {
-				item
-					.setTitle('Annotate Image')
-					.setIcon('pencil')
-					.onClick(async () => {
-						try {
-							// Get the active markdown view
+							// Get file path from src attribute
+							// Get Vault Name
+							const rootFolder = this.app.vault.getName();
 							const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-							if (!activeView) {
-								new Notice('No active markdown view');
-								return;
+							if (activeView) {
+								// Grab full path of an src, it will return full path including Drive letter etc.
+								// thus we need to get rid of anything what is not part of the vault
+								let imagePath = img.getAttribute('src');
+								if (imagePath) {
+									// Find the position of the root folder in the path
+									const rootFolderIndex = imagePath.indexOf(rootFolder);
+
+									// Remove everything before the root folder
+									if (rootFolderIndex !== -1) {
+										imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
+									}
+
+									// Remove the query string
+									imagePath = imagePath.split('?')[0];
+									// Decode percent-encoded characters
+									const decodedPath = decodeURIComponent(imagePath);
+
+									const file = this.app.vault.getAbstractFileByPath(decodedPath);
+									if (file instanceof TFile && isImage(file)) {
+										// Replace the image
+										await this.app.vault.modifyBinary(file, buffer);
+
+										// Refresh all views that might be showing this image
+										const leaves = this.app.workspace.getLeavesOfType('markdown');
+										for (const leaf of leaves) {
+											const view = leaf.view;
+											if (view instanceof MarkdownView) {
+												// Store current state
+												const currentState = leaf.getViewState();
+												// const editor = view.editor;
+												// const cursorPosition = editor.getCursor();
+												// const scrollInfo = editor.getScrollInfo();
+
+												// Force refresh by switching views
+												await leaf.setViewState({
+													type: 'empty',
+													state: {}
+												});
+
+												// Switch back to the original view
+												await leaf.setViewState(currentState);
+
+												// Restore cursor and scroll position
+												// editor.setCursor(cursorPosition);
+												// editor.scrollTo(scrollInfo.left, scrollInfo.top);
+											}
+										}
+
+										// Additionally, refresh any image views of this file
+										const imageLeaves = this.app.workspace.getLeavesOfType('image');
+										for (const leaf of imageLeaves) {
+											const view = leaf.view;
+											if (view instanceof FileView && view.file === file) {
+												// Refresh the image view
+												await leaf.setViewState({
+													type: 'image',
+													state: { file: file.path }
+												});
+											}
+										}
+									}
+								}
 							}
-			
-							// Get the current file (note) being viewed
-							const currentFile = activeView.file;
-							if (!currentFile) {
-								new Notice('No current file found');
-								return;
-							}
-			
-							// Get the filename from the src attribute
-							const srcAttribute = img.getAttribute('src');
-							if (!srcAttribute) {
-								new Notice('No source attribute found');
-								return;
-							}
-			
-							// Extract just the filename
-							const filename = decodeURIComponent(srcAttribute.split('?')[0].split('/').pop() || '');
-							// console.log('Extracted filename:', filename);
-			
-							// Search for the file in the vault
-							const matchingFiles = this.app.vault.getFiles().filter(file => 
-								file.name === filename
-							);
-			
-							if (matchingFiles.length === 0) {
-								console.error('No matching files found for:', filename);
-								new Notice(`Unable to find image: ${filename}`);
-								return;
-							}
-			
-							// If multiple matches, try to find the one in the same folder as the current note
-							const file = matchingFiles.length === 1 
-								? matchingFiles[0] 
-								: matchingFiles.find(f => {
-									// Get the parent folder of the current file
-									const parentPath = currentFile.parent?.path;
-									return parentPath 
-										? f.path.startsWith(parentPath) 
-										: false;
-								}) || matchingFiles[0];
-			
-							if (file instanceof TFile) {
-								// console.log('Found file:', file.path);
-								new ImageAnnotationModal(this.app, this, file).open();
-							} else {
-								new Notice('Unable to locate image file');
-							}
-						} catch (error) {
-							console.error('Image location error:', error);
-							new Notice('Error processing image path');
 						}
 					});
-			});
-        
-			menu.showAtPosition({ x: event.pageX, y: event.pageY });
-			
+					modal.open();
+				})
+		);
 
-			// // Prevent the default context menu from appearing
-			// event.preventDefault();
-		}
+		// Delete (Image + md link)
+		menu.addItem((item) => {
+			item.setTitle('Delete Image from vault')
+				.setIcon('trash')
+				.onClick(async () => {
+					deleteImageFromVault(event, this.app);
+				});
+		});
+
+		// Add annotate option
+		menu.addItem((item) => {
+			item
+				.setTitle('Annotate Image')
+				.setIcon('pencil')
+				.onClick(async () => {
+					try {
+						// Get the active markdown view
+						const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+						if (!activeView) {
+							new Notice('No active markdown view');
+							return;
+						}
+
+						// Get the current file (note) being viewed
+						const currentFile = activeView.file;
+						if (!currentFile) {
+							new Notice('No current file found');
+							return;
+						}
+
+						// Get the filename from the src attribute
+						const srcAttribute = img.getAttribute('src');
+						if (!srcAttribute) {
+							new Notice('No source attribute found');
+							return;
+						}
+
+						// Extract just the filename
+						const filename = decodeURIComponent(srcAttribute.split('?')[0].split('/').pop() || '');
+						// console.log('Extracted filename:', filename);
+
+						// Search for the file in the vault
+						const matchingFiles = this.app.vault.getFiles().filter(file =>
+							file.name === filename
+						);
+
+						if (matchingFiles.length === 0) {
+							console.error('No matching files found for:', filename);
+							new Notice(`Unable to find image: ${filename}`);
+							return;
+						}
+
+						// If multiple matches, try to find the one in the same folder as the current note
+						const file = matchingFiles.length === 1
+							? matchingFiles[0]
+							: matchingFiles.find(f => {
+								// Get the parent folder of the current file
+								const parentPath = currentFile.parent?.path;
+								return parentPath
+									? f.path.startsWith(parentPath)
+									: false;
+							}) || matchingFiles[0];
+
+						if (file instanceof TFile) {
+							// console.log('Found file:', file.path);
+							new ImageAnnotationModal(this.app, this, file).open();
+						} else {
+							new Notice('Unable to locate image file');
+						}
+					} catch (error) {
+						console.error('Image location error:', error);
+						new Notice('Error processing image path');
+					}
+				});
+		});
+        
+		menu.showAtPosition({ x: event.pageX, y: event.pageY });
+		
+
+		// // Prevent the default context menu from appearing
+		// event.preventDefault();
+		
 
 	}
 
