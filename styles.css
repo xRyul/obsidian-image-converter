@@ -805,8 +805,7 @@
     width: 100%;
 }
 
-/* Progress */
-/* //////////////////////////////// */
+/* Progress Bar Base */
 .image-converter-progress {
     position: fixed;
     bottom: 40px;
@@ -824,12 +823,14 @@
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
+/* Progress Text */
 .image-converter-progress .progress-text {
     font-size: 14px;
     font-weight: 500;
     color: var(--text-normal);
 }
 
+/* File Name */
 .image-converter-progress .file-name {
     font-size: 12px;
     color: var(--text-muted);
@@ -838,21 +839,91 @@
     text-overflow: ellipsis;
 }
 
+/* Progress Bar Container */
 .image-converter-progress .progress-bar {
     width: 100%;
-    height: 4px;
+    height: 6px; /* Increased height for better visibility */
     background-color: var(--background-modifier-border);
-    border-radius: 2px;
+    border-radius: 3px;
     overflow: hidden;
+    position: relative;
 }
 
+/* Progress Fill with Animation */
 .image-converter-progress .progress-fill {
     height: 100%;
-    background-color: var(--interactive-accent);
-    transition: width 0.3s ease;
+    background: var(--interactive-accent);
+    border-radius: 3px;
+    transition: width 0.3s ease-in-out;
+    position: relative;
 }
 
-/* Mobile adjustments */
+/* Active Processing Animation */
+.image-converter-progress .progress-fill.processing {
+    background: linear-gradient(
+        45deg,
+        var(--interactive-accent) 25%,
+        var(--interactive-accent-hover) 25%,
+        var(--interactive-accent-hover) 50%,
+        var(--interactive-accent) 50%,
+        var(--interactive-accent) 75%,
+        var(--interactive-accent-hover) 75%,
+        var(--interactive-accent-hover)
+    );
+    background-size: 20px 20px;
+    animation: progress-bar-stripes 1s linear infinite;
+}
+
+/* Processing Indicator */
+.image-converter-progress .processing-indicator {
+    position: absolute;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    background: var(--text-on-accent);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2;
+}
+
+.image-converter-progress .processing-indicator.pulse {
+    animation: pulse 1s ease-in-out infinite;
+}
+
+/* Time Remaining */
+.image-converter-progress .time-remaining {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    text-align: right;
+}
+
+/* Animations */
+@keyframes progress-bar-stripes {
+    from {
+        background-position: 20px 0;
+    }
+    to {
+        background-position: 0 0;
+    }
+}
+
+@keyframes pulse {
+    0% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 1;
+    }
+    50% {
+        transform: translate(-50%, -50%) scale(1.5);
+        opacity: 0.7;
+    }
+    100% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 1;
+    }
+}
+
+/* Mobile Adjustments */
 @media (max-width: 768px) {
     .image-converter-progress {
         bottom: 10px;
@@ -861,80 +932,6 @@
         max-width: none;
     }
 }
-
-/*  */
-
-/* Progress bar container */
-.image-converter-progress .progress-container {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 10px;
-    background-color: var(--background-primary);
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 4px;
-    margin: 10px 0;
-}
-
-.image-converter-progress .progress-container.hidden {
-    display: none;
-}
-
-/* Progress text */
-.image-converter-progress .progress-text {
-    font-size: var(--font-ui-small);
-    color: var(--text-muted);
-    margin-bottom: 4px;
-}
-
-/* File name */
-.file-name {
-    font-size: var(--font-ui-smaller);
-    color: var(--text-normal);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 200px;
-}
-
-/* Progress bar */
-.image-converter-progress .progress-bar {
-    width: 100%;
-    height: 4px;
-    background-color: var(--background-modifier-border);
-    border-radius: 2px;
-    overflow: hidden;
-    position: relative;
-}
-
-/* Progress fill */
-.image-converter-progress .progress-fill {
-    height: 100%;
-    background-color: var(--interactive-accent);
-    border-radius: 2px;
-    transition: width 0.3s ease;
-    width: 0;
-}
-
-/* Use CSS custom properties for progress */
-.image-converter-progress .progress-fill[data-progress] {
-    width: calc(var(--progress-percentage, 0) * 1%);
-}
-
-/* Update the progress using attribute */
-.image-converter-progress .progress-fill[data-progress="0"] { --progress-percentage: 0; }
-.image-converter-progress .progress-fill[data-progress="10"] { --progress-percentage: 10; }
-.image-converter-progress .progress-fill[data-progress="20"] { --progress-percentage: 20; }
-.image-converter-progress .progress-fill[data-progress="30"] { --progress-percentage: 30; }
-.image-converter-progress .progress-fill[data-progress="40"] { --progress-percentage: 40; }
-.image-converter-progress .progress-fill[data-progress="50"] { --progress-percentage: 50; }
-.image-converter-progress .progress-fill[data-progress="60"] { --progress-percentage: 60; }
-.image-converter-progress .progress-fill[data-progress="70"] { --progress-percentage: 70; }
-.image-converter-progress .progress-fill[data-progress="80"] { --progress-percentage: 80; }
-.image-converter-progress .progress-fill[data-progress="90"] { --progress-percentage: 90; }
-.image-converter-progress .progress-fill[data-progress="100"] { --progress-percentage: 100; }
-
-
 
 
 
@@ -1701,3 +1698,226 @@
         margin-left: 4px;
     }
 }
+
+
+/* CROP */
+
+
+
+.crop-tool-modal .modal {
+    position: fixed;
+    border-radius: var(--radius-m);
+    padding: 0;
+    overflow: hidden;
+    background-color: var(--background-primary);
+    box-shadow: var(--shadow-l);
+    animation: modalOpen 200ms ease-out;
+}
+
+.crop-tool-modal .crop-modal-wrapper {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background-color: var(--background-primary);
+    border-radius: var(--radius-m);
+}
+
+.crop-tool-modal .crop-modal-header {
+    padding: var(--size-4-4);
+    /* background-color: var(--background-secondary);
+    border-bottom: 1px solid var(--background-modifier-border); */
+}
+
+.crop-tool-modal .crop-modal-header h2 {
+    margin: 0;
+    font-size: 1.5em;
+}
+
+.crop-tool-modal .crop-container {
+    position: relative;
+    width: 100%;
+    overflow: hidden; /* Contain the overlay */
+}
+
+.crop-tool-modal .crop-original-image {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+/* Remove the separate overlay div since we're using box-shadow */
+.crop-tool-modal .crop-overlay {
+    display: none;
+}
+
+.crop-tool-modal .selection-area {
+    position: absolute;
+    border: 2px solid var(--interactive-accent);
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+    pointer-events: auto;
+    cursor: move;
+    z-index: 2;
+}
+.crop-tool-modal .resize-handle {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    background-color: #fff;
+    border: 1px solid #00a8ff;
+    border-radius: 50%;
+}
+
+/* Position handles */
+.crop-tool-modal .nw-resize { top: -5px; left: -5px; cursor: nw-resize; }
+.crop-tool-modal .n-resize { top: -5px; left: 50%; transform: translateX(-50%); cursor: n-resize; }
+.crop-tool-modal .ne-resize { top: -5px; right: -5px; cursor: ne-resize; }
+.crop-tool-modal .w-resize { top: 50%; left: -5px; transform: translateY(-50%); cursor: w-resize; }
+.crop-tool-modal .e-resize { top: 50%; right: -5px; transform: translateY(-50%); cursor: e-resize; }
+.crop-tool-modal .sw-resize { bottom: -5px; left: -5px; cursor: sw-resize; }
+.crop-tool-modal .s-resize { bottom: -5px; left: 50%; transform: translateX(-50%); cursor: s-resize; }
+.crop-tool-modal .se-resize { bottom: -5px; right: -5px; cursor: se-resize; }
+
+.crop-tool-modal .crop-modal-buttons {
+    padding: var(--size-4-2);
+    border-top: 1px solid var(--background-modifier-border);
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--size-2-3);
+    background-color: var(--background-secondary);
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 3;
+}
+
+.crop-tool-modal .crop-modal-buttons button {
+    padding: var(--size-4-1) var(--size-4-3);
+    border-radius: var(--radius-s);
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-medium);
+    border: 1px solid var(--background-modifier-border);
+    background-color: var(--interactive-normal);
+    color: var(--text-normal);
+    cursor: pointer;
+    min-width: 70px;
+}
+
+.crop-tool-modal .crop-modal-buttons button:hover {
+    background-color: var(--interactive-hover);
+}
+
+/* Make the Save button more prominent */
+.crop-tool-modal .crop-modal-buttons button:first-child {
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border-color: var(--interactive-accent);
+}
+
+.crop-tool-modal .crop-modal-buttons button:first-child:hover {
+    background-color: var(--interactive-accent-hover);
+}
+
+.crop-tool-modal .crop-modal-content {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+    padding: 16px;
+}
+
+/* Aspect ratio */
+
+.crop-tool-modal .aspect-ratio-controls {
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.crop-tool-modal .ratio-buttons-container {
+    display: flex;
+    gap: 8px;
+}
+
+.crop-tool-modal .custom-ratio-container {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.crop-tool-modal .aspect-ratio-button {
+    padding: 4px 8px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    background: var(--background-secondary);
+    cursor: pointer;
+}
+
+.crop-tool-modal .aspect-ratio-button:hover {
+    background: var(--background-modifier-hover);
+}
+
+.crop-tool-modal .aspect-ratio-button.active {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.crop-tool-modal .custom-ratio-input {
+    width: 40px;
+    height: 24px;
+    padding: 2px 4px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    background: var(--background-primary);
+    text-align: center;
+}
+
+.crop-tool-modal .custom-ratio-input:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+}
+
+/* Remove spinner buttons from number inputs */
+.crop-tool-modal .custom-ratio-input::-webkit-outer-spin-button,
+.crop-tool-modal .custom-ratio-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.crop-tool-modal .custom-ratio-input[type=number] {
+    -moz-appearance: textfield;
+}
+
+/* Mobile-specific styles */
+@media screen and (max-width: 768px) {
+    .crop-tool-modal .modal {
+        width: calc(100% - var(--size-4-4));
+        height: calc(100% - var(--size-4-4));
+        max-height: 90vh;
+        margin: var(--size-4-2);
+    }
+
+    .crop-tool-modal .crop-modal-header {
+        padding: var(--size-4-2);
+    }
+
+    .crop-tool-modal .crop-modal-buttons {
+        padding: var(--size-4-2);
+    }
+}
+
+/* Animation for modal opening */
+
+/* @keyframes modalOpen {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -48%) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+    }
+} */
