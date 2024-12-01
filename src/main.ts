@@ -1290,63 +1290,8 @@ export default class ImageConvertPlugin extends Plugin {
 						continue; // Skip to next iteration
 					}
 				}
-
-				// // Extend timeout for large or complex files
-				// if (this.dropInfo?.batchId === currentBatchId) {
-				// 	const currentFileIndex = this.dropInfo.totalProcessedFiles;
-				// 	const currentFile = this.dropInfo.files[currentFileIndex];
-
-				// 	if (currentFile) {
-				// 		// Get the MIME type using mime package if available
-				// 		const mimeType = mime.getType(currentFile.name) || currentFile.type;
-
-				// 		// Check if the file is large or a complex format
-				// 		const isLargeFile = currentFile.size > 10 * 1024 * 1024; // 10MB
-				// 		const isComplexFormat = ['image/heic', 'image/tiff', 'image/png'].includes(mimeType);
-
-				// 		if (isLargeFile || isComplexFormat) {
-				// 			if (this.dropInfo.timeoutId) {
-				// 				window.clearTimeout(this.dropInfo.timeoutId);
-				// 			}
-
-				// 			// Calculate extended timeout based on file characteristics
-				// 			const extensionTime = Math.max(
-				// 				30000, // minimum 30 seconds
-				// 				(currentFile.size / (1024 * 1024)) * 2000 // 2 seconds per MB
-				// 			) * (isComplexFormat ? 1.5 : 1); // 50% more time for complex formats
-
-				// 			this.dropInfo.timeoutId = window.setTimeout(() => {
-				// 				if (this.dropInfo?.batchId === currentBatchId) {
-				// 					const remainingFiles = this.fileQueue.length;
-				// 					if (remainingFiles > 0) {
-				// 						console.log(`Extended processing time for remaining ${remainingFiles} files`);
-				// 					} else {
-				// 						this.userAction = false;
-				// 						this.batchStarted = false;
-				// 						this.dropInfo = null;
-				// 					}
-				// 				}
-				// 			}, extensionTime);
-				// 		}
-				// 	}
-				// }
-
 	
 				try {
-					// // Before processing, mark the file
-					// if (!Platform.isMobile) {
-					// 	this.mobileProcessedFiles.set(item.file.path, {
-					// 		path: item.file.path,
-					// 		timestamp: Date.now(),
-					// 		size: (await this.app.vault.adapter.stat(item.file.path))?.size || 0,
-					// 		platform: 'desktop'
-					// 	});
-					// }
-
-					// // Kill switch check before processing each file
-					// if (this.isKillSwitchActive) {
-					// 	break;
-					// }
 					
 					// Update progress before processing
 					if (this.settings.showProgress) {
@@ -1454,21 +1399,21 @@ export default class ImageConvertPlugin extends Plugin {
 					this.processedFiles = [];
 
 					// Refresh note
-					const leaf = this.app.workspace.getMostRecentLeaf();
-					if (leaf) {
-						// Store current state
-						const currentState = leaf.getViewState();
+					// const leaf = this.app.workspace.getMostRecentLeaf();
+					// if (leaf) {
+					// 	// Store current state
+					// 	const currentState = leaf.getViewState();
 						
-						// Switch to a different view type temporarily
-						await leaf.setViewState({
-							type: 'empty',
-							state: {}
-						});
+					// 	// Switch to a different view type temporarily
+					// 	await leaf.setViewState({
+					// 		type: 'empty',
+					// 		state: {}
+					// 	});
 
-						// Switch back to the original view
-						await leaf.setViewState(currentState);
+					// 	// Switch back to the original view
+					// 	await leaf.setViewState(currentState);
 
-					}
+					// }
 
 				}
 	
@@ -1562,17 +1507,6 @@ export default class ImageConvertPlugin extends Plugin {
 			this.progressEl.style.display = 'flex';
 		}
 	}
-
-    // private async generateSourceHash(file: TFile): Promise<string> {
-    //     const binary = await this.app.vault.readBinary(file);
-
-    //     // Use a better hashing algorithm like SHA-256 for better collision resistance
-    //     const hashBuffer = await crypto.subtle.digest('SHA-256', binary);
-    //     const hashArray = Array.from(new Uint8Array(hashBuffer));
-    //     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-    //     return hashHex; // Return the hexadecimal string of the hash
-    // }
 
 	/////////////////////////////////
 
@@ -4070,6 +4004,66 @@ export default class ImageConvertPlugin extends Plugin {
 				.setIcon('trash')
 				.onClick(async () => {
 					deleteImageFromVault(event, this.app);
+				});
+		});
+
+		menu.addItem((item) => {
+			item
+				.setTitle('Crop')
+				.setIcon('scissors')
+				.onClick(async () => {
+					// Get the active markdown view
+					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+					if (!activeView) {
+						new Notice('No active markdown view');
+						return;
+					}
+
+					// Get the current file (note) being viewed
+					const currentFile = activeView.file;
+					if (!currentFile) {
+						new Notice('No current file found');
+						return;
+					}
+
+					// Get the filename from the src attribute
+					const srcAttribute = img.getAttribute('src');
+					if (!srcAttribute) {
+						new Notice('No source attribute found');
+						return;
+					}
+
+					// Extract just the filename
+					const filename = decodeURIComponent(srcAttribute.split('?')[0].split('/').pop() || '');
+					// console.log('Extracted filename:', filename);
+
+					// Search for the file in the vault
+					const matchingFiles = this.app.vault.getFiles().filter(file =>
+						file.name === filename
+					);
+
+					if (matchingFiles.length === 0) {
+						console.error('No matching files found for:', filename);
+						new Notice(`Unable to find image: ${filename}`);
+						return;
+					}
+
+					// If multiple matches, try to find the one in the same folder as the current note
+					const file = matchingFiles.length === 1
+						? matchingFiles[0]
+						: matchingFiles.find(f => {
+							// Get the parent folder of the current file
+							const parentPath = currentFile.parent?.path;
+							return parentPath
+								? f.path.startsWith(parentPath)
+								: false;
+						}) || matchingFiles[0];
+
+						if (file instanceof TFile) {
+							new CropModal(this.app, file).open();
+						} else {
+							new Notice('Unable to locate image file');
+						}
 				});
 		});
 
@@ -10839,5 +10833,689 @@ class ArrowBrush extends PencilBrush {
             console.error('Error creating arrow head:', error);
             return null;
         }
+    }
+}
+
+
+type SupportedImageFormat = 'jpeg' | 'png' | 'webp' | 'avif';
+export class CropModal extends Modal {
+	private readonly eventRefs: Array<() => void> = [];
+
+	private readonly MODAL_PADDING = 16;
+	private readonly HEADER_HEIGHT = 60;
+	private readonly FOOTER_HEIGHT = 60;
+	private readonly ASPECT_RATIO_HEIGHT = 80;
+	
+	// Calculate total chrome height (all UI elements except image)
+	private readonly CHROME_HEIGHT = this.HEADER_HEIGHT + this.FOOTER_HEIGHT + this.ASPECT_RATIO_HEIGHT;
+	
+	// Maximum dimensions relative to viewport
+	private readonly MAX_WIDTH_RATIO = 0.85; // 85% of viewport width
+	private readonly MAX_HEIGHT_RATIO = 0.85; // 85% of viewport height
+	
+	// Minimum dimensions
+	private readonly MIN_WIDTH = 320;
+	private readonly MIN_HEIGHT = 400;
+
+    private imageFile: TFile;
+    private originalArrayBuffer: ArrayBuffer | null = null;
+    private cropContainer: HTMLDivElement;
+    private selectionArea: HTMLDivElement;
+    private isDrawing = false;
+    private startX = 0;
+    private startY = 0;
+    private originalImage: HTMLImageElement;
+    private imageScale: { x: number, y: number } = { x: 1, y: 1 };
+
+	private currentAspectRatio: number | null = null;
+
+    private registerEvent(
+        el: Element | Document,
+        event: string,
+        callback: (event: any) => any
+    ): void {
+        el.addEventListener(event, callback);
+        this.eventRefs.push(() => el.removeEventListener(event, callback));
+    }
+
+	constructor(app: App, imageFile: TFile) {
+		super(app);
+		this.imageFile = imageFile;
+		// Add specific class to modal
+		this.containerEl.addClass('crop-tool-modal');
+	}
+
+    async onOpen() {
+		const { contentEl } = this;
+		contentEl.empty();
+		
+		// Add a wrapper div for better control of modal size
+		const modalWrapper = contentEl.createDiv('crop-modal-wrapper');
+	
+		// Create modal structure
+		const modalHeader = modalWrapper.createDiv('crop-modal-header');
+		modalHeader.createEl('h2', { text: 'Crop Image' });
+	
+		// Create main container
+		const modalContent = modalWrapper.createDiv('crop-modal-content');
+		this.cropContainer = modalContent.createDiv('crop-container');
+			
+		// Create selection area
+		this.selectionArea = this.cropContainer.createDiv('selection-area');
+		this.selectionArea.style.display = 'none';
+	
+		// Create buttons - Move this inside modalWrapper
+		const buttonContainer = modalWrapper.createDiv('crop-modal-buttons');
+		const saveButton = buttonContainer.createEl('button', { text: 'Save' });
+		const cancelButton = buttonContainer.createEl('button', { text: 'Cancel' });
+		const resetButton = buttonContainer.createEl('button', { text: 'Reset' });
+
+		// Add aspect ratio controls
+		const aspectRatioContainer = modalHeader.createDiv('aspect-ratio-controls');
+		aspectRatioContainer.createEl('span', { text: 'Aspect Ratio: ' });
+		
+		// Create ratio buttons container
+		const ratioButtonsContainer = aspectRatioContainer.createDiv('ratio-buttons-container');
+		
+		// Add preset ratio buttons
+		[
+			{ name: 'free', ratio: null, label: 'Free' },
+			{ name: 'square', ratio: 1, label: '1:1' },
+			{ name: '16:9', ratio: 16/9, label: '16:9' },
+			{ name: '4:3', ratio: 4/3, label: '4:3' },
+		].forEach(({ name, ratio, label }) => {
+			const button = ratioButtonsContainer.createEl('button', {
+				text: label,
+				cls: 'aspect-ratio-button'
+			});
+			
+			button.addEventListener('click', () => {
+				// Remove active class from all buttons
+				aspectRatioContainer.querySelectorAll('.aspect-ratio-button').forEach(btn => 
+					btn.removeClass('active'));
+				
+				// Add active class to clicked button
+				button.addClass('active');
+				
+				// Clear custom inputs when selecting a preset
+				if (ratio !== null) {
+					widthInput.value = '';
+					heightInput.value = '';
+				}
+				
+				this.currentAspectRatio = ratio;
+				
+				// If there's an existing selection, adjust it to the new aspect ratio
+				if (this.selectionArea.style.display !== 'none') {
+					this.adjustSelectionToAspectRatio();
+				}
+			});
+
+			// Set free as default active
+			if (name === 'free') {
+				button.addClass('active');
+			}
+		});
+
+		// Create custom ratio inputs
+		const customRatioContainer = aspectRatioContainer.createDiv('custom-ratio-container');
+		
+		const widthInput = customRatioContainer.createEl('input', {
+			type: 'number',
+			placeholder: 'W',
+			cls: 'custom-ratio-input'
+		});
+		
+		customRatioContainer.createEl('span', { text: ':' });
+		
+		const heightInput = customRatioContainer.createEl('input', {
+			type: 'number',
+			placeholder: 'H',
+			cls: 'custom-ratio-input'
+		});
+
+		// Function to update custom ratio
+		const updateCustomRatio = () => {
+			const width = parseFloat(widthInput.value);
+			const height = parseFloat(heightInput.value);
+			
+			if (width > 0 && height > 0) {
+				// Remove active class from preset buttons
+				aspectRatioContainer.querySelectorAll('.aspect-ratio-button').forEach(btn => 
+					btn.removeClass('active'));
+					
+				this.currentAspectRatio = width / height;
+				if (this.selectionArea.style.display !== 'none') {
+					this.adjustSelectionToAspectRatio();
+				}
+			}
+		};
+
+		// Add input event listeners for immediate updates
+		widthInput.addEventListener('input', updateCustomRatio);
+		heightInput.addEventListener('input', updateCustomRatio);
+
+        try {
+            await this.loadImage();
+            this.setupEventListeners();
+
+            // Add button listeners
+			this.registerEvent(saveButton, 'click', () => this.saveCroppedImage());
+			this.registerEvent(cancelButton, 'click', () => this.close());
+			this.registerEvent(resetButton, 'click', () => this.resetSelection());
+
+			// Add escape key handler
+			this.registerEvent(document, 'keydown', (e: KeyboardEvent) => {
+				if (e.key === 'Escape') {
+					this.resetSelection();
+					// Optionally, prevent modal from closing
+					e.stopPropagation();
+				}
+			});
+        } catch (error) {
+            new Notice('Error loading image for cropping');
+            console.error('Crop modal error:', error);
+            this.close();
+        }
+    }
+
+    private async loadImage() {
+        this.originalArrayBuffer = await this.app.vault.readBinary(this.imageFile);
+        const blob = new Blob([this.originalArrayBuffer]);
+        const imageUrl = URL.createObjectURL(blob);
+
+        // Create and load the original image
+        this.originalImage = document.createElement('img');
+        this.originalImage.className = 'crop-original-image';
+        
+        return new Promise<void>((resolve, reject) => {
+            this.originalImage.onload = () => {
+				this.adjustModalSize();
+
+                // Calculate scaling factors
+                this.imageScale.x = this.originalImage.naturalWidth / this.originalImage.clientWidth;
+                this.imageScale.y = this.originalImage.naturalHeight / this.originalImage.clientHeight;
+                this.cropContainer.appendChild(this.originalImage);
+                resolve();
+            };
+            this.originalImage.onerror = reject;
+            this.originalImage.src = imageUrl;
+        });
+    }
+
+	private adjustModalSize() {
+		if (!this.originalImage) return;
+	
+		const modalElement = this.containerEl.querySelector('.modal') as HTMLElement;
+		if (!modalElement) return;
+	
+		const isMobile = window.innerWidth <= 768;
+		
+		// Get available space
+		const availableWidth = window.innerWidth * this.MAX_WIDTH_RATIO;
+		const availableHeight = window.innerHeight * this.MAX_HEIGHT_RATIO;
+	
+		// Get image dimensions
+		const imgWidth = this.originalImage.naturalWidth;
+		const imgHeight = this.originalImage.naturalHeight;
+		const imgAspectRatio = imgWidth / imgHeight;
+	
+		let modalWidth, modalHeight;
+	
+		if (isMobile) {
+			// Mobile layout: full width with padding
+			modalWidth = window.innerWidth - (this.MODAL_PADDING * 2);
+			modalHeight = Math.min(
+				window.innerHeight - (this.MODAL_PADDING * 2),
+				modalWidth / imgAspectRatio + this.CHROME_HEIGHT
+			);
+		} else {
+			// Desktop layout: maintain aspect ratio within bounds
+			if (imgAspectRatio > 1) {
+				// Landscape image
+				modalWidth = Math.min(imgWidth, availableWidth);
+				modalHeight = (modalWidth / imgAspectRatio) + this.CHROME_HEIGHT;
+	
+				// Adjust if too tall
+				if (modalHeight > availableHeight) {
+					modalHeight = availableHeight;
+					modalWidth = (modalHeight - this.CHROME_HEIGHT) * imgAspectRatio;
+				}
+			} else {
+				// Portrait image
+				modalHeight = Math.min(imgHeight + this.CHROME_HEIGHT, availableHeight);
+				modalWidth = (modalHeight - this.CHROME_HEIGHT) * imgAspectRatio;
+	
+				// Adjust if too wide
+				if (modalWidth > availableWidth) {
+					modalWidth = availableWidth;
+					modalHeight = (modalWidth / imgAspectRatio) + this.CHROME_HEIGHT;
+				}
+			}
+		}
+	
+		// Apply minimum dimensions
+		modalWidth = Math.max(this.MIN_WIDTH, modalWidth);
+		modalHeight = Math.max(this.MIN_HEIGHT, modalHeight);
+	
+		// Apply styles
+		modalElement.style.width = `${modalWidth}px`;
+		modalElement.style.height = `${modalHeight}px`;
+		modalElement.style.top = '50%';
+		modalElement.style.left = '50%';
+		modalElement.style.transform = 'translate(-50%, -50%)';
+	}
+
+	private setupEventListeners() {
+        // Mouse down - start drawing selection
+        this.registerEvent(this.cropContainer, 'mousedown', (e) => {
+            if (e.target === this.originalImage) {
+                this.isDrawing = true;
+                const rect = this.cropContainer.getBoundingClientRect();
+                this.startX = e.clientX - rect.left;
+                this.startY = e.clientY - rect.top;
+                
+                this.selectionArea.style.display = 'block';
+                this.selectionArea.style.left = `${this.startX}px`;
+                this.selectionArea.style.top = `${this.startY}px`;
+                this.selectionArea.style.width = '0';
+                this.selectionArea.style.height = '0';
+            }
+        });
+
+        // Mouse move - update selection size
+        this.registerEvent(this.cropContainer, 'mousemove', (e) => {
+            if (!this.isDrawing) return;
+            const rect = this.cropContainer.getBoundingClientRect();
+            const currentX = e.clientX - rect.left;
+            const currentY = e.clientY - rect.top;
+            this.updateSelectionSize(currentX, currentY);
+        });
+
+        // Mouse up - finish drawing selection
+        this.registerEvent(this.cropContainer, 'mouseup', (e) => {
+            this.isDrawing = false;
+            this.makeSelectionMovable();
+        });
+
+        // Prevent selection from getting stuck if mouse leaves the container
+        this.registerEvent(this.cropContainer, 'mouseleave', (e) => {
+            this.isDrawing = false;
+        });
+    }
+
+	private makeSelectionMovable() {
+		this.addResizeHandles();
+		this.setupResizeHandlers();
+		
+		let isDragging = false;
+		let dragStartX = 0;
+		let dragStartY = 0;
+		let initialLeft = 0;
+		let initialTop = 0;
+	
+		this.registerEvent(this.selectionArea, 'mousedown', (e) => {
+			e.stopPropagation(); // Prevent container's mousedown from firing
+			isDragging = true;
+			
+			// Store the initial positions
+			initialLeft = parseInt(this.selectionArea.style.left) || 0;
+			initialTop = parseInt(this.selectionArea.style.top) || 0;
+			dragStartX = e.clientX;
+			dragStartY = e.clientY;
+			
+			this.selectionArea.style.cursor = 'move';
+		});
+	
+		this.registerEvent(document, 'mousemove', (e) => {
+			if (!isDragging) return;
+	
+			// Calculate the distance moved from the start position
+			const deltaX = e.clientX - dragStartX;
+			const deltaY = e.clientY - dragStartY;
+	
+			// Calculate new positions
+			let newLeft = initialLeft + deltaX;
+			let newTop = initialTop + deltaY;
+	
+			// Get container boundaries
+			const containerRect = this.cropContainer.getBoundingClientRect();
+			const selectionRect = this.selectionArea.getBoundingClientRect();
+	
+			// Constrain to container boundaries
+			newLeft = Math.max(0, Math.min(newLeft, containerRect.width - selectionRect.width));
+			newTop = Math.max(0, Math.min(newTop, containerRect.height - selectionRect.height));
+	
+			// Apply new position
+			this.selectionArea.style.left = `${newLeft}px`;
+			this.selectionArea.style.top = `${newTop}px`;
+		});
+	
+		this.registerEvent(document, 'mouseup', () => {
+			isDragging = false;
+			this.selectionArea.style.cursor = 'move';
+		});
+	}
+
+	// Add this method to handle aspect ratio constraints during drawing
+	private updateSelectionSize(currentX: number, currentY: number) {
+		let width = currentX - this.startX;
+		let height = currentY - this.startY;
+
+		if (this.currentAspectRatio) {
+			// Maintain aspect ratio while drawing
+			const absWidth = Math.abs(width);
+			const absHeight = Math.abs(height);
+
+			if (absWidth / absHeight > this.currentAspectRatio) {
+				// Width is too big, adjust it
+				width = Math.sign(width) * absHeight * this.currentAspectRatio;
+			} else {
+				// Height is too big, adjust it
+				height = Math.sign(height) * absWidth / this.currentAspectRatio;
+			}
+		}
+
+		// Handle negative dimensions (drawing from right to left or bottom to top)
+		if (width < 0) {
+			this.selectionArea.style.left = `${this.startX + width}px`;
+			this.selectionArea.style.width = `${Math.abs(width)}px`;
+		} else {
+			this.selectionArea.style.left = `${this.startX}px`;
+			this.selectionArea.style.width = `${width}px`;
+		}
+
+		if (height < 0) {
+			this.selectionArea.style.top = `${this.startY + height}px`;
+			this.selectionArea.style.height = `${Math.abs(height)}px`;
+		} else {
+			this.selectionArea.style.top = `${this.startY}px`;
+			this.selectionArea.style.height = `${height}px`;
+		}
+	}
+
+	// Add this method to adjust existing selection to new aspect ratio
+	private adjustSelectionToAspectRatio() {
+		if (!this.currentAspectRatio) return; // Don't adjust if free form
+
+		const currentWidth = parseInt(this.selectionArea.style.width);
+		const currentHeight = parseInt(this.selectionArea.style.height);
+		
+		if (currentWidth / currentHeight > this.currentAspectRatio) {
+			// Adjust width to match height * ratio
+			const newWidth = currentHeight * this.currentAspectRatio;
+			this.selectionArea.style.width = `${newWidth}px`;
+		} else {
+			// Adjust height to match width / ratio
+			const newHeight = currentWidth / this.currentAspectRatio;
+			this.selectionArea.style.height = `${newHeight}px`;
+		}
+	}
+
+
+	private addResizeHandles() {
+		// Create resize handles for all corners and edges
+		const handles = [
+			'nw', 'n', 'ne',
+			'w', 'e',
+			'sw', 's', 'se'
+		];
+	
+		handles.forEach(position => {
+			const handle = document.createElement('div');
+			handle.className = `resize-handle ${position}-resize`;
+			this.selectionArea.appendChild(handle);
+		});
+	}
+	
+	private setupResizeHandlers() {
+		let isResizing = false;
+		let currentHandle: string | null = null;
+		let startX = 0;
+		let startY = 0;
+		let startWidth = 0;
+		let startHeight = 0;
+		let startLeft = 0;
+		let startTop = 0;
+	
+		const handles = this.selectionArea.querySelectorAll('.resize-handle');
+	
+		handles.forEach(handle => {
+			this.registerEvent(handle, 'mousedown', (e: MouseEvent) => {
+				e.stopPropagation(); // Prevent dragging from starting
+				isResizing = true;
+				currentHandle = handle.className.split(' ')[1].split('-')[0]; // Get position (nw, n, ne, etc.)
+				
+				startX = e.clientX;
+				startY = e.clientY;
+				startWidth = this.selectionArea.offsetWidth;
+				startHeight = this.selectionArea.offsetHeight;
+				startLeft = this.selectionArea.offsetLeft;
+				startTop = this.selectionArea.offsetTop;
+			});
+		});
+	
+		this.registerEvent(document, 'mousemove', (e: MouseEvent) => {
+			if (!isResizing) return;
+	
+			const deltaX = e.clientX - startX;
+			const deltaY = e.clientY - startY;
+			
+			let newWidth = startWidth;
+			let newHeight = startHeight;
+			let newLeft = startLeft;
+			let newTop = startTop;
+	
+			// Calculate new dimensions based on which handle is being dragged
+			switch (currentHandle) {
+				case 'se':
+					newWidth = startWidth + deltaX;
+					newHeight = this.currentAspectRatio 
+						? newWidth / this.currentAspectRatio 
+						: startHeight + deltaY;
+					break;
+				case 'sw':
+					newWidth = startWidth - deltaX;
+					newHeight = this.currentAspectRatio 
+						? newWidth / this.currentAspectRatio 
+						: startHeight + deltaY;
+					newLeft = startLeft + deltaX;
+					break;
+				case 'ne':
+					newWidth = startWidth + deltaX;
+					newHeight = this.currentAspectRatio 
+						? newWidth / this.currentAspectRatio 
+						: startHeight - deltaY;
+					newTop = startTop + (startHeight - newHeight);
+					break;
+				case 'nw':
+					newWidth = startWidth - deltaX;
+					newHeight = this.currentAspectRatio 
+						? newWidth / this.currentAspectRatio 
+						: startHeight - deltaY;
+					newLeft = startLeft + deltaX;
+					newTop = startTop + (startHeight - newHeight);
+					break;
+				case 'n':
+					newHeight = startHeight - deltaY;
+					if (this.currentAspectRatio) {
+						newWidth = newHeight * this.currentAspectRatio;
+						newLeft = startLeft + (startWidth - newWidth) / 2;
+					}
+					newTop = startTop + deltaY;
+					break;
+				case 's':
+					newHeight = startHeight + deltaY;
+					if (this.currentAspectRatio) {
+						newWidth = newHeight * this.currentAspectRatio;
+						newLeft = startLeft + (startWidth - newWidth) / 2;
+					}
+					break;
+				case 'e':
+					newWidth = startWidth + deltaX;
+					if (this.currentAspectRatio) {
+						newHeight = newWidth / this.currentAspectRatio;
+						newTop = startTop + (startHeight - newHeight) / 2;
+					}
+					break;
+				case 'w':
+					newWidth = startWidth - deltaX;
+					if (this.currentAspectRatio) {
+						newHeight = newWidth / this.currentAspectRatio;
+						newTop = startTop + (startHeight - newHeight) / 2;
+					}
+					newLeft = startLeft + deltaX;
+					break;
+			}
+	
+			// Constrain to container boundaries
+			const containerRect = this.cropContainer.getBoundingClientRect();
+			newWidth = Math.max(20, Math.min(newWidth, containerRect.width - newLeft));
+			newHeight = Math.max(20, Math.min(newHeight, containerRect.height - newTop));
+			newLeft = Math.max(0, Math.min(newLeft, containerRect.width - newWidth));
+			newTop = Math.max(0, Math.min(newTop, containerRect.height - newHeight));
+	
+			// Apply new dimensions
+			this.selectionArea.style.width = `${newWidth}px`;
+			this.selectionArea.style.height = `${newHeight}px`;
+			this.selectionArea.style.left = `${newLeft}px`;
+			this.selectionArea.style.top = `${newTop}px`;
+		});
+	
+		this.registerEvent(document, 'mouseup', () => {
+			isResizing = false;
+			currentHandle = null;
+		});
+	}
+
+
+    private resetSelection() {
+        this.selectionArea.style.display = 'none';
+        this.selectionArea.style.width = '0';
+        this.selectionArea.style.height = '0';
+    }
+
+	async saveCroppedImage() {
+		if (!this.originalImage || !this.selectionArea.offsetWidth) {
+			new Notice('Please select an area to crop');
+			return;
+		}
+	
+		try {
+			// Create a canvas to perform the crop
+			const canvas = document.createElement('canvas');
+			const ctx = canvas.getContext('2d');
+			if (!ctx) {
+				throw new Error('Could not get canvas context');
+			}
+	
+			// Get the selection area dimensions
+			const selectionRect = this.selectionArea.getBoundingClientRect();
+			const imageRect = this.originalImage.getBoundingClientRect();
+			const scaleX = this.originalImage.naturalWidth / imageRect.width;
+			const scaleY = this.originalImage.naturalHeight / imageRect.height;
+	
+			// Calculate crop dimensions in original image coordinates
+			const cropX = (selectionRect.left - imageRect.left) * scaleX;
+			const cropY = (selectionRect.top - imageRect.top) * scaleY;
+			const cropWidth = selectionRect.width * scaleX;
+			const cropHeight = selectionRect.height * scaleY;
+	
+			// Set canvas dimensions to crop size
+			canvas.width = cropWidth;
+			canvas.height = cropHeight;
+	
+			// Draw the cropped portion
+			ctx.drawImage(
+				this.originalImage,
+				cropX, cropY, cropWidth, cropHeight,
+				0, 0, cropWidth, cropHeight
+			);
+	
+			// Determine the output format
+			const extension = this.imageFile.extension.toLowerCase();
+			let outputFormat: SupportedImageFormat = 'png'; // default
+			let quality = 1.0;
+	
+			// Map extension to format and set appropriate quality
+			switch (extension) {
+				case 'jpg':
+				case 'jpeg':
+					outputFormat = 'jpeg';
+					quality = 0.92; // Standard quality for JPEG
+					break;
+				case 'webp':
+					outputFormat = 'webp';
+					quality = 0.92; // Good balance for WebP
+					break;
+				case 'avif':
+					outputFormat = 'avif';
+					quality = 0.85; // AVIF can maintain good quality at lower values
+					break;
+				case 'png':
+					outputFormat = 'png';
+					break;
+			}
+	
+			// Convert to blob with explicit promise handling
+			const blob = await new Promise<Blob>((resolve, reject) => {
+				canvas.toBlob(
+					(result) => {
+						if (result) {
+							resolve(result);
+						} else {
+							reject(new Error('Failed to create blob from canvas'));
+						}
+					},
+					`image/${outputFormat}`,
+					quality
+				);
+			});
+	
+			if (!blob) {
+				throw new Error('Failed to create image blob');
+			}
+	
+			// Convert blob to array buffer
+			const arrayBuffer = await blob.arrayBuffer();
+			
+			if (!arrayBuffer) {
+				throw new Error('Failed to create array buffer from blob');
+			}
+	
+			// Save the cropped image
+			await this.app.vault.modifyBinary(this.imageFile, arrayBuffer);
+			
+			new Notice('Image cropped successfully');
+	
+			// Refresh image in the editor
+			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!activeView) return;
+			
+			const leaf = this.app.workspace.getMostRecentLeaf();
+			if (leaf) {
+				const currentState = leaf.getViewState();
+				await leaf.setViewState({
+					type: 'empty',
+					state: {}
+				});
+				await leaf.setViewState(currentState);
+			}
+	
+			this.close();
+	
+		} catch (error) {
+			console.error('Save error:', error);
+			new Notice(`Error saving cropped image: ${error.message}`);
+		}
+	}
+
+    onClose() {
+        // Clean up all registered events
+        this.eventRefs.forEach(cleanup => cleanup());
+        this.eventRefs.length = 0;
+        
+        const { contentEl } = this;
+        contentEl.empty();
     }
 }
