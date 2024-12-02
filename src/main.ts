@@ -4009,7 +4009,7 @@ export default class ImageConvertPlugin extends Plugin {
 
 		menu.addItem((item) => {
 			item
-				.setTitle('Crop')
+				.setTitle('Crop/Rotate/Flip')
 				.setIcon('scissors')
 				.onClick(async () => {
 					// Get the active markdown view
@@ -5570,7 +5570,7 @@ function updateImageLink({ activeView, element, newWidth, newHeight, settings }:
 
 	// Obsidian supports WIDTHxHEIGHT syntax. But for simplicity we can use only 1 whichever is longer.
 	// This helps with setting appropriate initial |size depending on the image at hand
-    const longestSide = Math.round(Math.max(newWidth, newHeight));
+    const longestSide = Math.round(newWidth);
 
     let updatedContent = targetLineContent;
     let startCh = 0;
@@ -5593,6 +5593,7 @@ function updateImageLink({ activeView, element, newWidth, newHeight, settings }:
         if (normalizedPath.includes(normalizedImageName)) {
             // Preserve alt text if it exists, otherwise keep empty
             const newAltText = altText.replace(/\|\d+(\|\d+)?/g, '');
+			// const newMarkdown = `![[${path}|${newWidth}x${newHeight}]]`;
             const newMarkdown = `![${newAltText}|${longestSide}](${path})`;
             startCh = match.index;
             endCh = startCh + fullMatch.length;
@@ -5611,6 +5612,7 @@ function updateImageLink({ activeView, element, newWidth, newHeight, settings }:
             const normalizedImageName = normalizeForComparison(imageName);
             
             if (normalizedPath.includes(normalizedImageName)) {
+				// const newMarkdown = `![${newAltText}|${newWidth}x${newHeight}](${path})`;
                 const newMarkdown = `![[${path}|${longestSide}]]`;
                 startCh = match.index;
                 endCh = startCh + fullMatch.length;
@@ -10849,13 +10851,13 @@ export class CropModal extends Modal {
 	// Calculate total chrome height (all UI elements except image)
 	private readonly CHROME_HEIGHT = this.HEADER_HEIGHT + this.FOOTER_HEIGHT + this.ASPECT_RATIO_HEIGHT;
 	
-	// Maximum dimensions relative to viewport
-	private readonly MAX_WIDTH_RATIO = 0.85; // 85% of viewport width
-	private readonly MAX_HEIGHT_RATIO = 0.85; // 85% of viewport height
-	
 	// Minimum dimensions
 	private readonly MIN_WIDTH = 320;
 	private readonly MIN_HEIGHT = 400;
+
+	private readonly STATIC_DESKTOP_WIDTH_RATIO = 0.9; // 80% of window width
+	private readonly STATIC_DESKTOP_HEIGHT_RATIO = 0.9; // 80% of window height
+
 
     private imageFile: TFile;
     private originalArrayBuffer: ArrayBuffer | null = null;
@@ -10868,6 +10870,16 @@ export class CropModal extends Modal {
     private imageScale: { x: number, y: number } = { x: 1, y: 1 };
 
 	private currentAspectRatio: number | null = null;
+
+	private currentRotation = 0;
+	private isFlippedX = false;
+	private isFlippedY = false;
+
+	private zoom = 1;
+	private readonly MIN_ZOOM = 0.1;
+	private readonly MAX_ZOOM = 5;
+	private readonly ZOOM_STEP = 0.1;
+
 
     private registerEvent(
         el: Element | Document,
@@ -10894,7 +10906,7 @@ export class CropModal extends Modal {
 	
 		// Create modal structure
 		const modalHeader = modalWrapper.createDiv('crop-modal-header');
-		modalHeader.createEl('h2', { text: 'Crop Image' });
+		modalHeader.createEl('h2', { text: 'Crop image' });
 	
 		// Create main container
 		const modalContent = modalWrapper.createDiv('crop-modal-content');
@@ -10912,11 +10924,14 @@ export class CropModal extends Modal {
 
 		// Add aspect ratio controls
 		const aspectRatioContainer = modalHeader.createDiv('aspect-ratio-controls');
-		aspectRatioContainer.createEl('span', { text: 'Aspect Ratio: ' });
+
+		// Add transform controls
+		this.createTransformControls(aspectRatioContainer);
+		aspectRatioContainer.createEl('span', { text: ' ' });
 		
 		// Create ratio buttons container
 		const ratioButtonsContainer = aspectRatioContainer.createDiv('ratio-buttons-container');
-		
+
 		// Add preset ratio buttons
 		[
 			{ name: 'free', ratio: null, label: 'Free' },
@@ -10995,12 +11010,15 @@ export class CropModal extends Modal {
 		widthInput.addEventListener('input', updateCustomRatio);
 		heightInput.addEventListener('input', updateCustomRatio);
 
+		// Add image controls (rotation and zoom)
+		this.createImageControls(modalHeader);
+
         try {
             await this.loadImage();
             this.setupEventListeners();
 
             // Add button listeners
-			this.registerEvent(saveButton, 'click', () => this.saveCroppedImage());
+			this.registerEvent(saveButton, 'click', () => this.saveImage());
 			this.registerEvent(cancelButton, 'click', () => this.close());
 			this.registerEvent(resetButton, 'click', () => this.resetSelection());
 
@@ -11051,10 +11069,6 @@ export class CropModal extends Modal {
 	
 		const isMobile = window.innerWidth <= 768;
 		
-		// Get available space
-		const availableWidth = window.innerWidth * this.MAX_WIDTH_RATIO;
-		const availableHeight = window.innerHeight * this.MAX_HEIGHT_RATIO;
-	
 		// Get image dimensions
 		const imgWidth = this.originalImage.naturalWidth;
 		const imgHeight = this.originalImage.naturalHeight;
@@ -11070,27 +11084,21 @@ export class CropModal extends Modal {
 				modalWidth / imgAspectRatio + this.CHROME_HEIGHT
 			);
 		} else {
-			// Desktop layout: maintain aspect ratio within bounds
-			if (imgAspectRatio > 1) {
-				// Landscape image
-				modalWidth = Math.min(imgWidth, availableWidth);
+			// Desktop layout: static size at 80% of window
+			modalWidth = window.innerWidth * this.STATIC_DESKTOP_WIDTH_RATIO;
+			modalHeight = window.innerHeight * this.STATIC_DESKTOP_HEIGHT_RATIO;
+	
+			// Ensure the image container maintains aspect ratio within these bounds
+			const availableImageHeight = modalHeight - this.CHROME_HEIGHT;
+			const availableImageWidth = modalWidth;
+	
+			// Adjust container size to maintain aspect ratio
+			if (imgAspectRatio > availableImageWidth / availableImageHeight) {
+				// Image is wider than available space
 				modalHeight = (modalWidth / imgAspectRatio) + this.CHROME_HEIGHT;
-	
-				// Adjust if too tall
-				if (modalHeight > availableHeight) {
-					modalHeight = availableHeight;
-					modalWidth = (modalHeight - this.CHROME_HEIGHT) * imgAspectRatio;
-				}
 			} else {
-				// Portrait image
-				modalHeight = Math.min(imgHeight + this.CHROME_HEIGHT, availableHeight);
-				modalWidth = (modalHeight - this.CHROME_HEIGHT) * imgAspectRatio;
-	
-				// Adjust if too wide
-				if (modalWidth > availableWidth) {
-					modalWidth = availableWidth;
-					modalHeight = (modalWidth / imgAspectRatio) + this.CHROME_HEIGHT;
-				}
+				// Image is taller than available space
+				modalWidth = (availableImageHeight * imgAspectRatio);
 			}
 		}
 	
@@ -11105,6 +11113,171 @@ export class CropModal extends Modal {
 		modalElement.style.left = '50%';
 		modalElement.style.transform = 'translate(-50%, -50%)';
 	}
+
+   // Flip/ Rotate 
+	private createTransformControls(modalHeader: HTMLElement) {
+		const transformControls = modalHeader.createDiv({ cls: 'transform-controls' });
+		
+		// Rotation controls
+		const rotateContainer = transformControls.createDiv({ cls: 'rotate-container' });
+		
+		const rotateLeftBtn = rotateContainer.createEl('button', {
+			cls: 'transform-button',
+			text: '↺',
+			attr: { title: '90° Counter Clockwise' }
+		});
+		
+		const rotateRightBtn = rotateContainer.createEl('button', {
+			cls: 'transform-button',
+			text: '↻',
+			attr: { title: '90° Clockwise' }
+		});
+		
+		// Flip controls
+		const flipContainer = transformControls.createDiv({ cls: 'flip-container' });
+		
+		const flipHorizontalBtn = flipContainer.createEl('button', {
+			cls: 'transform-button',
+			text: '↔',
+			attr: { title: 'Flip Horizontally' }
+		});
+		
+		const flipVerticalBtn = flipContainer.createEl('button', {
+			cls: 'transform-button',
+			text: '↕',
+			attr: { title: 'Flip Vertically' }
+		});
+		
+		// Add event listeners
+		this.registerEvent(rotateLeftBtn, 'click', () => this.rotate(-90));
+		this.registerEvent(rotateRightBtn, 'click', () => this.rotate(90));
+		this.registerEvent(flipHorizontalBtn, 'click', () => this.flip('horizontal'));
+		this.registerEvent(flipVerticalBtn, 'click', () => this.flip('vertical'));
+	}
+
+	private rotate(degrees: number) {
+		this.currentRotation = (this.currentRotation + degrees) % 360;
+		this.applyTransforms();
+	}
+	
+	private flip(direction: 'horizontal' | 'vertical') {
+		if (direction === 'horizontal') {
+			this.isFlippedX = !this.isFlippedX;
+		} else {
+			this.isFlippedY = !this.isFlippedY;
+		}
+		this.applyTransforms();
+	}
+	
+
+
+
+	// Zoom / Rotate slider 
+	private createImageControls(modalHeader: HTMLElement) {
+		const controlsContainer = modalHeader.createDiv({ cls: 'image-controls' });
+
+		// Rotation controls
+		const rotationContainer = controlsContainer.createDiv({ cls: 'control-group rotation-controls' });
+		rotationContainer.createEl('span', { text: 'Rotation: ', cls: 'control-label' });
+
+		const rotationValue = rotationContainer.createEl('span', {
+			text: '0°',
+			cls: 'rotation-value'
+		});
+
+		const rotationSlider = rotationContainer.createEl('input', {
+			type: 'range',
+			cls: 'slider rotation-slider',
+			attr: {
+				min: '0',
+				max: '360',
+				value: '0',
+				disabled: 'true'
+			}
+		});
+
+		// Zoom controls
+		const zoomContainer = controlsContainer.createDiv({ cls: 'control-group zoom-controls' });
+		zoomContainer.createEl('span', { text: 'Zoom: ', cls: 'control-label' });
+
+		const zoomValue = zoomContainer.createEl('span', {
+			text: '100%',
+			cls: 'zoom-value'
+		});
+
+		const zoomSlider = zoomContainer.createEl('input', {
+			type: 'range',
+			cls: 'slider zoom-slider',
+			attr: {
+				min: String(this.MIN_ZOOM * 100),
+				max: String(this.MAX_ZOOM * 100),
+				value: '100'
+			}
+		});
+
+		// Add event listeners
+		this.registerEvent(rotationSlider, 'input', (e: Event) => {
+			const value = parseInt((e.target as HTMLInputElement).value);
+			this.currentRotation = value;
+			rotationValue.textContent = `${value}°`;
+			this.applyTransforms();
+		});
+
+		this.registerEvent(zoomSlider, 'input', (e: Event) => {
+			const value = parseInt((e.target as HTMLInputElement).value);
+			this.zoom = value / 100;
+			zoomValue.textContent = `${value}%`;
+			this.applyTransforms();
+		});
+
+		// Add mouse wheel zoom
+		this.registerEvent(this.cropContainer, 'wheel', (e: WheelEvent) => {
+			e.preventDefault();
+
+			const delta = -Math.sign(e.deltaY) * this.ZOOM_STEP;
+			const newZoom = Math.max(this.MIN_ZOOM,
+				Math.min(this.MAX_ZOOM, this.zoom + delta));
+
+			if (newZoom !== this.zoom) {
+				this.zoom = newZoom;
+				zoomSlider.value = String(this.zoom * 100);
+				zoomValue.textContent = `${Math.round(this.zoom * 100)}%`;
+				this.applyTransforms();
+			}
+		});
+	}
+
+	private applyTransforms() {
+		const transforms: string[] = [];
+		
+		// Add zoom
+		if (this.zoom !== 1) {
+			transforms.push(`scale(${this.zoom})`);
+		}
+		
+		// Add rotation
+		if (this.currentRotation !== 0) {
+			transforms.push(`rotate(${this.currentRotation}deg)`);
+		}
+		
+		// Add flips
+		if (this.isFlippedX) {
+			transforms.push('scaleX(-1)');
+		}
+		if (this.isFlippedY) {
+			transforms.push('scaleY(-1)');
+		}
+		
+		this.originalImage.style.transform = transforms.join(' ');
+		
+		// Adjust container size if needed
+		if (Math.abs(this.currentRotation) === 90 || 
+			Math.abs(this.currentRotation) === 270 ||
+			this.zoom !== 1) {
+			this.adjustModalSize();
+		}
+	}
+
 
 	private setupEventListeners() {
         // Mouse down - start drawing selection
@@ -11143,6 +11316,10 @@ export class CropModal extends Modal {
             this.isDrawing = false;
         });
     }
+
+
+
+
 
 	private makeSelectionMovable() {
 		this.addResizeHandles();
@@ -11395,69 +11572,130 @@ export class CropModal extends Modal {
         this.selectionArea.style.height = '0';
     }
 
-	async saveCroppedImage() {
-		if (!this.originalImage || !this.selectionArea.offsetWidth) {
-			new Notice('Please select an area to crop');
-			return;
-		}
-	
+	async saveImage() {
 		try {
-			// Create a canvas to perform the crop
+			// Create a canvas to perform the transformations
 			const canvas = document.createElement('canvas');
 			const ctx = canvas.getContext('2d');
 			if (!ctx) {
 				throw new Error('Could not get canvas context');
 			}
 	
-			// Get the selection area dimensions
-			const selectionRect = this.selectionArea.getBoundingClientRect();
-			const imageRect = this.originalImage.getBoundingClientRect();
-			const scaleX = this.originalImage.naturalWidth / imageRect.width;
-			const scaleY = this.originalImage.naturalHeight / imageRect.height;
+			// If there's a selection, crop and transform
+			if (this.selectionArea.style.display !== 'none' && this.selectionArea.offsetWidth) {
+				// Get the selection area dimensions
+				const selectionRect = this.selectionArea.getBoundingClientRect();
+				const imageRect = this.originalImage.getBoundingClientRect();
+				const scaleX = this.originalImage.naturalWidth / imageRect.width;
+				const scaleY = this.originalImage.naturalHeight / imageRect.height;
 	
-			// Calculate crop dimensions in original image coordinates
-			const cropX = (selectionRect.left - imageRect.left) * scaleX;
-			const cropY = (selectionRect.top - imageRect.top) * scaleY;
-			const cropWidth = selectionRect.width * scaleX;
-			const cropHeight = selectionRect.height * scaleY;
+				// Calculate crop dimensions in original image coordinates
+				const cropX = (selectionRect.left - imageRect.left) * scaleX;
+				const cropY = (selectionRect.top - imageRect.top) * scaleY;
+				const cropWidth = selectionRect.width * scaleX;
+				const cropHeight = selectionRect.height * scaleY;
 	
-			// Set canvas dimensions to crop size
-			canvas.width = cropWidth;
-			canvas.height = cropHeight;
+				// Set canvas dimensions based on rotation
+				let finalWidth = cropWidth;
+				let finalHeight = cropHeight;
+				if (Math.abs(this.currentRotation) === 90 || Math.abs(this.currentRotation) === 270) {
+					[finalWidth, finalHeight] = [finalHeight, finalWidth];
+				}
 	
-			// Draw the cropped portion
-			ctx.drawImage(
-				this.originalImage,
-				cropX, cropY, cropWidth, cropHeight,
-				0, 0, cropWidth, cropHeight
-			);
+				canvas.width = finalWidth;
+				canvas.height = finalHeight;
+	
+				// Clear the canvas and save state
+				ctx.clearRect(0, 0, canvas.width, canvas.height);
+				ctx.save();
+	
+				// Move to center of canvas
+				ctx.translate(canvas.width / 2, canvas.height / 2);
+	
+				// Apply rotation
+				ctx.rotate((this.currentRotation * Math.PI) / 180);
+	
+				// Apply flips
+				ctx.scale(
+					this.isFlippedX ? -1 : 1,
+					this.isFlippedY ? -1 : 1
+				);
+	
+				// Draw the cropped portion
+				ctx.drawImage(
+					this.originalImage,
+					cropX, cropY, cropWidth, cropHeight,
+					-cropWidth / 2, -cropHeight / 2, cropWidth, cropHeight
+				);
+			} else {
+				// Just transform the entire image without cropping
+				let finalWidth = this.originalImage.naturalWidth;
+				let finalHeight = this.originalImage.naturalHeight;
+				
+				// Apply zoom to dimensions
+				finalWidth *= this.zoom;
+				finalHeight *= this.zoom;
+
+				// Adjust dimensions if rotated 90 or 270 degrees
+				if (Math.abs(this.currentRotation) === 90 || Math.abs(this.currentRotation) === 270) {
+					[finalWidth, finalHeight] = [finalHeight, finalWidth];
+				}
+	
+				canvas.width = finalWidth;
+				canvas.height = finalHeight;
+	
+				// Clear the canvas and save state
+				ctx.clearRect(0, 0, canvas.width, canvas.height);
+				ctx.save();
+	
+				// Move to center of canvas
+				ctx.translate(canvas.width / 2, canvas.height / 2);
+	
+				// Apply rotation
+				ctx.rotate((this.currentRotation * Math.PI) / 180);
+	
+				// Apply flips
+				ctx.scale(
+					this.isFlippedX ? -1 : 1,
+					this.isFlippedY ? -1 : 1
+				);
+	
+				// Draw the entire image
+				ctx.drawImage(
+					this.originalImage,
+					-this.originalImage.naturalWidth / 2,
+					-this.originalImage.naturalHeight / 2
+				);
+			}
+	
+			// Restore canvas state
+			ctx.restore();
 	
 			// Determine the output format
 			const extension = this.imageFile.extension.toLowerCase();
-			let outputFormat: SupportedImageFormat = 'png'; // default
+			let outputFormat: SupportedImageFormat = 'png';
 			let quality = 1.0;
 	
-			// Map extension to format and set appropriate quality
 			switch (extension) {
 				case 'jpg':
 				case 'jpeg':
 					outputFormat = 'jpeg';
-					quality = 0.92; // Standard quality for JPEG
+					quality = 0.92;
 					break;
 				case 'webp':
 					outputFormat = 'webp';
-					quality = 0.92; // Good balance for WebP
+					quality = 0.92;
 					break;
 				case 'avif':
 					outputFormat = 'avif';
-					quality = 0.85; // AVIF can maintain good quality at lower values
+					quality = 0.85;
 					break;
 				case 'png':
 					outputFormat = 'png';
 					break;
 			}
 	
-			// Convert to blob with explicit promise handling
+			// Convert to blob
 			const blob = await new Promise<Blob>((resolve, reject) => {
 				canvas.toBlob(
 					(result) => {
@@ -11483,15 +11721,12 @@ export class CropModal extends Modal {
 				throw new Error('Failed to create array buffer from blob');
 			}
 	
-			// Save the cropped image
+			// Save the transformed image
 			await this.app.vault.modifyBinary(this.imageFile, arrayBuffer);
 			
-			new Notice('Image cropped successfully');
+			new Notice('Image saved successfully');
 	
 			// Refresh image in the editor
-			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-			if (!activeView) return;
-			
 			const leaf = this.app.workspace.getMostRecentLeaf();
 			if (leaf) {
 				const currentState = leaf.getViewState();
@@ -11506,7 +11741,7 @@ export class CropModal extends Modal {
 	
 		} catch (error) {
 			console.error('Save error:', error);
-			new Notice(`Error saving cropped image: ${error.message}`);
+			new Notice(`Error saving image: ${error.message}`);
 		}
 	}
 
