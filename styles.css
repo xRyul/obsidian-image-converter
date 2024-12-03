@@ -1154,15 +1154,6 @@
     overflow: hidden;
 }
 
-.modal-container {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    width: 100%;
-    gap: 10px;
-    padding: 10px;
-}
-
 .image-annotation-modal .modal-container {
     background-color: var(--background-primary);
     border-radius: 8px;
@@ -1170,10 +1161,12 @@
     flex-direction: column;
     height: 100%;
     width: 100%;
+    gap: 10px;
+    padding: 10px;
     position: relative;
 }
 
-.canvas-container {
+.image-annotation-modal .canvas-container {
     flex: 1;
     display: flex;
     justify-content: center;
@@ -1184,8 +1177,14 @@
     position: relative;
 }
 
+.image-annotation-modal .canvas-container canvas {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
 /* Toolbar styling */
-.annotation-toolbar {
+.image-annotation-modal .annotation-toolbar {
     position: relative; /* Changed from absolute */
     top: auto;
     left: auto;
@@ -1198,12 +1197,8 @@
     background-color: var(--background-secondary);
     border-radius: var(--radius-m);
 }
-.canvas-container canvas {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
-}
-.annotation-toolbar button {
+
+.image-annotation-modal .annotation-toolbar button {
     background-color: var(--interactive-normal);
     border: none;
     padding: 4px 8px;
@@ -1217,10 +1212,7 @@
     font-size: var(--font-ui-small);
 }
 
-
-
-
-.preset-buttons {
+.image-annotation-modal .preset-buttons {
     margin-left: auto;
     margin-right: auto;
     gap: 8px;
@@ -1228,7 +1220,7 @@
     border-top: 1px solid var(--background-modifier-border);
 }
 
-.preset-button {
+.image-annotation-modal .preset-button {
     display: flex;
     padding: 4px 8px;
     border: 1px solid var(--background-modifier-border);
@@ -1237,18 +1229,18 @@
     background: var(--background-primary);
 }
 
-.preset-color {
+.image-annotation-modal .preset-color {
     width: 16px;
     height: 16px;
     border: 1px solid var(--background-modifier-border);
     border-radius: 2px;
 }
 
-.preset-button:hover {
+.image-annotation-modal .preset-button:hover {
     background-color: var(--background-modifier-hover);
 }
 
-.preset-number {
+.image-annotation-modal .preset-number {
     font-size: 0.8em;
     opacity: 0.8;
     margin-left: 4.5px;
@@ -1258,16 +1250,14 @@
 
 
 
-
-
-.control-label {
+.image-annotation-modal .control-label {
     font-size: 12px;
     color: var(--text-muted);
     margin-bottom: 2px;
     white-space: nowrap;
 }
 
-.size-buttons-container {
+.image-annotation-modal .size-buttons-container {
     display: flex;
     gap: 27px;
     margin-top: 8px;
@@ -1276,50 +1266,50 @@
 
 
 
-.opacity-buttons-container {
+.image-annotation-modal .opacity-buttons-container {
     display: flex;
     gap: 8px;
     margin-top: 8px;
     margin-bottom: 2px;
 }
 
-.button-group {
+.image-annotation-modal .button-group {
     display: flex;
 }
 
-.button-group button {
+.image-annotation-modal .button-group button {
     padding: 4px 8px;
     min-width: 36px;
     height: 24px;
     font-size: 12px;
 }
 
-.button-group button.is-active {
+.image-annotation-modal .button-group button.is-active {
     background-color: var(--interactive-accent);
     color: var(--text-on-accent);
 }
 
 
 
-.blend-modes-container {
+.image-annotation-modal .blend-modes-container {
     display: flex;
     gap: 18px;
     margin-top: 8px;
     margin-bottom: 2px;
 }
 
-.blend-modes-container .dropdown-container {
+.image-annotation-modal .blend-modes-container .dropdown-container {
     min-width: 100px;
 }
 
-.blend-modes-container .dropdown {
+.image-annotation-modal .blend-modes-container .dropdown {
     width: 80%;
     height: 100%;
 }
 
 
 
-.layer-controls {
+.image-annotation-modal .layer-controls {
     display: flex;
     gap: 20px;
     margin-top: 8px;
@@ -1327,14 +1317,11 @@
 }
 
 
-/* .layer-controls .button-group {
 
-} */
-
-.size-buttons-container .control-label,
-.opacity-buttons-container .control-label,
-.blend-modes-container .control-label,
-.layer-controls .control-label {
+.image-annotation-modal .size-buttons-container .control-label,
+.image-annotation-modal .opacity-buttons-container .control-label,
+.image-annotation-modal .blend-modes-container .control-label,
+.image-annotation-modal .layer-controls .control-label {
     margin-top:auto;
     margin-bottom: auto;
 }
@@ -1344,52 +1331,52 @@
 
 
 
-.color-swatches {
+.image-annotation-modal .color-swatches {
     display: flex;
     flex-direction: column;
     gap: 8px;
     padding: 8px;
 }
 
-.color-row {
+.image-annotation-modal .color-row {
     display: flex;
     align-items: center;
     gap: 8px;
 }
 
-.row-label {
+.image-annotation-modal .row-label {
     font-size: 12px;
     min-width: 70px;
 }
 
-.swatches-container {
+.image-annotation-modal .swatches-container {
     display: flex;
     gap: 8px;
 }
 
-.color-column {
+.image-annotation-modal .color-column {
     display: flex;
     flex-direction: column;
     gap: 4px;
 }
 
-.section-label {
+.image-annotation-modal .section-label {
     font-size: 12px;
     margin-bottom: 4px;
 }
 
-.dominant-container {
+.image-annotation-modal .dominant-container {
     display: flex;
     gap: 8px;
 }
 
-.color-column {
+.image-annotation-modal .color-column {
     display: flex;
     flex-direction: column;
     gap: 4px;
 }
 
-.color-swatch {
+.image-annotation-modal .color-swatch {
     width: 24px;
     height: 24px;
     border-radius: 4px;
@@ -1398,18 +1385,18 @@
 }
 
 
-.color-swatch:hover {
+.image-annotation-modal .color-swatch:hover {
     transform: scale(1.1);
 }
 
-.color-separator {
+.image-annotation-modal .color-separator {
     height: 1px;
     margin: 4px 0;
 }
 
 
 
-.background-dropdown {
+.image-annotation-modal .background-dropdown {
     position: fixed;
     z-index: 1000;
     background-color: var(--background-primary);
@@ -1473,7 +1460,7 @@
 
 
 
-.dominant-section {
+.image-annotation-modal .dominant-section {
     display: flex;
     flex-direction: column;
 }
@@ -1484,7 +1471,7 @@
     overflow: hidden;
 }
 
-.modal-resize-handle {
+.image-annotation-modal .modal-resize-handle {
     position: absolute;
     bottom: 0;
     right: 0;
@@ -1500,11 +1487,11 @@
     z-index: 100;
 }
 
-.is-resizing {
+.image-annotation-modal .is-resizing {
     user-select: none;
 }
 
-.canvas-container {
+.image-annotation-modal .canvas-container {
     transition: width 0.1s ease, height 0.1s ease;
     background: var(--background-secondary);
     overflow: hidden;
@@ -1513,7 +1500,7 @@
 }
 
 /* Add checkerboard pattern for transparent areas */
-.canvas-container::before {
+.image-annotation-modal .canvas-container::before {
     content: '';
     position: absolute;
     top: 0;
@@ -1532,22 +1519,22 @@
 }
 
 /* Hover states */
-.annotation-toolbar button:hover {
+.image-annotation-modal .annotation-toolbar button:hover {
     background-color: var(--interactive-hover);
 }
 
 /* Active state for buttons */
-.annotation-toolbar button.is-active {
+.image-annotation-modal .annotation-toolbar button.is-active {
     background-color: var(--interactive-accent);
     color: var(--text-on-accent);
 }
 
-.annotation-toolbar button svg {
+.image-annotation-modal .annotation-toolbar button svg {
     width: 16px;
     height: 16px;
 }
 
-.annotation-toolbar-group {
+.image-annotation-modal .annotation-toolbar-group {
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
@@ -1555,7 +1542,7 @@
     min-width: auto; /* Remove fixed width */
 }
 
-.annotation-toolbar input[type="color"] {
+.image-annotation-modal .annotation-toolbar input[type="color"] {
     width: 30px;
     height: 30px;
     padding: 0;
@@ -1564,24 +1551,24 @@
     cursor: pointer;
 }
 
-.annotation-toolbar-group:last-child {
+.image-annotation-modal .annotation-toolbar-group:last-child {
     border-right: none;
 }
 
 
-.left-section {
+.image-annotation-modal .left-section {
     display: flex;
-    align-items: center;
+    /* align-items: center; */
     gap: 8px;
 }
 
-.drawing-tools-column {
+.image-annotation-modal .drawing-tools-column {
     display: flex;
     flex-direction: column;
     gap: 4px;
 }
 
-.toolbar-separator {
+.image-annotation-modal .toolbar-separator {
     width: 1px;
     height: 100%;
     background-color: var(--background-modifier-border);
@@ -1589,41 +1576,42 @@
 }
 
 
-.drawing-group {
+.image-annotation-modal .drawing-group {
     display: flex;
     align-items: center;
 }
 
-.color-picker-wrapper {
+.image-annotation-modal .color-picker-wrapper {
     display: flex;
-    align-items: center;
+    /* align-items: center; */
     padding: 2px;
 }
 
-.color-picker {
+.image-annotation-modal .color-picker {
     width: 24px;
     height: 24px;
+    margin-top: 30px;
     padding: 0;
     border: none;
     border-radius: var(--radius-s);
     cursor: pointer;
 }
 
-.color-picker::-webkit-color-swatch-wrapper {
+.image-annotation-modal .color-picker::-webkit-color-swatch-wrapper {
     padding: 0;
 }
 
-.color-picker::-webkit-color-swatch {
+.image-annotation-modal .color-picker::-webkit-color-swatch {
     border: none;
     border-radius: var(--radius-s);
 }
 
-.color-picker::-moz-color-swatch {
+.image-annotation-modal .color-picker::-moz-color-swatch {
     border: 2px solid var(--background-modifier-border);
     border-radius: var(--radius-s);
 }
 
-.color-picker:hover {
+.image-annotation-modal .color-picker:hover {
     opacity: 0.8;
 }
 
@@ -1664,35 +1652,35 @@
 }
 
 /* Save button styling */
-.annotation-toolbar button.mod-cta {
+.image-annotation-modal .annotation-toolbar button.mod-cta {
     background-color: var(--interactive-accent);
     color: var(--text-on-accent);
 }
 
-.annotation-toolbar button.mod-cta:hover {
+.image-annotation-modal .annotation-toolbar button.mod-cta:hover {
     background-color: var(--interactive-accent-hover);
 }
 /* Mobile-specific adjustments */
 @media (max-width: 768px) {
-    .annotation-toolbar {
+    .image-annotation-modal .annotation-toolbar {
         padding: 4px;
         gap: 4px;
     }
 
-    .annotation-toolbar button {
+    .image-annotation-modal .annotation-toolbar button {
         padding: 6px;
     }
 
-    .annotation-toolbar button svg {
+    .image-annotation-modal .annotation-toolbar button svg {
         width: 14px;
         height: 14px;
     }
 
-    .slider-container {
+    .image-annotation-modal .slider-container {
         min-width: 100px;
     }
 
-    .brush-controls {
+    .image-annotation-modal .brush-controls {
         flex-direction: column;
         padding-left: 4px;
         margin-left: 4px;
@@ -1701,9 +1689,6 @@
 
 
 /* CROP */
-
-
-
 .crop-tool-modal .modal {
     position: fixed;
     border-radius: var(--radius-m);
@@ -1712,6 +1697,7 @@
     background-color: var(--background-primary);
     box-shadow: var(--shadow-l);
     animation: modalOpen 200ms ease-out;
+    /* margin-top: auto; */
 }
 
 .crop-tool-modal .crop-modal-wrapper {
@@ -1736,7 +1722,8 @@
 .crop-tool-modal .crop-container {
     position: relative;
     width: 100%;
-    overflow: hidden; /* Contain the overlay */
+    height: 100%;
+    /* overflow: hidden; Contain the overlay */
 }
 
 .crop-tool-modal .crop-original-image {
@@ -1744,6 +1731,7 @@
     max-height: 100%;
     object-fit: contain;
     display: block;
+    margin: auto;
 }
 
 /* Remove the separate overlay div since we're using box-shadow */
@@ -1759,6 +1747,7 @@
     cursor: move;
     z-index: 2;
 }
+
 .crop-tool-modal .resize-handle {
     position: absolute;
     width: 10px;
@@ -1829,7 +1818,7 @@
 /* Aspect ratio */
 
 .crop-tool-modal .aspect-ratio-controls {
-    padding: 8px 16px;
+    padding: 8px 0px;
     border-bottom: 1px solid var(--background-modifier-border);
     display: flex;
     align-items: center;
@@ -1846,6 +1835,8 @@
     display: flex;
     align-items: center;
     gap: 4px;
+    margin-left: auto;
+    margin-right: 0;
 }
 
 .crop-tool-modal .aspect-ratio-button {
@@ -1890,6 +1881,92 @@
 .crop-tool-modal .custom-ratio-input[type=number] {
     -moz-appearance: textfield;
 }
+
+/* Rotate / Flip */
+.crop-tool-modal .transform-controls {
+    display: flex;
+    margin-left: 0;
+    margin-right: auto;
+}
+
+.crop-tool-modal .rotate-container,
+.crop-tool-modal .flip-container {
+    display: flex;
+    gap: 1px;
+}
+
+.crop-tool-modal .transform-button {
+    padding: 4px 8px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    background: var(--background-secondary);
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+}
+
+.crop-tool-modal .transform-button:hover {
+    background: var(--background-modifier-hover);
+}
+
+/* Rotate / Zoom slider */
+.crop-tool-modal .image-controls {
+    display: flex;
+    gap: 20px;
+    padding: 6px 0px;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.crop-tool-modal .control-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+}
+
+.crop-tool-modal .control-label {
+    min-width: 10px;
+    font-weight: var(--font-medium);
+}
+
+.crop-tool-modal .slider {
+    flex: 1;
+    height: 6px;
+    -webkit-appearance: none;
+    background: var(--background-modifier-border);
+    border-radius: 3px;
+    outline: none;
+}
+
+.crop-tool-modal .slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--interactive-accent);
+    cursor: pointer;
+    border: none;
+}
+
+.crop-tool-modal .slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--interactive-accent);
+    cursor: pointer;
+    border: none;
+}
+
+.crop-tool-modal .rotation-value,
+.crop-tool-modal .zoom-value {
+    min-width: 5px;
+    text-align: right;
+}
+
 
 /* Mobile-specific styles */
 @media screen and (max-width: 768px) {

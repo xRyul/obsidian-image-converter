@@ -8040,8 +8040,6 @@ class ImageAnnotationModal extends Modal {
 	private undoStack: string[] = [];
     private redoStack: string[] = [];
     private isUndoRedoAction = false;
-    private maxStackSize = 50; // Limit stack size to prevent memory issues
-
 
 	private currentBackground: BackgroundType = 'transparent';
 	private readonly backgroundOptions: BackgroundOptions = ['transparent', '#ffffff', '#000000', 'grid', 'dots'] as const;
@@ -11598,6 +11596,7 @@ export class CropModal extends Modal {
 				// Set canvas dimensions based on rotation
 				let finalWidth = cropWidth;
 				let finalHeight = cropHeight;
+				
 				if (Math.abs(this.currentRotation) === 90 || Math.abs(this.currentRotation) === 270) {
 					[finalWidth, finalHeight] = [finalHeight, finalWidth];
 				}
