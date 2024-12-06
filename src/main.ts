@@ -48,10 +48,12 @@ type BackgroundOptions = readonly ['transparent', '#ffffff', '#000000', 'grid', 
 type BackgroundType = BackgroundOptions[number];
 
 interface ToolPreset {
-	size: number;
+    size: number;
     color: string;
     opacity: number;
     blendMode: BlendMode;
+    backgroundColor?: string;
+    backgroundOpacity?: number;
 }
 
 
@@ -8045,6 +8047,8 @@ class ImageAnnotationModal extends Modal {
 	private readonly backgroundOptions: BackgroundOptions = ['transparent', '#ffffff', '#000000', 'grid', 'dots'] as const;
 	private backgroundDropdown: HTMLElement | null = null;
 
+	private textBackgroundControls: HTMLElement | null = null; // Add this as a class property
+	
 	constructor(app: App, plugin: ImageConvertPlugin, imageFile: TFile) {
 		super(app);
 		this.plugin = plugin;
@@ -8391,6 +8395,7 @@ class ImageAnnotationModal extends Modal {
 		});
 
 		this.createPresetButtons(swatchesContainer);
+
 	}
 
 	private updateBrushColor() {
@@ -8406,6 +8411,90 @@ class ImageAnnotationModal extends Modal {
 		this.canvas.freeDrawingBrush.width = this.brushSizes[this.currentBrushSizeIndex];
 	}
 
+	private createTextBackgroundControls(container: HTMLElement) {
+		const textBgContainer = container.createDiv('control-group');
+		textBgContainer.createDiv('control-label').setText('Text Background:');
+		const controlsContainer = textBgContainer.createDiv('button-group');
+		
+		// Create color picker wrapper with alpha support
+		const bgColorWrapper = controlsContainer.createDiv('background-color-wrapper');
+		const bgColorPicker = bgColorWrapper.createEl('input', {
+			type: 'color',
+			cls: 'background-color-picker',
+			value: '#ffffff'
+		});
+		
+		// Add alpha slider next to color picker
+		const alphaSlider = bgColorWrapper.createEl('input', {
+			type: 'range',
+			cls: 'background-alpha-slider',
+			attr: {
+				min: '0',
+				max: '100',
+				value: '70' // default to 0 - transparent
+			}
+		});
+	
+		// Transparent background
+		new ButtonComponent(controlsContainer)
+			.setTooltip('Transparent')
+			.setIcon('eraser')
+			.onClick(() => {
+				this.setTextBackground('transparent');
+			});
+	
+		// Semi-transparent white
+		new ButtonComponent(controlsContainer)
+			.setTooltip('Semi-transparent white')
+			.setIcon('square')
+			.onClick(() => {
+				this.setTextBackground('rgba(255, 255, 255, 0.7)');
+			})
+			.buttonEl.addClass('bg-white-semi');
+	
+		// Semi-transparent black
+		new ButtonComponent(controlsContainer)
+			.setTooltip('Semi-transparent black')
+			.setIcon('square')
+			.onClick(() => {
+				this.setTextBackground('rgba(0, 0, 0, 0.7)');
+			})
+			.buttonEl.addClass('bg-black-semi');
+	
+		// Update background with both color and alpha
+		const updateBackground = () => {
+			const color = bgColorPicker.value;
+			const alpha = parseInt(alphaSlider.value) / 100;
+			const rgba = this.hexToRgba(color, alpha);
+			this.setTextBackground(rgba);
+		};
+	
+		bgColorPicker.addEventListener('input', updateBackground);
+		alphaSlider.addEventListener('input', updateBackground);
+	}
+
+
+	private setTextBackground(color: string) {
+		if (!this.canvas) return;
+		
+		const activeObject = this.canvas.getActiveObject();
+		if (!activeObject) return;
+		
+		if (activeObject instanceof IText) {
+			activeObject.set('backgroundColor', color);
+		} else if (activeObject instanceof ActiveSelection) {
+			activeObject.getObjects().forEach(obj => {
+				if (obj instanceof IText) {
+					obj.set('backgroundColor', color);
+				}
+			});
+		}
+		
+		this.canvas.requestRenderAll();
+		this.saveState();
+	}
+	
+	
 	private createAndAddText(color: string, x: number, y: number) {
 		if (this.isTextEditingBlocked) {
 			console.debug('Text creation blocked');
@@ -8418,6 +8507,7 @@ class ImageAnnotationModal extends Modal {
 				top: y,
 				fontSize: 20,
 				fill: color,
+				backgroundColor: 'transparent', // Add default background color
 				selectable: true,
 				evented: true,
 				editable: true,
@@ -8446,23 +8536,6 @@ class ImageAnnotationModal extends Modal {
 			this.isTextEditingBlocked = false;
 		}
 	}
-
-	// private recoverTextEditing() {
-	// 	if (!this.canvas) return;
-		
-	// 	this.isTextEditingBlocked = false;
-	// 	this.isDrawingMode = false;
-	// 	this.canvas.isDrawingMode = false;
-		
-	// 	const activeObject = this.canvas.getActiveObject();
-	// 	if (activeObject instanceof IText) {
-	// 		activeObject.selectable = true;
-	// 		activeObject.evented = true;
-	// 		activeObject.editable = true;
-	// 	}
-		
-	// 	this.canvas.requestRenderAll();
-	// }
 
 	private registerHotkeys() {
 		this.scope.register(['Mod'], 'S', (evt: KeyboardEvent) => {
@@ -8624,6 +8697,14 @@ class ImageAnnotationModal extends Modal {
 		
 		this.currentTool = newTool;
 		this.updateObjectInteractivity();
+
+		// Handle text background controls visibility
+		const textBgControls = this.modalEl.querySelector('.text-background-controls');
+		if (textBgControls instanceof HTMLElement) {
+			textBgControls.style.display = 
+				newTool === ToolMode.Text ? 'flex' : 'none';
+		}
+
 		// Show/hide preset buttons based on tool
 		const presetContainer = this.modalEl.querySelector('.preset-buttons');
 		if (presetContainer instanceof HTMLElement) {
@@ -8642,10 +8723,15 @@ class ImageAnnotationModal extends Modal {
 		this.switchTool(newTool);
 	}
 	
+
+
 	private toggleArrowMode(arrowBtn?: ButtonComponent) {
 		const newTool = this.currentTool === ToolMode.Arrow ? ToolMode.None : ToolMode.Arrow;
 		this.switchTool(newTool);
 	}
+
+
+
 
 
 	// Add this method to create preset buttons
@@ -8672,21 +8758,27 @@ class ImageAnnotationModal extends Modal {
 			presetButton.setAttribute('title', 'Click to load, Shift+Click to save');
 		}
 		
+
 		return presetContainer;
 	}
 
 	// Add these methods to handle preset functionality
 	private async savePreset(index: number) {
 		const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
+		const bgColorPicker = this.modalEl.querySelector('.background-color-picker') as HTMLInputElement;
+		const bgAlphaSlider = this.modalEl.querySelector('.background-alpha-slider') as HTMLInputElement;
+		
 		if (!colorPicker) return;
 	
 		const preset: ToolPreset = {
 			size: this.brushSizes[this.currentBrushSizeIndex],
 			color: colorPicker.value,
 			opacity: this.brushOpacities[this.currentOpacityIndex],
-			blendMode: this.currentBlendMode
+			blendMode: this.currentBlendMode,
+			backgroundColor: bgColorPicker?.value,
+			backgroundOpacity: bgAlphaSlider ? parseInt(bgAlphaSlider.value) / 100 : undefined
 		};
-	
+
 		// Save to appropriate tool preset array in plugin settings
 		if (this.isDrawingMode) {
 			this.plugin.settings.annotationPresets.drawing[index] = preset;
@@ -8716,11 +8808,45 @@ class ImageAnnotationModal extends Modal {
 			return;
 		}
 	
+		// Check if preset exists
+		if (!preset) return;
+
+
 		// Apply color
 		const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
 		if (colorPicker) {
 			colorPicker.value = preset.color;
 		}
+
+
+		// If in text mode, directly update active text object's color
+		if (this.isTextMode) {
+			const activeObject = this.canvas?.getActiveObject();
+			if (activeObject instanceof IText) {
+				activeObject.set({
+					fill: preset.color // Set the text color directly
+				});
+				this.canvas?.requestRenderAll();
+			}
+		}
+
+		// Load background settings if they exist
+		if (this.isTextMode && preset.backgroundColor) {
+			const bgColorPicker = this.modalEl.querySelector('.background-color-picker') as HTMLInputElement;
+			const bgAlphaSlider = this.modalEl.querySelector('.background-alpha-slider') as HTMLInputElement;
+			
+			if (bgColorPicker) {
+				bgColorPicker.value = preset.backgroundColor; // Default to white
+			}
+			
+			if (bgAlphaSlider && preset.backgroundOpacity !== undefined) {
+				bgAlphaSlider.value = (preset.backgroundOpacity * 100).toString();
+			}
+			
+			this.setTextBackground(this.hexToRgba(preset.backgroundColor, preset.backgroundOpacity ?? 1));
+		}
+
+
 	
 		// Find and click the appropriate opacity button
 		const opacityIndex = this.brushOpacities.indexOf(preset.opacity);
@@ -8765,8 +8891,18 @@ class ImageAnnotationModal extends Modal {
 		presetButtons.forEach((button, index) => {
 			const colorDiv = button.querySelector('.preset-color') as HTMLDivElement;
 			if (colorDiv) {
-				colorDiv.style.backgroundColor = currentPresets[index].color;
-				colorDiv.style.opacity = currentPresets[index].opacity.toString();
+				if (this.isTextMode && currentPresets[index].backgroundColor) {
+					// For text mode, show both text color and background
+					colorDiv.style.backgroundColor = currentPresets[index].backgroundColor;
+					colorDiv.style.opacity = (currentPresets[index].backgroundOpacity ?? 1).toString();
+					// Add a small indicator for text color
+					colorDiv.style.border = `2px solid ${currentPresets[index].color}`;
+				} else {
+					// For other modes, show just the main color
+					colorDiv.style.backgroundColor = currentPresets[index].color;
+					colorDiv.style.opacity = currentPresets[index].opacity.toString();
+					colorDiv.style.border = 'none';
+				}
 			}
 		});
 	}
@@ -8831,17 +8967,12 @@ class ImageAnnotationModal extends Modal {
 		});
 		colorPicker.addClass('color-picker');
 	
+		
 		// Update color picker event listener
-		colorPicker.addEventListener('input', () => {
+		colorPicker.addEventListener('input', (e) => {
+			const color = (e.target as HTMLInputElement).value;
+			this.updateColorForSelectedObjects(color);
 			this.updateBrushColor();
-			
-			if (this.canvas) {
-				const activeObject = this.canvas.getActiveObject();
-				if (activeObject && activeObject instanceof IText) {
-					activeObject.set('fill', colorPicker.value);
-					this.canvas.requestRenderAll();
-				}
-			}
 		});
 
 		// Brush controls
@@ -8879,7 +9010,12 @@ class ImageAnnotationModal extends Modal {
 			.setIcon('arrow-down-to-line')
 			.onClick(() => this.sendToBack());
 		
-					
+
+		// Create a separate container for text background controls
+		this.textBackgroundControls = brushControlsColumn.createDiv('text-background-controls');
+		this.textBackgroundControls.style.display = 'none'; // Hide by default
+		this.createTextBackgroundControls(this.textBackgroundControls);
+
 		// Utility tools
 		new ButtonComponent(utilityGroup)
 			.setTooltip('Clear All')
@@ -9186,9 +9322,29 @@ class ImageAnnotationModal extends Modal {
 
 
 
-    private setupSelectionEvents() {
-        if (!this.canvas) return;
-    }
+	private setupSelectionEvents() {
+		if (!this.canvas) return;
+	
+		this.canvas.on('selection:created', (e) => {
+			const event = e as unknown as { selected: FabricObject[] };
+			this.syncColorPickerWithSelection(event);
+		});
+	
+		this.canvas.on('selection:updated', (e) => {
+			const event = e as unknown as { selected: FabricObject[] };
+			this.syncColorPickerWithSelection(event);
+		});
+	
+		// Add color picker event listener
+		const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
+		if (colorPicker) {
+			colorPicker.addEventListener('input', (e) => {
+				const color = (e.target as HTMLInputElement).value;
+				this.updateColorForSelectedObjects(color);
+				this.updateBrushColor();
+			});
+		}
+	}
 
 	private deleteSelectedObjects() {
 		if (!this.canvas) return;
@@ -9453,6 +9609,85 @@ class ImageAnnotationModal extends Modal {
 	private _boundHandleKeyboard: ((e: KeyboardEvent) => void) | null = null;
 
 
+	private syncColorPickerWithSelection(e: { selected: FabricObject[] }) {
+		const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
+		const bgColorPicker = this.modalEl.querySelector('.background-color-picker') as HTMLInputElement;
+		const alphaSlider = this.modalEl.querySelector('.background-alpha-slider') as HTMLInputElement;
+		if (!colorPicker || !bgColorPicker || !alphaSlider) return;
+	
+		if (e.selected.length === 0) return;
+	
+		const firstObject = e.selected[0];
+		if (firstObject instanceof IText) {
+			// Update text color
+			const color = firstObject.fill as string;
+			if (color) {
+				colorPicker.value = this.rgbaToHex(color); // Convert to #rrggbb
+			}
+	
+			// Update background color and alpha
+			const bgColor = firstObject.backgroundColor as string;
+			if (bgColor && bgColor !== 'transparent') {
+				const { hex, alpha } = this.rgbaToHexWithAlpha(bgColor);
+				bgColorPicker.value = hex;
+				alphaSlider.value = (alpha * 100).toString(); // Set alpha slider
+			} else {
+				bgColorPicker.value = '#ffffff'; // Default to white
+				alphaSlider.value = '0'; // Default to transparent
+			}
+		}
+	}
+	
+	
+	private updateColorForSelectedObjects(color: string) {
+		if (!this.canvas) return;
+	
+		const activeObject = this.canvas.getActiveObject();
+		if (!activeObject) return;
+	
+		const opacity = this.brushOpacities[this.currentOpacityIndex];
+	
+		if (activeObject instanceof ActiveSelection) {
+			// Handle multiple selection
+			const selection = activeObject as ActiveSelection;
+			selection.forEachObject((obj) => {
+				if (obj instanceof IText) {
+					obj.set('fill', color);
+				} else {
+					obj.set('stroke', this.hexToRgba(color, opacity));
+				}
+			});
+			// Mark the selection as dirty to ensure it updates
+			selection.dirty = true;
+		} else {
+			// Handle single object
+			if (activeObject instanceof IText) {
+				activeObject.set('fill', color);
+			} else {
+				activeObject.set('stroke', this.hexToRgba(color, opacity));
+			}
+		}
+	
+		this.canvas.requestRenderAll();
+	}
+
+	private rgbaToHex(rgba: string): string {
+		const rgbaMatch = rgba.match(/rgba?\((\d+), (\d+), (\d+)/);
+		if (!rgbaMatch) return '#ff0000'; // Default to white if parsing fails -> RED COLOR TEXT
+	
+		const [, r, g, b] = rgbaMatch.map(Number); // Skip the first element (full match)
+		return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+	}
+	
+	private rgbaToHexWithAlpha(rgba: string): { hex: string; alpha: number } {
+		const rgbaMatch = rgba.match(/rgba\((\d+), (\d+), (\d+), ([0-9.]+)\)/);
+		if (!rgbaMatch) return { hex: '#ffffff', alpha: 1 }; // Default to white and opaque
+	
+		const [, r, g, b, a] = rgbaMatch.map((v, i) => (i === 4 ? parseFloat(v) : Number(v))); // Skip first element
+		const hex = `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+		return { hex, alpha: a };
+	}
+	
 	private hexToRgba(hex: string, opacity: number): string {
 		// Remove the hash if present
 		hex = hex.replace('#', '');

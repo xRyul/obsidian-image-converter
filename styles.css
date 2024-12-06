@@ -1275,6 +1275,8 @@
 
 .image-annotation-modal .button-group {
     display: flex;
+    gap: 4px;
+    align-items: center;
 }
 
 .image-annotation-modal .button-group button {
@@ -1393,6 +1395,17 @@
     height: 1px;
     margin: 4px 0;
 }
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1587,6 +1600,31 @@
     padding: 2px;
 }
 
+.image-annotation-modal .background-color-wrapper {
+    display: flex;
+    align-items: center;
+}
+/* 
+.image-annotation-modal .background-alpha-slider {
+    width: 60px;
+    height: 24px;
+    margin: 0;
+    padding: 0;
+} */
+
+.image-annotation-modal .preset-button .preset-color {
+    width: 20px;
+    height: 20px;
+    border-radius: 10px;
+    transition: all 0.2s ease;
+}
+
+.image-annotation-modal .preset-button.text-preset .preset-color {
+    position: relative;
+    border-style: solid;
+    border-width: 2px;
+}
+
 .image-annotation-modal .color-picker {
     width: 24px;
     height: 24px;
@@ -1685,6 +1723,47 @@
         padding-left: 4px;
         margin-left: 4px;
     }
+}
+
+
+.image-annotation-modal .control-group {
+    display: flex;
+    gap: 5px;
+    margin-top: 8px;
+    margin-bottom: 2px;
+    align-items: center;
+}
+
+.image-annotation-modal .text-background-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.image-annotation-modal .text-bg-controls {
+    display: flex;
+    flex-direction: row;
+    align-content: center;
+    flex-wrap: nowrap;
+    align-items: center;
+}
+
+.image-annotation-modal .background-color-picker {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    cursor: pointer;
+    margin-right: 4px;
+}
+
+.image-annotation-modal .layer-controls {
+    display: flex;
+    flex-direction: row;
+    align-content: center;
+    flex-wrap: nowrap;
+    align-items: center;
 }
 
 
