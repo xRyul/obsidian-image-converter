@@ -9,12 +9,12 @@ Supported image formats: WEBP, JPG, PNG, HEIC, TIF
 - 🖼️ **Convert**: Automatically convert dropped/pasted images into WEBP, JPG or PNG
 - 🗜️ **Compress**: Reduce file size by specifying Quality value between 1-100
 - 📏 **Resize** images (destructive and non-destructive)
-	- Append `|width` to links automatically
-	- Resize by dragging edge of the image, or with Scrollwheel (e.g., **CMD+Scrollwheel**)
-      <img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/5724c6e9-19d4-4eaf-a559-1168f6557a14" width="400px"> 
+	- Automatically read image dimensions and apply it to the image link e.g.: apply image width to  `|width` or specify any custom size. 
+	- Resize by dragging edge of the image, or with Scrollwheel (e.g., **CMD+Scrollwheel**)  </br>
+      <img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/5724c6e9-19d4-4eaf-a559-1168f6557a14" width="400px"></br>
 	- Resize **original** image (width, height, longest edge, shortest edge, fit, fill)
-- **Image annotation** and **markup tool**. Draw, write, scribble, annotate, markup on top of images right inside Obsidian.
-  <img src="https://github.com/user-attachments/assets/71b8d71d-2608-441a-91cd-b7003b84d23a" width="400px">  
+- **Image annotation** and **markup tool**. Draw, write, scribble, annotate, markup on top of images right inside Obsidian.  </br>
+  <img src="https://github.com/user-attachments/assets/71b8d71d-2608-441a-91cd-b7003b84d23a" width="400px"></br>
 - ✂️ **Crop, rotate, and flip images**  </br>
   <img src="https://github.com/user-attachments/assets/a4ead276-ac4e-4523-8567-fa064bdf7119" width="400px"></br>
 - 📁 **Custom File Management and Renaming**:
