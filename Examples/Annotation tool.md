@@ -1,3 +1,5 @@
+# Annotation tool
+
 This is simple tool for quick markups / annotations, when loading whole photoshop or excalidraw instance is too much for such a trivial task. I wanted something what would allow me to quickly do some scribbles over screenshots/ photos from all the lectures I am currently taking. The idea of being able to Paste image/screenshot into the note -> open it inside Obsidian without leaving the context/ note/ or the line your are in -> do some scribbles -> save image back into then note -> continue with the lecture. All without leaving Obsidian, swapping windows, copy pasting, exporting to over applications etc.
 
 - This provides and ability to draw and add text directly on an image.
@@ -13,14 +15,16 @@ https://github.com/user-attachments/assets/19660874-7a92-4784-b3d1-d38135422b8b
 
 Right click on any image and select **"Annotate Image**" from the context menu to open it in a new window.
 
-![[Annotation tool-20241209170455987.webp|222]]
+![image](https://github.com/user-attachments/assets/ce214b00-587f-4135-8505-fac89e265dfd)
+
 
 
 ## To add annotation:
 
 Simply use 1 of 3 tools: Brush (B), freehand Arrow (A), Text (T)
 
-![[Annotation tool-20241209170512521.webp|86]]
+![image](https://github.com/user-attachments/assets/2ec87dfc-7a57-416b-8a7f-d87d14cad726)
+
 
 
 ## To modify annotation:
@@ -28,7 +32,9 @@ Simply use 1 of 3 tools: Brush (B), freehand Arrow (A), Text (T)
 - Selection Tool. Active by default. Deselect active tools (Brush, Arrow, or Text) via shortcuts (B, A, T) or buttons to reactivate the Selection Tool. Use the Selection Tool to move or adjust elements.
 - Editing text: Double-click anywhere to create a new text element. Double-click an existing text element to edit it. Text automatically sharpens when scaled to ensure clarity.
 - Changing Colors. Select an element and choose a color from the swatches or use the color picker. The color picker allows HEX, HSL, or RGB value input. 6 Dominant colors are automatically calculated, then 6 Complimentary colors at 180 degrees are provided beneath it.
-![[Annotation tool-20241209170535346.webp|222]] ![[Annotation tool-20241209170540362.webp|222]]
+
+![image](https://github.com/user-attachments/assets/9430725a-aa8d-4272-8195-d21c9a8deed5)
+![image](https://github.com/user-attachments/assets/2fd43b98-a489-4d23-b91e-0ae695e632fa)
 
 
 ## To delete:
