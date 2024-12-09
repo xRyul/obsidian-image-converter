@@ -32,7 +32,7 @@ Supported image formats: WEBP, JPG, PNG, HEIC, TIF
 	- Copy as Base64 encoded image
  	- **Resize** original image you have jsut clicked upon  </br>
 	  <img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/3367b41c-63fa-4a1c-a616-8561e467eef7" width="400px">  </br>
-
+    - **Delete image from vault** - removes image and its link from the vault
 
 
 ## Quick Summary for Image Compression
