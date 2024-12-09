@@ -41,7 +41,7 @@ Supported image formats: WEBP, JPG, PNG, HEIC, TIF
 ## 📚 Documentation
 - Settings overview
 - Basic usage examples
-- Annotation tool
+- [Annotation tool](<Examples/Annotation tool.md>)
 - Crop tool
 - [List of supported variables and use-case examples](variables.md)
 - [[How to compress images without quality loss - empirical analysis of image format vs image quality vs file size]]
