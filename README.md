@@ -1,35 +1,38 @@
 # Image Converter for ObsidianMD
+
+Making image management inside Obsidian slightly more convenient.
+
 https://github.com/xRyul/obsidian-image-converter/assets/47340038/63a0646b-29ec-4055-abfc-55d31e07b2f7
 
 ## Features
 Supported image formats: WEBP, JPG, PNG, HEIC, TIF
-
-- Convert: Automatically convert dropped/pasted images into WEBP, JPG or PNG. 
-- Image compression: Reduce file size of an image by specifying desired Quality value between 1-100
-- Renaming: Auto-rename converted image with Variables e.g. {noteName} {fileName} and more. [List of Supported Variables](<Examples/Variables Reference Guide.md>)
-- Custom output folders: Create custom Output folders with Variables e.g. {noteName} {fileName} and more. [List of Supported Variables](<Examples/Variables Reference Guide.md>)
-- Attachments: Option to keep image files separate from all other attachments
-- Links: Markdown Links and Wiki links. 
-	- For example, create Markdown links for images, and WIKi links for all other attachments.
-- Resize image by dragging edge of an image
-	-  <img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/5724c6e9-19d4-4eaf-a559-1168f6557a14" width="600px"> 
-- Resize image via MOD+mouse scrollwheel e.g. CMD+Scrollwheel or Shift+Scrollwheel or any other modifier key as defined by the user.
-- Auto-resize image based on 6 modes: Fit, Fill, Longest Side, Shortest Side, Height, Width
-	- Image resize by the Longest Side
-
-  https://github.com/xRyul/obsidian-image-converter/assets/47340038/6c287f86-08b8-4483-800d-040dd5207341
-
-- Ability to copy an image into clipboard via right click context menu
-	- 	<img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/2034a444-cd49-4ce0-af98-745694ba4986" width="600px">
-
-- Ability to resize original image via right click context menu
-	- <img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/3367b41c-63fa-4a1c-a616-8561e467eef7" width="600px">
-
+- 🖼️ **Convert**: Automatically convert dropped/pasted images into WEBP, JPG or PNG
+- 🗜️ **Compress**: Reduce file size by specifying Quality value between 1-100
+- 📏 **Resize** images (destructive and non-destructive)
+	- Append `|width` to links automatically
+	- Resize by dragging edge of the image, or with Scrollwheel (e.g., **CMD+Scrollwheel**)
+      <img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/5724c6e9-19d4-4eaf-a559-1168f6557a14" width="400px"> 
+	- Resize **original** image (width, height, longest edge, shortest edge, fit, fill)
 - **Image annotation** and **markup tool**. Draw, write, scribble, annotate, markup on top of images right inside Obsidian.
-![image](https://github.com/user-attachments/assets/71b8d71d-2608-441a-91cd-b7003b84d23a)
+  <img src="https://github.com/user-attachments/assets/71b8d71d-2608-441a-91cd-b7003b84d23a" width="400px">  
+- ✂️ **Crop, rotate, and flip images**  </br>
+  <img src="https://github.com/user-attachments/assets/a4ead276-ac4e-4523-8567-fa064bdf7119" width="400px"></br>
+- 📁 **Custom File Management and Renaming**:
+	- **Rename**: Use variables (e.g., `{noteName}`, `{fileName}`) to auto-rename images [List of Supported Variables](<Examples/Variables Reference Guide.md>)
+	- **Output**: Organize images into custom output folders with variables.[List of Supported Variables](<Examples/Variables Reference Guide.md>)
+- 🌍 **Pure JavaScript implementation** that works completely **offline**. No external APIs or binary dependencies (such as ImageMagick, Cloudinary, FFmpeg, sharp, etc.) required - keeping it lightweight, portable and secure.
 
-- **Crop**
-![image](https://github.com/user-attachments/assets/a4ead276-ac4e-4523-8567-fa064bdf7119)
+
+## Other
+- 🔄 **Batch Processing**: Convert, compress, and resize all images in a note or across the entire vault.
+- 🔗 **Compatibility with other markdown editors:** Ability to have **Markdown links for images**, and **Wiki links** for all other links.
+- 🖱️**Custom right click context menus:**
+	- Copy to clipboard  </br>
+	  <img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/2034a444-cd49-4ce0-af98-745694ba4986" width="400px"></br>
+	- Copy as Base64 encoded image
+ 	- **Resize** original image you have jsut clicked upon  </br>
+	  <img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/3367b41c-63fa-4a1c-a616-8561e467eef7" width="400px">  </br>
+
 
 
 ## Quick Summary for Image Compression
@@ -112,6 +115,19 @@ Below is the table which shows how much quality we lose with each conversion. Th
 3. Move downloaded files into `/obsidian-image-converter` folder. 
 4. Enable the plugin in ObsidianMD. 
 
-# Credits
-- This repo is heavily inspired by https://github.com/musug/obsidian-paste-png-to-jpeg musug has created an amazing ground work for the project, but sadly who has gone AWOL leaving the project behind without fixing some major issues. Hence, this is an attempt to rejuvenate the project.
-- FabricJS 💖 https://fabricjs.com/
+## 🐛 Issues & Support
+
+Found a bug or need help? [Open an issue](https://github.com/xRyul/obsidian-image-converter/issues)
+
+If you find this plugin useful, your support keeps this project alive and growing:
+
+[![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/xryul)
+
+## 📜 License
+
+MIT License - see [LICENSE](LICENSE)
+
+## 🙏 Credits
+
+- Original inspiration from [musug's plugin](https://github.com/musug/obsidian-paste-png-to-jpeg)
+- [FabricJS](https://fabricjs.com/) for annotation capabilities
