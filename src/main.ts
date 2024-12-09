@@ -134,6 +134,9 @@ interface ImageConvertSettings {
 	convertToPNG: boolean;
 	convertTo: string;
 	quality: number;
+
+    skipPatterns: string;
+
 	allowLargerFiles: boolean;
 
 	baseTimeout: number;
@@ -238,6 +241,9 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	convertToPNG: false,
 	convertTo: 'webp',
 	quality: 0.75,
+
+	skipPatterns: '',
+
 	allowLargerFiles: false,
 
 	baseTimeout: 20000,
@@ -693,7 +699,14 @@ export default class ImageConvertPlugin extends Plugin {
 					size: file?.size || 0,
 					type: item.type
 				};
-			});
+			})
+			// Add skip pattern filter here
+			.filter(item => !this.shouldSkipFile(item.name));
+
+		// If all files are skipped, return early
+		if (imageItems.length === 0) {
+			return;
+		}
 		
 		// Calculate adaptive timeout based on files
 		const calculateTimeout = (files: typeof imageItems) => {
@@ -803,7 +816,7 @@ export default class ImageConvertPlugin extends Plugin {
 	
 		this.batchId = Date.now().toString();
 	
-		// Enhanced file analysis
+		// Enhanced file analysis with skip pattern check
 		let imageFiles: Array<{name: string; size: number; type: string}> = [];
 		if (event.dataTransfer?.files) {
 			imageFiles = Array.from(event.dataTransfer.files)
@@ -814,7 +827,14 @@ export default class ImageConvertPlugin extends Plugin {
 						size: file.size,
 						type: mimeType
 					};
-				});
+				})
+				// Skip pattern
+				.filter(file => !this.shouldSkipFile(file.name));
+		}
+
+		// If all files are skipped, return early
+		if (imageFiles.length === 0) {
+			return;
 		}
 
 		// Calculate adaptive timeout based on file types and sizes
@@ -922,6 +942,11 @@ export default class ImageConvertPlugin extends Plugin {
 			this.app.vault.on('create', async (file: TFile) => {
 				if (!(file instanceof TFile) || !isImage(file)) return;
 				if (this.isConversionPaused) return;
+
+				if (this.shouldSkipFile(file.name)) {
+					console.log(`Skipping file ${file.name} due to pattern match`);
+					return;
+				}
 
 				if (await this.isExternalOperation(file)) return;
 				// For multiple files, we want to maintain the batch state
@@ -1227,7 +1252,54 @@ export default class ImageConvertPlugin extends Plugin {
 			);
 		}
 	}
+	private shouldSkipFile(filename: string): boolean {
+		if (!this.settings.skipPatterns.trim()) {
+			return false;
+		}
 
+		const patterns = this.settings.skipPatterns
+			.split(',')
+			.map(p => p.trim())
+			.filter(p => p.length > 0);
+
+		return patterns.some(pattern => {
+			try {
+				// Check if pattern is a regex (enclosed in /)
+				if (pattern.startsWith('/') && pattern.endsWith('/')) {
+					// Extract regex pattern without the slashes
+					const regexPattern = pattern.slice(1, -1);
+					const regex = new RegExp(regexPattern, 'i');
+					return regex.test(filename);
+				}
+				// Check if pattern is a regex (enclosed in r/)
+				else if (pattern.startsWith('r/') && pattern.endsWith('/')) {
+					// Extract regex pattern without r/ and /
+					const regexPattern = pattern.slice(2, -1);
+					const regex = new RegExp(regexPattern, 'i');
+					return regex.test(filename);
+				}
+				// Check if pattern is a regex (enclosed in regex:)
+				else if (pattern.startsWith('regex:')) {
+					// Extract regex pattern without regex:
+					const regexPattern = pattern.slice(6);
+					const regex = new RegExp(regexPattern, 'i');
+					return regex.test(filename);
+				}
+				// Default to glob pattern
+				else {
+					const globPattern = pattern
+						.replace(/\./g, '\\.')
+						.replace(/\*/g, '.*')
+						.replace(/\?/g, '.');
+					const regex = new RegExp(`^${globPattern}$`, 'i');
+					return regex.test(filename);
+				}
+			} catch (e) {
+				console.error(`Invalid pattern: ${pattern}`, e);
+				return false;
+			}
+		});
+	}
 	// Queue
 	/////////////////////////////////
 	// Handle large batches of images via the queue
@@ -6140,7 +6212,7 @@ export class ImageConvertTab extends PluginSettingTab {
 		
 		// Resize Mode Setting
 		new Setting(resizeSettingsContainer)
-			.setName('Resize Mode ⓘ')
+			.setName('Resize mode ⓘ')
 			.setDesc('Choose how images should be resized. Note: Results are permanent.')
 			.setTooltip('Fit: Maintains aspect ratio within dimensions\nFill: Exactly matches dimensions\nLongest Edge: Limits the longest side\nShortest Edge: Limits the shortest side\nWidth/Height: Constrains single dimension')
 			.addDropdown(dropdown =>
@@ -6180,6 +6252,33 @@ export class ImageConvertTab extends PluginSettingTab {
 			this.updateResizeInputs(resizeSettingsContainer, this.plugin.settings.destructive_resizeMode);
 			this.addEnlargeReduceSetting(resizeSettingsContainer);
 		}
+
+		new Setting(container)
+			.setName('Skip patterns ⓘ')
+			.setDesc('Skip files matching these patterns (comma-separated)')
+			.setTooltip(
+				'Supports multiple pattern types:\n\n' +
+				'1. Glob patterns:\n' +
+				'   *.png, draft-*, test-?.jpg\n' +
+				'   * = any characters\n' +
+				'   ? = single character\n\n' +
+				'2. Regular expressions:\n' +
+				'   /pattern/ or r/pattern/ or regex:pattern\n\n' +
+				'Examples:\n' +
+				' *.png (all PNG files)\n' +
+				' draft-* (files starting with draft-)\n' +
+				' /^IMG_\\d{4}\\./ (IMG_ followed by 4 digits)\n' +
+				' r/\\.(jpe?g|png)$/ (files ending in .jpg/.jpeg/.png)\n' +
+				' regex:^(draft|temp)- (files starting with draft- or temp-)'
+			)
+			.addText(text => text
+				.setPlaceholder('e.g., *.png, draft-*, /^IMG_\\d{4}\\./)')
+				.setValue(this.plugin.settings.skipPatterns)
+				.onChange(async (value) => {
+					this.plugin.settings.skipPatterns = value;
+					await this.plugin.saveSettings();
+				}));
+
 	}
 
 	private addEnlargeReduceSetting(container: HTMLElement): void {
@@ -8893,7 +8992,7 @@ class ImageAnnotationModal extends Modal {
 			if (colorDiv) {
 				if (this.isTextMode && currentPresets[index].backgroundColor) {
 					// For text mode, show both text color and background
-					colorDiv.style.backgroundColor = currentPresets[index].backgroundColor;
+					colorDiv.style.backgroundColor = currentPresets[index].backgroundColor ?? 'transparent';
 					colorDiv.style.opacity = (currentPresets[index].backgroundOpacity ?? 1).toString();
 					// Add a small indicator for text color
 					colorDiv.style.border = `2px solid ${currentPresets[index].color}`;
