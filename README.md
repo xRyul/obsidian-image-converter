@@ -16,7 +16,8 @@ Supported image formats: WEBP, JPG, PNG, HEIC, TIF
 - **Image annotation** and **markup tool**. Draw, write, scribble, annotate, markup on top of images right inside Obsidian.  </br>
   <img src="https://github.com/user-attachments/assets/71b8d71d-2608-441a-91cd-b7003b84d23a" width="400px"></br>
 - ✂️ **Crop, rotate, and flip images**  </br>
-  <img src="https://github.com/user-attachments/assets/a4ead276-ac4e-4523-8567-fa064bdf7119" width="400px"></br>
+  <img src="https://github.com/user-attachments/assets/a4ead276-ac4e-4523-8567-fa064bdf7119" width="400px"><<img src="https://github.com/user-attachments/assets/6ff7c138-90fe-456d-b968-c5fb45d27bbf" width="400px"></br>
+
 - 📁 **Custom File Management and Renaming**:
 	- **Rename**: Use variables (e.g., `{noteName}`, `{fileName}`) to auto-rename images [List of Supported Variables](<Examples/Variables Reference Guide.md>)
 	- **Output**: Organize images into custom output folders with variables.[List of Supported Variables](<Examples/Variables Reference Guide.md>)
