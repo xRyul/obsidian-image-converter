@@ -4,7 +4,7 @@ https://github.com/xRyul/obsidian-image-converter/assets/47340038/63a0646b-29ec-
 ## Features
 Supported image formats: WEBP, JPG, PNG, HEIC, TIF
 
-- Image conversion: Automatically convert dropped/pasted images into WEBP, JPG or PNG. 
+- Convert: Automatically convert dropped/pasted images into WEBP, JPG or PNG. 
 - Image compression: Reduce file size of an image by specifying desired Quality value between 1-100
 - Renaming: Auto-rename converted image with Variables e.g. {noteName} {fileName} and more. [List of Supported Variables](<Examples/Variables Reference Guide.md>)
 - Custom output folders: Create custom Output folders with Variables e.g. {noteName} {fileName} and more. [List of Supported Variables](<Examples/Variables Reference Guide.md>)
@@ -25,7 +25,11 @@ Supported image formats: WEBP, JPG, PNG, HEIC, TIF
 - Ability to resize original image via right click context menu
 	- <img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/3367b41c-63fa-4a1c-a616-8561e467eef7" width="600px">
 
-- Image annotation and markup tool. Draw, write, scribble, annotate, markup on top of images right inside Obsidian.
+- **Image annotation** and **markup tool**. Draw, write, scribble, annotate, markup on top of images right inside Obsidian.
+![image](https://github.com/user-attachments/assets/71b8d71d-2608-441a-91cd-b7003b84d23a)
+
+- **Crop**
+![image](https://github.com/user-attachments/assets/a4ead276-ac4e-4523-8567-fa064bdf7119)
 
 
 ## Quick Summary for Image Compression
