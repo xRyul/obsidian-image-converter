@@ -1,9 +1,9 @@
 {
 	"id": "image-converter",
 	"name": "Image Converter",
-	"version": "1.2.15",
+	"version": "1.2.16",
 	"minAppVersion": "0.15.0",
-	"description": "Convert, compress and resize images from one format to another by dragging and dropping or pasting into the note. HEIC, TIF, JPG, WEBP, PNG.",
+	"description": "Convert, compress, resize, annotate, markup, draw, crop, rotate, flip, align images directly in Obsidian. Drag-resize, rename with variables, batch process. WEBP, JPG, PNG, HEIC, TIF.",
 	"author": "xRyul",
 	"authorUrl": "https://github.com/xryul",
 	"isDesktopOnly": false,
