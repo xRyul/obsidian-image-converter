@@ -808,89 +808,71 @@
 
 
 
-/* styles.css */
-/* Base image animation keyframes */
-@keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+/* Image Positioning  */
+/* /////////////////////////////////////////////////// */
+/* Base image styles */
+.markdown-reading-view img,
+.markdown-source-view img,
+.internal-embed.image-embed {
+    display: inline-block;
+    max-width: 100%;
+    vertical-align: top;
+    pointer-events: auto;
+    position: relative;
+    z-index: 2;
 }
 
-@keyframes slideInFromLeft {
-    from { 
-        opacity: 0;
-        transform: translateX(0px);
-    }
-    to { 
-        opacity: 1;
-        transform: translateX(0);
-    }
+/* Positioning styles WITH wrap */
+.image-wrap.image-position-left,
+.image-wrap.internal-embed.image-embed.image-position-left {
+    float: left !important;
+    margin: 0.5em 1em 0.5em 0 !important;
+    clear: left;
 }
 
-@keyframes slideInFromRight {
-    from { 
-        opacity: 0;
-        transform: translateX(0px);
-    }
-    to { 
-        opacity: 1;
-        transform: translateX(0);
-    }
+.image-wrap.image-position-right,
+.image-wrap.internal-embed.image-embed.image-position-right {
+    float: right !important;
+    margin: 0.5em 0 0.5em 1em !important;
+    clear: right;
+
 }
 
 
-/* Left positioning */
-.cm-content .internal-embed.image-embed.image-position-left,
-.cm-content img.image-position-left,
-.markdown-reading-view .internal-embed.image-embed.image-position-left,
-.markdown-reading-view img.image-position-left,
-.el-p .internal-embed.image-embed.image-position-left,
-.el-p img.image-position-left {
+/* Positioning styles WITHOUT wrap */
+.image-no-wrap.image-position-left,
+.image-no-wrap.internal-embed.image-embed.image-position-left,
+.image-no-wrap.image-position-right,
+.image-no-wrap.internal-embed.image-embed.image-position-right {
     display: block !important;
+    margin: 1em auto !important;
+    clear: both;
+}
+
+.image-no-wrap.image-position-left {
     margin-right: auto !important;
     margin-left: 0 !important;
-    animation: zoomIn  0.3s ease-in;
+}
+
+.image-no-wrap.image-position-right {
+    margin-left: auto !important;
+    margin-right: 0 !important;
 }
 
 /* Center positioning */
-.cm-content .internal-embed.image-embed.image-position-center,
-.cm-content img.image-position-center,
-.markdown-reading-view .internal-embed.image-embed.image-position-center,
-.markdown-reading-view img.image-position-center,
-.el-p .internal-embed.image-embed.image-position-center,
-.el-p img.image-position-center {
+.image-position-center,
+.internal-embed.image-embed.image-position-center {
     display: block !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-    animation: fadeIn 0.3s ease-in;
+    margin: 1em auto !important;
+    clear: both;
 }
 
-/* Right positioning */
-.cm-content .internal-embed.image-embed.image-position-right,
-.cm-content img.image-position-right,
-.markdown-reading-view .internal-embed.image-embed.image-position-right,
-.markdown-reading-view img.image-position-right,
-.el-p .internal-embed.image-embed.image-position-right,
-.el-p img.image-position-right {
-    display: block !important;
-    margin-left: auto !important;
-    margin-right: 0 !important;
-    animation: slideInFromRight 0.3s ease-in;
+/* Preserve image dimensions */
+.markdown-reading-view img[style*="width"],
+.markdown-source-view img[style*="width"] {
+    height: auto !important;
 }
 
-/* Ensure containers don't override image dimensions */
-.internal-embed.image-embed,
-.markdown-reading-view .internal-embed.image-embed,
-.el-p .internal-embed.image-embed {
-    display: block !important;
-    max-width: 100% !important;
-}
-
-/* Ensure span containers maintain image dimensions */
-.internal-embed.media-embed.image-embed span,
-.markdown-reading-view span.internal-embed,
-.el-p span.internal-embed {
-    display: block !important;
-}
 
 
 

@@ -81,7 +81,11 @@ declare module 'obsidian' {
     }
     interface MenuItem {
         setSubmenu(): MenuItem;
-        addItem(callback: (item: MenuItem) => void): MenuItem;
+        addItem(callback: (item: MenuItem) => any): MenuItem;
+        addSeparator(): MenuItem;
+        setIcon(icon: string): MenuItem;
+        setTitle(title: string): MenuItem;
+        onClick(callback: () => any): MenuItem;
     }
 }
 
@@ -206,6 +210,7 @@ interface ImageConvertSettings {
 
 	rememberScrollPosition: boolean;
 	cursorPosition: 'front' | 'back';
+	cacheCleanupInterval: number;
 
 	useMdLinks: boolean;
 	useRelativePath: boolean;
@@ -315,6 +320,8 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	useMdLinks: false,
 	useRelativePath: false,
 
+	cacheCleanupInterval: 60,
+
     annotationPresets: {
         drawing: Array(3).fill({
             color: '#000000',
@@ -382,10 +389,11 @@ export default class ImageConvertPlugin extends Plugin {
 	private isConversionDisabled = false;  // For complete plugin disable
     private isProcessingDisabled = false;  // For conversion/compression/resize disable only
 
-	private imagePositionManager: ImagePositionManager;
+	public imagePositionManager: ImagePositionManager;
+	private cacheCleanupIntervalId: number | null = null;
 
 	// Drag Resize
-    private resizeState: {
+    public resizeState: {
         isResizing: boolean;
         startX: number;
         startY: number;
@@ -414,6 +422,13 @@ export default class ImageConvertPlugin extends Plugin {
 
 		this.addSettingTab(new ImageConvertTab(this.app, this));
 
+		this.imagePositionManager = new ImagePositionManager(this);
+		// // Apply positions immediately without setTimeout
+		// const currentFile = this.app.workspace.getActiveFile();
+		// if (currentFile) {
+		// 	this.imagePositionManager.applyPositionsToNote(currentFile.path);
+		// }
+
 		// Add periodic cleanup
 		this.registerInterval(
 			window.setInterval(() => this.cleanupProcessedFiles(), 30000)
@@ -425,8 +440,6 @@ export default class ImageConvertPlugin extends Plugin {
 			this.progressEl = document.body.createDiv('image-converter-progress');
 			this.progressEl.style.display = 'none';
 		
-			this.imagePositionManager = new ImagePositionManager(this);
-
 			// Register commands
 			this.registerCommands();
 			// Register all event handlers
@@ -443,12 +456,14 @@ export default class ImageConvertPlugin extends Plugin {
 			// Register for layout changes
 			this.registerEvent(
 				this.app.workspace.on('layout-change', () => {
-					// This is simply to get position on layout change
-					const currentFile = this.app.workspace.getActiveFile();
-					if (currentFile) {
-						this.imagePositionManager.applyPositionsToNote(currentFile.path);
-					}
-
+					// // This is simply to get position on layout change
+					// const currentFile = this.app.workspace.getActiveFile();
+					// if (currentFile) {
+					// 	this.imagePositionManager.applyPositionsToNote(currentFile.path);
+					// }
+					// Reconnect the observer after layout changes
+					this.imagePositionManager.setupImageObserver();
+					
 					this.registerEventHandlers();
 					this.initializeDragResize();
 				})
@@ -456,6 +471,24 @@ export default class ImageConvertPlugin extends Plugin {
 	
 
 			// POSITION MANAGEMENT 
+			// All below events are needed for keeping CACHE UP-toDate and cleaned up
+			// Register event to apply positions when switching notes
+			this.registerEvent(
+				this.app.workspace.on('file-open', (file) => {
+					if (file) {
+						this.imagePositionManager.applyPositionsToNote(file.path);
+					}
+				})
+			);
+
+			// this.registerDomEvent(document, 'click', (event: MouseEvent) => {
+			// 	const target = event.target as HTMLElement;
+			// 	if (target.tagName === 'IMG' || target.classList.contains('image-embed')) {
+			// 		event.preventDefault();
+			// 		event.stopPropagation();
+			// 	}
+			// });
+			
 			// Apply to current note after a short delay to ensure everything is loaded
 			// setTimeout(async () => {
 			// 	const currentFile = this.app.workspace.getActiveFile();
@@ -474,6 +507,15 @@ export default class ImageConvertPlugin extends Plugin {
 			// 	})
 			// );
 	
+			this.registerEvent(
+				this.app.vault.on('modify', async (file) => {
+					if (file instanceof TFile && file.extension === 'md') {
+						const content = await this.app.vault.read(file);
+						await this.imagePositionManager.validateNoteCache(file.path, content);
+					}
+				})
+			);
+
 			// Register for active leaf changes, this will help with loading position if opening into a NOTE
 			this.registerEvent(
 				this.app.workspace.on('active-leaf-change', async () => {
@@ -525,7 +567,8 @@ export default class ImageConvertPlugin extends Plugin {
 										notePath,
 										file.path,
 										positions.position,
-										positions.width
+										positions.width,
+										positions.wrap || false
 									);
 								}
 							}
@@ -534,12 +577,9 @@ export default class ImageConvertPlugin extends Plugin {
 				})
 			);
 
-			// Clean cache periodically (e.g., every hour)
-			this.registerInterval(
-				window.setInterval(() => {
-					this.imagePositionManager.cleanCache();
-				}, 60 * 60 * 1000)
-			);
+			// Periodic cleanup for catching edge cases and maintaining overall cache health (e.g., every hour)
+			// Initialize cache cleanup interval
+			this.updateCacheCleanupInterval();
 
 			// Register context menu
 			this.registerContextMenu();
@@ -634,8 +674,18 @@ export default class ImageConvertPlugin extends Plugin {
 
 		// Final cache cleanup before unloading
 		await this.imagePositionManager.cleanCache();
+		// Clean up the observer
+		if (this.imagePositionManager) {
+			this.imagePositionManager.cleanupObserver();
+		}
+        if (this.cacheCleanupIntervalId) {
+            window.clearInterval(this.cacheCleanupIntervalId);
+        }
 
-
+		document.querySelectorAll('img').forEach(img => {
+			img.style.pointerEvents = 'auto';
+		});
+		
 		// Wait for any pending operations to complete
 		await new Promise(resolve => window.setTimeout(resolve, 100));
 
@@ -671,16 +721,6 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
 	private registerEventHandlers() {
-
-		// Register event to apply positions when switching notes
-		this.registerEvent(
-			this.app.workspace.on('file-open', (file) => {
-				if (file) {
-					this.imagePositionManager.applyPositionsToNote(file.path);
-				}
-			})
-		);
-
 		// Register workspace-level events
 		const workspaceContainer = this.app.workspace.containerEl;
 		
@@ -2582,7 +2622,7 @@ export default class ImageConvertPlugin extends Plugin {
 		// Get Obsidian's link settings
 		const useMarkdownLinks = this.app.vault.getConfig('useMarkdownLinks');
 		// Encode path if Obsidian is set to use Wiki links + OUR pLUGIN setting is turned ON + path contains spaces or special chars
-		if (!useMarkdownLinks && this.settings.useMdLinks && /[\s!@#$%^&*()+=[\]{};:'",<>?|\\]/.test(cleanPath)) {
+		if (!useMarkdownLinks && this.settings.useMdLinks && /[\s!#$%^&*()+=[\]{};:'",<>?|\\]/.test(cleanPath)) {
 			// Split the path to encode each segment separately
 			const pathSegments = cleanPath.split('/');
 			cleanPath = pathSegments
@@ -3955,16 +3995,22 @@ export default class ImageConvertPlugin extends Plugin {
 
 	private registerContextMenu() {
 
+
+
 		this.registerDomEvent(
 			document,
 			'contextmenu',
 			(event: MouseEvent) => {
 				const target = event.target as HTMLElement;
 				
-				if (target instanceof HTMLImageElement) {
-					event.preventDefault();
-					event.stopPropagation();
-					this.onContextMenu(event);
+				// Check if target is an image or is within an image container
+				const img = target instanceof HTMLImageElement ? 
+					target : 
+					target.closest('img');
+				
+				if (img) {
+
+					this.onContextMenu(event, img as HTMLImageElement);
 				}
 			},
 			true  // capture phase
@@ -3995,15 +4041,16 @@ export default class ImageConvertPlugin extends Plugin {
 		return () => el.off(event, selector, listener, options);
 	}
 
-	onContextMenu(event: MouseEvent) {
+	onContextMenu(event: MouseEvent, img: HTMLImageElement) {
 
-		// Prevent default context menu from being displayed
-		// event.preventDefault();
 		// If the 'Disable right-click context menu' setting is enabled, return immediately
 		if (!this.settings.rightClickContextMenu) {
 			return;
 		}
-
+		// Prevent default context menu from being displayed
+		event.preventDefault();
+		event.stopPropagation();
+		
 		// Check if we're in Canvas view first
 		const activeView = this.getActiveView();
 		const isCanvasView = activeView?.getViewType() === 'canvas';
@@ -4019,7 +4066,7 @@ export default class ImageConvertPlugin extends Plugin {
 			return; // Exit if not an image
 		}
 
-		const img = event.target as HTMLImageElement;
+		// const img = event.target as HTMLImageElement;
 
 
 		// Only show the context menu if the user right-clicks within the center of the image
@@ -4088,31 +4135,69 @@ export default class ImageConvertPlugin extends Plugin {
 				.setIcon('align-justify')
 				.setSubmenu()
 				.addItem((subItem) => {
+					const currentPosition = this.getCurrentImagePosition(img);
 					subItem
 						.setTitle('Left')
 						.setIcon('align-left')
+						.setChecked(currentPosition === 'left')
 						.onClick(async () => {
-							await this.setImagePosition(img, 'left');
+							if (currentPosition === 'left') {
+								// Remove positioning if clicking the same position
+								await this.removeImagePosition(img);
+							} else {
+								await this.setImagePosition(img, 'left', false);
+							}
 						});
 				})
 				.addItem((subItem) => {
+					const currentPosition = this.getCurrentImagePosition(img);
 					subItem
 						.setTitle('Center')
 						.setIcon('align-center')
+						.setChecked(currentPosition === 'center')
 						.onClick(async () => {
-							await this.setImagePosition(img, 'center');
+							if (currentPosition === 'center') {
+								// Remove positioning if clicking the same position
+								await this.removeImagePosition(img);
+							} else {
+								await this.setImagePosition(img, 'center', false);
+							}
 						});
 				})
 				.addItem((subItem) => {
+					const currentPosition = this.getCurrentImagePosition(img);
 					subItem
 						.setTitle('Right')
 						.setIcon('align-right')
+						.setChecked(currentPosition === 'right')
 						.onClick(async () => {
-							await this.setImagePosition(img, 'right');
+							if (currentPosition === 'right') {
+								// Remove positioning if clicking the same position
+								await this.removeImagePosition(img);
+							} else {
+								await this.setImagePosition(img, 'right', false);
+							}
+						});
+				})
+				.addSeparator()
+				.addItem((subItem) => {
+					const currentWrap = this.getCurrentImageWrap(img);
+					subItem
+						.setTitle('Wrap Text')
+						.setChecked(currentWrap)
+						.onClick(async () => {
+							const currentPosition = this.getCurrentImagePosition(img);
+							if (currentPosition === 'none') {
+								// If no positioning is set, default to left when enabling wrap
+								await this.setImagePosition(img, 'left', !currentWrap);
+							} else {
+								await this.setImagePosition(img, currentPosition, !currentWrap);
+							}
 						});
 				});
 		});
 
+		
 		// Add option to resize image
 		menu.addItem((item: MenuItem) =>
 			item
@@ -4375,38 +4460,130 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
 	// Left, right, center image alignment/ positioning
-    private async setImagePosition(img: HTMLImageElement, position: 'left' | 'center' | 'right') {
-        const activeFile = this.app.workspace.getActiveFile();
-        if (!activeFile) return;
+	private async setImagePosition(
+		img: HTMLImageElement, 
+		position: 'left' | 'center' | 'right',
+		wrap = false
+	) {
+		const activeFile = this.app.workspace.getActiveFile();
+		if (!activeFile) return;
+	
+		const src = img.getAttribute('src');
+		if (!src) return;
+	
+		// Remove existing classes
+		const positionClasses = ['image-position-left', 'image-position-center', 'image-position-right'];
+		const wrapClasses = ['image-wrap', 'image-no-wrap'];
+		
+		// Get the parent embed if it exists
+		const parentEmbed = img.closest('.internal-embed.image-embed');
+		
+		// Function to update element classes
+		const updateElement = (element: Element) => {
+			if (element) {
+				// Remove existing position and wrap classes
+				element.classList.remove(...positionClasses, ...wrapClasses);
+				
+				// Add new classes
+				element.classList.add(`image-position-${position}`);
+				element.classList.add(wrap ? 'image-wrap' : 'image-no-wrap');
+			}
+		};
+	
+		// Update both the image and its parent embed
+		updateElement(img);
+		if (parentEmbed) {
+			updateElement(parentEmbed);
+		}
+	
+		// Save to cache
+		await this.imagePositionManager.setImagePosition(
+			activeFile.path,
+			src,
+			position,
+			img.style.width,
+			wrap
+		);
+	}
 
-        const src = img.getAttribute('src');
-        if (!src) return;
+	private async removeImagePosition(img: HTMLImageElement) {
+		const activeFile = this.app.workspace.getActiveFile();
+		if (!activeFile) return;
+	
+		const src = img.getAttribute('src');
+		if (!src) return;
+	
+		// Remove all positioning classes
+		img.classList.remove(
+			'image-position-left', 
+			'image-position-center', 
+			'image-position-right',
+			'image-wrap',
+			'image-no-wrap'
+		);
+	
+		// Remove from parent embed if exists
+		const parentEmbed = img.closest('.internal-embed.image-embed');
+		if (parentEmbed) {
+			parentEmbed.classList.remove(
+				'image-position-left', 
+				'image-position-center', 
+				'image-position-right',
+				'image-wrap',
+				'image-no-wrap'
+			);
+		}
+	
+		// Remove from cache
+		await this.imagePositionManager.removeImageFromCache(activeFile.path, src);
+	}
 
-        const width = img.style.width || img.getAttribute('width') || undefined;
-
-        await this.imagePositionManager.setImagePosition(
-            activeFile.path,
-            src,
-            position,
-            width
-        );
-
-        // Apply position immediately for visual feedback
-        const positionClasses = ['image-position-left', 'image-position-center', 'image-position-right'];
-        img.classList.remove(...positionClasses);
-        img.classList.add(`image-position-${position}`);
-
-        const parentEmbed = img.closest('.internal-embed.image-embed');
-        if (parentEmbed) {
-            parentEmbed.classList.remove(...positionClasses);
-            parentEmbed.classList.add(`image-position-${position}`);
-        }
-    }
-
-	private getCurrentImagePosition(element: HTMLImageElement): 'left' | 'center' | 'right' {
+	private getCurrentImageWrap(element: HTMLImageElement): boolean {
+		return element.classList.contains('image-wrap');
+	}
+	
+	private getCurrentImagePosition(element: HTMLImageElement): 'left' | 'center' | 'right' | 'none' {
 		if (element.classList.contains('image-position-center')) return 'center';
 		if (element.classList.contains('image-position-right')) return 'right';
-		return 'left'; // default position
+		if (element.classList.contains('image-position-left')) return 'left';
+		return 'none'; // default state when no positioning is applied
+	}
+
+	private getCurrentContainer(img: HTMLImageElement) {
+		const listItem = img.closest('li');
+		if (listItem) {
+			const list = listItem.closest('ul, ol');
+			return {
+				type: 'list',
+				element: listItem,
+				listType: list?.tagName.toLowerCase(),
+				level: this.getListNestingLevel(listItem)
+			};
+		}
+	
+		const callout = img.closest('.callout');
+		if (callout) {
+			return {
+				type: 'callout',
+				element: callout
+			};
+		}
+	
+		return { type: 'normal', element: null };
+	}
+	
+	private getListNestingLevel(listItem: HTMLElement): number {
+		let level = 0;
+		let parent = listItem.parentElement;
+		while (parent) {
+			if (parent.tagName === 'UL' || parent.tagName === 'OL') {
+				level++;
+				parent = parent.parentElement?.closest('ul, ol') || null;
+			} else {
+				break;
+			}
+		}
+		return level;
 	}
 
 
@@ -4458,17 +4635,17 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
 	private dragResize_handleMouseDown(event: MouseEvent) {
-		if (!this.settings.resizeByDragging) return;
-		if (Platform.isMobile) { return; }
+		if (!this.settings.resizeByDragging || Platform.isMobile) return;
+		
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-		const target = event.target as HTMLElement;
-		// Early return if disabled or in reading mode without permission
-		if (!this.settings.resizeByDragging || 
-			!activeView || 
+		if (!activeView || 
 			(activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode)) {
 			return;
 		}
-		if (!this.dragResize_isValidTarget(target)) return;
+	
+		// Find the image element, either as the target or as a parent
+		const target = (event.target as HTMLElement).closest('img, video') as HTMLElement;
+		if (!target || !this.dragResize_isValidTarget(target)) return;
 	
 		const rect = target.getBoundingClientRect();
 		const x = event.clientX - rect.left;
@@ -4479,8 +4656,8 @@ export default class ImageConvertPlugin extends Plugin {
 			(y >= rect.height - edgeSize || y <= edgeSize)) {
 			
 			event.preventDefault();
+			event.stopPropagation();
 			
-			// Set active resize state
 			target.setAttribute('data-resize-active', 'true');
 			
 			this.resizeState = {
@@ -4512,46 +4689,55 @@ export default class ImageConvertPlugin extends Plugin {
 		}
 	}
 
-	private dragResize_handleMouseUp() {
+	private async dragResize_handleMouseUp() {
 		if (Platform.isMobile) { return; }
 		if (this.resizeState.element) {
 			const element = this.resizeState.element;
+			if (!(element instanceof HTMLImageElement)) return;
+	
 			// Clean up resize attributes
 			element.removeAttribute('data-resize-edge');
 			element.removeAttribute('data-resize-active');
 			this.dragResize_updateCursorPosition();
-
-			// Update cache with new dimensions
-			if (element instanceof HTMLImageElement) {
+	
+			try {
+				// Update cache with new dimensions
 				const activeFile = this.app.workspace.getActiveFile();
 				if (activeFile && this.imagePositionManager) {
 					const src = element.getAttribute('src');
 					if (src) {
-						// Get current position from element's classes
-						const currentPosition = this.getCurrentImagePosition(element);
 						const width = element.style.width || 
 									element.getAttribute('width') || 
 									undefined;
-
-						// console.log('Updating cache after drag resize:', {
-						// 	path: activeFile.path,
-						// 	src,
-						// 	position: currentPosition,
-						// 	width
-						// });
-
-						// Update cache with current position and new width
-						this.imagePositionManager.setImagePosition(
+	
+						// Preserve existing classes
+						const currentPosition = this.getCurrentImagePosition(element);
+						const currentWrap = this.getCurrentImageWrap(element);
+	
+						// Ensure classes are maintained
+						element.classList.add(`image-position-${currentPosition}`);
+						element.classList.add(currentWrap ? 'image-wrap' : 'image-no-wrap');
+	
+						// Update parent embed if it exists
+						const parentEmbed = element.closest('.internal-embed.image-embed');
+						if (parentEmbed) {
+							parentEmbed.classList.add(`image-position-${currentPosition}`);
+							parentEmbed.classList.add(currentWrap ? 'image-wrap' : 'image-no-wrap');
+						}
+	
+						// Update cache
+						await this.imagePositionManager.preservePositionDuringResize(
 							activeFile.path,
 							src,
-							currentPosition,
 							width
 						);
 					}
 				}
+			} catch (error) {
+				console.error('Error updating image position during resize:', error);
 			}
 		}
-
+	
 		this.resizeState = {
 			isResizing: false,
 			startX: 0,
@@ -4763,54 +4949,56 @@ export default class ImageConvertPlugin extends Plugin {
 					if (!this.scrollwheelresize_checkModifierKey(event)) return;
 	
 					try {
-						const img = event.target as HTMLImageElement | HTMLVideoElement;
-						const imageName = getImageName(img);
+						const element = event.target as HTMLImageElement | HTMLVideoElement;
+						const imageName = getImageName(element);
 	
 						if (!imageName || imageName !== this.storedImageName) {
 							return;
 						}
 	
-						const { newWidth, newHeight, newLeft, newTop } = 
-							resizeImageScrollWheel(event, img);
-						
-						if (img instanceof HTMLImageElement) {
-							img.style.width = `${newWidth}px`;
-							img.style.height = `${newHeight}px`;
-							img.style.left = `${newLeft}px`;
-							img.style.top = `${newTop}px`;
+						const { newWidth, newHeight } = resizeImageScrollWheel(event, element);
 	
-							// Update cache with new dimensions
+						if (element instanceof HTMLImageElement) {
+							element.style.width = `${newWidth}px`;
+							element.style.height = `${newHeight}px`;
+							element.style.removeProperty('left');
+							element.style.removeProperty('top');
+						
+							// Preserve existing classes
+							const currentPosition = this.getCurrentImagePosition(element);
+							const currentWrap = this.getCurrentImageWrap(element);
+	
+							// Ensure classes are maintained
+							element.classList.add(`image-position-${currentPosition}`);
+							element.classList.add(currentWrap ? 'image-wrap' : 'image-no-wrap');
+	
+							// Update parent embed if it exists
+							const parentEmbed = element.closest('.internal-embed.image-embed');
+							if (parentEmbed) {
+								parentEmbed.classList.add(`image-position-${currentPosition}`);
+								parentEmbed.classList.add(currentWrap ? 'image-wrap' : 'image-no-wrap');
+							}
+	
+							// Update cache
 							const activeFile = this.app.workspace.getActiveFile();
 							if (activeFile && this.imagePositionManager) {
-								const src = img.getAttribute('src');
+								const src = element.getAttribute('src');
 								if (src) {
-									// Get current position from element's classes
-									const currentPosition = this.getCurrentImagePosition(img);
-	
-									// console.log('Updating cache after scroll resize:', {
-									// 	path: activeFile.path,
-									// 	src,
-									// 	position: currentPosition,
-									// 	width: `${newWidth}px`
-									// });
-	
-									// Update cache with current position and new width
-									await this.imagePositionManager.setImagePosition(
+									await this.imagePositionManager.preservePositionDuringResize(
 										activeFile.path,
 										src,
-										currentPosition,
 										`${newWidth}px`
 									);
 								}
 							}
-						} else if (img instanceof HTMLVideoElement) {
-							img.style.width = `${newWidth}%`;
+						} else if (element instanceof HTMLVideoElement) {
+							element.style.width = `${newWidth}%`;
 						}
 	
 						const editor = activeView.editor;
 						updateImageLink({
 							activeView,
-							element: img,
+							element,
 							newWidth,
 							newHeight,
 							settings: this.settings
@@ -4819,8 +5007,9 @@ export default class ImageConvertPlugin extends Plugin {
 						this.scrollwheelresize_updateCursorPosition(editor, imageName);
 	
 					} catch (error) {
-						console.error('An error occurred:', error);
+						console.error('Error during scroll wheel resize:', error);
 					}
+				
 				}
 			)
 		);
@@ -4915,7 +5104,21 @@ export default class ImageConvertPlugin extends Plugin {
 		return ['markdown', 'canvas', 'excalidraw'].includes(viewType || '');
 	}
 
+    public updateCacheCleanupInterval() {
+        // Clear existing interval if any
+        if (this.cacheCleanupIntervalId) {
+            window.clearInterval(this.cacheCleanupIntervalId);
+            this.cacheCleanupIntervalId = null;
+        }
 
+        // Set new interval if enabled
+        if (this.settings.cacheCleanupInterval > 0) {
+            this.cacheCleanupIntervalId = window.setInterval(() => {
+                console.log("Automatic cache cleanup...");
+                this.imagePositionManager.cleanCache();
+            }, this.settings.cacheCleanupInterval);
+        }
+    }
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -6017,40 +6220,38 @@ function isExternalLink(imageName: string): boolean {
 	return imageName.startsWith('http://') || imageName.startsWith('https://');
 }
 function resizeImageScrollWheel(event: WheelEvent, img: HTMLImageElement | HTMLVideoElement) {
+    // Prevent default scroll behavior
+    // event.preventDefault();
 
-	const delta = Math.sign(event.deltaY); // get the direction of the scroll
-	const scaleFactor = delta < 0 ? 1.1 : 0.9; // set the scale factor for resizing
+    const delta = Math.sign(event.deltaY);
+    const scaleFactor = delta < 0 ? 1.1 : 0.9;
 
-	let newWidth;
-	if (img instanceof HTMLVideoElement && img.style.width.endsWith('%')) {
-		// If the element is a video and the width is in percentages, calculate the new width in percentages
-		newWidth = parseFloat(img.style.width) * scaleFactor;
-		// Ensure the width is within the range 1% - 100%
-		newWidth = Math.max(1, Math.min(newWidth, 100));
-	} else {
-		// If the element is an image or the width is in pixels, calculate the new width in pixels
-		newWidth = img.clientWidth * scaleFactor;
-		// Ensure the image doesn't get too small
-		newWidth = Math.max(newWidth, 50);
-	}
+    let newWidth;
+    if (img instanceof HTMLVideoElement && img.style.width.endsWith('%')) {
+        // Handle video elements with percentage widths
+        newWidth = parseFloat(img.style.width) * scaleFactor;
+        newWidth = Math.max(1, Math.min(newWidth, 100));
+    } else {
+        // Handle images and videos with pixel widths
+        newWidth = img.clientWidth * scaleFactor;
+        newWidth = Math.max(50, newWidth); // Minimum width of 50px
+    }
 
-	// Calculate the new height while maintaining the aspect ratio
-	const aspectRatio = img.clientWidth / img.clientHeight;
-	let newHeight = newWidth / aspectRatio;
-	newHeight = Math.max(newHeight, 50); // Ensure the image doesn't get too small
+    // Calculate height maintaining aspect ratio
+    const aspectRatio = img.clientWidth / img.clientHeight;
+    let newHeight = Math.max(50, newWidth / aspectRatio);
 
-	// Round the values to the nearest whole number
-	newWidth = Math.round(newWidth);
-	newHeight = Math.round(newHeight);
+    // Round values
+    newWidth = Math.round(newWidth);
+    newHeight = Math.round(newHeight);
 
-	// Calculate the new position of the image so that it zooms towards the mouse pointer
-	const rect = img.getBoundingClientRect();
-	const dx = event.clientX - rect.left; // horizontal distance from left edge of image to mouse pointer
-	const dy = event.clientY - rect.top; // vertical distance from top edge of image to mouse pointer
-	const newLeft = rect.left - dx * (newWidth / img.clientWidth - 1);
-	const newTop = rect.top - dy * (newHeight / img.clientHeight - 1);
-
-	return { newWidth, newHeight, newLeft, newTop };
+    // Return new dimensions without position calculations
+    return {
+        newWidth,
+        newHeight,
+        newLeft: 0,  
+        newTop: 0    
+    };
 }
 /* ------------------------------------------------------------- */
 /* ------------------------------------------------------------- */
@@ -7287,13 +7488,80 @@ export class ImageConvertTab extends PluginSettingTab {
 
 		new Setting(container)
 			.setName('Allow larger file sizes after conversion ⓘ')
-            .setTooltip('• When enabled, processed images will be saved even if they are larger than the original.\n• When disabled, it might produce smaller file sizes, but it might also disable any resizing, conversion or compression.\n• Thus, if you really need that file to be at 1000px width, then keep this setting turned ON. Otherwise, if you never use destructive resizing, never use any of the commands to "Process all vault" or "Process all images in current note" and simply want smallest file possible then you can KEEP this OFF.')			.addToggle(toggle => toggle
+			.setTooltip('• When enabled, processed images will be saved even if they are larger than the original.\n• When disabled, it might produce smaller file sizes, but it might also disable any resizing, conversion or compression.\n• Thus, if you really need that file to be at 1000px width, then keep this setting turned ON. Otherwise, if you never use destructive resizing, never use any of the commands to "Process all vault" or "Process all images in current note" and simply want smallest file possible then you can KEEP this OFF.').addToggle(toggle => toggle
 				.setValue(this.plugin.settings.allowLargerFiles)
 				.onChange(async (value) => {
 					this.plugin.settings.allowLargerFiles = value;
 					await this.plugin.saveSettings();
 				}));
-		
+
+		// Add a separator
+		container.createEl('hr');
+
+		// Cache Management Section
+		const cacheContainer = container.createDiv('settings-container');
+		cacheContainer.createEl('h3', { text: 'Cache for Image Alignment' });
+
+		cacheContainer.createDiv('settings-container', (settingsContainer) => {
+			settingsContainer.createEl('p', {
+				text: 'Image position cache stores information about image alignments and sizes. Large caches might impact performance.'
+			});
+		});
+
+		// Display current cache size
+		const cacheInfoDiv = cacheContainer.createDiv('cache-info');
+		const updateCacheInfo = async () => {
+			const cacheSize = await this.getCacheSize();
+			cacheInfoDiv.empty();
+			cacheInfoDiv.createEl('p', {
+				text: `Current cache size: ${cacheSize.notes} notes, ${cacheSize.images} images`
+			});
+		};
+		updateCacheInfo();
+
+		// Add clean cache button
+		new Setting(cacheContainer)
+			.setName('Clean Cache')
+			.setDesc('Remove unused entries from the image position cache')
+			.addButton(button => button
+				.setButtonText('Clean Now')
+				.onClick(async () => {
+					const beforeSize = await this.getCacheSize();
+					await this.plugin.imagePositionManager.cleanCache();
+					const afterSize = await this.getCacheSize();
+
+					new Notice(
+						`Cache cleaned!\nBefore: ${beforeSize.notes} notes, ${beforeSize.images} images\n` +
+						`After: ${afterSize.notes} notes, ${afterSize.images} images`
+					);
+
+					updateCacheInfo();
+				}));
+
+		// Add cache interval setting
+		new Setting(cacheContainer)
+			.setName('Auto-clean interval (minutes)')
+			.setDesc('How often should the cache be automatically cleaned (0 to disable)')
+			.addText(text => text
+				.setValue((this.plugin.settings.cacheCleanupInterval / (60 * 1000)).toString())
+				.onChange(async (value) => {
+					const minutes = parseInt(value);
+					this.plugin.settings.cacheCleanupInterval = minutes * 60 * 1000;
+					await this.plugin.saveSettings();
+
+					// Update the cleanup interval
+					this.plugin.updateCacheCleanupInterval();
+				}));
+	}
+
+	// Add helper method to get cache size
+	private async getCacheSize(): Promise<{notes: number, images: number}> {
+		const cache = this.plugin.imagePositionManager.getCache();
+		const notes = Object.keys(cache).length;
+		const images = Object.values(cache).reduce((total, noteCache) => 
+			total + Object.keys(noteCache).length, 0
+		);
+		return { notes, images };
 	}
 
 }
@@ -12338,12 +12606,15 @@ interface ImagePositionCache {
         [imageSrc: string]: {
             position: 'left' | 'center' | 'right';
             width?: string;
+            wrap: boolean;
         }
     }
 }
 
 export class ImagePositionManager {
     private cache: ImagePositionCache = {};
+	private imageObserver: MutationObserver | null = null;
+
     private readonly CACHE_FILE = '.image-positions.json';
     private pluginDir: string;
 
@@ -12351,6 +12622,7 @@ export class ImagePositionManager {
         // Get the actual plugin directory from the plugin's main file path
         this.pluginDir = this.getPluginDir();
         this.loadCache();
+		this.setupImageObserver();
     }
 
 	private getPluginDir(): string {
@@ -12403,31 +12675,131 @@ export class ImagePositionManager {
         }
     }
 
-    public async setImagePosition(
-        notePath: string, 
-        imageSrc: string, 
-        position: 'left' | 'center' | 'right',
-        width?: string
-    ) {
-        if (!this.cache[notePath]) {
-            this.cache[notePath] = {};
-        }
-        
-        // Store with normalized path
-        const normalizedSrc = this.normalizeImagePath(imageSrc);
-        this.cache[notePath][normalizedSrc] = {
-            position,
-            width
-        };
-        
-        await this.saveCache();
-    }
+	public setupImageObserver() {
+		if (this.imageObserver) {
+			this.imageObserver.disconnect();
+		}
+	
+		this.imageObserver = new MutationObserver((mutations) => {
+			const mainPlugin = this.plugin as ImageConvertPlugin;
+			
+			// Get current file once for all mutations
+			const currentFile = this.plugin.app.workspace.getActiveFile();
+			if (!currentFile || !this.cache[currentFile.path]) return;
+	
+			const processImage = (img: HTMLImageElement) => {
+				// Skip if we're currently resizing
+				if (mainPlugin.resizeState?.isResizing) return;
+	
+				// Skip if the image has resize attributes
+				if (img.hasAttribute('data-resize-edge') || 
+					img.hasAttribute('data-resize-active')) {
+					return;
+				}
+	
+				const src = img.getAttribute('src');
+				if (!src) return;
+	
+				// Normalize the source path
+				const normalizedSrc = this.normalizeImagePath(src);
+				
+				// Find matching cache entry
+				const positions = this.cache[currentFile.path];
+				const cacheEntry = Object.entries(positions).find(([key, _]) => 
+					this.normalizeImagePath(key) === normalizedSrc
+				);
+	
+				if (cacheEntry) {
+					const [, positionData] = cacheEntry;
+					this.applyPositionToImage(img, positionData);
+				}
+			};
+	
+			mutations.forEach((mutation) => {
+				// Handle added nodes
+				mutation.addedNodes.forEach((node) => {
+					if (node instanceof HTMLImageElement) {
+						processImage(node);
+					} else if (node instanceof Element) {
+						// Process all images within added elements
+						node.querySelectorAll('img').forEach(img => processImage(img));
+					}
+				});
+	
+				// Handle attribute modifications on existing images
+				if (mutation.type === 'attributes' && 
+					mutation.target instanceof HTMLImageElement &&
+					!mutation.target.hasAttribute('data-resize-active')) {
+					processImage(mutation.target);
+				}
+			});
+		});
+	
+		// Observe both structure and attribute changes
+		this.imageObserver.observe(document.body, {
+			childList: true,
+			subtree: true,
+			attributes: true,
+			attributeFilter: ['src', 'style', 'width', 'height']
+		});
+	}
+
+	// In ImagePositionManager class
+	public async setImagePosition(
+		notePath: string,
+		imageSrc: string,
+		position: 'left' | 'center' | 'right' | 'none',
+		width?: string,
+		wrap = false
+	) {
+		// If position is 'none', remove from cache
+		if (position === 'none') {
+			if (this.cache[notePath]) {
+				const normalizedSrc = this.normalizeImagePath(imageSrc);
+				Object.keys(this.cache[notePath]).forEach(key => {
+					if (this.normalizeImagePath(key) === normalizedSrc) {
+						delete this.cache[notePath][key];
+					}
+				});
+				if (Object.keys(this.cache[notePath]).length === 0) {
+					delete this.cache[notePath];
+				}
+				await this.saveCache();
+			}
+			return;
+		}
+	
+		if (!this.cache[notePath]) {
+			this.cache[notePath] = {};
+		}
+		
+		const normalizedSrc = this.normalizeImagePath(imageSrc);
+		
+		// Remove any existing entries for this image
+		Object.keys(this.cache[notePath]).forEach(key => {
+			if (this.normalizeImagePath(key) === normalizedSrc) {
+				delete this.cache[notePath][key];
+			}
+		});
+	
+		// Add new entry
+		this.cache[notePath][imageSrc] = {
+			position,
+			width,
+			wrap
+		};
+		
+		await this.saveCache();
+	}
 
 	// Helper method to normalize image paths
 	private normalizeImagePath(src: string): string {
-		// Extract just the filename from the path
-		const match = src.match(/([^/\\]+)\.[^.]+(?:\?.*)?$/);
-		return match ? match[1] : src;
+		// Remove query parameters and decode URI components
+		const cleanSrc = decodeURIComponent(src.split('?')[0]);
+		
+		// Extract just the filename
+		const match = cleanSrc.match(/([^/\\]+)\.[^.]+$/);
+		return match ? match[1] : cleanSrc;
 	}
 
     public getImagePosition(notePath: string, imageSrc: string) {
@@ -12437,54 +12809,125 @@ export class ImagePositionManager {
 	public async applyPositionsToNote(notePath: string) {
 		const positions = this.cache[notePath];
 		if (!positions) return;
-
-		// console.log('Applying positions for note:', notePath, positions);
-
-		const applyPositions = () => {
-			const images = document.querySelectorAll('img');
-			// console.log('Found images:', images.length);
-
-			images.forEach((img) => {
+	
+		requestAnimationFrame(() => {
+			document.querySelectorAll('img').forEach((img) => {
 				const src = img.getAttribute('src');
 				if (!src) return;
-
-				// Use normalized path for comparison
+	
 				const normalizedSrc = this.normalizeImagePath(src);
-				// console.log('Checking normalized image:', normalizedSrc);
-
-				if (positions[normalizedSrc]) {
-					// console.log('Applying position for:', normalizedSrc, positions[normalizedSrc]);
-					const positionData = positions[normalizedSrc];
-
-					// Remove existing position classes
-					img.classList.remove('image-position-left', 'image-position-center', 'image-position-right');
-
-					// Add new position class
-					img.classList.add(`image-position-${positionData.position}`);
-
-					// Apply to parent embed if exists
+				const cacheEntry = Object.entries(positions).find(([key, _]) => 
+					this.normalizeImagePath(key) === normalizedSrc
+				);
+	
+				if (cacheEntry) {
+					const [, positionData] = cacheEntry;
+					
+					// Get the parent embed if it exists
 					const parentEmbed = img.closest('.internal-embed.image-embed');
+					
+					// Function to update element classes
+					const updateElement = (element: Element) => {
+						if (element) {
+							// Remove existing position and wrap classes
+							element.classList.remove(
+								'image-position-left',
+								'image-position-center',
+								'image-position-right',
+								'image-wrap',
+								'image-no-wrap'
+							);
+							
+							// Add new classes
+							element.classList.add(`image-position-${positionData.position}`);
+							element.classList.add(positionData.wrap ? 'image-wrap' : 'image-no-wrap');
+	
+							// Set width if it exists
+							if (positionData.width && element instanceof HTMLElement) {
+								element.style.width = positionData.width;
+							}
+						}
+					};
+	
+					// Update both the image and its parent embed
+					updateElement(img);
 					if (parentEmbed) {
-						parentEmbed.classList.remove('image-position-left', 'image-position-center', 'image-position-right');
-						parentEmbed.classList.add(`image-position-${positionData.position}`);
-					}
-
-					// Preserve width if it exists
-					if (positionData.width) {
-						img.style.width = positionData.width;
+						updateElement(parentEmbed);
 					}
 				}
 			});
-		};
+		});
+	}
 
-		// Try multiple times to ensure images are loaded
-		for (let i = 0; i < 3; i++) {
-			await new Promise(resolve => setTimeout(resolve, 300 * (i + 1)));
-			applyPositions();
+	private applyPositionToImage(
+		img: HTMLImageElement, 
+		positionData: { position: string; width?: string; wrap: boolean }
+	) {
+		// Remove existing classes first
+		img.classList.remove(
+			'image-position-left', 
+			'image-position-center', 
+			'image-position-right',
+			'image-wrap',
+			'image-no-wrap'
+		);
+	
+		// Add new classes
+		img.classList.add(`image-position-${positionData.position}`);
+		img.classList.add(positionData.wrap ? 'image-wrap' : 'image-no-wrap');
+	
+		// Apply to parent embed if exists
+		const parentEmbed = img.closest('.internal-embed.image-embed');
+		if (parentEmbed) {
+			parentEmbed.classList.remove(
+				'image-position-left', 
+				'image-position-center', 
+				'image-position-right',
+				'image-wrap',
+				'image-no-wrap'
+			);
+			parentEmbed.classList.add(`image-position-${positionData.position}`);
+			parentEmbed.classList.add(positionData.wrap ? 'image-wrap' : 'image-no-wrap');
+		}
+	
+		// Apply width if it exists
+		if (positionData.width) {
+			img.style.width = positionData.width;
 		}
 	}
+
+	public async preservePositionDuringResize(
+		notePath: string,
+		imageSrc: string,
+		width?: string
+	) {
+		const normalizedSrc = this.normalizeImagePath(imageSrc);
+		
+		// Find the matching cache entry
+		const noteCache = this.cache[notePath];
+		if (!noteCache) return;
+	
+		// Look for matching entry in cache
+		const cacheKey = Object.keys(noteCache).find(key => 
+			this.normalizeImagePath(key) === normalizedSrc
+		);
+	
+		if (cacheKey && noteCache[cacheKey]) {
+			const positions = noteCache[cacheKey];
+			// Update only the width while preserving position and wrap
+			await this.setImagePosition(
+				notePath,
+				imageSrc,
+				positions.position,
+				width,
+				positions.wrap
+			);
+		}
+	}
+
 	// Clean up entries for non-existent files
 	public async cleanCache() {
+		console.time("Cache cleanup time");
 		const newCache: ImagePositionCache = {};
 
 		for (const notePath in this.cache) {
@@ -12516,9 +12959,59 @@ export class ImagePositionManager {
 
 		this.cache = newCache;
 		await this.saveCache();
+		console.timeEnd("Cache cleanup time");
 		console.log('Cache cleaned:', this.cache);
 	}
 
+	public async validateNoteCache(notePath: string, noteContent: string) {
+		if (!this.cache[notePath]) return;
+	
+		const imageLinks = this.extractImageLinks(noteContent);
+		const cachedImages = Object.keys(this.cache[notePath]);
+		
+		// Find cached images that are no longer in the note
+		const imagesToRemove = cachedImages.filter(cachedImage => {
+			const normalizedCachedImage = this.normalizeImagePath(cachedImage);
+			return !imageLinks.some(link => 
+				this.normalizeImagePath(link) === normalizedCachedImage
+			);
+		});
+	
+		// Remove orphaned entries
+		for (const imageToRemove of imagesToRemove) {
+			await this.removeImageFromCache(notePath, imageToRemove);
+		}
+	
+		// If no images left in cache for this note, remove the note entry
+		if (Object.keys(this.cache[notePath]).length === 0) {
+			delete this.cache[notePath];
+			await this.saveCache();
+		}
+	}
+	
+	// Helper method to extract image links from note content
+	private extractImageLinks(content: string): string[] {
+		const imageLinks: string[] = [];
+		
+		// Match both standard markdown images and Obsidian wiki-style images
+		const markdownImageRegex = /!\[.*?\]\((.*?)\)/g;
+		const wikiImageRegex = /!\[\[(.*?)\]\]/g;
+		
+		// Extract standard markdown images
+		let match;
+		while ((match = markdownImageRegex.exec(content)) !== null) {
+			if (match[1]) imageLinks.push(match[1].split('|')[0]);
+		}
+		
+		// Extract wiki-style images
+		while ((match = wikiImageRegex.exec(content)) !== null) {
+			if (match[1]) imageLinks.push(match[1].split('|')[0]);
+		}
+		
+		return imageLinks;
+	}
+
+	
 	// Add method to remove cache for specific image
 	public async removeImageFromCache(notePath: string, imageSrc: string) {
 		if (this.cache[notePath]) {
@@ -12546,4 +13039,12 @@ export class ImagePositionManager {
 			await this.saveCache();
 		}
 	}
+
+	public cleanupObserver() {
+        if (this.imageObserver) {
+            this.imageObserver.disconnect();
+            this.imageObserver = null;
+        }
+    }
+
 }
