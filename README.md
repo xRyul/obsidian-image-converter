@@ -4,6 +4,8 @@ Making image management inside Obsidian slightly more convenient.
 
 https://github.com/xRyul/obsidian-image-converter/assets/47340038/63a0646b-29ec-4055-abfc-55d31e07b2f7
 
+
+
 ## Features
 Supported image formats: WEBP, JPG, PNG, HEIC, TIF
 - 🖼️ **Convert**: Automatically convert dropped/pasted images into WEBP, JPG or PNG
@@ -13,6 +15,8 @@ Supported image formats: WEBP, JPG, PNG, HEIC, TIF
 	- Resize by dragging edge of the image, or with Scrollwheel (e.g., **CMD+Scrollwheel**)  </br>
       <img src="https://github.com/xRyul/obsidian-image-converter/assets/47340038/5724c6e9-19d4-4eaf-a559-1168f6557a14" width="740px"></br>
 	- Resize **original** image (width, height, longest edge, shortest edge, fit, fill)
+- Align (left, right center) and wrap text around images without any custom syntax in your links:  </br>
+  <img src="https://github.com/user-attachments/assets/2224d5d3-7563-4e53-a412-cfbb975e01f5" width="740px"></br>
 - **Image annotation** and **markup tool**. Draw, write, scribble, annotate, markup on top of images right inside Obsidian.  </br>
   <img src="https://github.com/user-attachments/assets/71b8d71d-2608-441a-91cd-b7003b84d23a" width="740px"><img src="https://github.com/user-attachments/assets/a5f74860-a473-4163-b616-f2a11a6cbc4f" width="740px"></br>
   <img src="https://github.com/user-attachments/assets/828c1128-719a-45ef-a5fd-cad2c7222e71" width="740px"><img src="https://github.com/user-attachments/assets/7b1500a9-297b-4320-ba5a-9f446c6b3a4c" width="740px"></br>
