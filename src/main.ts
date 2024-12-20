@@ -1,5 +1,7 @@
 
 import { App, View, MarkdownView, Notice, ItemView, DropdownComponent, FileView, Plugin, TFile, Scope, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
+
+
 // Browsers use the MIME type, not the file extension this module allows 
 // us to be more precise when default MIME checking options fail
 import mime from "./mime.min.js"
@@ -76,6 +78,9 @@ if (!Platform.isMobile) {
 
 // For the sake of build
 declare module 'obsidian' {
+	interface App {
+        showInFolder(path: string): Promise<void>;
+    }
     interface Vault {
         getConfig(key: string): any;
     }
@@ -86,7 +91,21 @@ declare module 'obsidian' {
         setIcon(icon: string): MenuItem;
         setTitle(title: string): MenuItem;
         onClick(callback: () => any): MenuItem;
-    }
+    }	
+}
+
+interface OperationState {
+    isProcessing: boolean;
+    lastOperation: number;
+    operationQueue: Array<() => Promise<void>>;
+    currentLock: string | null;
+}
+
+interface ImageState {
+    position: string;
+    width?: string;
+    wrap: boolean;
+    isUpdating: boolean;
 }
 
 interface Listener {
@@ -251,7 +270,7 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	convertTo: 'webp',
 	quality: 0.75,
 
-	skipPatterns: '',
+	skipPatterns: '*.gif,*.avif',
 
 	allowLargerFiles: false,
 
@@ -320,7 +339,7 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	useMdLinks: false,
 	useRelativePath: false,
 
-	cacheCleanupInterval: 60,
+	cacheCleanupInterval: 3600000,
 
     annotationPresets: {
         drawing: Array(3).fill({
@@ -456,14 +475,22 @@ export default class ImageConvertPlugin extends Plugin {
 			// Register for layout changes
 			this.registerEvent(
 				this.app.workspace.on('layout-change', () => {
-					// // This is simply to get position on layout change
-					// const currentFile = this.app.workspace.getActiveFile();
-					// if (currentFile) {
-					// 	this.imagePositionManager.applyPositionsToNote(currentFile.path);
-					// }
-					// Reconnect the observer after layout changes
-					this.imagePositionManager.setupImageObserver();
-					
+					// Wrap in immediate async function
+					void (async () => {
+						try {
+							// This is now accessible because lock is public
+							await this.imagePositionManager.lock.acquire('layoutChange', async () => {
+								const currentFile = this.app.workspace.getActiveFile();
+								if (currentFile) {
+									await this.imagePositionManager.applyPositionsToNote(currentFile.path);
+								}
+								this.imagePositionManager.setupImageObserver();
+							});
+						} catch (error) {
+							console.error('Layout change error:', error);
+						}
+					})();
+	
 					this.registerEventHandlers();
 					this.initializeDragResize();
 				})
@@ -481,6 +508,7 @@ export default class ImageConvertPlugin extends Plugin {
 				})
 			);
 
+			// Prevent image link from showing up when clicking on the image
 			// this.registerDomEvent(document, 'click', (event: MouseEvent) => {
 			// 	const target = event.target as HTMLElement;
 			// 	if (target.tagName === 'IMG' || target.classList.contains('image-embed')) {
@@ -563,7 +591,7 @@ export default class ImageConvertPlugin extends Plugin {
 								const positions = await this.imagePositionManager.getImagePosition(notePath, oldPath);
 								if (positions) {
 									await this.imagePositionManager.removeImageFromCache(notePath, oldPath);
-									await this.imagePositionManager.setImagePosition(
+									await this.imagePositionManager.saveImagePositionToCache(
 										notePath,
 										file.path,
 										positions.position,
@@ -678,6 +706,11 @@ export default class ImageConvertPlugin extends Plugin {
 		if (this.imagePositionManager) {
 			this.imagePositionManager.cleanupObserver();
 		}
+		await this.imagePositionManager.lock.acquire('cleanup', async () => {
+			this.imagePositionManager.cleanupObserver();
+			await this.imagePositionManager.saveCache();
+		});
+
         if (this.cacheCleanupIntervalId) {
             window.clearInterval(this.cacheCleanupIntervalId);
         }
@@ -4074,10 +4107,44 @@ export default class ImageConvertPlugin extends Plugin {
 		// Create new Menu object
 		const menu = new Menu();
 
+		menu.addItem((item) => {
+			item
+				.setTitle('Open in new window')
+				.setIcon('square-arrow-out-up-right')
+				.onClick(async () => {
+					try {
+						const imagePath = this.getImagePath(img);
+						if (imagePath) {
+							const file = this.app.vault.getAbstractFileByPath(imagePath);
+							if (file instanceof TFile) {
+								const leaf = this.app.workspace.getLeaf('window');
+								if (leaf) {
+									await leaf.openFile(file);
+								}
+							}
+						}
+					} catch (error) {
+						new Notice('Failed to open in new window');
+						console.error(error);
+					}
+				});
+		});
+
+		menu.addSeparator();
+
+		// Cut
+		menu.addItem((item) => {
+			item.setTitle('Cut')
+				.setIcon('scissors')
+				.onClick(async () => {
+					cutImageFromNote(event, this.app);
+				});
+		});
+
 		// Add option to copy image to clipboard
 		menu.addItem((item: MenuItem) =>
 			item
-				.setTitle('Copy Image')
+				.setTitle('Copy image')
 				.setIcon('copy')
 				.onClick(() => {
 					// Copy original image data to clipboard
@@ -4145,7 +4212,7 @@ export default class ImageConvertPlugin extends Plugin {
 								// Remove positioning if clicking the same position
 								await this.removeImagePosition(img);
 							} else {
-								await this.setImagePosition(img, 'left', false);
+								await this.updateImagePositionUI(img, 'left', false);
 							}
 						});
 				})
@@ -4160,7 +4227,7 @@ export default class ImageConvertPlugin extends Plugin {
 								// Remove positioning if clicking the same position
 								await this.removeImagePosition(img);
 							} else {
-								await this.setImagePosition(img, 'center', false);
+								await this.updateImagePositionUI(img, 'center', false);
 							}
 						});
 				})
@@ -4175,7 +4242,7 @@ export default class ImageConvertPlugin extends Plugin {
 								// Remove positioning if clicking the same position
 								await this.removeImagePosition(img);
 							} else {
-								await this.setImagePosition(img, 'right', false);
+								await this.updateImagePositionUI(img, 'right', false);
 							}
 						});
 				})
@@ -4189,9 +4256,9 @@ export default class ImageConvertPlugin extends Plugin {
 							const currentPosition = this.getCurrentImagePosition(img);
 							if (currentPosition === 'none') {
 								// If no positioning is set, default to left when enabling wrap
-								await this.setImagePosition(img, 'left', !currentWrap);
+								await this.updateImagePositionUI(img, 'left', !currentWrap);
 							} else {
-								await this.setImagePosition(img, currentPosition, !currentWrap);
+								await this.updateImagePositionUI(img, currentPosition, !currentWrap);
 							}
 						});
 				});
@@ -4441,6 +4508,73 @@ export default class ImageConvertPlugin extends Plugin {
         
 		menu.addSeparator();
 
+		menu.addItem((item) => {
+			item
+				.setTitle('Show in navigation')
+				.setIcon('folder-open')
+				.onClick(async () => {
+					try {
+						const imagePath = this.getImagePath(img);
+						if (imagePath) {
+							const file = this.app.vault.getAbstractFileByPath(imagePath);
+							if (file instanceof TFile) {
+								// First, try to get existing file explorer
+								let fileExplorerLeaf = this.app.workspace.getLeavesOfType('file-explorer')[0];
+								
+								// If file explorer isn't open, create it
+								if (!fileExplorerLeaf) {
+									const newLeaf = this.app.workspace.getLeftLeaf(false);
+									if (newLeaf) {
+										await newLeaf.setViewState({
+											type: 'file-explorer'
+										});
+										fileExplorerLeaf = newLeaf;
+									}
+								}
+		
+								// Proceed only if we have a valid leaf
+								if (fileExplorerLeaf) {
+									// Ensure the left sidebar is expanded
+									if (this.app.workspace.leftSplit) {
+										this.app.workspace.leftSplit.expand();
+									}
+		
+									// Now reveal the file
+									const fileExplorerView = fileExplorerLeaf.view;
+									if (fileExplorerView) {
+										// @ts-ignore (since revealInFolder is not in the type definitions)
+										fileExplorerView.revealInFolder(file);
+									}
+								}
+							}
+						}
+					} catch (error) {
+						new Notice('Failed to show in navigation');
+						console.error(error);
+					}
+				});
+		});
+		
+		menu.addItem((item) => {
+			item
+				.setTitle('Show in system explorer')
+				.setIcon('arrow-up-right')
+				.onClick(async () => {
+					try {
+						const imagePath = this.getImagePath(img);
+						if (imagePath) {
+							await this.app.showInFolder(imagePath);
+						}
+					} catch (error) {
+						new Notice('Failed to show in system explorer');
+						console.error(error);
+					}
+				});
+		});
+		
+		
+		menu.addSeparator();
+
 		// Delete (Image + md link)
 		menu.addItem((item) => {
 			item.setTitle('Delete Image from vault')
@@ -4460,7 +4594,7 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
 	// Left, right, center image alignment/ positioning
-	private async setImagePosition(
+	private async updateImagePositionUI(
 		img: HTMLImageElement, 
 		position: 'left' | 'center' | 'right',
 		wrap = false
@@ -4497,13 +4631,14 @@ export default class ImageConvertPlugin extends Plugin {
 		}
 	
 		// Save to cache
-		await this.imagePositionManager.setImagePosition(
+		await this.imagePositionManager.saveImagePositionToCache(
 			activeFile.path,
 			src,
 			position,
 			img.style.width,
 			wrap
 		);
+		
 	}
 
 	private async removeImagePosition(img: HTMLImageElement) {
@@ -4549,43 +4684,35 @@ export default class ImageConvertPlugin extends Plugin {
 		return 'none'; // default state when no positioning is applied
 	}
 
-	private getCurrentContainer(img: HTMLImageElement) {
-		const listItem = img.closest('li');
-		if (listItem) {
-			const list = listItem.closest('ul, ol');
-			return {
-				type: 'list',
-				element: listItem,
-				listType: list?.tagName.toLowerCase(),
-				level: this.getListNestingLevel(listItem)
-			};
-		}
 	
-		const callout = img.closest('.callout');
-		if (callout) {
-			return {
-				type: 'callout',
-				element: callout
-			};
-		}
+	private getImagePath(img: HTMLImageElement): string | null {
+		try {
+			const srcAttribute = img.getAttribute('src');
+			if (!srcAttribute) return null;
 	
-		return { type: 'normal', element: null };
-	}
-	
-	private getListNestingLevel(listItem: HTMLElement): number {
-		let level = 0;
-		let parent = listItem.parentElement;
-		while (parent) {
-			if (parent.tagName === 'UL' || parent.tagName === 'OL') {
-				level++;
-				parent = parent.parentElement?.closest('ul, ol') || null;
-			} else {
-				break;
+			// Get Vault Name
+			const rootFolder = this.app.vault.getName();
+			
+			// Decode and clean up the path
+			let imagePath = decodeURIComponent(srcAttribute);
+			
+			// Find the position of the root folder in the path
+			const rootFolderIndex = imagePath.indexOf(rootFolder);
+			
+			// Remove everything before the root folder
+			if (rootFolderIndex !== -1) {
+				imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
 			}
+			
+			// Remove any query parameters
+			imagePath = imagePath.split('?')[0];
+			
+			return imagePath;
+		} catch (error) {
+			console.error('Error getting image path:', error);
+			return null;
 		}
-		return level;
 	}
-
 
 	/* ------------------------------------------------------------- */
 	/* ------------------------------------------------------------- */
@@ -6507,6 +6634,144 @@ function deleteMarkdownLink(activeView: MarkdownView, imagePath: string | null) 
 /* ------------------------------------------------------------- */
 /* ------------------------------------------------------------- */
 
+async function cutImageFromNote(event: MouseEvent, app: App) {
+    const img = event.target as HTMLImageElement;
+    const src = img.getAttribute('src');
+    if (!src) return;
+
+    const activeView = app.workspace.getActiveViewOfType(MarkdownView);
+
+    try {
+        if (!activeView) {
+            new Notice('No active view found');
+            return;
+        }
+
+        const editor = activeView.editor;
+        const doc = editor.getDoc();
+        const lineCount = doc.lineCount();
+
+        // Find and store the markdown link before deletion
+        let markdownLink: string | null = null;
+
+        if (src.startsWith('data:image') || src.startsWith('http')) {
+            // For base64 or external images, find the full line containing the image
+            for (let i = 0; i < lineCount; i++) {
+                const line = doc.getLine(i);
+                if (line.includes(src)) {
+                    markdownLink = line.trim();
+                    break;
+                }
+            }
+        } else {
+            // For internal vault images
+            const rootFolder = app.vault.getName();
+            let imagePath = decodeURIComponent(src);
+
+            // Clean up the path
+            const rootFolderIndex = imagePath.indexOf(rootFolder);
+            if (rootFolderIndex !== -1) {
+                imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
+            }
+            imagePath = imagePath.split('?')[0];
+
+            const file = app.vault.getAbstractFileByPath(imagePath);
+            if (file instanceof TFile && isImage(file)) {
+                // Find the full markdown line
+                markdownLink = cutImageFromNote_findMarkdownLink(activeView, file);
+            }
+        }
+
+        if (markdownLink) {
+            // Copy to clipboard
+            await navigator.clipboard.writeText(markdownLink);
+            
+            // Find and delete the exact markdown link from the document
+            for (let i = 0; i < lineCount; i++) {
+                const line = doc.getLine(i);
+                if (line.includes(markdownLink)) {
+                    // Delete the entire line if it only contains the markdown link
+                    if (line.trim() === markdownLink) {
+                        editor.replaceRange(
+                            '',
+                            { line: i, ch: 0 },
+                            { line: i + 1, ch: 0 }
+                        );
+                    } else {
+                        // Delete just the markdown link if the line contains other content
+                        const startCh = line.indexOf(markdownLink);
+                        editor.replaceRange(
+                            '',
+                            { line: i, ch: startCh },
+                            { line: i, ch: startCh + markdownLink.length }
+                        );
+                    }
+                    break;
+                }
+            }
+
+            new Notice('Image link copied to clipboard and removed from note');
+        } else {
+            new Notice('Failed to find image link');
+        }
+
+    } catch (error) {
+        console.error('Error cutting image:', error);
+        new Notice('Failed to cut image. Check console for details.');
+    }
+}
+function cutImageFromNote_findMarkdownLink(activeView: MarkdownView, file: TFile): string | null {
+    const editor = activeView.editor;
+    const doc = editor.getDoc();
+    const lineCount = doc.lineCount();
+
+    const normalizeForComparison = (path: string) => {
+        return path.replace(/\\/g, '/')
+            .replace(/%20/g, ' ')
+            .split('|')[0] // Remove dimensions for comparison
+            .split('?')[0]
+            .toLowerCase()
+            .trim();
+    };
+
+    const normalizedFileName = normalizeForComparison(file.name);
+    const normalizedFilePath = normalizeForComparison(file.path);
+
+    for (let i = 0; i < lineCount; i++) {
+        const line = doc.getLine(i);
+        
+        // Check for wiki-style links with dimensions
+        const wikiLinkMatch = line.match(/!\[\[([^\]]+?)\]\]/);
+
+        if (wikiLinkMatch) {
+            const fullMatch = wikiLinkMatch[0]; // Complete match including ![[]]
+            const innerContent = wikiLinkMatch[1]; // Content inside [[]]
+            const linkPath = innerContent.split('|')[0]; // Get path without dimensions
+            const normalizedLinkPath = normalizeForComparison(linkPath);
+            
+            if (normalizedLinkPath.endsWith(normalizedFileName) || 
+                normalizedLinkPath === normalizedFilePath) {
+                return fullMatch; // Return the complete wiki link with dimensions
+            }
+        }
+        
+        // Check for standard markdown links
+        const mdLinkMatch = line.match(/!\[([^\]]*?)(?:\|\d+(?:\|\d+)?)?\]\(([^)]+)\)/);
+        if (mdLinkMatch) {
+            const linkText = mdLinkMatch[0];
+            const linkPath = mdLinkMatch[2];
+            const normalizedLinkPath = normalizeForComparison(linkPath);
+            if (normalizedLinkPath.endsWith(normalizedFileName) || 
+                normalizedLinkPath === normalizedFilePath) {
+                return linkText;
+            }
+        }
+    }
+
+    return null;
+}
+
+
 
 export class ImageConvertTab extends PluginSettingTab {
 	plugin: ImageConvertPlugin;
@@ -7545,7 +7810,16 @@ export class ImageConvertTab extends PluginSettingTab {
 			.addText(text => text
 				.setValue((this.plugin.settings.cacheCleanupInterval / (60 * 1000)).toString())
 				.onChange(async (value) => {
-					const minutes = parseInt(value);
+					// parseFloat to handle decimal values
+					const minutes = parseFloat(value); 
+
+					// Check for valid input
+					if (isNaN(minutes) || minutes < 0) {
+						new Notice("Invalid cache cleanup interval. Please enter a non-negative number.");
+						return;
+					}
+
+					// Store the value in milliseconds
 					this.plugin.settings.cacheCleanupInterval = minutes * 60 * 1000;
 					await this.plugin.saveSettings();
 
@@ -9114,12 +9388,22 @@ class ImageAnnotationModal extends Modal {
 		}
 	
 		try {
+			// Get background color from current settings
+			const bgColorPicker = this.modalEl.querySelector('.background-color-picker') as HTMLInputElement;
+			const alphaSlider = this.modalEl.querySelector('.background-alpha-slider') as HTMLInputElement;
+			let backgroundColor = 'transparent';
+			
+			if (bgColorPicker && alphaSlider) {
+				const alpha = parseInt(alphaSlider.value) / 100;
+				backgroundColor = this.hexToRgba(bgColorPicker.value, alpha);
+			}
+	
 			const text = new IText('Type here', {
 				left: x,
 				top: y,
 				fontSize: 20,
 				fill: color,
-				backgroundColor: 'transparent', // Add default background color
+				backgroundColor: backgroundColor, // Apply background color
 				selectable: true,
 				evented: true,
 				editable: true,
@@ -9136,7 +9420,6 @@ class ImageAnnotationModal extends Modal {
 			// Force render before entering edit mode
 			this.canvas?.requestRenderAll();
 			
-			// Small delay before entering edit mode
 			setTimeout(() => {
 				text.enterEditing();
 				text.selectAll();
@@ -9172,10 +9455,10 @@ class ImageAnnotationModal extends Modal {
 		this.scope.register(['Mod'], 'Z', (evt: KeyboardEvent) => {
 			evt.preventDefault();
 			if (evt.shiftKey) {
-				console.log('Redo triggered');
+	
 				this.redo();
 			} else {
-				console.log('Undo triggered');
+
 				this.undo();
 			}
 			return false;
@@ -9183,7 +9466,7 @@ class ImageAnnotationModal extends Modal {
 		
 		this.scope.register(['Mod', 'Shift'], 'Z', (evt: KeyboardEvent) => {
 			evt.preventDefault();
-			console.log('Redo triggered (shift)');
+		
 			this.redo();
 			return false;
 		});
@@ -9422,43 +9705,77 @@ class ImageAnnotationModal extends Modal {
 	
 		// Check if preset exists
 		if (!preset) return;
-
-
-		// Apply color
+	
+		// Apply color to color picker
 		const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
 		if (colorPicker) {
 			colorPicker.value = preset.color;
 		}
-
-
-		// If in text mode, directly update active text object's color
+	
+		// If in text mode, handle text-specific settings
 		if (this.isTextMode) {
-			const activeObject = this.canvas?.getActiveObject();
-			if (activeObject instanceof IText) {
-				activeObject.set({
-					fill: preset.color // Set the text color directly
-				});
-				this.canvas?.requestRenderAll();
-			}
-		}
-
-		// Load background settings if they exist
-		if (this.isTextMode && preset.backgroundColor) {
+			// Update background controls
 			const bgColorPicker = this.modalEl.querySelector('.background-color-picker') as HTMLInputElement;
 			const bgAlphaSlider = this.modalEl.querySelector('.background-alpha-slider') as HTMLInputElement;
 			
-			if (bgColorPicker) {
-				bgColorPicker.value = preset.backgroundColor; // Default to white
+			if (bgColorPicker && preset.backgroundColor) {
+				bgColorPicker.value = preset.backgroundColor;
 			}
 			
 			if (bgAlphaSlider && preset.backgroundOpacity !== undefined) {
 				bgAlphaSlider.value = (preset.backgroundOpacity * 100).toString();
 			}
-			
-			this.setTextBackground(this.hexToRgba(preset.backgroundColor, preset.backgroundOpacity ?? 1));
+	
+			// Apply to selected text object if one exists
+			const activeObject = this.canvas?.getActiveObject();
+			if (activeObject) {
+				if (activeObject instanceof IText) {
+					// Apply text color
+					activeObject.set('fill', preset.color);
+					
+					// Apply background color if defined
+					if (preset.backgroundColor) {
+						const bgColor = this.hexToRgba(
+							preset.backgroundColor, 
+							preset.backgroundOpacity ?? 1
+						);
+						activeObject.set('backgroundColor', bgColor);
+					}
+					
+					this.canvas?.requestRenderAll();
+				} else if (activeObject instanceof ActiveSelection) {
+					// Handle multiple selected text objects
+					activeObject.getObjects().forEach(obj => {
+						if (obj instanceof IText) {
+							obj.set('fill', preset.color);
+							if (preset.backgroundColor) {
+								const bgColor = this.hexToRgba(
+									preset.backgroundColor, 
+									preset.backgroundOpacity ?? 1
+								);
+								obj.set('backgroundColor', bgColor);
+							}
+						}
+					});
+					this.canvas?.requestRenderAll();
+				}
+			}
+		} else {
+			// Handle non-text presets (drawing, arrow)
+			const activeObject = this.canvas?.getActiveObject();
+			if (activeObject) {
+				if (activeObject instanceof ActiveSelection) {
+					activeObject.getObjects().forEach(obj => {
+						if (!(obj instanceof IText)) {
+							obj.set('stroke', this.hexToRgba(preset.color, preset.opacity ?? 1));
+						}
+					});
+				} else if (!(activeObject instanceof IText)) {
+					activeObject.set('stroke', this.hexToRgba(preset.color, preset.opacity ?? 1));
+				}
+				this.canvas?.requestRenderAll();
+			}
 		}
-
-
 	
 		// Find and click the appropriate opacity button
 		const opacityIndex = this.brushOpacities.indexOf(preset.opacity);
@@ -9481,7 +9798,7 @@ class ImageAnnotationModal extends Modal {
 				button.click();
 			}
 		}
-
+	
 		// Set blend mode
 		this.currentBlendMode = preset.blendMode;
 		const blendModeDropdown = this.modalEl.querySelector('.blend-modes-container select') as HTMLSelectElement;
@@ -10231,21 +10548,23 @@ class ImageAnnotationModal extends Modal {
 	
 		const firstObject = e.selected[0];
 		if (firstObject instanceof IText) {
-			// Update text color
+			// Only update if the color is actually defined
 			const color = firstObject.fill as string;
-			if (color) {
-				colorPicker.value = this.rgbaToHex(color); // Convert to #rrggbb
+			if (color && color !== colorPicker.value) {
+				colorPicker.value = this.rgbaToHex(color);
 			}
 	
-			// Update background color and alpha
+			// Update background color and alpha only if they're different
 			const bgColor = firstObject.backgroundColor as string;
 			if (bgColor && bgColor !== 'transparent') {
 				const { hex, alpha } = this.rgbaToHexWithAlpha(bgColor);
-				bgColorPicker.value = hex;
-				alphaSlider.value = (alpha * 100).toString(); // Set alpha slider
-			} else {
-				bgColorPicker.value = '#ffffff'; // Default to white
-				alphaSlider.value = '0'; // Default to transparent
+				if (hex !== bgColorPicker.value) {
+					bgColorPicker.value = hex;
+				}
+				const newAlpha = Math.round(alpha * 100).toString();
+				if (newAlpha !== alphaSlider.value) {
+					alphaSlider.value = newAlpha;
+				}
 			}
 		}
 	}
@@ -10931,7 +11250,7 @@ class ImageAnnotationModal extends Modal {
 
 	private saveState() {
 		if (!this.canvas || this.isUndoRedoAction) {
-			console.log('Skipping state save - isUndoRedoAction:', this.isUndoRedoAction);
+			// console.log('Skipping state save - isUndoRedoAction:', this.isUndoRedoAction);
 			return;
 		}
 	
@@ -10945,7 +11264,7 @@ class ImageAnnotationModal extends Modal {
 		
 		// Don't save if it's the same as the last state
 		if (this.undoStack[this.undoStack.length - 1] === newState) {
-			console.log('Skipping duplicate state');
+			// console.log('Skipping duplicate state');
 			return;
 		}
 	
@@ -10956,7 +11275,7 @@ class ImageAnnotationModal extends Modal {
 	
 	private async undo() {
 		if (!this.canvas || this.undoStack.length <= 1) { // Changed from 0 to 1 because of initial empty state
-			console.log('Cannot undo: no more states');
+			// console.log('Cannot undo: no more states');
 			return;
 		}
 	
@@ -11001,7 +11320,7 @@ class ImageAnnotationModal extends Modal {
 	
 	private async redo() {
 		if (!this.canvas || this.redoStack.length === 0) {
-			console.log('Cannot redo: no more states');
+			// console.log('Cannot redo: no more states');
 			return;
 		}
 	
@@ -12037,7 +12356,7 @@ export class CropModal extends Modal {
 				min: '0',
 				max: '360',
 				value: '0',
-				disabled: 'true'
+				// disabled: 'true'
 			}
 		});
 
@@ -12613,13 +12932,27 @@ interface ImagePositionCache {
 
 export class ImagePositionManager {
     private cache: ImagePositionCache = {};
-	private imageObserver: MutationObserver | null = null;
+    private imageObserver: MutationObserver | null = null;
+    private operationQueue: Array<() => Promise<void>> = [];
+    private isProcessing = false;
+    public lock = new AsyncLock(); // Make lock public
+    private app: App;
+
+	private currentState: OperationState = {
+		isProcessing: false,
+		lastOperation: Date.now(),
+		operationQueue: [],
+		currentLock: null
+	};
+	
+	private imageStates: Map<string, ImageState> = new Map();
 
     private readonly CACHE_FILE = '.image-positions.json';
     private pluginDir: string;
 
     constructor(private plugin: Plugin) {
         // Get the actual plugin directory from the plugin's main file path
+		this.app = plugin.app;
         this.pluginDir = this.getPluginDir();
         this.loadCache();
 		this.setupImageObserver();
@@ -12681,58 +13014,66 @@ export class ImagePositionManager {
 		}
 	
 		this.imageObserver = new MutationObserver((mutations) => {
-			const mainPlugin = this.plugin as ImageConvertPlugin;
-			
-			// Get current file once for all mutations
-			const currentFile = this.plugin.app.workspace.getActiveFile();
-			if (!currentFile || !this.cache[currentFile.path]) return;
-	
-			const processImage = (img: HTMLImageElement) => {
-				// Skip if we're currently resizing
-				if (mainPlugin.resizeState?.isResizing) return;
-	
-				// Skip if the image has resize attributes
-				if (img.hasAttribute('data-resize-edge') || 
-					img.hasAttribute('data-resize-active')) {
-					return;
-				}
-	
-				const src = img.getAttribute('src');
-				if (!src) return;
-	
-				// Normalize the source path
-				const normalizedSrc = this.normalizeImagePath(src);
+			void (async () => {
+                try {
+					await this.lock.acquire('observerOperation', async () => {
+						const mainPlugin = this.plugin as ImageConvertPlugin;
+						
+						// Get current file once for all mutations
+						const currentFile = this.plugin.app.workspace.getActiveFile();
+						if (!currentFile || !this.cache[currentFile.path]) return;
 				
-				// Find matching cache entry
-				const positions = this.cache[currentFile.path];
-				const cacheEntry = Object.entries(positions).find(([key, _]) => 
-					this.normalizeImagePath(key) === normalizedSrc
-				);
-	
-				if (cacheEntry) {
-					const [, positionData] = cacheEntry;
-					this.applyPositionToImage(img, positionData);
-				}
-			};
-	
-			mutations.forEach((mutation) => {
-				// Handle added nodes
-				mutation.addedNodes.forEach((node) => {
-					if (node instanceof HTMLImageElement) {
-						processImage(node);
-					} else if (node instanceof Element) {
-						// Process all images within added elements
-						node.querySelectorAll('img').forEach(img => processImage(img));
-					}
-				});
-	
-				// Handle attribute modifications on existing images
-				if (mutation.type === 'attributes' && 
-					mutation.target instanceof HTMLImageElement &&
-					!mutation.target.hasAttribute('data-resize-active')) {
-					processImage(mutation.target);
-				}
-			});
+						const processImage = (img: HTMLImageElement) => {
+							// Skip if we're currently resizing
+							if (mainPlugin.resizeState?.isResizing) return;
+				
+							// Skip if the image has resize attributes
+							if (img.hasAttribute('data-resize-edge') || 
+								img.hasAttribute('data-resize-active')) {
+								return;
+							}
+				
+							const src = img.getAttribute('src');
+							if (!src) return;
+				
+							// Normalize the source path
+							const normalizedSrc = this.normalizeImagePath(src);
+							
+							// Find matching cache entry
+							const positions = this.cache[currentFile.path];
+							const cacheEntry = Object.entries(positions).find(([key, _]) => 
+								this.normalizeImagePath(key) === normalizedSrc
+							);
+				
+							if (cacheEntry) {
+								const [, positionData] = cacheEntry;
+								this.applyPositionToImage(img, positionData);
+							}
+						};
+				
+						mutations.forEach((mutation) => {
+							// Handle added nodes
+							mutation.addedNodes.forEach((node) => {
+								if (node instanceof HTMLImageElement) {
+									processImage(node);
+								} else if (node instanceof Element) {
+									// Process all images within added elements
+									node.querySelectorAll('img').forEach(img => processImage(img));
+								}
+							});
+				
+							// Handle attribute modifications on existing images
+							if (mutation.type === 'attributes' && 
+								mutation.target instanceof HTMLImageElement &&
+								!mutation.target.hasAttribute('data-resize-active')) {
+								processImage(mutation.target);
+							}
+						});
+					});
+				} catch (error) {
+                    console.error('Observer error:', error);
+                }
+            })();
 		});
 	
 		// Observe both structure and attribute changes
@@ -12744,53 +13085,70 @@ export class ImagePositionManager {
 		});
 	}
 
-	// In ImagePositionManager class
-	public async setImagePosition(
-		notePath: string,
-		imageSrc: string,
-		position: 'left' | 'center' | 'right' | 'none',
-		width?: string,
-		wrap = false
-	) {
-		// If position is 'none', remove from cache
-		if (position === 'none') {
-			if (this.cache[notePath]) {
-				const normalizedSrc = this.normalizeImagePath(imageSrc);
-				Object.keys(this.cache[notePath]).forEach(key => {
-					if (this.normalizeImagePath(key) === normalizedSrc) {
-						delete this.cache[notePath][key];
-					}
-				});
-				if (Object.keys(this.cache[notePath]).length === 0) {
-					delete this.cache[notePath];
-				}
-				await this.saveCache();
-			}
-			return;
-		}
-	
-		if (!this.cache[notePath]) {
-			this.cache[notePath] = {};
-		}
-		
-		const normalizedSrc = this.normalizeImagePath(imageSrc);
-		
-		// Remove any existing entries for this image
-		Object.keys(this.cache[notePath]).forEach(key => {
-			if (this.normalizeImagePath(key) === normalizedSrc) {
-				delete this.cache[notePath][key];
-			}
-		});
-	
-		// Add new entry
-		this.cache[notePath][imageSrc] = {
-			position,
-			width,
-			wrap
-		};
-		
-		await this.saveCache();
-	}
+	private async processQueue() {
+        if (this.isProcessing) return;
+        this.isProcessing = true;
+
+        try {
+            while (this.operationQueue.length > 0) {
+                const operation = this.operationQueue.shift();
+                if (operation) {
+                    await this.lock.acquire('cacheOperation', async () => {
+                        await operation();
+                    });
+                }
+            }
+        } finally {
+            this.isProcessing = false;
+        }
+    }
+
+    public async saveImagePositionToCache(
+        notePath: string,
+        imageSrc: string,
+        position: 'left' | 'center' | 'right' | 'none',
+        width?: string,
+        wrap = false
+    ) {
+        try {
+            await this.lock.acquire('cacheOperation', async () => {
+                // Update image state first
+                await this.updateImageState(imageSrc, {
+                    position,
+                    width,
+                    wrap,
+                    isUpdating: true
+                });
+
+                // Existing cache logic
+                if (position === 'none') {
+                    if (this.cache[notePath]) {
+                        const normalizedSrc = this.normalizeImagePath(imageSrc);
+                        Object.keys(this.cache[notePath]).forEach(key => {
+                            if (this.normalizeImagePath(key) === normalizedSrc) {
+                                delete this.cache[notePath][key];
+                            }
+                        });
+                        if (Object.keys(this.cache[notePath]).length === 0) {
+                            delete this.cache[notePath];
+                        }
+                    }
+                } else {
+                    if (!this.cache[notePath]) {
+                        this.cache[notePath] = {};
+                    }
+                    this.cache[notePath][imageSrc] = { position, width, wrap };
+                }
+
+                await this.saveCache();
+                
+                // Update state after successful operation
+                await this.updateImageState(imageSrc, { isUpdating: false });
+            });
+        } catch (error) {
+            await this.handleOperationError(error, 'saveImagePositionToCache');
+        }
+    }
 
 	// Helper method to normalize image paths
 	private normalizeImagePath(src: string): string {
@@ -12806,58 +13164,34 @@ export class ImagePositionManager {
         return this.cache[notePath]?.[imageSrc];
     }
 
-	public async applyPositionsToNote(notePath: string) {
-		const positions = this.cache[notePath];
-		if (!positions) return;
-	
-		requestAnimationFrame(() => {
-			document.querySelectorAll('img').forEach((img) => {
-				const src = img.getAttribute('src');
-				if (!src) return;
-	
-				const normalizedSrc = this.normalizeImagePath(src);
-				const cacheEntry = Object.entries(positions).find(([key, _]) => 
-					this.normalizeImagePath(key) === normalizedSrc
-				);
-	
-				if (cacheEntry) {
-					const [, positionData] = cacheEntry;
-					
-					// Get the parent embed if it exists
-					const parentEmbed = img.closest('.internal-embed.image-embed');
-					
-					// Function to update element classes
-					const updateElement = (element: Element) => {
-						if (element) {
-							// Remove existing position and wrap classes
-							element.classList.remove(
-								'image-position-left',
-								'image-position-center',
-								'image-position-right',
-								'image-wrap',
-								'image-no-wrap'
-							);
-							
-							// Add new classes
-							element.classList.add(`image-position-${positionData.position}`);
-							element.classList.add(positionData.wrap ? 'image-wrap' : 'image-no-wrap');
-	
-							// Set width if it exists
-							if (positionData.width && element instanceof HTMLElement) {
-								element.style.width = positionData.width;
-							}
-						}
-					};
-	
-					// Update both the image and its parent embed
-					updateElement(img);
-					if (parentEmbed) {
-						updateElement(parentEmbed);
-					}
-				}
-			});
-		});
-	}
+    public async applyPositionsToNote(notePath: string) {
+        try {
+            await this.lock.acquire('applyPositions', async () => {
+                const positions = this.cache[notePath];
+                if (!positions) return;
+
+                for (const [imageSrc, positionData] of Object.entries(positions)) {
+                    await this.updateImageState(imageSrc, {
+                        position: positionData.position,
+                        width: positionData.width,
+                        wrap: positionData.wrap,
+                        isUpdating: true
+                    });
+
+                    // Your existing position application logic
+                    requestAnimationFrame(() => {
+                        document.querySelectorAll(`img[src="${imageSrc}"]`).forEach((img) => {
+                            this.applyPositionToImage(img as HTMLImageElement, positionData);
+                        });
+                    });
+
+                    await this.updateImageState(imageSrc, { isUpdating: false });
+                }
+            });
+        } catch (error) {
+            await this.handleOperationError(error, 'applyPositionsToNote');
+        }
+    }
 
 	private applyPositionToImage(
 		img: HTMLImageElement, 
@@ -12915,7 +13249,7 @@ export class ImagePositionManager {
 		if (cacheKey && noteCache[cacheKey]) {
 			const positions = noteCache[cacheKey];
 			// Update only the width while preserving position and wrap
-			await this.setImagePosition(
+			await this.saveImagePositionToCache(
 				notePath,
 				imageSrc,
 				positions.position,
@@ -12927,68 +13261,130 @@ export class ImagePositionManager {
 
 	// Clean up entries for non-existent files
 	public async cleanCache() {
-		console.time("Cache cleanup time");
-		const newCache: ImagePositionCache = {};
+		await this.lock.acquire('cacheCleanup', async () => {
+			console.time("Cache cleanup time");
+			const newCache: ImagePositionCache = {};
 
-		for (const notePath in this.cache) {
-			// Check if note still exists
-			const noteFile = this.plugin.app.vault.getAbstractFileByPath(notePath);
-			if (!noteFile) continue;
+			for (const notePath in this.cache) {
+				// Check if note still exists
+				const noteFile = this.plugin.app.vault.getAbstractFileByPath(notePath);
+				if (!noteFile) continue;
 
-			newCache[notePath] = {};
+				newCache[notePath] = {};
 
-			for (const imageSrc in this.cache[notePath]) {
-				// Get normalized filename
-				const filename = this.normalizeImagePath(imageSrc);
+				for (const imageSrc in this.cache[notePath]) {
+					// Get normalized filename
+					const filename = this.normalizeImagePath(imageSrc);
 
-				// Check if image still exists in vault
-				const imageExists = this.plugin.app.vault.getFiles().some(file =>
-					this.normalizeImagePath(file.path) === filename
-				);
+					// Check if image still exists in vault
+					const imageExists = this.plugin.app.vault.getFiles().some(file =>
+						this.normalizeImagePath(file.path) === filename
+					);
 
-				if (imageExists) {
-					newCache[notePath][imageSrc] = this.cache[notePath][imageSrc];
+					if (imageExists) {
+						newCache[notePath][imageSrc] = this.cache[notePath][imageSrc];
+					}
+				}
+
+				// Remove note entry if it has no images
+				if (Object.keys(newCache[notePath]).length === 0) {
+					delete newCache[notePath];
 				}
 			}
 
-			// Remove note entry if it has no images
-			if (Object.keys(newCache[notePath]).length === 0) {
-				delete newCache[notePath];
-			}
-		}
-
-		this.cache = newCache;
-		await this.saveCache();
-		console.timeEnd("Cache cleanup time");
-		console.log('Cache cleaned:', this.cache);
+			this.cache = newCache;
+			await this.saveCache();
+			console.timeEnd("Cache cleanup time");
+			console.log('Cache cleaned:', this.cache);
+		});
 	}
 
 	public async validateNoteCache(notePath: string, noteContent: string) {
-		if (!this.cache[notePath]) return;
-	
-		const imageLinks = this.extractImageLinks(noteContent);
-		const cachedImages = Object.keys(this.cache[notePath]);
+		await this.lock.acquire('validateCache', async () => {
+			if (!this.cache[notePath]) return;
 		
-		// Find cached images that are no longer in the note
-		const imagesToRemove = cachedImages.filter(cachedImage => {
-			const normalizedCachedImage = this.normalizeImagePath(cachedImage);
-			return !imageLinks.some(link => 
-				this.normalizeImagePath(link) === normalizedCachedImage
-			);
+			const imageLinks = this.extractImageLinks(noteContent);
+			const cachedImages = Object.keys(this.cache[notePath]);
+			
+			// Find cached images that are no longer in the note
+			const imagesToRemove = cachedImages.filter(cachedImage => {
+				const normalizedCachedImage = this.normalizeImagePath(cachedImage);
+				return !imageLinks.some(link => 
+					this.normalizeImagePath(link) === normalizedCachedImage
+				);
+			});
+		
+			// Remove orphaned entries
+			for (const imageToRemove of imagesToRemove) {
+				await this.removeImageFromCache(notePath, imageToRemove);
+			}
+		
+			// If no images left in cache for this note, remove the note entry
+			if (Object.keys(this.cache[notePath]).length === 0) {
+				delete this.cache[notePath];
+				await this.saveCache();
+			}
 		});
-	
-		// Remove orphaned entries
-		for (const imageToRemove of imagesToRemove) {
-			await this.removeImageFromCache(notePath, imageToRemove);
-		}
-	
-		// If no images left in cache for this note, remove the note entry
-		if (Object.keys(this.cache[notePath]).length === 0) {
-			delete this.cache[notePath];
-			await this.saveCache();
-		}
 	}
 	
+    private async handleOperationError(error: Error, operation: string) {
+        console.error(`Error during ${operation}:`, error);
+        
+        await this.lock.acquire('errorHandling', async () => {
+            // Clear any pending operations
+            this.operationQueue = [];
+            this.isProcessing = false;
+
+            // Reset all updating states
+            for (const [imagePath, state] of this.imageStates) {
+                if (state.isUpdating) {
+                    await this.updateImageState(imagePath, { isUpdating: false });
+                }
+            }
+
+            // Validate and repair cache
+            await this.validateCache();
+
+            // Notify user of error (if you have a notification system)
+            if (this.plugin instanceof ImageConvertPlugin) {
+                // Example notification (implement according to your UI system)
+                new Notice(
+                    `Error during ${operation}. Cache has been validated.`,
+                    5000
+                );
+            }
+        });
+    }
+    private async updateImageState(imagePath: string, state: Partial<ImageState>) {
+        const currentState = this.imageStates.get(imagePath) || {
+            position: 'none',
+            wrap: false,
+            isUpdating: false
+        };
+        
+        const newState = { ...currentState, ...state };
+        this.imageStates.set(imagePath, newState);
+
+        // Optional: Add visual feedback for updating state
+        const images = document.querySelectorAll(`img[src="${imagePath}"]`);
+        images.forEach(img => {
+            if (newState.isUpdating) {
+                img.classList.add('image-updating');
+            } else {
+                img.classList.remove('image-updating');
+            }
+        });
+    }
+    private async validateCache() {
+        await this.lock.acquire('validation', async () => {
+            const currentFile = this.app.workspace.getActiveFile();
+            if (currentFile) {
+                const content = await this.app.vault.read(currentFile);
+                await this.validateNoteCache(currentFile.path, content);
+            }
+        });
+    }
+
 	// Helper method to extract image links from note content
 	private extractImageLinks(content: string): string[] {
 		const imageLinks: string[] = [];
@@ -13044,7 +13440,38 @@ export class ImagePositionManager {
         if (this.imageObserver) {
             this.imageObserver.disconnect();
             this.imageObserver = null;
+			this.operationQueue = [];
+			this.isProcessing = false;
         }
     }
 
+}
+
+// Helper class for async locking
+class AsyncLock {
+    private locks: Map<string, Promise<void>> = new Map();
+
+    async acquire(key: string, fn: () => Promise<void>) {
+        const release = await this.acquireLock(key);
+        try {
+            return await fn();
+        } finally {
+            release();
+        }
+    }
+
+    private async acquireLock(key: string): Promise<() => void> {
+        while (this.locks.has(key)) {
+            await this.locks.get(key);
+        }
+
+        let resolve!: () => void;
+        const promise = new Promise<void>(r => resolve = r);
+        this.locks.set(key, promise);
+
+        return () => {
+            this.locks.delete(key);
+            resolve();
+        };
+    }
 }

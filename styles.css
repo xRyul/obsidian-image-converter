@@ -822,6 +822,15 @@
     z-index: 2;
 }
 
+/* Preserve image dimensions */
+.markdown-reading-view img[style*="width"],
+.markdown-source-view img[style*="width"] {
+    height: auto !important;
+    
+}
+
+/* ===== Reading Mode Styles ===== */
+
 /* Positioning styles WITH wrap */
 .image-wrap.image-position-left,
 .image-wrap.internal-embed.image-embed.image-position-left {
@@ -835,43 +844,113 @@
     float: right !important;
     margin: 0.5em 0 0.5em 1em !important;
     clear: right;
-
 }
-
 
 /* Positioning styles WITHOUT wrap */
 .image-no-wrap.image-position-left,
-.image-no-wrap.internal-embed.image-embed.image-position-left,
+.image-no-wrap.internal-embed.image-embed.image-position-left {
+    display: block !important;
+    margin:auto !important;
+    margin-left: 0 !important;
+    clear: both;
+    float: none !important;
+}
+
 .image-no-wrap.image-position-right,
 .image-no-wrap.internal-embed.image-embed.image-position-right {
     display: block !important;
-    margin: 1em auto !important;
-    clear: both;
-}
-
-.image-no-wrap.image-position-left {
-    margin-right: auto !important;
-    margin-left: 0 !important;
-}
-
-.image-no-wrap.image-position-right {
-    margin-left: auto !important;
+    margin: auto !important;
     margin-right: 0 !important;
+    clear: both;
+    float: none !important;
 }
 
-/* Center positioning */
+/* Center positioning (always no wrap) */
 .image-position-center,
 .internal-embed.image-embed.image-position-center {
     display: block !important;
-    margin: 1em auto !important;
+    margin: auto !important;
     clear: both;
+    float: none !important;
 }
 
-/* Preserve image dimensions */
-.markdown-reading-view img[style*="width"],
-.markdown-source-view img[style*="width"] {
-    height: auto !important;
+/* ===== Live Preview Specific Styles ===== */
+
+
+/* Live Preview positioning WITH wrap */
+.markdown-source-view.mod-cm6 .image-wrap.image-position-left,
+.markdown-source-view.mod-cm6 .image-wrap.internal-embed.image-embed.image-position-left {
+    float: left !important;
+    margin: 0 1em 0.5em 0 !important;
+    clear: left;
 }
+
+.markdown-source-view.mod-cm6 .image-wrap.image-position-right,
+.markdown-source-view.mod-cm6 .image-wrap.internal-embed.image-embed.image-position-right {
+    float: right !important;
+    margin: 0em 0 0.5em 1em !important;
+    clear: right;
+}
+
+
+
+/* Live Preview positioning WITHOUT wrap */
+.markdown-source-view.mod-cm6 .image-no-wrap.image-position-left,
+.markdown-source-view.mod-cm6 .image-no-wrap.internal-embed.image-embed.image-position-left {
+    display: block !important;
+    margin: auto !important;
+    margin-left: 0 !important;
+    clear: both;
+    float: none !important;
+}
+
+.markdown-source-view.mod-cm6 .image-no-wrap.image-position-right,
+.markdown-source-view.mod-cm6 .image-no-wrap.internal-embed.image-embed.image-position-right {
+    display: block !important;
+    margin: auto !important;
+    margin-right: 0 !important;
+    clear: both;
+    float: none !important;
+}
+
+/* Live Preview center positioning (always no wrap) */
+.markdown-source-view.mod-cm6 .image-position-center,
+.markdown-source-view.mod-cm6 .internal-embed.image-embed.image-position-center {
+    display: block !important;
+    margin: auto !important;
+    clear: both;
+    float: none !important;
+    text-align: center;
+}
+
+/* List image container styles */
+.image-list-container {
+    width: 100%;
+    margin: 0.5em 0;
+}
+
+/* Maintain list structure */
+.markdown-source-view.mod-cm6 .cm-line:has(.image-list-container) {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+}
+
+/* Container positioning within lists */
+.image-list-container.image-position-left {
+    align-self: flex-start;
+}
+
+.image-list-container.image-position-center {
+    align-self: center;
+}
+
+.image-list-container.image-position-right {
+    align-self: flex-end;
+}
+
+
+
 
 
 
