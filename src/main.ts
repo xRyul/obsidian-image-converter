@@ -229,7 +229,7 @@ interface ImageConvertSettings {
 
 	rememberScrollPosition: boolean;
 	cursorPosition: 'front' | 'back';
-	cacheCleanupInterval: number;
+	imageAlignment_cacheCleanupInterval: number;
 
 	useMdLinks: boolean;
 	useRelativePath: boolean;
@@ -339,7 +339,7 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	useMdLinks: false,
 	useRelativePath: false,
 
-	cacheCleanupInterval: 3600000,
+	imageAlignment_cacheCleanupInterval: 3600000,
 
     annotationPresets: {
         drawing: Array(3).fill({
@@ -5239,11 +5239,11 @@ export default class ImageConvertPlugin extends Plugin {
         }
 
         // Set new interval if enabled
-        if (this.settings.cacheCleanupInterval > 0) {
+        if (this.settings.imageAlignment_cacheCleanupInterval > 0) {
             this.cacheCleanupIntervalId = window.setInterval(() => {
                 console.log("Automatic cache cleanup...");
                 this.imagePositionManager.cleanCache();
-            }, this.settings.cacheCleanupInterval);
+            }, this.settings.imageAlignment_cacheCleanupInterval);
         }
     }
 
@@ -7808,7 +7808,7 @@ export class ImageConvertTab extends PluginSettingTab {
 			.setName('Auto-clean interval (minutes)')
 			.setDesc('How often should the cache be automatically cleaned (0 to disable)')
 			.addText(text => text
-				.setValue((this.plugin.settings.cacheCleanupInterval / (60 * 1000)).toString())
+				.setValue((this.plugin.settings.imageAlignment_cacheCleanupInterval / (60 * 1000)).toString())
 				.onChange(async (value) => {
 					// parseFloat to handle decimal values
 					const minutes = parseFloat(value); 
@@ -7820,7 +7820,7 @@ export class ImageConvertTab extends PluginSettingTab {
 					}
 
 					// Store the value in milliseconds
-					this.plugin.settings.cacheCleanupInterval = minutes * 60 * 1000;
+					this.plugin.settings.imageAlignment_cacheCleanupInterval = minutes * 60 * 1000;
 					await this.plugin.saveSettings();
 
 					// Update the cleanup interval
