@@ -1,5 +1,5 @@
 
-import { App, View, MarkdownView, Notice, ItemView, DropdownComponent, FileView, Plugin, TFile, Scope, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
+import { App, View, MarkdownView, Notice, setIcon, ItemView, DropdownComponent, FileView, Plugin, TFile, TFolder, Scope, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
 
 
 // Browsers use the MIME type, not the file extension this module allows 
@@ -249,7 +249,7 @@ interface SettingsTab {
 
 interface LinkUpdateOptions {
     activeView: MarkdownView;
-    element: HTMLImageElement | HTMLVideoElement;
+    imageName: string | null;
     newWidth: number;
     newHeight: number;
     settings: {
@@ -365,6 +365,8 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 
 export default class ImageConvertPlugin extends Plugin {
 	settings: ImageConvertSettings;
+	imageProcessor: ImageProcessor;
+
 	widthSide: number | null = null;
 	storedImageName: string | null = null; // get imagename for comparison
 	private lastProcessedTime = 0;
@@ -375,6 +377,8 @@ export default class ImageConvertPlugin extends Plugin {
 		e.stopPropagation();
 	};
 
+	private registeredContextMenuCommands: string[] = [];
+	
 	// Queue
 	private fileHashes = new Set<string>();
     private progressEl: HTMLElement | null = null;
@@ -409,6 +413,7 @@ export default class ImageConvertPlugin extends Plugin {
     private isProcessingDisabled = false;  // For conversion/compression/resize disable only
 
 	public imagePositionManager: ImagePositionManager;
+	public imagePositioning: ImagePositioning;
 	private cacheCleanupIntervalId: number | null = null;
 
 	// Drag Resize
@@ -441,7 +446,8 @@ export default class ImageConvertPlugin extends Plugin {
 
 		this.addSettingTab(new ImageConvertTab(this.app, this));
 
-		this.imagePositionManager = new ImagePositionManager(this);
+        this.imagePositionManager = new ImagePositionManager(this);
+        this.imagePositioning = this.imagePositionManager.getPositioning();
 		// // Apply positions immediately without setTimeout
 		// const currentFile = this.app.workspace.getActiveFile();
 		// if (currentFile) {
@@ -612,6 +618,8 @@ export default class ImageConvertPlugin extends Plugin {
 			// Register context menu
 			this.registerContextMenu();
 
+			// Load batch image processor only in the end
+			this.imageProcessor = new ImageProcessor(this);
 			// Initialize Fabric.js defaults
 			FabricObject.prototype.transparentCorners = false;
 			FabricObject.prototype.cornerColor = '#108ee9';
@@ -3294,7 +3302,14 @@ export default class ImageConvertPlugin extends Plugin {
 		this.addCommand({
 			id: 'process-all-images-current-note',
 			name: 'Process all images in current note',
-			callback: () => new ProcessCurrentNote(this).open()
+			callback: () => {
+				const activeFile = this.app.workspace.getActiveFile();
+				if (activeFile) {
+					new ProcessCurrentNote(this.app, this, activeFile).open();
+				} else {
+					new Notice('Error: No active file found.');
+				}
+			},
 		});
 	
 		// Open settings
@@ -3423,6 +3438,25 @@ export default class ImageConvertPlugin extends Plugin {
 				isImage(file)
 			);
 	
+			// Get images from canvas files
+			const canvasFiles = allFiles.filter(file => 
+				file instanceof TFile && 
+				file.extension === 'canvas'
+			);
+	
+			// Process canvas files and collect image paths
+			for (const canvasFile of canvasFiles) {
+				const canvasImages = await getImagesFromCanvas(canvasFile);
+				for (const imagePath of canvasImages) {
+					const imageFile = this.app.vault.getAbstractFileByPath(imagePath);
+					if (imageFile instanceof TFile && isImage(imageFile)) {
+						if (!imageFiles.find(f => f.path === imageFile.path)) {
+							imageFiles.push(imageFile);
+						}
+					}
+				}
+			}
+
 			// If no images found at all
 			if (imageFiles.length === 0) {
 				new Notice('No images found in the vault.');
@@ -3625,8 +3659,9 @@ export default class ImageConvertPlugin extends Plugin {
 				return;
 			}
 	
-			// Get all markdown files in the vault
+			// Get all markdown and canvas files in the vault
 			const markdownFiles = this.app.vault.getMarkdownFiles();
+			const canvasFiles = this.app.vault.getFiles().filter(f => f.extension === 'canvas');
 	
 			// Iterate over each markdown file
 			for (const markdownFile of markdownFiles) {
@@ -3654,7 +3689,17 @@ export default class ImageConvertPlugin extends Plugin {
 				if (modified) {
 					await this.app.vault.modify(markdownFile, content);
 				}
+
 			}
+			// Update canvas files
+			for (const canvasFile of canvasFiles) {
+				await this.updateCanvasFileLinks(
+					canvasFile,
+					file.path,
+					newFile.path
+				);
+			}
+
 		} catch (error) {
 			// console.error('Error updating links:', error);
 			// new Notice(`Error updating links: ${error.message}`);
@@ -3709,27 +3754,53 @@ export default class ImageConvertPlugin extends Plugin {
 	
 			// Parse skip formats
 			const skipFormats = this.settings.ProcessCurrentNoteSkipFormats
-			.toLowerCase()
-			.split(',')
-			.map(format => format.trim())
-			.filter(format => format.length > 0);
+				.toLowerCase()
+				.split(',')
+				.map(format => format.trim())
+				.filter(format => format.length > 0);
 			
-			// Get all image files in the note first
-			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-			if (!activeView?.file) {
-				new Notice('No active note found.');
-				return;
+			// Get all image files in the note
+			let linkedFiles: TFile[] = [];
+
+			if (note.extension === 'canvas') {
+				// Handle canvas file
+				const canvasContent = await this.app.vault.read(note);
+				const canvasData = JSON.parse(canvasContent);
+				
+				const getImagesFromNodes = (nodes: any[]): string[] => {
+					let imagePaths: string[] = [];
+					for (const node of nodes) {
+						if (node.type === 'file' && node.file) {
+							const file = this.app.vault.getAbstractFileByPath(node.file);
+							if (file instanceof TFile && isImage(file)) {
+								imagePaths.push(node.file);
+							}
+						}
+						if (node.children && Array.isArray(node.children)) {
+							imagePaths = imagePaths.concat(getImagesFromNodes(node.children));
+						}
+					}
+					return imagePaths;
+				};
+
+				if (canvasData.nodes && Array.isArray(canvasData.nodes)) {
+					const imagePaths = getImagesFromNodes(canvasData.nodes);
+					linkedFiles = imagePaths
+						.map(path => this.app.vault.getAbstractFileByPath(path))
+						.filter((file): file is TFile => file instanceof TFile && isImage(file));
+				}
+			} else {
+				// Handle markdown file
+				const resolvedLinks = this.app.metadataCache.resolvedLinks;
+				const linksInCurrentNote = resolvedLinks[note.path];
+				linkedFiles = Object.keys(linksInCurrentNote)
+					.map(link => this.app.vault.getAbstractFileByPath(link))
+					.filter((file): file is TFile => 
+						file instanceof TFile && 
+						isImage(file)
+					);
 			}
-	
-			const resolvedLinks = this.app.metadataCache.resolvedLinks;
-			const linksInCurrentNote = resolvedLinks[activeView.file.path];
-			const linkedFiles = Object.keys(linksInCurrentNote)
-				.map(link => this.app.vault.getAbstractFileByPath(link))
-				.filter((file): file is TFile => 
-					file instanceof TFile && 
-					isImage(file)
-				);
-	
+
 			// If no images found at all
 			if (linkedFiles.length === 0) {
 				new Notice('No images found in the note.');
@@ -3940,30 +4011,33 @@ export default class ImageConvertPlugin extends Plugin {
 				return;
 			}
 
-			// Get the content of the current note
-			let content = await this.app.vault.read(note);
-			let modified = false;
 
-			// Handle different link formats
-			const linkPatterns = [
-				`![[${file.basename}]]`,                    // Basic wikilink
-				`![[${file.basename}.${file.extension}]]`,  // Full filename wikilink
-				`![](${file.name})`,                        // Markdown link
-			];
+			if (note.extension === 'canvas') {
+				// Handle canvas file
+				await this.updateCanvasFileLinks(note, file.path, newFile.path);
+			} else {
+				// Handle markdown file
+				let content = await this.app.vault.read(note);
+				let modified = false;
 
-			const newLink = `![[${newFile.basename}.${newFile.extension}]]`;
+				const linkPatterns = [
+					`![[${file.basename}]]`,
+					`![[${file.basename}.${file.extension}]]`,
+					`![](${file.name})`,
+				];
 
-			// Replace each pattern if found
-			for (const pattern of linkPatterns) {
-				if (content.includes(pattern)) {
-					content = content.split(pattern).join(newLink);
-					modified = true;
+				const newLink = `![[${newFile.basename}.${newFile.extension}]]`;
+
+				for (const pattern of linkPatterns) {
+					if (content.includes(pattern)) {
+						content = content.split(pattern).join(newLink);
+						modified = true;
+					}
 				}
-			}
 
-			// Only modify the file if changes were made
-			if (modified) {
-				await this.app.vault.modify(note, content);
+				if (modified) {
+					await this.app.vault.modify(note, content);
+				}
 			}
 		} catch (error) {
 			console.error('Error updating links:', error);
@@ -4001,6 +4075,7 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 	/* ------------------------------------------------------------- */
 
+	
 	private async getUniqueFilePath(file: TFile, newExtension: string): Promise<string> {
 		const dir = file.parent?.path || "";
 		const baseName = file.basename;
@@ -4017,7 +4092,30 @@ export default class ImageConvertPlugin extends Plugin {
 	
 		return newPath;
 	}
-
+	async updateCanvasFileLinks(canvasFile: TFile, oldPath: string, newPath: string) {
+		try {
+			const content = await this.app.vault.read(canvasFile);
+			const canvasData = JSON.parse(content);
+	
+			const updateNodePaths = (nodes: any[]) => {
+				for (const node of nodes) {
+					if (node.type === 'file' && node.file === oldPath) {
+						node.file = newPath;
+					}
+					if (node.children && Array.isArray(node.children)) {
+						updateNodePaths(node.children);
+					}
+				}
+			};
+	
+			if (canvasData.nodes && Array.isArray(canvasData.nodes)) {
+				updateNodePaths(canvasData.nodes);
+				await this.app.vault.modify(canvasFile, JSON.stringify(canvasData, null, 2));
+			}
+		} catch (error) {
+			console.error('Error updating canvas file links:', error);
+		}
+	}
 	/* ------------------------------------------------------------- */
 	/* ------------------------------------------------------------- */
 
@@ -4050,15 +4148,44 @@ export default class ImageConvertPlugin extends Plugin {
 		);
 		
 		this.registerEvent(
-			this.app.workspace.on("file-menu", (menu, file) => {
-				menu.addItem((item) => {
-					item
-						.setTitle("Process all images in current note")
-						.setIcon("cog")
-						.onClick(async () => {
-							new ProcessCurrentNote(this).open();
-						});
-				});
+			this.app.workspace.on('file-menu', (menu, file) => {
+				if (file instanceof TFile && isImage(file)) {
+					menu.addItem((item) => {
+						item.setTitle('Process image')
+							.setIcon("cog")
+							.onClick(() => {
+								// Show modal for single image options
+								new ProcessSingleImageModal(this.app, this, file).open();
+							});
+					});
+				} else if (file instanceof TFolder) {
+					menu.addItem((item) => {
+						item.setTitle('Process all images in Folder')
+							.setIcon("cog")
+							.onClick(() => {
+								// Open the updated ProcessFolderModal
+								new ProcessFolderModal(this.app, this, file.path).open();
+							});
+					});
+				} else if (file instanceof TFile && file.extension === 'md') {
+					menu.addItem((item) => {
+						item.setTitle('Process all images in Note')
+							.setIcon("cog")
+							.onClick(() => {
+								// Open the ProcessCurrentNoteModal
+								new ProcessCurrentNote(this.app, this, file).open();
+							});
+					});
+				} else if (file instanceof TFile && file.extension === 'canvas') {
+					menu.addItem((item) => {
+						item.setTitle('Process all images in Canvas') // Corrected text
+							.setIcon("cog")
+							.onClick(() => {
+								// Open the ProcessCurrentNoteModal
+								new ProcessCurrentNote(this.app, this, file).open();
+							});
+					});
+				}
 			})
 		);
 	}
@@ -4106,6 +4233,141 @@ export default class ImageConvertPlugin extends Plugin {
 
 		// Create new Menu object
 		const menu = new Menu();
+
+		// Get and parse paths
+		const imagePath = this.getImagePath(img);
+		const fullFileName = imagePath?.split('/').pop() || '';
+		const fileExtension = fullFileName.includes('.') ? `.${fullFileName.split('.').pop()}` : '';
+		const fileNameWithoutExt = fullFileName.replace(fileExtension, '');
+		const directoryPath = imagePath?.substring(0, imagePath.lastIndexOf('/')) || '';
+
+		// Create input container using Obsidian API
+		// Create input container using Obsidian API
+		const inputContainer = createDiv({ cls: 'image-info-container' });
+
+		// Add name input group
+		const nameGroup = createDiv({ cls: 'input-group' });
+		const nameIcon = createDiv({ cls: 'icon-container' });
+		setIcon(nameIcon, 'file-text'); // Use Obsidian's built-in 'file-text' icon
+		const nameLabel = createDiv({ text: 'Name:', cls: 'input-label' });
+		const nameInput = createEl('input', {
+			attr: { type: 'text', value: fileNameWithoutExt, placeholder: 'Enter a new image name' },
+			cls: 'image-name-input',
+		});
+		nameGroup.appendChild(nameIcon);
+		nameGroup.appendChild(nameLabel);
+		nameGroup.appendChild(nameInput);
+
+		// Add path input group
+		const pathGroup = createDiv({ cls: 'input-group' });
+		const pathIcon = createDiv({ cls: 'icon-container' });
+		setIcon(pathIcon, 'folder'); // Use Obsidian's built-in 'folder' icon
+		const pathLabel = createDiv({ text: 'Folder:', cls: 'input-label' });
+		const pathInput = createEl('input', {
+			attr: { type: 'text', value: directoryPath, placeholder: 'Enter a new path for the image' },
+			cls: 'image-path-input',
+		});
+		pathGroup.appendChild(pathIcon);
+		pathGroup.appendChild(pathLabel);
+		pathGroup.appendChild(pathInput);
+
+		// Append input groups to the container
+		inputContainer.appendChild(nameGroup);
+		inputContainer.appendChild(pathGroup);
+
+		// Event handlers
+		const stopPropagationHandler = (e: Event) => e.stopPropagation();
+
+		const keydownHandler = (e: KeyboardEvent) => {
+			e.stopPropagation();
+			if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Backspace', 'Delete'].includes(e.key)) {
+				return;
+			}
+		};
+
+		// Register events using Obsidian API
+		[nameInput, pathInput].forEach((input) => {
+			this.registerDomEvent(input, 'mousedown', stopPropagationHandler);
+			this.registerDomEvent(input, 'click', stopPropagationHandler);
+			this.registerDomEvent(input, 'keydown', keydownHandler);
+			this.registerDomEvent(input, 'input', stopPropagationHandler);
+		});
+
+		// Handle name changes
+		this.registerDomEvent(nameInput, 'change', async () => {
+			try {
+				const newName = nameInput.value;
+				if (imagePath && newName && newName !== fileNameWithoutExt) {
+					const newPath = `${pathInput.value}/${newName}${fileExtension}`;
+					const file = this.app.vault.getAbstractFileByPath(imagePath);
+					if (file instanceof TFile) {
+						// Create directories if they don't exist
+						await this.ensureFolderExists(pathInput.value);
+						
+						await this.app.fileManager.renameFile(file, newPath);
+						img.src = newPath;
+						new Notice('Image name updated successfully');
+					}
+				}
+			} catch (error) {
+				console.error('Failed to update image name:', error);
+				new Notice('Failed to update image name');
+			}
+		});
+
+		// Handle path changes
+		this.registerDomEvent(pathInput, 'change', async () => {
+			try {
+				const newDirectoryPath = pathInput.value;
+				const newPath = `${newDirectoryPath}/${nameInput.value}${fileExtension}`;
+				
+				if (imagePath && newPath !== imagePath) {
+					const file = this.app.vault.getAbstractFileByPath(imagePath);
+					if (file instanceof TFile) {
+						// Create directories if they don't exist
+						await this.ensureFolderExists(newDirectoryPath);
+						
+						await this.app.fileManager.renameFile(file, newPath);
+						img.src = newPath;
+						new Notice('Image path updated successfully');
+						// Refresh note
+						const leaf = this.app.workspace.getMostRecentLeaf();
+						if (leaf) {
+							// Store current state
+							const currentState = leaf.getViewState();
+							
+							// Switch to a different view type temporarily
+							await leaf.setViewState({
+								type: 'empty',
+								state: {}
+							});
+
+							// Switch back to the original view
+							await leaf.setViewState(currentState);
+						}
+					}
+				}
+			} catch (error) {
+				console.error('Failed to update image path:', error);
+				new Notice('Failed to update image path');
+			}
+		});
+
+		menu.addItem((item) => {
+			const itemDom = (item as any).dom as HTMLElement;
+			itemDom.empty();
+			itemDom.appendChild(inputContainer);
+			
+			setTimeout(() => {
+				nameInput.focus();
+				nameInput.select();
+			}, 50);
+		});
+
+		menu.addSeparator();
+
+
+
 
 		menu.addItem((item) => {
 			item
@@ -4202,7 +4464,8 @@ export default class ImageConvertPlugin extends Plugin {
 				.setIcon('align-justify')
 				.setSubmenu()
 				.addItem((subItem) => {
-					const currentPosition = this.getCurrentImagePosition(img);
+					// Use imagePositioning here
+					const currentPosition = this.imagePositioning.getCurrentImagePosition(img);
 					subItem
 						.setTitle('Left')
 						.setIcon('align-left')
@@ -4210,14 +4473,15 @@ export default class ImageConvertPlugin extends Plugin {
 						.onClick(async () => {
 							if (currentPosition === 'left') {
 								// Remove positioning if clicking the same position
-								await this.removeImagePosition(img);
+								await this.imagePositioning.removeImagePosition(img);
 							} else {
-								await this.updateImagePositionUI(img, 'left', false);
+								await this.imagePositioning.updateImagePositionUI(img, 'left', false);
 							}
 						});
 				})
 				.addItem((subItem) => {
-					const currentPosition = this.getCurrentImagePosition(img);
+					// Use imagePositioning here
+					const currentPosition = this.imagePositioning.getCurrentImagePosition(img);
 					subItem
 						.setTitle('Center')
 						.setIcon('align-center')
@@ -4225,14 +4489,15 @@ export default class ImageConvertPlugin extends Plugin {
 						.onClick(async () => {
 							if (currentPosition === 'center') {
 								// Remove positioning if clicking the same position
-								await this.removeImagePosition(img);
+								await this.imagePositioning.removeImagePosition(img);
 							} else {
-								await this.updateImagePositionUI(img, 'center', false);
+								await this.imagePositioning.updateImagePositionUI(img, 'center', false);
 							}
 						});
 				})
 				.addItem((subItem) => {
-					const currentPosition = this.getCurrentImagePosition(img);
+					// Use imagePositioning here
+					const currentPosition = this.imagePositioning.getCurrentImagePosition(img);
 					subItem
 						.setTitle('Right')
 						.setIcon('align-right')
@@ -4240,30 +4505,30 @@ export default class ImageConvertPlugin extends Plugin {
 						.onClick(async () => {
 							if (currentPosition === 'right') {
 								// Remove positioning if clicking the same position
-								await this.removeImagePosition(img);
+								await this.imagePositioning.removeImagePosition(img);
 							} else {
-								await this.updateImagePositionUI(img, 'right', false);
+								await this.imagePositioning.updateImagePositionUI(img, 'right', false);
 							}
 						});
 				})
 				.addSeparator()
 				.addItem((subItem) => {
-					const currentWrap = this.getCurrentImageWrap(img);
+					// Use imagePositioning here
+					const currentWrap = this.imagePositioning.getCurrentImageWrap(img);
 					subItem
 						.setTitle('Wrap Text')
 						.setChecked(currentWrap)
 						.onClick(async () => {
-							const currentPosition = this.getCurrentImagePosition(img);
+							const currentPosition = this.imagePositioning.getCurrentImagePosition(img);
 							if (currentPosition === 'none') {
 								// If no positioning is set, default to left when enabling wrap
-								await this.updateImagePositionUI(img, 'left', !currentWrap);
+								await this.imagePositioning.updateImagePositionUI(img, 'left', !currentWrap);
 							} else {
-								await this.updateImagePositionUI(img, currentPosition, !currentWrap);
+								await this.imagePositioning.updateImagePositionUI(img, currentPosition, !currentWrap);
 							}
 						});
 				});
 		});
-
 		
 		// Add option to resize image
 		menu.addItem((item: MenuItem) =>
@@ -4378,6 +4643,33 @@ export default class ImageConvertPlugin extends Plugin {
 					modal.open();
 				})
 		);
+
+		// Add option to process image
+		menu.addItem((item) => {
+			item.setTitle("Convert/compress...")
+				.setIcon("cog")
+				.onClick(async () => {
+					try {
+						// Get image path
+						const imagePath = this.getImagePath(img);
+						if (imagePath) {
+							const file = this.app.vault.getAbstractFileByPath(imagePath);
+
+							// Ensure the file is a TFile and an image
+							if (file instanceof TFile && isImage(file)) {
+								new ProcessSingleImageModal(this.app, this, file).open();
+							} else {
+								new Notice("Error: Not a valid image file.");
+							}
+						} else {
+							new Notice("Error: Could not find image path.");
+						}
+					} catch (error) {
+						console.error("Error processing image:", error);
+						new Notice("Error processing image");
+					}
+				});
+		});
 
 		menu.addItem((item) => {
 			item
@@ -4593,97 +4885,6 @@ export default class ImageConvertPlugin extends Plugin {
 
 	}
 
-	// Left, right, center image alignment/ positioning
-	private async updateImagePositionUI(
-		img: HTMLImageElement, 
-		position: 'left' | 'center' | 'right',
-		wrap = false
-	) {
-		const activeFile = this.app.workspace.getActiveFile();
-		if (!activeFile) return;
-	
-		const src = img.getAttribute('src');
-		if (!src) return;
-	
-		// Remove existing classes
-		const positionClasses = ['image-position-left', 'image-position-center', 'image-position-right'];
-		const wrapClasses = ['image-wrap', 'image-no-wrap'];
-		
-		// Get the parent embed if it exists
-		const parentEmbed = img.closest('.internal-embed.image-embed');
-		
-		// Function to update element classes
-		const updateElement = (element: Element) => {
-			if (element) {
-				// Remove existing position and wrap classes
-				element.classList.remove(...positionClasses, ...wrapClasses);
-				
-				// Add new classes
-				element.classList.add(`image-position-${position}`);
-				element.classList.add(wrap ? 'image-wrap' : 'image-no-wrap');
-			}
-		};
-	
-		// Update both the image and its parent embed
-		updateElement(img);
-		if (parentEmbed) {
-			updateElement(parentEmbed);
-		}
-	
-		// Save to cache
-		await this.imagePositionManager.saveImagePositionToCache(
-			activeFile.path,
-			src,
-			position,
-			img.style.width,
-			wrap
-		);
-		
-	}
-
-	private async removeImagePosition(img: HTMLImageElement) {
-		const activeFile = this.app.workspace.getActiveFile();
-		if (!activeFile) return;
-	
-		const src = img.getAttribute('src');
-		if (!src) return;
-	
-		// Remove all positioning classes
-		img.classList.remove(
-			'image-position-left', 
-			'image-position-center', 
-			'image-position-right',
-			'image-wrap',
-			'image-no-wrap'
-		);
-	
-		// Remove from parent embed if exists
-		const parentEmbed = img.closest('.internal-embed.image-embed');
-		if (parentEmbed) {
-			parentEmbed.classList.remove(
-				'image-position-left', 
-				'image-position-center', 
-				'image-position-right',
-				'image-wrap',
-				'image-no-wrap'
-			);
-		}
-	
-		// Remove from cache
-		await this.imagePositionManager.removeImageFromCache(activeFile.path, src);
-	}
-
-	private getCurrentImageWrap(element: HTMLImageElement): boolean {
-		return element.classList.contains('image-wrap');
-	}
-	
-	private getCurrentImagePosition(element: HTMLImageElement): 'left' | 'center' | 'right' | 'none' {
-		if (element.classList.contains('image-position-center')) return 'center';
-		if (element.classList.contains('image-position-right')) return 'right';
-		if (element.classList.contains('image-position-left')) return 'left';
-		return 'none'; // default state when no positioning is applied
-	}
-
 	
 	private getImagePath(img: HTMLImageElement): string | null {
 		try {
@@ -4805,75 +5006,76 @@ export default class ImageConvertPlugin extends Plugin {
 			if (this.rafId) {
 				cancelAnimationFrame(this.rafId);
 			}
-			
+
 			this.rafId = requestAnimationFrame(() => {
 				const { newWidth, newHeight } = this.dragResize_calculateNewDimensions(event);
-				this.dragResize_updateElementSize(newWidth, newHeight);
-				this.dragResize_updateMarkdownContent(newWidth, newHeight);
+
+				// Check if resizeState.element is not null before using it
+				if (!this.resizeState.element) return;
+
+				// Find all instances of the same image
+				const imageName = getImageName(this.resizeState.element);
+				const allInstances = this.findAllImageInstances(imageName);
+
+				// Update size of all instances
+				this.dragResize_updateElementSize(allInstances, newWidth, newHeight);
+
+				// Update markdown content for all instances (throttled)
+				this.dragResize_updateMarkdownContent(newWidth, newHeight, imageName);
 			});
 		} else {
 			this.handleNonResizingMouseMove(event);
 		}
 	}
 
-	private async dragResize_handleMouseUp() {
-		if (Platform.isMobile) { return; }
-		if (this.resizeState.element) {
-			const element = this.resizeState.element;
-			if (!(element instanceof HTMLImageElement)) return;
-	
-			// Clean up resize attributes
-			element.removeAttribute('data-resize-edge');
-			element.removeAttribute('data-resize-active');
-			this.dragResize_updateCursorPosition();
-	
-			try {
-				// Update cache with new dimensions
-				const activeFile = this.app.workspace.getActiveFile();
-				if (activeFile && this.imagePositionManager) {
-					const src = element.getAttribute('src');
-					if (src) {
-						const width = element.style.width || 
-									element.getAttribute('width') || 
-									undefined;
-	
-						// Preserve existing classes
-						const currentPosition = this.getCurrentImagePosition(element);
-						const currentWrap = this.getCurrentImageWrap(element);
-	
-						// Ensure classes are maintained
-						element.classList.add(`image-position-${currentPosition}`);
-						element.classList.add(currentWrap ? 'image-wrap' : 'image-no-wrap');
-	
-						// Update parent embed if it exists
-						const parentEmbed = element.closest('.internal-embed.image-embed');
-						if (parentEmbed) {
-							parentEmbed.classList.add(`image-position-${currentPosition}`);
-							parentEmbed.classList.add(currentWrap ? 'image-wrap' : 'image-no-wrap');
-						}
-	
-						// Update cache
-						await this.imagePositionManager.preservePositionDuringResize(
-							activeFile.path,
-							src,
-							width
-						);
-					}
-				}
-			} catch (error) {
-				console.error('Error updating image position during resize:', error);
-			}
-		}
-	
-		this.resizeState = {
-			isResizing: false,
-			startX: 0,
-			startY: 0,
-			startWidth: 0,
-			startHeight: 0,
-			element: null
-		};
-	}
+    private async dragResize_handleMouseUp() {
+        if (Platform.isMobile) { return; }
+        if (this.resizeState.element) {
+            const element = this.resizeState.element;
+
+            // Clean up resize attributes
+            const imageName = getImageName(element);
+            const allInstances = this.findAllImageInstances(imageName);
+            allInstances.forEach(el => {
+                el.removeAttribute('data-resize-edge');
+                el.removeAttribute('data-resize-active');
+            });
+
+            this.dragResize_updateCursorPosition();
+
+            try {
+                // Update cache with new dimensions
+                const activeFile = this.app.workspace.getActiveFile();
+                if (activeFile && this.imagePositionManager) {
+                    const src = element.getAttribute('src');
+                    if (src) {
+                        const width = element.style.width ||
+                            element.getAttribute('width') ||
+                            undefined;
+
+                        // Update cache (only need to do this once, not for each instance)
+                        await this.imagePositionManager.preservePositionDuringResize(
+                            activeFile.path,
+                            src,
+                            width
+                        );
+                    }
+                }
+            } catch (error) {
+                console.error('Error updating image position during resize:', error);
+            }
+        }
+
+        // Reset resize state
+        this.resizeState = {
+            isResizing: false,
+            startX: 0,
+            startY: 0,
+            startWidth: 0,
+            startHeight: 0,
+            element: null
+        };
+    }
 
 	private dragResize_handleMouseOut = (event: MouseEvent) => {
 		if (!this.settings.resizeByDragging) return;
@@ -4884,18 +5086,19 @@ export default class ImageConvertPlugin extends Plugin {
 		}
 	}
 
-    private dragResize_updateElementSize(newWidth: number, newHeight: number) {
-        if (!this.resizeState.element) return;
+	private dragResize_updateElementSize(elements: (HTMLImageElement | HTMLVideoElement)[], newWidth: number, newHeight: number) {
 		if (Platform.isMobile) { return; }
-        if (this.resizeState.element instanceof HTMLImageElement) {
-            this.resizeState.element.style.width = `${newWidth}px`;
-            this.resizeState.element.style.height = `${newHeight}px`;
-        } else if (this.resizeState.element instanceof HTMLVideoElement) {
-            const containerWidth = this.resizeState.element.parentElement?.clientWidth ?? 0;
-            const newWidthPercentage = (newWidth / containerWidth) * 100;
-            this.resizeState.element.style.width = `${newWidthPercentage}%`;
-        }
-    }
+		elements.forEach(element => {
+			if (element instanceof HTMLImageElement) {
+				element.style.width = `${newWidth}px`;
+				element.style.height = `${newHeight}px`;
+			} else if (element instanceof HTMLVideoElement) {
+				const containerWidth = element.parentElement?.clientWidth ?? 0;
+				const newWidthPercentage = (newWidth / containerWidth) * 100;
+				element.style.width = `${newWidthPercentage}%`;
+			}
+		});
+	}
 
 	private dragResize_calculateNewDimensions(event: MouseEvent) {
 		if (!this.resizeState.element) return { newWidth: 0, newHeight: 0 };
@@ -4913,25 +5116,20 @@ export default class ImageConvertPlugin extends Plugin {
 		};
 	}
 
-	private dragResize_updateMarkdownContent = this.throttle((newWidth: number, newHeight: number) => {
-		if (!this.resizeState.element) return;
+	private dragResize_updateMarkdownContent = this.throttle((newWidth: number, newHeight: number, imageName: string | null) => {
+		if (!imageName) return;
 	
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!activeView) return;
 	
-		const currentElement = this.resizeState.element;
-		const currentImageName = getImageName(currentElement);
-		
-		if (!currentImageName) return;
-	
 		updateImageLink({
 			activeView,
-			element: currentElement,
+			imageName,
 			newWidth,
 			newHeight,
 			settings: this.settings
 		});
-	}, 100);  // Update markdown content at most every 100ms
+	}, 100);
 
 	private dragResize_updateCursorPosition() {
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -5057,17 +5255,15 @@ export default class ImageConvertPlugin extends Plugin {
 				document,
 				"wheel",
 				"img, video",
-				// Make the callback async
 				async (event: WheelEvent) => {
-					if (Platform.isMobile) { return; }
-					if (!this.settings.resizeWithScrollwheel) return;
-					
+					if (Platform.isMobile || !this.settings.resizeWithScrollwheel) return;
+	
 					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-					if (!activeView) return;
-					if (!activeView || 
+					if (!activeView ||
 						(activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode)) {
 						return;
 					}
+	
 					const markdownContainer = activeView.containerEl;
 					const target = event.target as HTMLElement;
 					if (!markdownContainer.contains(target)) return;
@@ -5079,64 +5275,72 @@ export default class ImageConvertPlugin extends Plugin {
 						const element = event.target as HTMLImageElement | HTMLVideoElement;
 						const imageName = getImageName(element);
 	
-						if (!imageName || imageName !== this.storedImageName) {
+						// Get image position data from cache using imagePositionManager
+						const activeFile = this.app.workspace.getActiveFile();
+
+						// Define the type of positionData explicitly
+						let positionData: {
+							position: 'left' | 'center' | 'right';
+							width?: string;
+							wrap: boolean;
+						} | null = null;
+
+
+
+						if (activeFile && this.imagePositionManager) {
+							positionData = this.imagePositionManager.getImagePosition(activeFile.path, element.getAttribute('src') || '');
+						}
+	
+						if (!imageName) {
 							return;
 						}
 	
 						const { newWidth, newHeight } = resizeImageScrollWheel(event, element);
 	
-						if (element instanceof HTMLImageElement) {
-							element.style.width = `${newWidth}px`;
-							element.style.height = `${newHeight}px`;
-							element.style.removeProperty('left');
-							element.style.removeProperty('top');
-						
-							// Preserve existing classes
-							const currentPosition = this.getCurrentImagePosition(element);
-							const currentWrap = this.getCurrentImageWrap(element);
+						// Find all instances of the same image
+						const allInstances = this.findAllImageInstances(imageName);
 	
-							// Ensure classes are maintained
-							element.classList.add(`image-position-${currentPosition}`);
-							element.classList.add(currentWrap ? 'image-wrap' : 'image-no-wrap');
-	
-							// Update parent embed if it exists
-							const parentEmbed = element.closest('.internal-embed.image-embed');
-							if (parentEmbed) {
-								parentEmbed.classList.add(`image-position-${currentPosition}`);
-								parentEmbed.classList.add(currentWrap ? 'image-wrap' : 'image-no-wrap');
-							}
-	
-							// Update cache
-							const activeFile = this.app.workspace.getActiveFile();
-							if (activeFile && this.imagePositionManager) {
-								const src = element.getAttribute('src');
-								if (src) {
-									await this.imagePositionManager.preservePositionDuringResize(
-										activeFile.path,
-										src,
-										`${newWidth}px`
-									);
+						allInstances.forEach(async (el) => {
+							if (el instanceof HTMLImageElement) {
+								// Apply cached position before resize using imagePositionManager
+								if (positionData) {
+									this.imagePositioning.applyPositionToImage(el, positionData);
 								}
+								el.style.width = `${newWidth}px`;
+								el.style.height = `${newHeight}px`;
+								el.style.removeProperty('left');
+								el.style.removeProperty('top');
+							} else if (el instanceof HTMLVideoElement) {
+								el.style.width = `${newWidth}%`;
 							}
-						} else if (element instanceof HTMLVideoElement) {
-							element.style.width = `${newWidth}%`;
-						}
+						});
 	
-						const editor = activeView.editor;
+						// Update the markdown links for all instances
 						updateImageLink({
 							activeView,
-							element,
+							imageName, // Pass the image name
 							newWidth,
 							newHeight,
 							settings: this.settings
 						});
-						
-						this.scrollwheelresize_updateCursorPosition(editor, imageName);
+	
+						this.scrollwheelresize_updateCursorPosition(activeView.editor, imageName);
+	
+						// Update cache with new dimensions, preserving position
+						if (activeFile && this.imagePositionManager) {
+							const src = element.getAttribute('src');
+							if (src && positionData) {
+								await this.imagePositionManager.preservePositionDuringResize(
+									activeFile.path,
+									src,
+									`${newWidth}px`
+								);
+							}
+						}
 	
 					} catch (error) {
 						console.error('Error during scroll wheel resize:', error);
 					}
-				
 				}
 			)
 		);
@@ -5174,29 +5378,57 @@ export default class ImageConvertPlugin extends Plugin {
 		);
 	}
 
-    private scrollwheelresize_updateCursorPosition(editor: Editor, imageName: string | null) {
-        if (Platform.isMobile) { return; }
+	private scrollwheelresize_updateCursorPosition(editor: Editor, imageName: string | null) {
+		if (Platform.isMobile) { return; }
 		if (!imageName) return;  // Early return if imageName is null
+	
+		const cursorPos = editor.getCursor();
+		const lineContent = editor.getLine(cursorPos.line);
+		
+		let newCursorPos;
+		if (this.settings.cursorPosition === 'front') {
+			const linkStart = Math.max(lineContent.indexOf('![['), lineContent.indexOf('!['));
+			newCursorPos = { line: cursorPos.line, ch: Math.max(linkStart, 0) };
+		} else {
+			const linkEnd = lineContent.indexOf(']]') !== -1 ? 
+				lineContent.indexOf(']]') + 2 : 
+				lineContent.indexOf(')') + 1;
+			newCursorPos = { line: cursorPos.line, ch: Math.min(linkEnd, lineContent.length) };
+		}
+		editor.setCursor(newCursorPos);
+	}
 
-        const cursorPos = editor.getCursor();
-        const lineContent = editor.getLine(cursorPos.line);
-        
-        let newCursorPos;
-        if (this.settings.cursorPosition === 'front') {
-            const linkStart = Math.max(lineContent.indexOf('![['), lineContent.indexOf('!['));
-            newCursorPos = { line: cursorPos.line, ch: Math.max(linkStart, 0) };
-        } else {
-            const linkEnd = lineContent.indexOf(']]') !== -1 ? 
-                lineContent.indexOf(']]') + 2 : 
-                lineContent.indexOf(')') + 1;
-            newCursorPos = { line: cursorPos.line, ch: Math.min(linkEnd, lineContent.length) };
-        }
-        editor.setCursor(newCursorPos);
+	/* ------------------------------------------------------------- */
+	/* ------------------------------------------------------------- */
+
+
+    private findAllImageInstances(imageName: string | null): (HTMLImageElement | HTMLVideoElement)[] {
+        if (!imageName) return [];
+
+        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (!activeView) return [];
+
+        const allImagesAndVideos = activeView.containerEl.querySelectorAll('img, video');
+        const instances: (HTMLImageElement | HTMLVideoElement)[] = [];
+
+        allImagesAndVideos.forEach(el => {
+            const currentImageName = getImageName(el as HTMLImageElement | HTMLVideoElement);
+
+            // Handle base64 and external images separately
+            if (isBase64Image(imageName) || isExternalLink(imageName)) {
+                if (currentImageName === imageName) {
+                    instances.push(el as HTMLImageElement | HTMLVideoElement);
+                }
+            } else {
+                // For regular images, compare normalized filenames using imagePositionManager.normalizeImagePath
+                if (this.imagePositionManager.normalizeImagePath(currentImageName) === this.imagePositionManager.normalizeImagePath(imageName)) {
+                    instances.push(el as HTMLImageElement | HTMLVideoElement);
+                }
+            }
+        });
+
+        return instances;
     }
-
-	/* ------------------------------------------------------------- */
-	/* ------------------------------------------------------------- */
-
 
 
 	getActiveEditor(sourcePath: string): Editor | null {
@@ -5293,6 +5525,37 @@ async function refreshImagesInActiveNote() {
 	}
 }
 
+async function getImagesFromCanvas(file: TFile): Promise<string[]> {
+    try {
+        const content = await this.app.vault.read(file);
+        const canvasData = JSON.parse(content);
+        const imagePaths: string[] = [];
+
+        // Recursive function to traverse nodes
+        const traverseNodes = (nodes: any[]) => {
+            for (const node of nodes) {
+                // Check if node is an image
+                if (node.type === 'file' && node.file && isImage(node.file)) {
+                    imagePaths.push(node.file);
+                }
+                // Recursively check child nodes if they exist
+                if (node.children && Array.isArray(node.children)) {
+                    traverseNodes(node.children);
+                }
+            }
+        };
+
+        // Start traversal from root nodes
+        if (canvasData.nodes && Array.isArray(canvasData.nodes)) {
+            traverseNodes(canvasData.nodes);
+        }
+
+        return imagePaths;
+    } catch (error) {
+        console.error('Error parsing canvas file:', error);
+        return [];
+    }
+}
 
 /* ------------------------------------------------------------- */
 async function handleTiffImage(binary: ArrayBuffer): Promise<Blob> {
@@ -6173,22 +6436,12 @@ function printEditorLineWidth(app: App): number {
 
 /* HELPER: for drag resize and scrollwheel */
 /* ------------------------------------------------------------- */
-function updateImageLink({ activeView, element, newWidth, newHeight, settings }: LinkUpdateOptions): void {
+function updateImageLink({ activeView, imageName, newWidth, newHeight, settings }: LinkUpdateOptions): void {
     const editor = activeView.editor;
-    const imageName = getImageName(element);
     if (!imageName) return;
 
-    // Find the correct line containing our image
-    const doc = editor.getDoc();
-    const lineCount = doc.lineCount();
-    let targetLine = -1;
-    let targetLineContent = '';
-    
-    const currentLine = editor.getCursor().line;
-    const currentLineContent = editor.getLine(currentLine);
-    
-    // Helper function to decode URL components for comparison
-    const normalizeForComparison = (path: string) => {
+    // Helper function to normalize paths for comparison
+    const normalizePath = (path: string): string => {
         try {
             return decodeURIComponent(path).replace(/\\/g, '/');
         } catch {
@@ -6196,121 +6449,137 @@ function updateImageLink({ activeView, element, newWidth, newHeight, settings }:
         }
     };
 
-    if (isExternalLink(imageName)) {
-        if (currentLineContent.includes(imageName)) {
-            targetLine = currentLine;
-            targetLineContent = currentLineContent;
-        }
-    } else {
-        // Search through document looking for both exact matches and URL-encoded matches
-        const normalizedImageName = normalizeForComparison(imageName);
-        for (let i = 0; i < lineCount; i++) {
+    // Helper function to get filename from path
+    const getFilenameFromPath = (path: string): string => {
+        const normalized = normalizePath(path);
+        return normalized.split('/').pop() || normalized;
+    };
+
+	// Helper function to check if a line is within frontmatter
+    const isFrontmatter = (lineNumber: number, editor: Editor): boolean => {
+        let inFrontmatter = false;
+        let frontmatterStart = false;
+        
+        for (let i = 0; i <= lineNumber; i++) {
             const line = editor.getLine(i);
-            const normalizedLine = normalizeForComparison(line);
-            if (normalizedLine.includes(normalizedImageName)) {
-                targetLine = i;
-                targetLineContent = line;
-                break;
+            
+            // Check for frontmatter start
+            if (i === 0 && line === '---') {
+                inFrontmatter = true;
+                frontmatterStart = true;
+                continue;
+            }
+            
+            // Check for frontmatter end
+            if (inFrontmatter && line === '---') {
+                inFrontmatter = false;
+                continue;
+            }
+            
+            // If we reach our target line and we're still in frontmatter
+            if (i === lineNumber && inFrontmatter && frontmatterStart) {
+                return true;
             }
         }
-    }
+        return false;
+    };
 
-    if (targetLine === -1) return;
+    const normalizedTargetName = isBase64Image(imageName) ? imageName : getFilenameFromPath(imageName);
 
-	// Obsidian supports WIDTHxHEIGHT syntax. But for simplicity we can use only 1 whichever is longer.
-	// This helps with setting appropriate initial |size depending on the image at hand
-    const longestSide = Math.round(newWidth);
+	// Find all matches in the current line
+	const findAllMatches = (content: string) => {
+		const matches: Array<{
+			type: 'md' | 'wiki',
+			fullMatch: string,
+			index: number,
+			path: string,
+			altText?: string
+		}> = [];
 
-    let updatedContent = targetLineContent;
-    let startCh = 0;
-    let endCh = targetLineContent.length;
+		// Find Markdown-style links with size parameters
+		const mdRegex = /!\[([^\]]*?)(?:\|\d+(?:\|\d+)?)?\]\(([^)]+)\)/g;
+		let mdMatch;
+		while ((mdMatch = mdRegex.exec(content)) !== null) {
+			matches.push({
+				type: 'md',
+				fullMatch: mdMatch[0],
+				index: mdMatch.index,
+				path: mdMatch[2],
+				altText: mdMatch[1]
+			});
+		}
 
-    // Updated pattern to handle both cases:
-    // ![|242](path) and ![alttext|242](path)
-    const markdownPattern = /!\[([^\]]*?)(?:\|\d+(?:\|\d+)?)?\]\(([^)]+)\)/g;
-    const wikiLinkPattern = /!\[\[([^\]]+?)(?:\|\d+(?:\|\d+)?)?\]\]/g;
+		// Find Wiki-style links with size parameters
+		const wikiRegex = /!\[\[([^\]]+?)(?:\|\d+(?:\|\d+)?)?\]\]/g;
+		let wikiMatch;
+		while ((wikiMatch = wikiRegex.exec(content)) !== null) {
+			const [fullMatch, content] = wikiMatch;
+			const [path] = content.split('|'); // Split on pipe to get just the path
+			matches.push({
+				type: 'wiki',
+				fullMatch,
+				index: wikiMatch.index,
+				path
+			});
+		}
 
-    let match;
-    while ((match = markdownPattern.exec(targetLineContent)) !== null) {
-        const fullMatch = match[0];
-        const altText = match[1];
-        const path = match[2];
-        
-        const normalizedPath = normalizeForComparison(path);
-        const normalizedImageName = normalizeForComparison(imageName);
-        
-        if (normalizedPath.includes(normalizedImageName)) {
-            // Preserve alt text if it exists, otherwise keep empty
-            const newAltText = altText.replace(/\|\d+(\|\d+)?/g, '');
-			// const newMarkdown = `![[${path}|${newWidth}x${newHeight}]]`;
-            const newMarkdown = `![${newAltText}|${longestSide}](${path})`;
-            startCh = match.index;
-            endCh = startCh + fullMatch.length;
-            updatedContent = newMarkdown;
-            break;
-        }
-    }
+		return matches;
+	};
 
-    // Only try wiki link pattern if markdown pattern didn't match
-    if (startCh === 0 && endCh === targetLineContent.length) {
-        while ((match = wikiLinkPattern.exec(targetLineContent)) !== null) {
-            const fullMatch = match[0];
-            const path = match[1].split('|')[0];
-            
-            const normalizedPath = normalizeForComparison(path);
-            const normalizedImageName = normalizeForComparison(imageName);
-            
-            if (normalizedPath.includes(normalizedImageName)) {
-				// const newMarkdown = `![${newAltText}|${newWidth}x${newHeight}](${path})`;
-                const newMarkdown = `![[${path}|${longestSide}]]`;
-                startCh = match.index;
-                endCh = startCh + fullMatch.length;
-                updatedContent = newMarkdown;
-                break;
-            }
-        }
-    }
+    // Search through document for the line containing our image
+    const lineCount = editor.lineCount();
+	const targetLines: { line: number, match: any }[] = [];
 
-    // Update the content and maintain cursor position
-    editor.replaceRange(
-        updatedContent,
-        { line: targetLine, ch: startCh },
-        { line: targetLine, ch: endCh }
-    );
+	for (let i = 0; i < lineCount; i++) {
+		// Skip if line is in frontmatter
+		if (isFrontmatter(i, editor)) {
+			continue;
+		}
+	
+		const line = editor.getLine(i);
+		const matches = findAllMatches(line);
+	
+		for (const match of matches) {
+			const matchFilename = isBase64Image(match.path) ? match.path : getFilenameFromPath(match.path);
+			if (matchFilename === normalizedTargetName) {
+				targetLines.push({ line: i, match });
+			}
+		}
+	}
 
-    // Set cursor position more accurately
-    let finalCursorPos;
-    if (settings.cursorPosition === 'front') {
-        finalCursorPos = {
-            line: targetLine,
-            ch: startCh
-        };
-    } else {
-        // Get the updated line content after replacement
-        const updatedLineContent = editor.getLine(targetLine);
-        
-        // Find the end of the link in the updated content
-        const endOfLink = (() => {
-            const mdMatch = updatedLineContent.slice(startCh).match(/!\[.*?\)\s*/);
-            const wikiMatch = updatedLineContent.slice(startCh).match(/!\[\[.*?\]\]\s*/);
-            
-            if (mdMatch) {
-                return startCh + mdMatch[0].length;
-            } else if (wikiMatch) {
-                return startCh + wikiMatch[0].length;
-            }
-            return endCh;
-        })();
+	targetLines.forEach(({ line: targetLine, match: targetMatch }) => {
+		const longestSide = Math.round(newWidth);
+		let updatedContent = '';
+		const startCh = targetMatch.index;
+		const endCh = startCh + targetMatch.fullMatch.length;
 
-        finalCursorPos = {
-            line: targetLine,
-            ch: endOfLink
-        };
-    }
+		if (targetMatch.type === 'md') {
+			const cleanAltText = targetMatch.altText?.replace(/\|\d+(?:\|\d+)?/g, '') || '';
+			updatedContent = `![${cleanAltText}|${longestSide}](${targetMatch.path})`;
+		} else {
+			updatedContent = `![[${targetMatch.path}|${longestSide}]]`;
+		}
 
-    editor.setCursor(finalCursorPos);
+		if (!updatedContent) return;
+
+		// Update the content
+		editor.replaceRange(
+			updatedContent,
+			{ line: targetLine, ch: startCh },
+			{ line: targetLine, ch: endCh }
+		);
+
+		// Update cursor position
+		const finalCursorPos = {
+			line: targetLine,
+			ch: settings.cursorPosition === 'front' ? startCh : startCh + updatedContent.length
+		};
+		editor.setCursor(finalCursorPos);
+	});
 }
-function getImageName(img: HTMLImageElement | HTMLVideoElement): string | null {
+function getImageName(img: HTMLImageElement | HTMLVideoElement | null): string | null {
+	// 4. Handle null in getImageName
+	if (!img) return null;
     let imageName = img.getAttribute("src");
     
     if (!imageName) return null;
@@ -6505,131 +6774,116 @@ function deleteMarkdownLink(activeView: MarkdownView, imagePath: string | null) 
     const editor = activeView.editor;
     const doc = editor.getDoc();
     const lineCount = doc.lineCount();
+    
+    // Normalize the image path for comparison
+    const normalizedImagePath = imagePath.replace(/\\/g, '/')
+        .replace(/%20/g, ' ')
+        .split('?')[0]
+        .toLowerCase()
+        .trim();
 
-    // Helper function to normalize paths for comparison
-	const normalizeForComparison = (path: string) => {
-		try {
-			return decodeURIComponent(path)
-				.replace(/\\/g, '/')
-				.replace(/%20/g, ' ')
-				.split('?')[0]  // Remove any query parameters
-				.toLowerCase()
-				.trim();
-		} catch {
-			return path
-				.replace(/\\/g, '/')
-				.replace(/%20/g, ' ')
-				.split('?')[0]  // Remove any query parameters
-				.toLowerCase()
-				.trim();
-		}
-	};
+    let frontmatterEnd = -1;
 
-    const normalizedImagePath = normalizeForComparison(imagePath);
-
-    // Find the line containing the image
-    let lineIndex: number | undefined;
+    // First pass: identify frontmatter end
     for (let i = 0; i < lineCount; i++) {
-        const line = doc.getLine(i);
-        
-        // Handle base64 images
-        if (line.includes('data:image') && imagePath.startsWith('data:image')) {
-            if (line.includes(imagePath)) {
-                lineIndex = i;
-                break;
-            }
-            continue;
+        const line = editor.getLine(i).trim();
+        if (line === '---') {
+            if (i === 0) continue; // Skip the first '---'
+            frontmatterEnd = i;
+            break;
         }
-
-        // Handle external links
-        if (isExternalLink(imagePath)) {
-            if (line.includes(imagePath)) {
-                lineIndex = i;
-                break;
-            }
-            continue;
-        }
-
-        // Handle both wiki-style and standard markdown links
-        const wikiLinkMatch = line.match(/!\[\[(.*?)(?:\|.*?)?\]\]/);
-        const markdownLinkMatch = line.match(/!\[([^\]]*?)(?:\|\d+(?:\|\d+)?)?\]\(([^)]+)\)/);
-
-        if (wikiLinkMatch) {
-            const normalizedWikiPath = normalizeForComparison(wikiLinkMatch[1].split('|')[0]);
-            if (normalizedWikiPath === normalizedImagePath) {
-                lineIndex = i;
-                break;
-            }
-        }
-
-		if (markdownLinkMatch) {
-			const normalizedMdPath = normalizeForComparison(markdownLinkMatch[2]);
-			const normalizedTargetPath = normalizeForComparison(imagePath);
-			
-			// Check if either path contains the other
-			if (normalizedMdPath.includes(normalizedTargetPath) || 
-				normalizedTargetPath.includes(normalizedMdPath)) {
-				lineIndex = i;
-				break;
-			}
-		}
     }
 
-    if (lineIndex !== undefined) {
-        editor.setCursor({ line: lineIndex, ch: 0 });
-        const cursor = editor.getCursor();
-        const line = editor.getLine(cursor.line);
+    // Store all matches to delete
+    const matchesToDelete: Array<{line: number, start: number, length: number}> = [];
 
-        // Find the full markdown link
-        let startPos: number;
-        let endPos: number;
+    // Search through all lines in the document (excluding frontmatter)
+    for (let i = frontmatterEnd + 1; i < lineCount; i++) {
+        const line = editor.getLine(i);
+        
+        // Find all possible matches in the current line
+        const wikiMatches = [...line.matchAll(/!\[\[([^\]]+?)(?:\|[^\]]+?)?\]\]/g)];
+        const mdMatches = [...line.matchAll(/!\[([^\]]*?)(?:\|\d+(?:\|\d+)?)?\]\(([^)]+)\)/g)];
+        
+        // Check wiki-style links
+        for (const match of wikiMatches) {
+            const linkPath = match[1].split('|')[0]
+                .replace(/\\/g, '/')
+                .replace(/%20/g, ' ')
+                .split('?')[0]
+                .toLowerCase()
+                .trim();
 
-        if (line.includes('data:image')) {
-            // Handle base64 images
-            const imgTagRegex = /<img[^>]*src="[^"]*"[^>]*>/;
-            const match = imgTagRegex.exec(line);
-            if (match) {
-                startPos = match.index;
-                endPos = startPos + match[0].length;
-            } else {
-                return;
+            if (linkPath.includes(normalizedImagePath)) {
+                matchesToDelete.push({
+                    line: i,
+                    start: match.index!,
+                    length: match[0].length
+                });
             }
-		} else {
-			// Handle all three link types
-			// 1. Wiki-style links
-			const wikiLinkMatch = line.match(/!\[\[.*?\]\]/);
-			if (wikiLinkMatch) {
-				startPos = line.indexOf('![[');
-				endPos = line.indexOf(']]', startPos) + 2;
-			} else {
-				// 2. Standard markdown links with or without alt text
-				const mdLinkMatch = line.match(/!\[([^\]]*?)(?:\|\d+)*\]\(([^)]+)\)/);
-				
-				if (mdLinkMatch) {
-					startPos = line.indexOf('![');
-					endPos = line.indexOf(')', startPos) + 1;
-				} else {
-					// console.log("No markdown match found");
-					return;
-				}
-			}
-		}
+        }
 
-		// Delete the markdown link and any trailing whitespace
-		let trailingWhitespace = 0;
-		while (line[endPos + trailingWhitespace] === ' ' ||
-			line[endPos + trailingWhitespace] === '\t') {
-			trailingWhitespace++;
-		}
-		if (line[endPos + trailingWhitespace] === '\n') {
-			trailingWhitespace++;
-		}
+        // Check markdown-style links
+        for (const match of mdMatches) {
+            const linkPath = match[2]
+                .replace(/\\/g, '/')
+                .replace(/%20/g, ' ')
+                .split('?')[0]
+                .toLowerCase()
+                .trim();
 
-		editor.replaceRange('',
-			{ line: cursor.line, ch: startPos },
-			{ line: cursor.line, ch: endPos + trailingWhitespace }
-		);
+            if (linkPath.includes(normalizedImagePath)) {
+                matchesToDelete.push({
+                    line: i,
+                    start: match.index!,
+                    length: match[0].length
+                });
+            }
+        }
+    }
+
+    // Delete matches in reverse order to maintain correct positions
+    for (const match of matchesToDelete.reverse()) {
+        deleteMatchFromLine(editor, match.line, match.start, match.length);
+    }
+    
+    if (matchesToDelete.length === 0) {
+        console.log("No match found for:", normalizedImagePath);
+    } else {
+        console.log(`Deleted ${matchesToDelete.length} instances of:`, normalizedImagePath);
+    }
+}
+
+function deleteMatchFromLine(
+    editor: Editor,
+    lineNumber: number,
+    startCh: number,
+    length: number
+) {
+    const line = editor.getLine(lineNumber);
+    
+    // Calculate trailing whitespace
+	let trailingWhitespace = 0;
+	while (line[startCh + length + trailingWhitespace] === ' ' ||
+		line[startCh + length + trailingWhitespace] === '\t') {
+		trailingWhitespace++;
 	}
+
+    // If this is the only content on the line, delete the entire line
+    if (line.trim() === line.substring(startCh, startCh + length).trim()) {
+        editor.replaceRange(
+            '',
+            { line: lineNumber, ch: 0 },
+            { line: lineNumber + 1, ch: 0 }
+        );
+    } else {
+        // Otherwise, just delete the match and its trailing whitespace
+        editor.replaceRange(
+            '',
+            { line: lineNumber, ch: startCh },
+            { line: lineNumber, ch: startCh + length + trailingWhitespace }
+        );
+    }
 }
 /* ------------------------------------------------------------- */
 /* ------------------------------------------------------------- */
@@ -6640,137 +6894,63 @@ async function cutImageFromNote(event: MouseEvent, app: App) {
     if (!src) return;
 
     const activeView = app.workspace.getActiveViewOfType(MarkdownView);
+    if (!activeView) {
+        new Notice('No active view found');
+        return;
+    }
 
     try {
-        if (!activeView) {
-            new Notice('No active view found');
+        const editor = activeView.editor;
+        const cursor = editor.getCursor();
+        const line = editor.getLine(cursor.line);
+
+        // Find the markdown link in the current line
+        const wikiMatch = line.match(/!\[\[([^\]]+?)(?:\|[^\]]+?)?\]\]/);
+        const mdMatch = line.match(/!\[([^\]]*?)(?:\|\d+(?:\|\d+)?)?\]\(([^)]+)\)/);
+        
+        const match = wikiMatch || mdMatch;
+        if (!match) {
+            new Notice('Failed to find image link');
             return;
         }
 
-        const editor = activeView.editor;
-        const doc = editor.getDoc();
-        const lineCount = doc.lineCount();
+        const [fullMatch] = match;
+        const startPos = line.indexOf(fullMatch);
+        const endPos = startPos + fullMatch.length;
 
-        // Find and store the markdown link before deletion
-        let markdownLink: string | null = null;
+        // Copy to clipboard
+        await navigator.clipboard.writeText(fullMatch);
 
-        if (src.startsWith('data:image') || src.startsWith('http')) {
-            // For base64 or external images, find the full line containing the image
-            for (let i = 0; i < lineCount; i++) {
-                const line = doc.getLine(i);
-                if (line.includes(src)) {
-                    markdownLink = line.trim();
-                    break;
-                }
-            }
+        // Calculate trailing whitespace
+		let trailingWhitespace = 0;
+		while (line[endPos + trailingWhitespace] === ' ' ||
+			line[endPos + trailingWhitespace] === '\t') {
+			trailingWhitespace++;
+		}
+
+        // If this is the only content on the line, delete the entire line
+        if (line.trim() === fullMatch.trim()) {
+            editor.replaceRange(
+                '',
+                { line: cursor.line, ch: 0 },
+                { line: cursor.line + 1, ch: 0 }
+            );
         } else {
-            // For internal vault images
-            const rootFolder = app.vault.getName();
-            let imagePath = decodeURIComponent(src);
-
-            // Clean up the path
-            const rootFolderIndex = imagePath.indexOf(rootFolder);
-            if (rootFolderIndex !== -1) {
-                imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
-            }
-            imagePath = imagePath.split('?')[0];
-
-            const file = app.vault.getAbstractFileByPath(imagePath);
-            if (file instanceof TFile && isImage(file)) {
-                // Find the full markdown line
-                markdownLink = cutImageFromNote_findMarkdownLink(activeView, file);
-            }
+            // Otherwise, just delete the match and its trailing whitespace
+            editor.replaceRange(
+                '',
+                { line: cursor.line, ch: startPos },
+                { line: cursor.line, ch: endPos + trailingWhitespace }
+            );
         }
 
-        if (markdownLink) {
-            // Copy to clipboard
-            await navigator.clipboard.writeText(markdownLink);
-            
-            // Find and delete the exact markdown link from the document
-            for (let i = 0; i < lineCount; i++) {
-                const line = doc.getLine(i);
-                if (line.includes(markdownLink)) {
-                    // Delete the entire line if it only contains the markdown link
-                    if (line.trim() === markdownLink) {
-                        editor.replaceRange(
-                            '',
-                            { line: i, ch: 0 },
-                            { line: i + 1, ch: 0 }
-                        );
-                    } else {
-                        // Delete just the markdown link if the line contains other content
-                        const startCh = line.indexOf(markdownLink);
-                        editor.replaceRange(
-                            '',
-                            { line: i, ch: startCh },
-                            { line: i, ch: startCh + markdownLink.length }
-                        );
-                    }
-                    break;
-                }
-            }
-
-            new Notice('Image link copied to clipboard and removed from note');
-        } else {
-            new Notice('Failed to find image link');
-        }
+        new Notice('Image link copied to clipboard and removed from note');
 
     } catch (error) {
         console.error('Error cutting image:', error);
         new Notice('Failed to cut image. Check console for details.');
     }
 }
-function cutImageFromNote_findMarkdownLink(activeView: MarkdownView, file: TFile): string | null {
-    const editor = activeView.editor;
-    const doc = editor.getDoc();
-    const lineCount = doc.lineCount();
-
-    const normalizeForComparison = (path: string) => {
-        return path.replace(/\\/g, '/')
-            .replace(/%20/g, ' ')
-            .split('|')[0] // Remove dimensions for comparison
-            .split('?')[0]
-            .toLowerCase()
-            .trim();
-    };
-
-    const normalizedFileName = normalizeForComparison(file.name);
-    const normalizedFilePath = normalizeForComparison(file.path);
-
-    for (let i = 0; i < lineCount; i++) {
-        const line = doc.getLine(i);
-        
-        // Check for wiki-style links with dimensions
-        const wikiLinkMatch = line.match(/!\[\[([^\]]+?)\]\]/);
-
-        if (wikiLinkMatch) {
-            const fullMatch = wikiLinkMatch[0]; // Complete match including ![[]]
-            const innerContent = wikiLinkMatch[1]; // Content inside [[]]
-            const linkPath = innerContent.split('|')[0]; // Get path without dimensions
-            const normalizedLinkPath = normalizeForComparison(linkPath);
-            
-            if (normalizedLinkPath.endsWith(normalizedFileName) || 
-                normalizedLinkPath === normalizedFilePath) {
-                return fullMatch; // Return the complete wiki link with dimensions
-            }
-        }
-        
-        // Check for standard markdown links
-        const mdLinkMatch = line.match(/!\[([^\]]*?)(?:\|\d+(?:\|\d+)?)?\]\(([^)]+)\)/);
-        if (mdLinkMatch) {
-            const linkText = mdLinkMatch[0];
-            const linkPath = mdLinkMatch[2];
-            const normalizedLinkPath = normalizeForComparison(linkPath);
-            if (normalizedLinkPath.endsWith(normalizedFileName) || 
-                normalizedLinkPath === normalizedFilePath) {
-                return linkText;
-            }
-        }
-    }
-
-    return null;
-}
-
 
 
 export class ImageConvertTab extends PluginSettingTab {
@@ -7904,320 +8084,6 @@ class ResizeImageModal extends Modal {
 	}
 }
 
-
-// class ProcessCurrentImage extends Modal {
-//     plugin: ImageConvertPlugin;
-//     private enlargeReduceSettings: Setting | null = null;
-//     private resizeInputSettings: Setting | null = null;
-//     private submitButton: ButtonComponent | null = null;
-// 	private resizeInputsDiv: HTMLDivElement | null = null;  // Add this
-//     private enlargeReduceDiv: HTMLDivElement | null = null; // Add this
-
-//     constructor(plugin: ImageConvertPlugin) {
-//         super(plugin.app);
-//         this.plugin = plugin;
-//     }
-
-// 	private updateResizeInputVisibility(resizeMode: string): void {
-// 		if (resizeMode === 'None') {
-// 			this.resizeInputSettings?.settingEl.hide();
-// 			this.enlargeReduceSettings?.settingEl.hide();
-// 		} else {
-// 			if (!this.resizeInputSettings) {
-// 				this.createResizeInputSettings(resizeMode);
-// 			} else {
-// 				this.updateResizeInputSettings(resizeMode);
-// 			}
-// 			if (!this.enlargeReduceSettings) {
-// 				this.createEnlargeReduceSettings();
-// 			}
-// 			this.resizeInputSettings?.settingEl.show();
-// 			this.enlargeReduceSettings?.settingEl.show();
-// 		}
-// 	}
-
-//     private createEnlargeReduceSettings(): void {
-//         if (!this.enlargeReduceDiv) return;
-//         this.enlargeReduceDiv.empty();
-        
-//         this.enlargeReduceSettings = new Setting(this.enlargeReduceDiv)
-//             .setName('Enlarge or Reduce')
-//             .setDesc(
-//                 'Reduce and Enlarge - would make sure that image set to specified dimensions are always fit\
-//                 inside these dimensions so both actions would be performed: small images would be enlarged\
-//                 to fit the dimensions and large images would be reduced;\
-//                 Reduce only - only large images will be reduced;\
-//                 Enlarge only - only small images will be increased')
-//             .addDropdown((dropdown) => 
-//                 dropdown
-//                     .addOptions({
-//                         Always: 'Reduce and Enlarge',
-//                         Reduce: 'Reduce only',
-//                         Enlarge: 'Enlarge only',
-//                     })
-//                     .setValue(this.plugin.settings.ProcessCurrentImage_EnlargeOrReduce)
-//                     .onChange(async (value: 'Always' | 'Reduce' | 'Enlarge') => {
-//                         this.plugin.settings.ProcessCurrentImage_EnlargeOrReduce = value;
-//                         await this.plugin.saveSettings();
-//                     })
-//             );
-//     }
-
-//     private createResizeInputSettings(resizeMode: string): void {
-//         if (!this.resizeInputsDiv) return;
-//         this.resizeInputsDiv.empty();
-//         this.resizeInputSettings = new Setting(this.resizeInputsDiv);
-//         this.updateResizeInputSettings(resizeMode);
-//     }
-
-// 	private updateResizeInputSettings(resizeMode: string): void {
-// 		if (!this.resizeInputSettings) return;
-	
-// 		this.resizeInputSettings.clear();
-	
-// 		let name = '';
-// 		let desc = '';
-	
-// 		if (['Fit', 'Fill'].includes(resizeMode)) {
-// 			name = 'Resize Dimensions';
-// 			desc = 'Enter the desired width and height in pixels';
-// 			this.resizeInputSettings
-// 				.setName(name)
-// 				.setDesc(desc)
-// 				.addText((text: TextComponent) => text
-// 					.setPlaceholder('Width')
-// 					.setValue(this.plugin.settings.ProcessCurrentImage_resizeModaldesiredWidth.toString())
-// 					.onChange(async (value: string) => {
-// 						const width = parseInt(value);
-// 						if (/^\d+$/.test(value) && width > 0) {
-// 							this.plugin.settings.ProcessCurrentImage_resizeModaldesiredWidth = width;
-// 							await this.plugin.saveSettings();
-// 						}
-// 					}))
-// 				.addText((text: TextComponent) => text
-// 					.setPlaceholder('Height')
-// 					.setValue(this.plugin.settings.ProcessCurrentImage_resizeModaldesiredHeight.toString())
-// 					.onChange(async (value: string) => {
-// 						const height = parseInt(value);
-// 						if (/^\d+$/.test(value) && height > 0) {
-// 							this.plugin.settings.ProcessCurrentImage_resizeModaldesiredHeight = height;
-// 							await this.plugin.saveSettings();
-// 						}
-// 					}));
-// 		} else {
-// 			switch (resizeMode) {
-// 				case 'LongestEdge':
-// 				case 'ShortestEdge':
-// 					name = `${resizeMode} Length`;
-// 					desc = 'Enter the desired length in pixels';
-// 					break;
-// 				case 'Width':
-// 					name = 'Width';
-// 					desc = 'Enter the desired width in pixels';
-// 					break;
-// 				case 'Height':
-// 					name = 'Height';
-// 					desc = 'Enter the desired height in pixels';
-// 					break;
-// 			}
-	
-// 			this.resizeInputSettings
-// 				.setName(name)
-// 				.setDesc(desc)
-// 				.addText((text: TextComponent) => text
-// 					.setPlaceholder('Length')
-// 					.setValue(this.getInitialValue(resizeMode).toString())
-// 					.onChange(async (value: string) => {
-// 						const length = parseInt(value);
-// 						if (/^\d+$/.test(value) && length > 0) {
-// 							await this.updateSettingValue(resizeMode, length);
-// 						}
-// 					}));
-// 		}
-	
-// 		// Update the enlarge/reduce settings in place instead of recreating
-// 		if (!this.enlargeReduceSettings) {
-// 			this.createEnlargeReduceSettings();
-// 		}
-// 	}
-
-//     private getInitialValue(resizeMode: string): number {
-//         switch (resizeMode) {
-//             case 'LongestEdge':
-//             case 'ShortestEdge':
-//                 return this.plugin.settings.ProcessCurrentImage_resizeModaldesiredLength;
-//             case 'Width':
-//                 return this.plugin.settings.ProcessCurrentImage_resizeModaldesiredWidth;
-//             case 'Height':
-//                 return this.plugin.settings.ProcessCurrentImage_resizeModaldesiredHeight;
-//             default:
-//                 return 0;
-//         }
-//     }
-
-//     private async updateSettingValue(resizeMode: string, value: number): Promise<void> {
-//         switch (resizeMode) {
-//             case 'LongestEdge':
-//             case 'ShortestEdge':
-//                 this.plugin.settings.ProcessCurrentImage_resizeModaldesiredLength = value;
-//                 break;
-//             case 'Width':
-//                 this.plugin.settings.ProcessCurrentImage_resizeModaldesiredWidth = value;
-//                 break;
-//             case 'Height':
-//                 this.plugin.settings.ProcessCurrentImage_resizeModaldesiredHeight = value;
-//                 break;
-//         }
-//         await this.plugin.saveSettings();
-//     }
-
-//     onOpen() {
-//         const { contentEl } = this;
-
-// 		const div1 = contentEl.createEl('div');
-// 		div1.style.display = 'flex';
-// 		div1.style.flexDirection = 'column';
-// 		div1.style.alignItems = 'center';
-// 		div1.style.justifyContent = 'center';
-
-// 		const heading1 = div1.createEl('h2')
-// 		heading1.textContent = 'Convert, compress and resize';
-	
-// 		let imageName = 'current image';
-// 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-
-// 		if (activeView && activeView.file) {
-// 			const element = this.app.workspace.getActiveFile();
-// 			if (element instanceof HTMLImageElement) {
-// 				imageName = element.getAttribute('src') || 'current image';
-// 			} else {
-// 				// Retrieve the image name from the context menu event
-// 				const contextMenuEvent = this.plugin.contextMenuEvent;
-// 				if (contextMenuEvent && contextMenuEvent.target instanceof HTMLImageElement) {
-// 					imageName = contextMenuEvent.target.getAttribute('src') || 'current image';
-// 				}
-// 			}
-// 		}
-	
-// 		const heading2 = div1.createEl('h6');
-// 		heading2.textContent = `${imageName}`;
-// 		heading2.style.marginTop = '-18px';
-	
-// 		const desc = div1.createEl('p');
-// 		desc.textContent = 'Running this will modify the selected image. Please create backups. The image link will be automatically updated.';
-// 		desc.style.marginTop = '-10px';
-// 		desc.style.padding = '20px';
-// 		desc.style.borderRadius = '10px';
-	
-// 		const settingsContainer = contentEl.createDiv('settings-container');
-
-//         new Setting(settingsContainer)
-//             .setName('Select format to convert images to')
-//             .setDesc(`"Same as original" - will keep original file format.`)
-//             .addDropdown(dropdown =>
-//                 dropdown
-//                     .addOptions({ disabled: 'Same as original', webp: 'WebP', jpg: 'JPG', png: 'PNG' })
-//                     .setValue(this.plugin.settings.ProcessCurrentImage_convertTo)
-//                     .onChange(async value => {
-//                         this.plugin.settings.ProcessCurrentImage_convertTo = value;
-//                         await this.plugin.saveSettings();
-//                     })
-//             );
-
-//         new Setting(settingsContainer)
-//             .setName('Quality')
-//             .setDesc('0 - low quality, 99 - high quality, 100 - no compression; 75 - recommended')
-//             .addText(text =>
-//                 text
-//                     .setPlaceholder('Enter quality (0-100)')
-//                     .setValue((this.plugin.settings.ProcessCurrentImage_quality * 100).toString())
-//                     .onChange(async value => {
-//                         const quality = parseInt(value);
-//                         if (/^\d+$/.test(value) && quality >= 0 && quality <= 100) {
-//                             this.plugin.settings.ProcessCurrentImage_quality = quality / 100;
-//                             await this.plugin.saveSettings();
-//                         }
-//                     })
-//             );
-
-// 		// Create a dedicated container for resize-related settings
-// 		const resizeContainer = settingsContainer.createDiv('resize-settings-container');
-
-
-// 		new Setting(resizeContainer)
-// 			.setName('Image resize mode')
-// 			.setDesc('Select the mode to use when resizing the image. Resizing an image will further reduce file-size, but it will resize your actual file, which means that the original file will be modified, and the changes will be permanent.')
-// 			.addDropdown(dropdown =>
-// 				dropdown
-// 					.addOptions({
-// 						None: 'None',
-// 						Fit: 'Fit',
-// 						Fill: 'Fill',
-// 						LongestEdge: 'Longest Edge',
-// 						ShortestEdge: 'Shortest Edge',
-// 						Width: 'Width',
-// 						Height: 'Height'
-// 					})
-// 					.setValue(this.plugin.settings.ProcessCurrentImage_ResizeModalresizeMode)
-// 					.onChange(async value => {
-// 						this.plugin.settings.ProcessCurrentImage_ResizeModalresizeMode = value;
-// 						await this.plugin.saveSettings();
-// 						this.updateResizeInputVisibility(value);
-// 					})
-// 			);
-// 		// Create placeholder divs for resize inputs and enlarge/reduce settings
-// 		this.resizeInputsDiv = resizeContainer.createDiv('resize-inputs');
-// 		this.enlargeReduceDiv = resizeContainer.createDiv('enlarge-reduce-settings');
-
-//         // Initially create and show/hide resize inputs based on current mode
-//         this.updateResizeInputVisibility(this.plugin.settings.ProcessCurrentImage_ResizeModalresizeMode);
-
-// 		// Add the missing settings
-// 		new Setting(settingsContainer)
-// 			.setName('Skip File Formats')
-// 			.setDesc('Comma-separated list of file formats to skip (e.g., tif,tiff,heic). Leave empty to process all formats.')
-// 			.addText(text =>
-// 				text
-// 					.setPlaceholder('tif,tiff,heic')
-// 					.setValue(this.plugin.settings.ProcessCurrentImage_SkipFormats)
-// 					.onChange(async (value) => {
-// 						this.plugin.settings.ProcessCurrentImage_SkipFormats = value;
-// 						await this.plugin.saveSettings();
-// 					})
-// 			);
-
-// 		new Setting(settingsContainer)
-// 			.setName('Skip images in target format')
-// 			.setDesc('Selecting this will skip images that already are in the target format. This is useful if you have a very large library, and want to process images in batches.')
-// 			.addToggle(toggle =>
-// 				toggle
-// 					.setValue(this.plugin.settings.ProcessCurrentImage_SkipImagesInTargetFormat)
-// 					.onChange(async value => {
-// 						this.plugin.settings.ProcessCurrentImage_SkipImagesInTargetFormat = value;
-// 						await this.plugin.saveSettings();
-// 					})
-// 			);
-
-// 		// Initially create and show/hide resize inputs based on current mode
-// 		this.updateResizeInputVisibility(this.plugin.settings.ProcessCurrentImage_ResizeModalresizeMode);
-
-// 		// Add submit button in a container at the bottom
-// 		const buttonContainer = settingsContainer.createDiv('button-container');
-
-// 		this.submitButton = new ButtonComponent(buttonContainer)
-// 			.setButtonText('Submit')
-// 			.onClick(() => {
-// 				this.close();
-// 				const currentNote = this.app.workspace.getActiveFile();
-// 				if (currentNote) {
-// 					this.plugin.processCurrentNoteImages(currentNote);
-// 				} else {
-// 					new Notice('Error: No active note found.');
-// 				}
-// 			});
-// 	}
-// }
-
 class ProcessAllVault extends Modal {
     plugin: ImageConvertPlugin;
     private enlargeReduceSettings: Setting | null = null;
@@ -8525,41 +8391,938 @@ class ProcessAllVault extends Modal {
     }
 }
 
-class ProcessCurrentNote extends Modal {
+
+export class ImageProcessor {
+	plugin: ImageConvertPlugin;
+	app: App;
+
+	constructor(plugin: ImageConvertPlugin) {
+		this.plugin = plugin;
+		this.app = plugin.app;
+	}
+
+	// This method determines the context and calls the appropriate processing function
+	async processImages(target: TFile | string, recursive = false) {
+		if (target instanceof TFile) {
+			if (target.extension === 'md' || target.extension === 'canvas') {
+				await this.processCurrentNoteImages(target);
+			} else if (isImage(target)) {
+				await this.processSingleImage(target);
+			} else {
+				new Notice('Error: Active file must be a markdown, canvas, or image file.');
+			}
+		} else if (typeof target === 'string') {
+			await this.processFolderImages(target, recursive);
+		} else {
+			new Notice('Error: Invalid target for image processing.');
+		}
+	}
+
+	async processSingleImage(imageFile: TFile) {
+		try {
+			// Here you would implement similar logic as in processCurrentNoteImages,
+			// but tailored for a single image. You might offer fewer options in the UI,
+			// or use default settings for most parameters.
+			await this.convertImage(imageFile);
+			new Notice(`Processed image: ${imageFile.name}`);
+		} catch (error) {
+			console.error('Error processing image:', error);
+			new Notice(`Error processing image: ${error.message}`);
+		}
+	}
+
+	async processFolderImages(folderPath: string, recursive: boolean) {
+		try {
+			const folder = this.app.vault.getAbstractFileByPath(folderPath);
+			if (!(folder instanceof TFolder)) {
+				new Notice('Error: Invalid folder path.');
+				return;
+			}
+	
+			// Get settings from the modal
+			const quality = this.plugin.settings.ProcessCurrentNotequality;
+			const convertTo = this.plugin.settings.ProcessCurrentNoteconvertTo;
+			const skipFormats = this.plugin.settings.ProcessCurrentNoteSkipFormats
+				.toLowerCase()
+				.split(',')
+				.map(format => format.trim())
+				.filter(format => format.length > 0);
+			const resizeMode = this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode;
+			const desiredWidth = this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth;
+			const desiredHeight = this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight;
+			const desiredLength = this.plugin.settings.ProcessCurrentNoteresizeModaldesiredLength;
+			const enlargeOrReduce = this.plugin.settings.ProcessCurrentNoteEnlargeOrReduce;
+	
+			const images = this.getImageFiles(folder, recursive);
+			if (images.length === 0) {
+				new Notice('No images found in the folder.');
+				return;
+			}
+	
+			let imageCount = 0;
+			const statusBarItemEl = this.plugin.addStatusBarItem();
+			const startTime = Date.now();
+			const totalImages = images.length;
+	
+			for (const image of images) {
+				// Skip image if its format is in the skipFormats list
+				if (skipFormats.includes(image.extension.toLowerCase())) {
+					console.log(`Skipping image ${image.name} (format in skip list)`);
+					continue; // Skip to the next image
+				}
+	
+				imageCount++;
+				await this.convertImage(
+					image,
+					convertTo,
+					quality,
+					resizeMode,
+					desiredWidth,
+					desiredHeight,
+					desiredLength,
+					enlargeOrReduce
+				);
+	
+				const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+				statusBarItemEl.setText(
+					`Processing image ${imageCount} of ${totalImages}, elapsed time: ${elapsedTime} seconds`
+				);
+			}
+	
+			const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
+			statusBarItemEl.setText(`Finished processing ${imageCount} images, total time: ${totalTime} seconds`);
+			window.setTimeout(() => {
+				statusBarItemEl.remove();
+			}, 5000);
+	
+		} catch (error) {
+			console.error('Error processing images in folder:', error);
+			new Notice(`Error processing images: ${error.message}`);
+		}
+	}
+
+	private getImageFiles(folder: TFolder, recursive: boolean): TFile[] {
+		let images: TFile[] = [];
+		folder.children.forEach(child => {
+			if (child instanceof TFile && isImage(child)) {
+				images.push(child);
+			} else if (recursive && child instanceof TFolder) {
+				images = images.concat(this.getImageFiles(child, recursive));
+			}
+		});
+		return images;
+	}
+
+	async processCurrentNoteImages(note: TFile) {
+		try {
+			const isKeepOriginalFormat = this.plugin.settings.ProcessCurrentNoteconvertTo === 'disabled';
+			const noCompression = this.plugin.settings.ProcessCurrentNotequality === 1;
+			const noResize = this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode === 'None';
+			const targetFormat = this.plugin.settings.ProcessCurrentNoteconvertTo;
+
+			// Parse skip formats
+			const skipFormats = this.plugin.settings.ProcessCurrentNoteSkipFormats
+				.toLowerCase()
+				.split(',')
+				.map(format => format.trim())
+				.filter(format => format.length > 0);
+
+			// Get all image files in the note
+			let linkedFiles: TFile[] = [];
+
+			if (note.extension === 'canvas') {
+				// Handle canvas file
+				const canvasContent = await this.app.vault.read(note);
+				const canvasData = JSON.parse(canvasContent);
+
+				const getImagesFromNodes = (nodes: any[]): string[] => {
+					let imagePaths: string[] = [];
+					for (const node of nodes) {
+						if (node.type === 'file' && node.file) {
+							const file = this.app.vault.getAbstractFileByPath(node.file);
+							if (file instanceof TFile && isImage(file)) {
+								imagePaths.push(node.file);
+							}
+						}
+						if (node.children && Array.isArray(node.children)) {
+							imagePaths = imagePaths.concat(getImagesFromNodes(node.children));
+						}
+					}
+					return imagePaths;
+				};
+
+				if (canvasData.nodes && Array.isArray(canvasData.nodes)) {
+					const imagePaths = getImagesFromNodes(canvasData.nodes);
+					linkedFiles = imagePaths
+						.map(path => this.app.vault.getAbstractFileByPath(path))
+						.filter((file): file is TFile => file instanceof TFile && isImage(file));
+				}
+			} else {
+				// Handle markdown file
+				const resolvedLinks = this.app.metadataCache.resolvedLinks;
+				const linksInCurrentNote = resolvedLinks[note.path];
+				linkedFiles = Object.keys(linksInCurrentNote)
+					.map(link => this.app.vault.getAbstractFileByPath(link))
+					.filter((file): file is TFile =>
+						file instanceof TFile &&
+						isImage(file)
+					);
+			}
+
+			// If no images found at all
+			if (linkedFiles.length === 0) {
+				new Notice('No images found in the note.');
+				return;
+			}
+
+			// Check if all images are either in target format or in skip list
+			const allImagesSkippable = linkedFiles.every(file =>
+				(file.extension === (isKeepOriginalFormat ? file.extension : targetFormat)) ||
+				skipFormats.includes(file.extension.toLowerCase())
+			);
+
+			// Early return with appropriate message if no processing is needed
+			if (allImagesSkippable && noCompression && noResize) {
+				if (isKeepOriginalFormat) {
+					new Notice('No processing needed: All images are either in skip list or kept in original format with no compression or resizing.');
+				} else {
+					new Notice(`No processing needed: All images are either in skip list or already in ${targetFormat.toUpperCase()} format with no compression or resizing.`);
+				}
+				return;
+			}
+
+			// Early return if no processing is needed
+			if (isKeepOriginalFormat && noCompression && noResize) {
+				new Notice('No processing needed: Original format selected with no compression or resizing.');
+				return;
+			}
+
+			// Filter files that actually need processing
+			const filesToProcess = linkedFiles.filter(file =>
+				this.shouldProcessImage(file)
+			);
+
+			if (filesToProcess.length === 0) {
+				if (this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat) {
+					new Notice(`No processing needed: All images are already in ${isKeepOriginalFormat ? 'their original' : targetFormat.toUpperCase()} format.`);
+				} else {
+					new Notice('No images found that need processing.');
+				}
+				return;
+			}
+
+			let imageCount = 0;
+			const statusBarItemEl = this.plugin.addStatusBarItem();
+			const startTime = Date.now();
+
+			const totalImages = filesToProcess.length;
+
+			for (const linkedFile of filesToProcess) {
+				imageCount++;
+				await this.convertImage(linkedFile);
+				await refreshImagesInActiveNote();
+
+				const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+				statusBarItemEl.setText(
+					`Processing image ${imageCount} of ${totalImages}, elapsed time: ${elapsedTime} seconds`
+				);
+			}
+
+			const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
+			statusBarItemEl.setText(`Finished processing ${imageCount} images, total time: ${totalTime} seconds`);
+			window.setTimeout(() => {
+				statusBarItemEl.remove();
+			}, 5000);
+
+		} catch (error) {
+			console.error('Error processing images in current note:', error);
+			new Notice(`Error processing images: ${error.message}`);
+		}
+	}
+
+	async convertImage(
+		file: TFile,
+		convertTo: string = this.plugin.settings.ProcessCurrentNoteconvertTo,
+		quality: number = this.plugin.settings.ProcessCurrentNotequality,
+		resizeMode: string = this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode,
+		desiredWidth: number = this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth,
+		desiredHeight: number = this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight,
+		desiredLength: number = this.plugin.settings.ProcessCurrentNoteresizeModaldesiredLength,
+		enlargeOrReduce: "Always" | "Reduce" | "Enlarge" = this.plugin.settings.ProcessCurrentNoteEnlargeOrReduce as "Always" | "Reduce" | "Enlarge"
+	) {
+		// This method is now responsible for converting a single image
+		// It should use the settings from the plugin to determine how to convert the image
+		// You can refactor the original convertCurrentNoteImages to call this method
+		// Similar logic as before, but without looping through files
+		try {
+			const isKeepOriginalFormat = convertTo === 'disabled';
+			const noCompression = quality === 1;
+			const noResize = resizeMode === 'None';
+	
+			// When "Same as original" is selected, treat the file's current extension
+			// as the target format
+			const effectiveTargetFormat = isKeepOriginalFormat
+				? file.extension
+				: convertTo;
+	
+			// Skip processing if:
+			// 1. We're keeping original format (disabled)
+			// 2. No compression
+			// 3. No resize
+			if (isKeepOriginalFormat && noCompression && noResize) {
+				console.log(`Skipping ${file.name}: No processing needed`);
+				return;
+			}
+	
+			// Skip if the image is already in target format (or original format if disabled)
+			if (this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat &&
+				file.extension === effectiveTargetFormat) {
+				console.log(`Skipping ${file.name}: Already in ${isKeepOriginalFormat ? 'original' : 'target'} format`);
+				return;
+			}
+	
+			const activeFile = this.app.workspace.getActiveFile();
+	
+			// Prepare for format conversion and renaming
+			let extension = file.extension;
+			let shouldRename = false;
+			let newFilePath: string | undefined;
+	
+			if (effectiveTargetFormat &&
+				effectiveTargetFormat !== 'disabled' &&
+				effectiveTargetFormat !== file.extension) {
+				extension = effectiveTargetFormat;
+				shouldRename = true;
+				newFilePath = await this.getUniqueFilePath(file, extension);
+			}
+	
+			const binary = await this.app.vault.readBinary(file);
+			let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
+	
+			// Handle special formats
+			if (file.extension === 'tif' || file.extension === 'tiff') {
+				imgBlob = await handleTiffImage(binary);
+			}
+	
+			if (file.extension === 'heic') {
+				imgBlob = await convertHeicToFormat(
+					binary,
+					'JPEG',
+					quality
+				);
+			}
+	
+			const allowLargerFiles = this.plugin.settings.allowLargerFiles;
+	
+			let arrayBuffer: ArrayBuffer | undefined;
+	
+			// Handle image conversion and compression/resizing
+			switch (extension) {
+				case 'jpg':
+				case 'jpeg':
+					arrayBuffer = await convertToJPG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce, allowLargerFiles);
+					break;
+				case 'png':
+					arrayBuffer = await convertToPNG(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce, allowLargerFiles);
+					break;
+				case 'webp':
+					arrayBuffer = await convertToWebP(imgBlob, quality, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce, allowLargerFiles);
+					break;
+				default:
+					new Notice(`Unsupported image format: ${file.extension}`);
+					return;
+			}
+	
+			// Apply the processed image if available
+			if (arrayBuffer) {
+				await this.app.vault.modifyBinary(file, arrayBuffer);
+			} else {
+				new Notice('Error: Failed to process image.');
+				return;
+			}
+	
+			// Rename and update links if necessary
+			if (shouldRename && newFilePath) {
+				if (activeFile) { // Check if activeFile is not null
+					await this.updateLinks(activeFile, file, extension);
+				}
+				await this.app.vault.rename(file, newFilePath);
+			}
+		} catch (error) {
+			console.error('Error converting image:', error);
+			new Notice(`Error converting image: ${error.message}`);
+		}
+	}
+
+	async updateLinks(fileOrFolder: TFile | string, file: TFile, newExtension: string) {
+		// This method will update links for a given file or across an entire folder
+		// You can use the logic from updateCurrentNoteLinks as a starting point
+		try {
+			// Rename the file first
+			const newFilePath = await this.getUniqueFilePath(file, newExtension);
+			await this.app.fileManager.renameFile(file, newFilePath);
+
+			// Get the new file reference after renaming
+			const newFile = this.app.vault.getAbstractFileByPath(newFilePath) as TFile;
+			if (!newFile) {
+				console.error('Could not find renamed file:', newFilePath);
+				return;
+			}
+
+			if (fileOrFolder instanceof TFile) {
+				if (fileOrFolder.extension === 'canvas') {
+					// Handle canvas file
+					await this.updateCanvasFileLinks(fileOrFolder, file.path, newFile.path);
+				} else {
+					// Handle markdown file
+					let content = await this.app.vault.read(fileOrFolder);
+					let modified = false;
+
+					const linkPatterns = [
+						`![[${file.basename}]]`,
+						`![[${file.basename}.${file.extension}]]`,
+						`![](${file.name})`,
+					];
+
+					const newLink = `![[${newFile.basename}.${newFile.extension}]]`;
+
+					for (const pattern of linkPatterns) {
+						if (content.includes(pattern)) {
+							content = content.split(pattern).join(newLink);
+							modified = true;
+						}
+					}
+
+					if (modified) {
+						await this.app.vault.modify(fileOrFolder, content);
+					}
+				}
+			}
+			// No need for `else` block here. Handle updating links in folder in `processFolderImages`.
+		} catch (error) {
+			console.error('Error updating links:', error);
+			new Notice(`Error updating links: ${error.message}`);
+		}
+	}
+
+	private shouldProcessImage(image: TFile): boolean {
+		const isKeepOriginalFormat = this.plugin.settings.ProcessCurrentNoteconvertTo === 'disabled';
+		const effectiveTargetFormat = isKeepOriginalFormat
+			? image.extension
+			: this.plugin.settings.ProcessCurrentNoteconvertTo;
+
+		// Get skip formats from settings and parse them
+		const skipFormats = this.plugin.settings.ProcessCurrentNoteSkipFormats
+			.toLowerCase()
+			.split(',')
+			.map(format => format.trim())
+			.filter(format => format.length > 0);
+
+		// Skip files with extensions in the skip list
+		if (skipFormats.includes(image.extension.toLowerCase())) {
+			console.log(`Skipping ${image.name}: Format ${image.extension} is in skip list`);
+			return false;
+		}
+
+		// Skip images already in target format (or original format if disabled)
+		if (this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat &&
+			image.extension === effectiveTargetFormat) {
+			console.log(`Skipping ${image.name}: Already in ${effectiveTargetFormat} format`);
+			return false;
+		}
+
+		return true;
+	}
+
+	// Add other utility methods like getUniqueFilePath, updateCanvasFileLinks, etc. here
+	// They can be mostly the same as before but may need adjustments to fit the new structure
+	private async getUniqueFilePath(file: TFile, newExtension: string): Promise<string> {
+		const dir = file.parent?.path || "";
+		const baseName = file.basename;
+		let counter = 0;
+		let newPath: string;
+
+		do {
+			newPath = counter === 0
+				? `${dir}/${baseName}.${newExtension}`
+				: `${dir}/${baseName}-${counter}.${newExtension}`;
+			newPath = newPath.replace(/^\//, ''); // Remove leading slash if present
+			counter++;
+		} while (await this.fileExists(newPath));
+
+		return newPath;
+	}
+
+	async fileExists(filePath: string): Promise<boolean> {
+		return await this.app.vault.adapter.exists(filePath);
+	}
+
+	async updateCanvasFileLinks(canvasFile: TFile, oldPath: string, newPath: string) {
+		try {
+			const content = await this.app.vault.read(canvasFile);
+			const canvasData = JSON.parse(content);
+	
+			const updateNodePaths = (nodes: any[]) => {
+				for (const node of nodes) {
+					if (node.type === 'file' && node.file === oldPath) {
+						node.file = newPath;
+					}
+					if (node.children && Array.isArray(node.children)) {
+						updateNodePaths(node.children);
+					}
+				}
+			};
+	
+			if (canvasData.nodes && Array.isArray(canvasData.nodes)) {
+				updateNodePaths(canvasData.nodes);
+				await this.app.vault.modify(canvasFile, JSON.stringify(canvasData, null, 2));
+			}
+		} catch (error) {
+			console.error('Error updating canvas file links:', error);
+		}
+	}
+}
+
+
+export class ProcessSingleImageModal extends Modal {
     plugin: ImageConvertPlugin;
-    private enlargeReduceSettings: Setting | null = null;
+    imageFile: TFile;
+
+    // --- Settings UI Elements ---
+    private qualitySetting: Setting | null = null;
+    private convertToSetting: Setting | null = null;
+    private resizeModeSetting: Setting | null = null;
     private resizeInputSettings: Setting | null = null;
-    private submitButton: ButtonComponent | null = null;
-	private resizeInputsDiv: HTMLDivElement | null = null;
+    private enlargeReduceSettings: Setting | null = null;
+    private resizeInputsDiv: HTMLDivElement | null = null;
     private enlargeReduceDiv: HTMLDivElement | null = null;
 
-    constructor(plugin: ImageConvertPlugin) {
-        super(plugin.app);
+    constructor(app: App, plugin: ImageConvertPlugin, imageFile: TFile) {
+        super(app);
         this.plugin = plugin;
+        this.imageFile = imageFile;
+        this.modalEl.addClass("image-convert-modal");
     }
 
+    onOpen() {
+        const { contentEl } = this;
+        this.createUI(contentEl);
+    }
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
+    }
+
+    // --- UI Creation Methods ---
+
+    private createUI(contentEl: HTMLElement) {
+        this.createHeader(contentEl);
+        this.createWarningMessage(contentEl);
+
+        // Create settings sections (no longer collapsible)
+        const settingsContainer = contentEl.createDiv({
+            cls: "settings-container",
+        });
+
+        // Format and Quality Container
+        const formatQualityContainer = settingsContainer.createDiv({
+            cls: "format-quality-container",
+        });
+        this.createGeneralSettings(formatQualityContainer);
+
+        // Resize Container
+        const resizeContainer = settingsContainer.createDiv({
+            cls: "resize-container",
+        });
+        this.createResizeSettings(resizeContainer);
+
+        this.createProcessButton(settingsContainer);
+    }
+
+    private createHeader(contentEl: HTMLElement) {
+        const headerContainer = contentEl.createDiv({ cls: "modal-header" });
+
+        // Main title
+        headerContainer.createEl("h2", {
+            text: "Convert, compress and resize",
+        });
+
+        // Subtitle
+        headerContainer.createEl("h6", {
+            text: this.imageFile.name,
+            cls: "modal-subtitle",
+        });
+    }
+
+    private createWarningMessage(contentEl: HTMLElement) {
+        contentEl.createEl("p", {
+            cls: "modal-warning",
+            text: "⚠️ This will modify the selected image. Please ensure you have backups.",
+        });
+    }
+
+    private createGeneralSettings(contentEl: HTMLElement) {
+        // contentEl.createEl("h4", { text: "General" });
+
+        // --- Convert To Setting ---
+        this.convertToSetting = new Setting(contentEl)
+            .setName("Convert to ⓘ")
+            .setDesc(
+                "Choose output format. 'Same as original' applies compression/resizing to current format."
+            )
+            .setTooltip(
+                "Same as original: preserves current format while applying compression/resizing"
+            )
+            .addDropdown((dropdown) => {
+                dropdown
+                    .addOption("disabled", "Same as original")
+                    .addOptions({
+                        webp: "WebP",
+                        jpg: "JPG",
+                        png: "PNG",
+                    })
+                    .setValue(this.plugin.settings.ProcessCurrentNoteconvertTo)
+                    .onChange(async (value) => {
+                        this.plugin.settings.ProcessCurrentNoteconvertTo = value;
+                        await this.plugin.saveSettings();
+                    });
+            });
+
+        // --- Quality Setting ---
+        this.qualitySetting = new Setting(contentEl)
+            .setName("Quality ⓘ")
+            .setDesc("Compression level (0-100)")
+            .setTooltip(
+                "100: No compression (original quality)\n75: Recommended (good balance)\n0-50: High compression (lower quality)"
+            )
+            .addText((text) => {
+                text
+                    .setPlaceholder("Enter quality (0-100)")
+                    .setValue(
+                        (
+                            this.plugin.settings.ProcessCurrentNotequality * 100
+                        ).toString()
+                    )
+                    .onChange(async (value) => {
+                        const quality = parseInt(value, 10);
+                        if (
+                            !isNaN(quality) &&
+                            quality >= 0 &&
+                            quality <= 100
+                        ) {
+                            this.plugin.settings.ProcessCurrentNotequality =
+                                quality / 100;
+                            await this.plugin.saveSettings();
+                        }
+                    });
+            });
+    }
+
+    private createResizeSettings(contentEl: HTMLElement) {
+        // contentEl.createEl("h4", { text: "Resize" });
+
+        // --- Resize Mode Setting ---
+        this.resizeModeSetting = new Setting(contentEl)
+            .setName("Resize mode ⓘ")
+            .setDesc(
+                "Choose how the image should be resized. Note: Results are permanent."
+            )
+            .setTooltip(
+                "Fit: Maintains aspect ratio within dimensions\nFill: Exactly matches dimensions\nLongest Edge: Limits the longest side\nShortest Edge: Limits the shortest side\nWidth/Height: Constrains single dimension"
+            )
+            .addDropdown((dropdown) => {
+                dropdown
+                    .addOptions({
+                        None: "None",
+                        Fit: "Fit (maintain aspect ratio within dimensions)",
+                        Fill: "Fill (exactly match dimensions)",
+                        LongestEdge: "Longest edge",
+                        ShortestEdge: "Shortest edge",
+                        Width: "Width",
+                        Height: "Height",
+                    })
+                    .setValue(
+                        this.plugin.settings
+                            .ProcessCurrentNoteResizeModalresizeMode
+                    )
+                    .onChange(async (value) => {
+                        this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode =
+                            value;
+                        await this.plugin.saveSettings();
+                        this.updateResizeInputVisibility(value);
+                    });
+            });
+
+        // --- Enlarge/Reduce Setting ---
+        this.createEnlargeReduceInputs(contentEl);
+
+        // --- Resize Inputs (Conditional) ---
+        this.resizeInputsDiv = contentEl.createDiv({ cls: "resize-inputs" });
+        this.updateResizeInputVisibility(
+            this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode
+        );
+    }
+
+    private createEnlargeReduceInputs(contentEl: HTMLElement) {
+        this.enlargeReduceDiv = contentEl.createDiv({
+            cls: "enlarge-reduce-settings",
+        });
+        this.createEnlargeReduceSettings();
+    }
+
+    private createProcessButton(contentEl: HTMLElement) {
+        const buttonContainer = contentEl.createDiv({ cls: "button-container" });
+        new ButtonComponent(buttonContainer)
+            .setButtonText("Process")
+            .setCta()
+            .onClick(() => {
+                this.close();
+				if (this.plugin.imageProcessor && typeof this.plugin.imageProcessor.processImages === 'function') {
+					this.plugin.imageProcessor.processImages(this.imageFile);
+				} else {
+					console.error("Error: 'processImages' method not found in 'imageProcessor'.");
+				}
+            });
+    }
+
+    // --- Helper Methods for Settings ---
+
     private updateResizeInputVisibility(resizeMode: string): void {
-        // Use Obsidian's methods for showing/hiding
-        if (resizeMode === 'None') {
-            if (this.resizeInputSettings) {
-                this.resizeInputSettings.settingEl.hide();
-            }
-            if (this.enlargeReduceSettings) {
-                this.enlargeReduceSettings.settingEl.hide();
-            }
+        if (resizeMode === "None") {
+            this.resizeInputsDiv?.empty();
+            this.enlargeReduceDiv?.hide();
+            this.resizeInputSettings = null;
+            this.enlargeReduceSettings = null;
         } else {
             if (!this.resizeInputSettings) {
                 this.createResizeInputSettings(resizeMode);
             } else {
                 this.updateResizeInputSettings(resizeMode);
             }
-            
+
             if (!this.enlargeReduceSettings) {
                 this.createEnlargeReduceSettings();
             }
-            
-            this.resizeInputSettings?.settingEl.show();
-            this.enlargeReduceSettings?.settingEl.show();
+            this.enlargeReduceDiv?.show();
+        }
+    }
+
+    private createEnlargeReduceSettings(): void {
+        if (!this.enlargeReduceDiv) return;
+
+        this.enlargeReduceDiv.empty();
+
+        this.enlargeReduceSettings = new Setting(this.enlargeReduceDiv)
+            .setClass("enlarge-reduce-setting")
+            .setName("Enlarge or Reduce ⓘ")
+            .setDesc(
+                "Reduce and Enlarge: Adjusts all images. Reduce only: Shrinks larger images. Enlarge only: Enlarges smaller images."
+            )
+            .setTooltip(
+                "• Reduce and Enlarge: Adjusts all images to fit specified dimensions\n• Reduce only: Only shrinks images larger than target\n• Enlarge only: Only enlarges images smaller than target"
+            )
+            .addDropdown((dropdown) => {
+                dropdown
+                    .addOptions({
+                        Always: "Reduce and Enlarge",
+                        Reduce: "Reduce only",
+                        Enlarge: "Enlarge only",
+                    })
+                    .setValue(
+                        this.plugin.settings.ProcessCurrentNoteEnlargeOrReduce
+                    )
+                    .onChange(
+                        async (value: "Always" | "Reduce" | "Enlarge") => {
+                            this.plugin.settings.ProcessCurrentNoteEnlargeOrReduce =
+                                value;
+                            await this.plugin.saveSettings();
+                        }
+                    );
+            });
+    }
+
+    private createResizeInputSettings(resizeMode: string): void {
+        if (!this.resizeInputsDiv) return;
+
+        this.resizeInputsDiv.empty();
+
+        this.resizeInputSettings = new Setting(this.resizeInputsDiv).setClass(
+            "resize-input-setting"
+        );
+
+        this.updateResizeInputSettings(resizeMode);
+    }
+
+    private updateResizeInputSettings(resizeMode: string): void {
+        if (!this.resizeInputSettings) return;
+
+        this.resizeInputSettings.clear();
+
+        let name = "";
+        let desc = "";
+
+        if (["Fit", "Fill"].includes(resizeMode)) {
+            name = "Resize dimensions";
+            desc = "Enter the desired width and height in pixels";
+            this.resizeInputSettings
+                .setName(name)
+                .setDesc(desc)
+                .addText((text) =>
+                    text
+                        .setPlaceholder("Width")
+                        .setValue(
+                            this.plugin.settings
+                                .ProcessCurrentNoteresizeModaldesiredWidth
+                                .toString()
+                        )
+                        .onChange(async (value: string) => {
+                            const width = parseInt(value);
+                            if (/^\d+$/.test(value) && width > 0) {
+                                this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth =
+                                    width;
+                                await this.plugin.saveSettings();
+                            }
+                        })
+                )
+                .addText((text) =>
+                    text
+                        .setPlaceholder("Height")
+                        .setValue(
+                            this.plugin.settings
+                                .ProcessCurrentNoteresizeModaldesiredHeight
+                                .toString()
+                        )
+                        .onChange(async (value: string) => {
+                            const height = parseInt(value);
+                            if (/^\d+$/.test(value) && height > 0) {
+                                this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight =
+                                    height;
+                                await this.plugin.saveSettings();
+                            }
+                        })
+                );
+        } else {
+            switch (resizeMode) {
+                case "LongestEdge":
+                case "ShortestEdge":
+                    name = `${resizeMode}`;
+                    desc = "Enter the desired length in pixels";
+                    break;
+                case "Width":
+                    name = "Width";
+                    desc = "Enter the desired width in pixels";
+                    break;
+                case "Height":
+                    name = "Height";
+                    desc = "Enter the desired height in pixels";
+                    break;
+            }
+
+            this.resizeInputSettings
+                .setName(name)
+                .setDesc(desc)
+                .addText((text) =>
+                    text
+                        .setPlaceholder("")
+                        .setValue(this.getInitialValue(resizeMode).toString())
+                        .onChange(async (value: string) => {
+                            const length = parseInt(value);
+                            if (/^\d+$/.test(value) && length > 0) {
+                                await this.updateSettingValue(
+                                    resizeMode,
+                                    length
+                                );
+                            }
+                        })
+                );
+        }
+    }
+
+    private getInitialValue(resizeMode: string): number {
+        switch (resizeMode) {
+            case "LongestEdge":
+            case "ShortestEdge":
+                return this.plugin.settings
+                    .ProcessCurrentNoteresizeModaldesiredLength;
+            case "Width":
+                return this.plugin.settings
+                    .ProcessCurrentNoteresizeModaldesiredWidth;
+            case "Height":
+                return this.plugin.settings
+                    .ProcessCurrentNoteresizeModaldesiredHeight;
+            default:
+                return 0;
+        }
+    }
+
+    private async updateSettingValue(
+        resizeMode: string,
+        value: number
+    ): Promise<void> {
+        switch (resizeMode) {
+            case "LongestEdge":
+            case "ShortestEdge":
+                this.plugin.settings.ProcessCurrentNoteresizeModaldesiredLength =
+                    value;
+                break;
+            case "Width":
+                this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth =
+                    value;
+                break;
+            case "Height":
+                this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight =
+                    value;
+                break;
+        }
+        await this.plugin.saveSettings();
+    }
+}
+
+class ProcessCurrentNote extends Modal {
+    plugin: ImageConvertPlugin;
+    activeFile: TFile;
+
+    private imageCount = 0;
+    private processedCount = 0;
+    private skippedCount = 0;
+    private imageCountDisplay: HTMLSpanElement;
+    private processedCountDisplay: HTMLSpanElement;
+    private skippedCountDisplay: HTMLSpanElement;
+
+    private enlargeReduceSettings: Setting | null = null;
+    private resizeInputSettings: Setting | null = null;
+    private submitButton: ButtonComponent | null = null;
+    private resizeInputsDiv: HTMLDivElement | null = null;
+    private enlargeReduceDiv: HTMLDivElement | null = null;
+    private convertToSetting: Setting;
+    private skipFormatsSetting: Setting;
+    private resizeModeSetting: Setting;
+    private skipTargetFormatSetting: Setting;
+
+	constructor(app: App, plugin: ImageConvertPlugin, activeFile: TFile) {
+		super(app);
+		this.plugin = plugin;
+		this.activeFile = activeFile;
+	}
+
+    private updateResizeInputVisibility(resizeMode: string): void {
+        if (resizeMode === "None") {
+            this.resizeInputsDiv?.empty();
+            this.enlargeReduceDiv?.hide(); // Explicitly hide it
+            this.resizeInputSettings = null;
+            this.enlargeReduceSettings = null;
+        } else {
+            if (!this.resizeInputSettings) {
+                this.createResizeInputSettings(resizeMode);
+            } else {
+                this.updateResizeInputSettings(resizeMode);
+            }
+
+            if (!this.enlargeReduceSettings) {
+                this.createEnlargeReduceSettings();
+            }
+            this.enlargeReduceDiv?.show(); // Show only when not None
         }
     }
 
@@ -8703,163 +9466,1178 @@ class ProcessCurrentNote extends Modal {
         await this.plugin.saveSettings();
     }
 
-	onOpen() {
-		const { contentEl } = this;
+    async onOpen() {
+        const { contentEl } = this;
+
+        // Create main container
+        const mainContainer = contentEl.createDiv({ cls: 'image-convert-modal' });
+
+        // Header section
+        const headerContainer = mainContainer.createDiv({ cls: 'modal-header' });
+        headerContainer.createEl('h2', { text: 'Convert, compress and resize' });
+
+        headerContainer.createEl('h6', {
+            text: `all images in: ${this.activeFile.basename}.${this.activeFile.extension}`,
+            cls: 'modal-subtitle'
+        });
+
+        // Initial image counts (fetch these before creating settings)
+        await this.updateImageCounts();
+
+        // --- Image Counts Display ---
+        const countsDisplay = contentEl.createDiv({ cls: 'image-counts-display' });
+
+        countsDisplay.createEl('span', { text: 'Total Images Found: ' });
+        this.imageCountDisplay = countsDisplay.createEl('span');
+
+        countsDisplay.createEl('br');
+
+        countsDisplay.createEl('span', { text: 'To be Processed: ' });
+        this.processedCountDisplay = countsDisplay.createEl('span');
+
+        countsDisplay.createEl('br');
+
+        countsDisplay.createEl('span', { text: 'Skipped: ' });
+        this.skippedCountDisplay = countsDisplay.createEl('span');
+		
+        // Warning message
+        headerContainer.createEl('p', {
+            cls: 'modal-warning',
+            text: '⚠️ This will modify all images in the current note. Please ensure you have backups.'
+        });
+
+        // --- Settings Container ---
+        const settingsContainer = mainContainer.createDiv({ cls: 'settings-container' });
+
+        // Format and Quality Container
+        const formatQualityContainer = settingsContainer.createDiv({ cls: 'format-quality-container' });
+
+        // Convert To setting
+        this.convertToSetting = new Setting(formatQualityContainer)
+            .setName('Convert to ⓘ ')
+            .setDesc('Choose output format for your images')
+            .setTooltip('Same as original: preserves current format while applying compression/resizing')
+            .addDropdown(dropdown =>
+                dropdown
+                    .addOptions({
+                        disabled: 'Same as original',
+                        webp: 'WebP',
+                        jpg: 'JPG',
+                        png: 'PNG'
+                    })
+                    .setValue(this.plugin.settings.ProcessCurrentNoteconvertTo)
+                    .onChange(async value => {
+                        this.plugin.settings.ProcessCurrentNoteconvertTo = value;
+                        await this.plugin.saveSettings();
+                        this.updateImageCountsAndDisplay(); // Update counts after changing this setting
+                    })
+            );
+
+        // Quality setting
+        new Setting(formatQualityContainer)
+            .setName('Quality ⓘ')
+            .setDesc('Compression level (0-100)')
+            .setTooltip('100: No compression (original quality)\n75: Recommended (good balance)\n0-50: High compression (lower quality)')
+            .addText(text =>
+                text
+                    .setPlaceholder('Enter quality (0-100)')
+                    .setValue((this.plugin.settings.ProcessCurrentNotequality * 100).toString())
+                    .onChange(async value => {
+                        const quality = parseInt(value);
+                        if (/^\d+$/.test(value) && quality >= 0 && quality <= 100) {
+                            this.plugin.settings.ProcessCurrentNotequality = quality / 100;
+                            await this.plugin.saveSettings();
+                        }
+                    })
+            );
+
+        // Resize Container (separate from format/quality)
+        const resizeContainer = settingsContainer.createDiv({ cls: 'resize-container' });
+
+        // Resize Mode setting
+        this.resizeModeSetting = new Setting(resizeContainer)
+            .setName('Resize Mode ⓘ')
+            .setDesc('Choose how images should be resized. Note: Results are permanent.')
+            .setTooltip('Fit: Maintains aspect ratio within dimensions\nFill: Exactly matches dimensions\nLongest Edge: Limits the longest side\nShortest Edge: Limits the shortest side\nWidth/Height: Constrains single dimension')
+            .addDropdown(dropdown =>
+                dropdown
+                    .addOptions({
+                        None: 'None',
+                        LongestEdge: 'Longest Edge',
+                        ShortestEdge: 'Shortest Edge',
+                        Width: 'Width',
+                        Height: 'Height',
+                        Fit: 'Fit',
+                        Fill: 'Fill',
+                    })
+                    .setValue(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)
+                    .onChange(async value => {
+                        this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode = value;
+                        await this.plugin.saveSettings();
+                        this.updateResizeInputVisibility(value);
+                        this.updateImageCountsAndDisplay(); // Update counts after changing this setting
+                    })
+            );
+
+        // Create resize inputs and enlarge/reduce containers
+        this.resizeInputsDiv = resizeContainer.createDiv({ cls: 'resize-inputs' });
+        this.enlargeReduceDiv = resizeContainer.createDiv({ cls: 'enlarge-reduce-settings' });
+
+        // Skip formats Container
+        const skipContainer = settingsContainer.createDiv({ cls: 'skip-container' });
+
+        // Skip formats setting
+        this.skipFormatsSetting = new Setting(skipContainer)
+            .setName('Skip File Formats ⓘ')
+            .setTooltip('Comma-separated list of file formats to skip (e.g., tif,tiff,heic). Leave empty to process all formats.')
+            .addText(text =>
+                text
+                    .setPlaceholder('tif,tiff,heic')
+                    .setValue(this.plugin.settings.ProcessCurrentNoteSkipFormats)
+                    .onChange(async value => {
+                        this.plugin.settings.ProcessCurrentNoteSkipFormats = value;
+                        await this.plugin.saveSettings();
+                        this.updateImageCountsAndDisplay(); // Update counts after changing this setting
+                    })
+            );
+
+        // Skip target format setting
+        this.skipTargetFormatSetting = new Setting(skipContainer)
+            .setName('Skip images in target format ⓘ')
+            .setTooltip('If image is already in target format, this allows you to skip its compression, conversion and resizing. Processing of all other formats will be still performed.')
+            .addToggle(toggle =>
+                toggle
+                    .setValue(this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat)
+                    .onChange(async value => {
+                        this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat = value;
+                        await this.plugin.saveSettings();
+                        this.updateImageCountsAndDisplay(); // Update counts after changing this setting
+                    })
+            );
+
+        // Initialize resize inputs
+        this.updateResizeInputVisibility(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode);
+
+        // --- Update Counts After Settings Change ---
+        await this.updateImageCountsAndDisplay();
+
+        // Submit button
+        const buttonContainer = settingsContainer.createDiv({ cls: 'button-container' });
+        this.submitButton = new ButtonComponent(buttonContainer)
+            .setButtonText('Submit')
+            .onClick(() => {
+                this.close();
+                const activeFile = this.app.workspace.getActiveFile();
+                if (activeFile) {
+                    if (activeFile.extension === 'md' || activeFile.extension === 'canvas') {
+                        this.plugin.processCurrentNoteImages(activeFile);
+                    } else {
+                        new Notice('Error: Active file must be a markdown or canvas file.');
+                    }
+                } else {
+                    new Notice('Error: No active file found.');
+                }
+            });
+    }
+
+	private async updateImageCountsAndDisplay() {
+        await this.updateImageCounts();
+        this.updateCountDisplays();
+    }
+
+    private async updateImageCounts() {
+        if (!this.activeFile) return;
+
+        const skipFormats = this.plugin.settings.ProcessCurrentNoteSkipFormats
+            .toLowerCase()
+            .split(',')
+            .map(format => format.trim())
+            .filter(format => format.length > 0);
+
+        const targetFormat = this.plugin.settings.ProcessCurrentNoteconvertTo.toLowerCase();
+        const skipTargetFormat = this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat;
+
+        if (this.activeFile.extension === 'canvas') {
+            const canvasData = JSON.parse(await this.app.vault.read(this.activeFile));
+            const images = this.getImagePathsFromCanvas(canvasData);
+            this.imageCount = images.length;
+            this.processedCount = images.filter(imagePath => {
+                const imageFile = this.app.vault.getAbstractFileByPath(imagePath);
+                if (!(imageFile instanceof TFile) || skipFormats.includes(imageFile.extension.toLowerCase())) {
+                    return false; // Skip if not a TFile or in skipFormats
+                }
+                if (skipTargetFormat && imageFile.extension.toLowerCase() === targetFormat) {
+                    return false; // Skip if skipTargetFormat is true and the image is already in the target format
+                }
+                return true;
+            }).length;
+            this.skippedCount = this.imageCount - this.processedCount;
+        } else {
+            // Handle markdown files (similar logic to your processCurrentNoteImages)
+            const linkedFiles = this.getLinkedImageFiles(this.activeFile);
+            this.imageCount = linkedFiles.length;
+
+            this.processedCount = linkedFiles.filter(file => {
+                if (skipFormats.includes(file.extension.toLowerCase())) {
+                    return false;
+                }
+                if (skipTargetFormat && file.extension.toLowerCase() === targetFormat) {
+                    return false;
+                }
+                return true;
+            }).length;
+            this.skippedCount = this.imageCount - this.processedCount;
+        }
+    }
+
+    private getImagePathsFromCanvas(canvasData: any): string[] {
+        let imagePaths: string[] = [];
+        for (const node of canvasData.nodes || []) {
+            if (node.type === 'file' && node.file) {
+                imagePaths.push(node.file);
+            }
+            if (node.children && Array.isArray(node.children)) {
+                imagePaths = imagePaths.concat(this.getImagePathsFromCanvas(node));
+            }
+        }
+        return imagePaths;
+    }
+
 	
-		// Create main container
-		const mainContainer = contentEl.createDiv({ cls: 'image-convert-modal' });
-	
-		// Header section
-		const headerContainer = mainContainer.createDiv({ cls: 'modal-header' });
-		headerContainer.createEl('h2', { text: 'Convert, compress and resize' });
-	
-		// Get current note info
-		let noteName = 'current note';
-		let noteExtension = '';
-		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (activeView?.file) {
-			noteName = activeView.file.basename;
-			noteExtension = activeView.file.extension;
-		}
-	
-		headerContainer.createEl('h6', {
-			text: `all images in: ${noteName}.${noteExtension}`,
-			cls: 'modal-subtitle'
-		});
-	
-		// Warning message
-		headerContainer.createEl('p', {
-			cls: 'modal-warning',
-			text: '⚠️ This will modify all images in the current note. Please ensure you have backups.'
-		});
-	
-		// Settings container
-		const settingsContainer = mainContainer.createDiv({ cls: 'settings-container' });
-	
-		// Format and Quality Container
-		const formatQualityContainer = settingsContainer.createDiv({ cls: 'format-quality-container' });
-	
-		// Convert To setting
-		new Setting(formatQualityContainer)
-			.setName('Convert to ⓘ ')
-			.setDesc('Choose output format for your images')
-			.setTooltip('Same as original: preserves current format while applying compression/resizing')
-			.addDropdown(dropdown =>
-				dropdown
-					.addOptions({
-						disabled: 'Same as original',
-						webp: 'WebP',
-						jpg: 'JPG',
-						png: 'PNG'
-					})
-					.setValue(this.plugin.settings.ProcessCurrentNoteconvertTo)
-					.onChange(async value => {
-						this.plugin.settings.ProcessCurrentNoteconvertTo = value;
-						await this.plugin.saveSettings();
-					})
-			);
-	
-		// Quality setting
-		new Setting(formatQualityContainer)
-			.setName('Quality ⓘ')
-			.setDesc('Compression level (0-100)')
-			.setTooltip('100: No compression (original quality)\n75: Recommended (good balance)\n0-50: High compression (lower quality)')
-			.addText(text =>
-				text
-					.setPlaceholder('Enter quality (0-100)')
-					.setValue((this.plugin.settings.ProcessCurrentNotequality * 100).toString())
-					.onChange(async value => {
-						const quality = parseInt(value);
-						if (/^\d+$/.test(value) && quality >= 0 && quality <= 100) {
-							this.plugin.settings.ProcessCurrentNotequality = quality / 100;
-							await this.plugin.saveSettings();
-						}
-					})
-			);
-	
-		// Resize Container (separate from format/quality)
-		const resizeContainer = settingsContainer.createDiv({ cls: 'resize-container' });
-	
-		// Resize Mode setting
-		new Setting(resizeContainer)
-			.setName('Resize Mode ⓘ')
-			.setDesc('Choose how images should be resized. Note: Results are permanent.')
-			.setTooltip('Fit: Maintains aspect ratio within dimensions\nFill: Exactly matches dimensions\nLongest Edge: Limits the longest side\nShortest Edge: Limits the shortest side\nWidth/Height: Constrains single dimension')
-			.addDropdown(dropdown =>
-				dropdown
-					.addOptions({
-						None: 'None',
-						LongestEdge: 'Longest Edge',
-						ShortestEdge: 'Shortest Edge',
-						Width: 'Width',
-						Height: 'Height',
-						Fit: 'Fit',
-						Fill: 'Fill',
-					})
-					.setValue(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)
-					.onChange(async value => {
-						this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode = value;
-						await this.plugin.saveSettings();
-						this.updateResizeInputVisibility(value);
-					})
-			);
-	
-		// Create resize inputs and enlarge/reduce containers
-		this.resizeInputsDiv = resizeContainer.createDiv({ cls: 'resize-inputs' });
-		this.enlargeReduceDiv = resizeContainer.createDiv({ cls: 'enlarge-reduce-settings' });
-	
-		// Skip formats Container
-		const skipContainer = settingsContainer.createDiv({ cls: 'skip-container' });
-	
-		// Skip formats setting
-		new Setting(skipContainer)
-			.setName('Skip File Formats ⓘ')
-			.setTooltip('Comma-separated list of file formats to skip (e.g., tif,tiff,heic). Leave empty to process all formats.')
-			.addText(text =>
-				text
-					.setPlaceholder('tif,tiff,heic')
-					.setValue(this.plugin.settings.ProcessCurrentNoteSkipFormats)
-					.onChange(async value => {
-						this.plugin.settings.ProcessCurrentNoteSkipFormats = value;
-						await this.plugin.saveSettings();
-					})
-			);
-	
-		// Skip target format setting
-		new Setting(skipContainer)
-			.setName('Skip images in target format ⓘ')
-			.setTooltip('If image is already in target format, this allows you to skip its compression, conversion and resizing. Processing of all other formats will be still performed.')
-			.addToggle(toggle =>
-				toggle
-					.setValue(this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat)
-					.onChange(async value => {
-						this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat = value;
-						await this.plugin.saveSettings();
-					})
-			);
-	
-		// Initialize resize inputs
-		this.updateResizeInputVisibility(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode);
-	
-		// Submit button
-		const buttonContainer = settingsContainer.createDiv({ cls: 'button-container' });
-		this.submitButton = new ButtonComponent(buttonContainer)
-			.setButtonText('Submit')
-			.onClick(() => {
-				this.close();
-				const currentNote = this.app.workspace.getActiveFile();
-				if (currentNote) {
-					this.plugin.processCurrentNoteImages(currentNote);
-				} else {
-					new Notice('Error: No active note found.');
-				}
-			});
-	}
+    private getLinkedImageFiles(file: TFile): TFile[] {
+        const resolvedLinks = this.app.metadataCache.resolvedLinks;
+        const linksInCurrentNote = resolvedLinks[file.path];
+        return Object.keys(linksInCurrentNote)
+            .map(link => this.app.vault.getAbstractFileByPath(link))
+            .filter((file): file is TFile => file instanceof TFile && isImage(file));
+    }
+
+    private updateCountDisplays() {
+        this.imageCountDisplay.setText(this.imageCount.toString());
+        this.processedCountDisplay.setText(this.processedCount.toString());
+        this.skippedCountDisplay.setText(this.skippedCount.toString());
+    }
+
 
 	onClose() {
 		const { contentEl } = this;
 		contentEl.empty();
 	}
+}
+
+
+enum ImageSource {
+    Direct = "direct",
+    Linked = "linked",
+}
+
+export class ProcessFolderModal extends Modal {
+    plugin: ImageConvertPlugin;
+    folderPath: string;
+    private recursive = false;
+
+    // --- Image Source Enum ---
+    private selectedImageSource: ImageSource = ImageSource.Direct; // Default to Direct
+
+    // --- Settings UI Elements ---
+    private imageSourceSetting: Setting | null = null;
+    private qualitySetting: Setting | null = null;
+    private convertToSetting: Setting | null = null;
+    private skipFormatsSetting: Setting | null = null;
+    private resizeModeSetting: Setting | null = null;
+    private resizeInputSettings: Setting | null = null;
+    private enlargeReduceSettings: Setting | null = null;
+    private skipTargetFormatSetting: Setting | null = null;
+    private resizeInputsDiv: HTMLDivElement | null = null;
+    private enlargeReduceDiv: HTMLDivElement | null = null;
+
+    // --- Image Counts ---
+    private imageCount = 0;
+    private processedCount = 0;
+    private skippedCount = 0;
+    private imageCountDisplay: HTMLSpanElement;
+    private processedCountDisplay: HTMLSpanElement;
+    private skippedCountDisplay: HTMLSpanElement;
+
+    // --- Description Updating ---
+    private updateImageSourceDescription:
+        | ((source: ImageSource | null) => void)
+        | null = null;
+
+    constructor(app: App, plugin: ImageConvertPlugin, folderPath: string) {
+        super(app);
+        this.plugin = plugin;
+        this.folderPath = folderPath;
+    }
+
+    async onOpen() {
+        const { contentEl } = this;
+        contentEl.addClass("image-convert-modal"); // Add a class for styling
+        await this.createUI(contentEl);
+
+        // Initialize image counts after UI elements are created
+        await this.updateImageCountsAndDisplay();
+    }
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
+    }
+
+    // --- UI Creation Methods ---
+
+    private async createUI(contentEl: HTMLElement) {
+        this.createHeader(contentEl);
+        // --- Warning Message ---
+        this.createWarningMessage(contentEl);
+
+				
+        // --- Image Counts ---
+        this.createImageCountsDisplay(contentEl);
+
+
+        // Create settings sections (no longer collapsible)
+        const settingsContainer = contentEl.createDiv({
+            cls: "settings-container",
+        });
+
+
+
+        this.createImageSourceSettings(settingsContainer);
+
+        // Format and Quality Container
+        const formatQualityContainer = settingsContainer.createDiv({
+            cls: "format-quality-container",
+        });
+        this.createGeneralSettings(formatQualityContainer);
+
+        // Resize Container
+        const resizeContainer = settingsContainer.createDiv({
+            cls: "resize-container",
+        });
+        this.createResizeSettings(resizeContainer);
+
+        // Skip Container
+        const skipContainer = settingsContainer.createDiv({
+            cls: "skip-container",
+        });
+        this.createSkipSettings(skipContainer);
+
+        this.createProcessButton(settingsContainer);
+
+    }
+
+    private createHeader(contentEl: HTMLElement) {
+        const folderName = this.folderPath.split("/").pop() || this.folderPath;
+        const headerContainer = contentEl.createDiv({ cls: "modal-header" });
+
+        // Main title
+        headerContainer.createEl("h2", { text: "Convert, compress and resize" });
+
+        // Subtitle
+        headerContainer.createEl("h6", {
+            text: `all images in: /${folderName}`,
+            cls: "modal-subtitle", // Add a class for styling
+        });
+    }
+
+    // --- Warning Message ---
+    private createWarningMessage(contentEl: HTMLElement) {
+        contentEl.createEl("p", {
+            cls: "modal-warning",
+            text: "⚠️ This will modify all images in the selected folder and subfolders (if recursive is enabled). Please ensure you have backups.",
+        });
+    }
+
+    // --- Image Counts Display ---
+    private createImageCountsDisplay(contentEl: HTMLElement) {
+
+		const countsDisplay = contentEl.createDiv({
+            cls: "image-counts-display-container",
+        });
+
+        // Add Image Source Description here
+        const imageSourceDesc = countsDisplay.createDiv({
+            cls: "image-source-description",
+        });
+        imageSourceDesc.id = "image-source-description"; // Set ID for aria-describedby
+
+        // Function to update the description text
+        const updateDescription = (source: ImageSource | null) => {
+            let descText = "No selection."; // Default text
+            if (source === ImageSource.Direct) {
+                descText =
+                    "Processing images directly in the folder.";
+            } else if (source === ImageSource.Linked) {
+                descText =
+                    "Processing images linked in notes or Canvas files.";
+            }
+            imageSourceDesc.setText(descText);
+        };
+
+        // Update description when the selected image source changes
+        this.updateImageSourceDescription = updateDescription;
+
+        // Set initial description
+        updateDescription(this.selectedImageSource);
+        // Image Counts
+        countsDisplay.createEl("span", { text: "Total images found: " });
+        this.imageCountDisplay = countsDisplay.createEl("span", {
+            text: this.imageCount.toString(),
+        });
+
+        countsDisplay.createEl("br");
+
+        countsDisplay.createEl("span", { text: "To be skipped: " });
+        this.skippedCountDisplay = countsDisplay.createEl("span", {
+            text: this.skippedCount.toString(),
+        });
+
+        countsDisplay.createEl("br");
+
+        countsDisplay.createEl("span", { text: "To be processed: " });
+        this.processedCountDisplay = countsDisplay.createEl("span", {
+            text: this.processedCount.toString(),
+        });
+
+
+    }
+
+    // --- Image Source Settings with Radio Buttons ---
+    private createImageSourceSettings(contentEl: HTMLElement) {
+        contentEl.createEl("h4", { text: "Image source" }); // Heading for Image Source
+
+        // --- Recursive Setting ---
+        new Setting(contentEl)
+            .setName("Recursive")
+            .setDesc("Process images in all subfolders as well")
+            .addToggle((toggle) =>
+                toggle.setValue(this.recursive).onChange(async (value) => {
+                    this.recursive = value;
+                    await this.updateImageCountsAndDisplay();
+                })
+            );
+
+        const imageSourceSettingContainer = contentEl.createDiv();
+        imageSourceSettingContainer.addClass("image-source-setting-container");
+
+        // Store button references for updating later
+        const buttonRefs: Record<ImageSource, any> = {
+            [ImageSource.Direct]: null,
+            [ImageSource.Linked]: null,
+        };
+
+        // Function to update the icons of the radio buttons
+        const updateIcons = () => {
+            Object.entries(buttonRefs).forEach(([source, button]) => {
+                if (button) {
+                    button.setIcon(
+                        this.selectedImageSource === source
+                            ? "lucide-check-circle"
+                            : "lucide-circle"
+                    );
+                }
+            });
+        };
+
+        // --- Create Radio Buttons ---
+        new Setting(imageSourceSettingContainer)
+            .setName("Direct images")
+            .setDesc("Images directly in the folder")
+            .addExtraButton((button) => {
+                buttonRefs[ImageSource.Direct] = button;
+                button
+                    .setIcon(
+                        this.selectedImageSource === ImageSource.Direct
+                            ? "lucide-check-circle"
+                            : "lucide-circle"
+                    )
+                    .setTooltip(
+                        this.selectedImageSource === ImageSource.Direct
+                            ? "Selected"
+                            : "Select"
+                    )
+                    .onClick(async () => {
+                        this.selectedImageSource = ImageSource.Direct;
+                        if (this.updateImageSourceDescription) {
+                            this.updateImageSourceDescription(
+                                this.selectedImageSource
+                            );
+                        }
+                        await this.updateImageCountsAndDisplay();
+                        updateIcons();
+                    });
+            });
+
+        new Setting(imageSourceSettingContainer)
+            .setName("Linked images")
+            .setDesc("Images linked in notes or Canvas")
+            .addExtraButton((button) => {
+                buttonRefs[ImageSource.Linked] = button;
+                button
+                    .setIcon(
+                        this.selectedImageSource === ImageSource.Linked
+                            ? "lucide-check-circle"
+                            : "lucide-circle"
+                    )
+                    .setTooltip(
+                        this.selectedImageSource === ImageSource.Linked
+                            ? "Selected"
+                            : "Select"
+                    )
+                    .onClick(async () => {
+                        this.selectedImageSource = ImageSource.Linked;
+                        if (this.updateImageSourceDescription) {
+                            this.updateImageSourceDescription(
+                                this.selectedImageSource
+                            );
+                        }
+                        await this.updateImageCountsAndDisplay();
+                        updateIcons();
+                    });
+            });
+
+        // Add the radio button container to contentEl
+        contentEl.appendChild(imageSourceSettingContainer);
+
+        // Set initial description and update icons
+        if (this.updateImageSourceDescription) {
+            this.updateImageSourceDescription(this.selectedImageSource);
+        }
+        updateIcons();
+    }
+
+    // --- General Settings ---
+    private async createGeneralSettings(contentEl: HTMLElement) {
+        contentEl.createEl("h4", { text: "General" }); // Heading for General Settings
+
+        // --- Convert To Setting ---
+        this.convertToSetting = new Setting(contentEl)
+            .setName("Convert to ⓘ")
+            .setDesc(
+                "Choose output format. 'Same as original' applies compression/resizing to current format."
+            )
+            .setTooltip(
+                "Same as original: preserves current format while applying compression/resizing"
+            )
+            .addDropdown((dropdown) => {
+                dropdown
+                    .addOption("disabled", "Same as original")
+                    .addOptions({
+                        webp: "WebP",
+                        jpg: "JPG",
+                        png: "PNG",
+                    })
+                    .setValue(this.plugin.settings.ProcessCurrentNoteconvertTo)
+                    .onChange(async (value) => {
+                        this.plugin.settings.ProcessCurrentNoteconvertTo = value;
+                        await this.plugin.saveSettings();
+                        await this.updateImageCountsAndDisplay();
+                    });
+            });
+
+        // --- Quality Setting ---
+        this.qualitySetting = new Setting(contentEl)
+            .setName("Quality ⓘ")
+            .setDesc("Compression level (0-100)")
+            .setTooltip(
+                "100: No compression (original quality)\n75: Recommended (good balance)\n0-50: High compression (lower quality)"
+            )
+            .addText((text) => {
+                text
+                    .setPlaceholder("Enter quality (0-100)")
+                    .setValue(
+                        (
+                            this.plugin.settings.ProcessCurrentNotequality * 100
+                        ).toString()
+                    )
+                    .onChange(async (value) => {
+                        const quality = parseInt(value, 10);
+                        if (
+                            !isNaN(quality) &&
+                            quality >= 0 &&
+                            quality <= 100
+                        ) {
+                            this.plugin.settings.ProcessCurrentNotequality =
+                                quality / 100;
+                            await this.plugin.saveSettings();
+                            await this.updateImageCountsAndDisplay();
+                        } else {
+                            // Optionally show an error message to the user
+                            // using a Notice or by adding an error class to the input
+                        }
+                    });
+            });
+    }
+
+    private createSkipSettings(contentEl: HTMLElement): void {
+        contentEl.createEl("h4", { text: "Skip" }); // Heading for Resize Settings
+
+        // --- Skip Formats Setting ---
+        this.skipFormatsSetting = new Setting(contentEl)
+            .setName("Skip formats ⓘ")
+            .setDesc(
+                "Comma-separated list (no dots or spaces, e.g., png,gif)."
+            )
+            .setTooltip(
+                "Comma-separated list of file formats to skip (e.g., tif,tiff,heic). Leave empty to process all formats."
+            )
+            .addText((text) => {
+                text
+                    .setPlaceholder("png,gif")
+                    .setValue(
+                        this.plugin.settings.ProcessCurrentNoteSkipFormats
+                    )
+                    .onChange(async (value) => {
+                        this.plugin.settings.ProcessCurrentNoteSkipFormats =
+                            value;
+                        await this.plugin.saveSettings();
+                        await this.updateImageCountsAndDisplay();
+                    });
+            });
+
+        // --- Skip Target Format Setting ---
+        this.skipTargetFormatSetting = new Setting(contentEl)
+            .setName("Skip images in target format ⓘ")
+            .setDesc(
+                "Skip compression/resizing if image is already in target format."
+            )
+            .setTooltip(
+                "If image is already in target format, this allows you to skip its compression, conversion and resizing. Processing of all other formats will be still performed."
+            )
+            .addToggle((toggle) => {
+                toggle
+                    .setValue(
+                        this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat
+                    )
+                    .onChange(async (value) => {
+                        this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat =
+                            value;
+                        await this.plugin.saveSettings();
+                        await this.updateImageCountsAndDisplay(); // Update counts on change
+                    });
+            });
+    }
+
+    // --- Resize Settings ---
+    private async createResizeSettings(contentEl: HTMLElement) {
+        contentEl.createEl("h4", { text: "Resize" }); // Heading for Resize Settings
+
+        // --- Resize Mode Setting ---
+        this.resizeModeSetting = new Setting(contentEl)
+            .setName("Resize mode ⓘ")
+            .setDesc(
+                "Choose how images should be resized. Note: Results are permanent"
+            )
+            .setTooltip(
+                "Fit: Maintains aspect ratio within dimensions\nFill: Exactly matches dimensions\nLongest Edge: Limits the longest side\nShortest Edge: Limits the shortest side\nWidth/Height: Constrains single dimension"
+            )
+            .addDropdown((dropdown) => {
+                dropdown
+                    .addOptions({
+                        None: "None",
+                        Fit: "Fit (maintain aspect ratio within dimensions)",
+                        Fill: "Fill (exactly match dimensions)",
+                        LongestEdge: "Longest edge",
+                        ShortestEdge: "Shortest edge",
+                        Width: "Width",
+                        Height: "Height",
+                    })
+                    .setValue(
+                        this.plugin.settings
+                            .ProcessCurrentNoteResizeModalresizeMode
+                    )
+                    .onChange(async (value) => {
+                        this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode =
+                            value;
+                        await this.plugin.saveSettings();
+                        this.updateResizeInputVisibility(value);
+                        await this.updateImageCountsAndDisplay();
+                    });
+            });
+
+        // --- Enlarge/Reduce Setting ---
+        this.createEnlargeReduceInputs(contentEl);
+
+        // --- Resize Inputs (Conditional) ---
+        this.resizeInputsDiv = contentEl.createDiv({ cls: "resize-inputs" });
+        this.updateResizeInputVisibility(
+            this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode
+        );
+    }
+
+    private createEnlargeReduceInputs(contentEl: HTMLElement) {
+        this.enlargeReduceDiv = contentEl.createDiv({
+            cls: "enlarge-reduce-settings",
+        });
+        this.createEnlargeReduceSettings();
+    }
+
+    private createProcessButton(contentEl: HTMLElement) {
+        const buttonContainer = contentEl.createDiv({ cls: "button-container" });
+        new ButtonComponent(buttonContainer)
+            .setButtonText("Process")
+            .setCta()
+            .onClick(() => {
+                this.close();
+                this.plugin.imageProcessor.processImages(
+                    this.folderPath,
+                    this.recursive
+                );
+            });
+    }
+
+    // --- Helper Methods for Settings ---
+
+    private updateResizeInputVisibility(resizeMode: string): void {
+        if (resizeMode === "None") {
+            this.resizeInputsDiv?.empty();
+            this.enlargeReduceDiv?.hide(); // Explicitly hide it
+            this.resizeInputSettings = null;
+            this.enlargeReduceSettings = null;
+        } else {
+            if (!this.resizeInputSettings) {
+                this.createResizeInputSettings(resizeMode);
+            } else {
+                this.updateResizeInputSettings(resizeMode);
+            }
+
+            if (!this.enlargeReduceSettings) {
+                this.createEnlargeReduceSettings();
+            }
+            this.enlargeReduceDiv?.show(); // Show only when not None
+        }
+    }
+
+    private createEnlargeReduceSettings(): void {
+        if (!this.enlargeReduceDiv) return;
+
+        this.enlargeReduceDiv.empty();
+
+        this.enlargeReduceSettings = new Setting(this.enlargeReduceDiv)
+            .setClass("enlarge-reduce-setting")
+            .setName("Enlarge or Reduce ⓘ")
+            .setDesc(
+                "Reduce and Enlarge: Adjusts all images. Reduce only: Shrinks larger images. Enlarge only: Enlarges smaller images."
+            )
+            .setTooltip(
+                "• Reduce and Enlarge: Adjusts all images to fit specified dimensions\n• Reduce only: Only shrinks images larger than target\n• Enlarge only: Only enlarges images smaller than target"
+            )
+            .addDropdown((dropdown) => {
+                dropdown
+                    .addOptions({
+                        Always: "Reduce and Enlarge",
+                        Reduce: "Reduce only",
+                        Enlarge: "Enlarge only",
+                    })
+                    .setValue(
+                        this.plugin.settings.ProcessCurrentNoteEnlargeOrReduce
+                    )
+                    .onChange(
+                        async (value: "Always" | "Reduce" | "Enlarge") => {
+                            this.plugin.settings.ProcessCurrentNoteEnlargeOrReduce =
+                                value;
+                            await this.plugin.saveSettings();
+                        }
+                    );
+            });
+    }
+
+    private createResizeInputSettings(resizeMode: string): void {
+        if (!this.resizeInputsDiv) return;
+
+        this.resizeInputsDiv.empty();
+
+        this.resizeInputSettings = new Setting(this.resizeInputsDiv).setClass(
+            "resize-input-setting"
+        );
+
+        this.updateResizeInputSettings(resizeMode);
+    }
+
+    private updateResizeInputSettings(resizeMode: string): void {
+        if (!this.resizeInputSettings) return;
+
+        this.resizeInputSettings.clear();
+
+        let name = "";
+        let desc = "";
+
+        if (["Fit", "Fill"].includes(resizeMode)) {
+            name = "Resize dimensions";
+            desc = "Enter the desired width and height in pixels";
+            this.resizeInputSettings
+                .setName(name)
+                .setDesc(desc)
+                .addText((text: TextComponent) =>
+                    text
+                        .setPlaceholder("Width")
+                        .setValue(
+                            this.plugin.settings
+                                .ProcessCurrentNoteresizeModaldesiredWidth
+                                .toString()
+                        )
+                        .onChange(async (value: string) => {
+                            const width = parseInt(value);
+                            if (/^\d+$/.test(value) && width > 0) {
+                                this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth =
+                                    width;
+                                await this.plugin.saveSettings();
+                            }
+                        })
+                )
+                .addText((text: TextComponent) =>
+                    text
+                        .setPlaceholder("Height")
+                        .setValue(
+                            this.plugin.settings
+                                .ProcessCurrentNoteresizeModaldesiredHeight
+                                .toString()
+                        )
+                        .onChange(async (value: string) => {
+                            const height = parseInt(value);
+                            if (/^\d+$/.test(value) && height > 0) {
+                                this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight =
+                                    height;
+                                await this.plugin.saveSettings();
+                            }
+                        })
+                );
+        } else {
+            switch (resizeMode) {
+                case "LongestEdge":
+                case "ShortestEdge":
+                    name = `${resizeMode}`;
+                    desc = "Enter the desired length in pixels";
+                    break;
+                case "Width":
+                    name = "Width";
+                    desc = "Enter the desired width in pixels";
+                    break;
+                case "Height":
+                    name = "Height";
+                    desc = "Enter the desired height in pixels";
+                    break;
+            }
+
+            this.resizeInputSettings
+                .setName(name)
+                .setDesc(desc)
+                .addText((text: TextComponent) =>
+                    text
+                        .setPlaceholder("")
+                        .setValue(this.getInitialValue(resizeMode).toString())
+                        .onChange(async (value: string) => {
+                            const length = parseInt(value);
+                            if (/^\d+$/.test(value) && length > 0) {
+                                await this.updateSettingValue(
+                                    resizeMode,
+                                    length
+                                );
+                            }
+                        })
+                );
+        }
+    }
+
+    private getInitialValue(resizeMode: string): number {
+        switch (resizeMode) {
+            case "LongestEdge":
+            case "ShortestEdge":
+                return this.plugin.settings
+                    .ProcessCurrentNoteresizeModaldesiredLength;
+            case "Width":
+                return this.plugin.settings
+                    .ProcessCurrentNoteresizeModaldesiredWidth;
+            case "Height":
+                return this.plugin.settings
+                    .ProcessCurrentNoteresizeModaldesiredHeight;
+            default:
+                return 0;
+        }
+    }
+
+    private async updateSettingValue(
+        resizeMode: string,
+        value: number
+    ): Promise<void> {
+        switch (resizeMode) {
+            case "LongestEdge":
+            case "ShortestEdge":
+                this.plugin.settings.ProcessCurrentNoteresizeModaldesiredLength =
+                    value;
+                break;
+            case "Width":
+                this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth =
+                    value;
+                break;
+            case "Height":
+                this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight =
+                    value;
+                break;
+        }
+        await this.plugin.saveSettings();
+    }
+
+    // --- Image Counting and Updating ---
+
+    private async updateImageCountsAndDisplay() {
+        const counts = await this.updateImageCounts();
+        this.updateCountDisplays(counts);
+    }
+
+    private async updateImageCounts(): Promise<{
+        total: number;
+        processed: number;
+        skipped: number;
+    }> {
+        const folder = this.app.vault.getAbstractFileByPath(this.folderPath);
+        if (!(folder instanceof TFolder)) {
+            new Notice("Error: Invalid folder path.");
+            return { total: 0, processed: 0, skipped: 0 };
+        }
+
+        const skipFormats = this.plugin.settings.ProcessCurrentNoteSkipFormats
+            .toLowerCase()
+            .split(",")
+            .map((format) => format.trim())
+            .filter((format) => format.length > 0);
+
+        const targetFormat = this.plugin.settings.ProcessCurrentNoteconvertTo;
+        const skipTargetFormat = this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat;
+
+        // Use the selectedImageSource to filter images
+        const { directImages, linkedImages } = await this.getImageFiles(
+            folder,
+            this.recursive,
+            this.selectedImageSource
+        );
+
+        let total = 0;
+        let processed = 0;
+        let skipped = 0;
+
+        for (const image of directImages) {
+            total++;
+            if (skipFormats.includes(image.extension.toLowerCase())) {
+                skipped++;
+            } else if (skipTargetFormat && image.extension.toLowerCase() === targetFormat) {
+                skipped++;
+            } else {
+                processed++;
+            }
+        }
+
+        for (const image of linkedImages) {
+            total++;
+            if (skipFormats.includes(image.extension.toLowerCase())) {
+                skipped++;
+            } else if (skipTargetFormat && image.extension.toLowerCase() === targetFormat) {
+                skipped++;
+            } else {
+                processed++;
+            }
+        }
+
+        console.log("updateImageCounts:", {
+            total,
+            processed,
+            skipped,
+            directImages,
+            linkedImages,
+        });
+        return { total, processed, skipped };
+    }
+
+    async getImageFiles(
+        folder: TFolder,
+        recursive: boolean,
+        selectedImageSource: ImageSource
+    ): Promise<{
+        directImages: TFile[];
+        linkedImages: TFile[];
+    }> {
+        const directImages: TFile[] = [];
+        const linkedImages: TFile[] = [];
+
+        for (const file of folder.children) {
+            if (file instanceof TFolder) {
+                if (recursive) {
+                    // Recursive case: process subfolders
+                    const {
+                        directImages: subfolderDirectImages,
+                        linkedImages: subfolderLinkedImages,
+                    } = await this.getImageFiles(
+                        file,
+                        recursive,
+                        selectedImageSource
+                    );
+                    directImages.push(...subfolderDirectImages);
+                    linkedImages.push(...subfolderLinkedImages);
+                }
+            } else if (file instanceof TFile) {
+                if (
+                    selectedImageSource === ImageSource.Direct &&
+                    isImage(file)
+                ) {
+                    // Direct image and direct source is selected
+                    directImages.push(file);
+                } else if (
+                    selectedImageSource === ImageSource.Linked &&
+                    file.extension === "md"
+                ) {
+                    // Linked image in Markdown and linked source is selected
+                    const linkedImagesInMarkdown =
+                        await this.getImagesFromMarkdownFile(file);
+                    linkedImages.push(...linkedImagesInMarkdown);
+                } else if (
+                    selectedImageSource === ImageSource.Linked &&
+                    file.extension === "canvas"
+                ) {
+                    // Linked image in Canvas and linked source is selected
+                    const linkedImagesInCanvas =
+                        await this.getImagesFromCanvasFile(file);
+                    linkedImages.push(...linkedImagesInCanvas);
+                }
+            }
+        }
+
+        console.log(
+            "Images found in folder",
+            folder.path,
+            ":",
+            { directImages, linkedImages },
+            "recursive:",
+            recursive,
+            "selectedImageSource:",
+            selectedImageSource
+        );
+        return { directImages, linkedImages };
+    }
+
+    async getImagesFromMarkdownFile(markdownFile: TFile): Promise<TFile[]> {
+        console.log("Getting images from Markdown file:", markdownFile.path);
+        const images: TFile[] = [];
+        const content = await this.app.vault.read(markdownFile);
+        const vault = this.app.vault;
+
+        // 1. Handle WikiLinks
+        const wikiRegex = /!\[\[([^\]]+?)(?:\|[^\]]+?)?\]\]/g; // Matches ![[image.png]] and ![[image.png|141]]
+        let match;
+        while ((match = wikiRegex.exec(content)) !== null) {
+            const linkedFileName = match[1];
+            const linkedFile = this.app.metadataCache.getFirstLinkpathDest(
+                linkedFileName,
+                markdownFile.path
+            );
+            if (linkedFile instanceof TFile && isImage(linkedFile)) {
+                console.log("Found WikiLink image:", linkedFile.path);
+                images.push(linkedFile);
+            }
+        }
+
+        // 2. Handle Markdown Links
+        const markdownImageRegex = /!\[.*?\]\(([^)]+?)\)/g; // Matches ![alt text](image.png)
+        while ((match = markdownImageRegex.exec(content)) !== null) {
+            const imagePath = match[1];
+            if (!imagePath.startsWith("http")) {
+                // Skip external URLs
+                // Resolve the relative path of the image from the root of the vault
+                const absoluteImagePath = normalizePath(
+                    vault.getRoot().path + "/" + imagePath
+                );
+
+                const linkedImageFile =
+                    vault.getAbstractFileByPath(absoluteImagePath);
+
+                if (
+                    linkedImageFile instanceof TFile &&
+                    isImage(linkedImageFile)
+                ) {
+                    console.log(
+                        "Found relative linked image:",
+                        linkedImageFile.path
+                    );
+                    images.push(linkedImageFile);
+                }
+            }
+        }
+
+        console.log(
+            "Images found in Markdown file:",
+            images.map((f) => f.path)
+        );
+        return images;
+    }
+
+    // Helper function to extract image names from Markdown content (both Wiki and Markdown links)
+    extractLinkedImageNames(content: string): string[] {
+        const wikiRegex = /!\[\[([^\]]+?)(?:\|[^\]]+?)?\]\]/g; // Matches ![[image.png]] and ![[image.png|141]]
+        const markdownRegex = /!\[.*?\]\(([^)]+?)\)/g; // Matches ![alt text](image.png) and ![alt text](image.png "Title")
+        const imageNames: string[] = [];
+        let match;
+
+        // Find Wiki-style links
+        while ((match = wikiRegex.exec(content)) !== null) {
+            imageNames.push(match[1]);
+        }
+
+        // Find Markdown-style links
+        while ((match = markdownRegex.exec(content)) !== null) {
+            imageNames.push(match[1]);
+        }
+
+        console.log("Image names extracted from Markdown:", imageNames);
+        return imageNames;
+    }
+
+    // Helper function to get the full path relative to a folder
+    getFullPath(parentFolder: TFolder | null, relativePath: string): string {
+        if (parentFolder) {
+            return normalizePath(parentFolder.path + "/" + relativePath);
+        } else {
+            // If parentFolder is null, the file is in the root of the vault
+            return normalizePath(relativePath);
+        }
+    }
+
+    async getImagesFromCanvasFile(file: TFile): Promise<TFile[]> {
+        const images: TFile[] = [];
+        const content = await this.app.vault.read(file);
+        const canvasData = JSON.parse(content);
+
+        if (canvasData.nodes && Array.isArray(canvasData.nodes)) {
+            for (const node of canvasData.nodes) {
+                if (node.type === "file" && node.file) {
+                    const linkedFile =
+                        this.app.vault.getAbstractFileByPath(node.file);
+                    if (!linkedFile) {
+                        console.warn("Could not find file:", node.file);
+                        continue;
+                    }
+                    if (linkedFile instanceof TFile && isImage(linkedFile)) {
+                        images.push(linkedFile);
+                    }
+                }
+            }
+        }
+
+        return images;
+    }
+
+    private updateCountDisplays(counts: {
+        total: number;
+        processed: number;
+        skipped: number;
+    }) {
+        this.imageCount = counts.total;
+        this.processedCount = counts.processed;
+        this.skippedCount = counts.skipped;
+
+        this.imageCountDisplay.setText(counts.total.toString());
+        this.processedCountDisplay.setText(counts.processed.toString());
+        this.skippedCountDisplay.setText(counts.skipped.toString());
+    }
 }
 
 
@@ -12926,9 +14704,15 @@ interface ImagePositionCache {
             position: 'left' | 'center' | 'right';
             width?: string;
             wrap: boolean;
-        }
-    }
+        } 
+    } 
 }
+
+// This is mainly to handle CACHE
+// Loading and saving the cache to a file.
+// Adding, removing, and updating image position data in the cache.
+// Setting up the MutationObserver to watch for changes in the DOM and apply cached positions.
+// Cleaning up the cache by removing entries for deleted images or notes.
 
 export class ImagePositionManager {
     private cache: ImagePositionCache = {};
@@ -12937,6 +14721,8 @@ export class ImagePositionManager {
     private isProcessing = false;
     public lock = new AsyncLock(); // Make lock public
     private app: App;
+	private imagePositioning: ImagePositioning;
+
 
 	private currentState: OperationState = {
 		isProcessing: false,
@@ -12954,6 +14740,7 @@ export class ImagePositionManager {
         // Get the actual plugin directory from the plugin's main file path
 		this.app = plugin.app;
         this.pluginDir = this.getPluginDir();
+		this.imagePositioning = new ImagePositioning(this.app, this);
         this.loadCache();
 		this.setupImageObserver();
     }
@@ -13085,23 +14872,23 @@ export class ImagePositionManager {
 		});
 	}
 
-	private async processQueue() {
-        if (this.isProcessing) return;
-        this.isProcessing = true;
+	// private async processQueue() {
+    //     if (this.isProcessing) return;
+    //     this.isProcessing = true;
 
-        try {
-            while (this.operationQueue.length > 0) {
-                const operation = this.operationQueue.shift();
-                if (operation) {
-                    await this.lock.acquire('cacheOperation', async () => {
-                        await operation();
-                    });
-                }
-            }
-        } finally {
-            this.isProcessing = false;
-        }
-    }
+    //     try {
+    //         while (this.operationQueue.length > 0) {
+    //             const operation = this.operationQueue.shift();
+    //             if (operation) {
+    //                 await this.lock.acquire('cacheOperation', async () => {
+    //                     await operation();
+    //                 });
+    //             }
+    //         }
+    //     } finally {
+    //         this.isProcessing = false;
+    //     }
+    // }
 
     public async saveImagePositionToCache(
         notePath: string,
@@ -13150,15 +14937,16 @@ export class ImagePositionManager {
         }
     }
 
-	// Helper method to normalize image paths
-	private normalizeImagePath(src: string): string {
-		// Remove query parameters and decode URI components
-		const cleanSrc = decodeURIComponent(src.split('?')[0]);
-		
-		// Extract just the filename
-		const match = cleanSrc.match(/([^/\\]+)\.[^.]+$/);
-		return match ? match[1] : cleanSrc;
-	}
+    public normalizeImagePath(src: string | null): string {
+        if (!src) return '';
+
+        // Remove query parameters and decode URI components
+        const cleanSrc = decodeURIComponent(src.split('?')[0]);
+
+        // Extract just the filename
+        const match = cleanSrc.match(/([^/\\]+)\.[^.]+$/);
+        return match ? match[1] : cleanSrc;
+    }
 
     public getImagePosition(notePath: string, imageSrc: string) {
         return this.cache[notePath]?.[imageSrc];
@@ -13193,42 +14981,18 @@ export class ImagePositionManager {
         }
     }
 
-	private applyPositionToImage(
-		img: HTMLImageElement, 
-		positionData: { position: string; width?: string; wrap: boolean }
-	) {
-		// Remove existing classes first
-		img.classList.remove(
-			'image-position-left', 
-			'image-position-center', 
-			'image-position-right',
-			'image-wrap',
-			'image-no-wrap'
-		);
-	
-		// Add new classes
-		img.classList.add(`image-position-${positionData.position}`);
-		img.classList.add(positionData.wrap ? 'image-wrap' : 'image-no-wrap');
-	
-		// Apply to parent embed if exists
-		const parentEmbed = img.closest('.internal-embed.image-embed');
-		if (parentEmbed) {
-			parentEmbed.classList.remove(
-				'image-position-left', 
-				'image-position-center', 
-				'image-position-right',
-				'image-wrap',
-				'image-no-wrap'
-			);
-			parentEmbed.classList.add(`image-position-${positionData.position}`);
-			parentEmbed.classList.add(positionData.wrap ? 'image-wrap' : 'image-no-wrap');
-		}
-	
-		// Apply width if it exists
-		if (positionData.width) {
-			img.style.width = positionData.width;
-		}
-	}
+    // Make applyPositionToImage public and delegate to ImagePositioning
+    public applyPositionToImage(
+        img: HTMLImageElement,
+        positionData: { position: string; width?: string; wrap: boolean }
+    ) {
+        this.imagePositioning.applyPositionToImage(img, positionData);
+    }
+
+    // Method to get image positioning instance
+    public getPositioning(): ImagePositioning {
+        return this.imagePositioning;
+    }
 
 	public async preservePositionDuringResize(
 		notePath: string,
@@ -13365,7 +15129,7 @@ export class ImagePositionManager {
         const newState = { ...currentState, ...state };
         this.imageStates.set(imagePath, newState);
 
-        // Optional: Add visual feedback for updating state
+        // Test: Add visual feedback for updating state
         const images = document.querySelectorAll(`img[src="${imagePath}"]`);
         images.forEach(img => {
             if (newState.isUpdating) {
@@ -13447,6 +15211,149 @@ export class ImagePositionManager {
 
 }
 
+
+// This is mainly for UI aspect of image positioning and alignment
+// Adding and removing CSS classes to actually position the images on the page.
+// Getting the current position and wrap status of an image.
+// Interacting directly with the DOM to update image styles.
+export class ImagePositioning {
+    private app: App;
+    private imagePositionManager: ImagePositionManager;
+
+    constructor(app: App, imagePositionManager: ImagePositionManager) {
+        this.app = app;
+        this.imagePositionManager = imagePositionManager;
+    }
+
+    // Left, right, center image alignment/ positioning
+    public async updateImagePositionUI(
+        img: HTMLImageElement,
+        position: 'left' | 'center' | 'right',
+        wrap = false
+    ) {
+        const activeFile = this.app.workspace.getActiveFile();
+        if (!activeFile) return;
+
+        const src = img.getAttribute('src');
+        if (!src) return;
+
+        // Remove existing classes
+        const positionClasses = ['image-position-left', 'image-position-center', 'image-position-right'];
+        const wrapClasses = ['image-wrap', 'image-no-wrap'];
+
+        // Get the parent embed if it exists
+        const parentEmbed = img.closest('.internal-embed.image-embed');
+
+        // Function to update element classes
+        const updateElement = (element: Element) => {
+            if (element) {
+                // Remove existing position and wrap classes
+                element.classList.remove(...positionClasses, ...wrapClasses);
+
+                // Add new classes
+                element.classList.add(`image-position-${position}`);
+                element.classList.add(wrap ? 'image-wrap' : 'image-no-wrap');
+            }
+        };
+
+        // Update both the image and its parent embed
+        updateElement(img);
+        if (parentEmbed) {
+            updateElement(parentEmbed);
+        }
+
+        // Save to cache
+        await this.imagePositionManager.saveImagePositionToCache(
+            activeFile.path,
+            src,
+            position,
+            img.style.width,
+            wrap
+        );
+
+    }
+
+    public async removeImagePosition(img: HTMLImageElement) {
+        const activeFile = this.app.workspace.getActiveFile();
+        if (!activeFile) return;
+
+        const src = img.getAttribute('src');
+        if (!src) return;
+
+        // Remove all positioning classes
+        img.classList.remove(
+            'image-position-left',
+            'image-position-center',
+            'image-position-right',
+            'image-wrap',
+            'image-no-wrap'
+        );
+
+        // Remove from parent embed if exists
+        const parentEmbed = img.closest('.internal-embed.image-embed');
+        if (parentEmbed) {
+            parentEmbed.classList.remove(
+                'image-position-left',
+                'image-position-center',
+                'image-position-right',
+                'image-wrap',
+                'image-no-wrap'
+            );
+        }
+
+        // Remove from cache
+        await this.imagePositionManager.removeImageFromCache(activeFile.path, src);
+    }
+
+    public getCurrentImageWrap(element: HTMLImageElement): boolean {
+        return element.classList.contains('image-wrap');
+    }
+
+    public getCurrentImagePosition(element: HTMLImageElement): 'left' | 'center' | 'right' | 'none' {
+        if (element.classList.contains('image-position-center')) return 'center';
+        if (element.classList.contains('image-position-right')) return 'right';
+        if (element.classList.contains('image-position-left')) return 'left';
+        return 'none'; // default state when no positioning is applied
+    }
+
+    public applyPositionToImage(
+        img: HTMLImageElement,
+        positionData: { position: string; width?: string; wrap: boolean }
+    ) {
+        // Remove existing classes first
+        img.classList.remove(
+            'image-position-left',
+            'image-position-center',
+            'image-position-right',
+            'image-wrap',
+            'image-no-wrap'
+        );
+
+        // Add new classes
+        img.classList.add(`image-position-${positionData.position}`);
+        img.classList.add(positionData.wrap ? 'image-wrap' : 'image-no-wrap');
+
+        // Apply to parent embed if exists
+        const parentEmbed = img.closest('.internal-embed.image-embed');
+        if (parentEmbed) {
+            parentEmbed.classList.remove(
+                'image-position-left',
+                'image-position-center',
+                'image-position-right',
+                'image-wrap',
+                'image-no-wrap'
+            );
+            parentEmbed.classList.add(`image-position-${positionData.position}`);
+            parentEmbed.classList.add(positionData.wrap ? 'image-wrap' : 'image-no-wrap');
+        }
+
+        // Apply width if it exists
+        if (positionData.width) {
+            img.style.width = positionData.width;
+        }
+    }
+}
+
 // Helper class for async locking
 class AsyncLock {
     private locks: Map<string, Promise<void>> = new Map();
@@ -13475,3 +15382,7 @@ class AsyncLock {
         };
     }
 }
+
+
+
+

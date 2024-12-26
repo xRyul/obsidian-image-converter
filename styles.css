@@ -808,17 +808,47 @@
 
 
 
+.image-info-container {
+    padding: 8px 0px 0 0;
+}
+
+.input-group {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    margin-bottom: 8px;
+}
+
+.icon-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+}
+
+.input-label {
+    min-width: 45px;
+}
+
+.image-name-input,
+.image-path-input {
+    flex: 1;
+    min-width: 200px;
+}
+
+
 /* Image Positioning  */
 /* /////////////////////////////////////////////////// */
-/* Base image styles */
+
 .markdown-reading-view img,
 .markdown-source-view img,
 .internal-embed.image-embed {
-    display: inline-block;
+    display: inline-block !important;
     max-width: 100%;
     vertical-align: top;
     pointer-events: auto;
-    position: relative;
+    position: relative !important;
     z-index: 2;
 }
 
@@ -826,7 +856,6 @@
 .markdown-reading-view img[style*="width"],
 .markdown-source-view img[style*="width"] {
     height: auto !important;
-    
 }
 
 /* ===== Reading Mode Styles ===== */
@@ -835,24 +864,24 @@
 .image-wrap.image-position-left,
 .image-wrap.internal-embed.image-embed.image-position-left {
     float: left !important;
-    margin: 0.5em 1em 0.5em 0 !important;
-    clear: left;
+    margin: 0.5em 1em 0.5em 0;
+    clear: left !important;
 }
 
 .image-wrap.image-position-right,
 .image-wrap.internal-embed.image-embed.image-position-right {
     float: right !important;
-    margin: 0.5em 0 0.5em 1em !important;
-    clear: right;
+    margin: 0.5em 0 0.5em 1em;
+    clear: right !important;
 }
 
 /* Positioning styles WITHOUT wrap */
 .image-no-wrap.image-position-left,
 .image-no-wrap.internal-embed.image-embed.image-position-left {
     display: block !important;
-    margin:auto !important;
+    margin:auto !important;;
     margin-left: 0 !important;
-    clear: both;
+    clear: both !important;
     float: none !important;
 }
 
@@ -861,7 +890,7 @@
     display: block !important;
     margin: auto !important;
     margin-right: 0 !important;
-    clear: both;
+    clear: both !important;
     float: none !important;
 }
 
@@ -870,7 +899,7 @@
 .internal-embed.image-embed.image-position-center {
     display: block !important;
     margin: auto !important;
-    clear: both;
+    clear: both !important;
     float: none !important;
 }
 
@@ -881,15 +910,15 @@
 .markdown-source-view.mod-cm6 .image-wrap.image-position-left,
 .markdown-source-view.mod-cm6 .image-wrap.internal-embed.image-embed.image-position-left {
     float: left !important;
-    margin: 0 1em 0.5em 0 !important;
-    clear: left;
+    margin: 0 1em 0.5em 0;
+    clear: left !important;
 }
 
 .markdown-source-view.mod-cm6 .image-wrap.image-position-right,
 .markdown-source-view.mod-cm6 .image-wrap.internal-embed.image-embed.image-position-right {
     float: right !important;
-    margin: 0em 0 0.5em 1em !important;
-    clear: right;
+    margin: 0em 0 0.5em 1em;
+    clear: right !important;
 }
 
 
@@ -900,7 +929,7 @@
     display: block !important;
     margin: auto !important;
     margin-left: 0 !important;
-    clear: both;
+    clear: both !important;
     float: none !important;
 }
 
@@ -909,7 +938,7 @@
     display: block !important;
     margin: auto !important;
     margin-right: 0 !important;
-    clear: both;
+    clear: both !important;
     float: none !important;
 }
 
@@ -918,9 +947,9 @@
 .markdown-source-view.mod-cm6 .internal-embed.image-embed.image-position-center {
     display: block !important;
     margin: auto !important;
-    clear: both;
+    clear: both !important;
     float: none !important;
-    text-align: center;
+    text-align: center !important;
 }
 
 /* List image container styles */
@@ -938,16 +967,17 @@
 
 /* Container positioning within lists */
 .image-list-container.image-position-left {
-    align-self: flex-start;
+    align-self: flex-start !important;
 }
 
 .image-list-container.image-position-center {
-    align-self: center;
+    align-self: center !important;
 }
 
 .image-list-container.image-position-right {
-    align-self: flex-end;
+    align-self: flex-end !important;
 }
+
 
 
 
@@ -1232,46 +1262,68 @@
     padding: 1rem;
 }
 
-.modal-header {
+.image-convert-modal .image-counts-display-container {
+    margin-top: 20px;
+    /* Add some space above the counts */
+    text-align: center;
+    /* Center-align the counts (optional) */
+}
+
+.image-counts-display {
+    width: fit-content;      /* Adjust width to fit the content */
+    margin-left: auto;      /* Automatic left margin */
+    margin-right: auto;     /* Automatic right margin */
+    text-align: center;
+}
+
+.image-convert-modal .modal-subtitle {
+    font-size: 0.9em;
+    /* Make the subtitle slightly smaller */
+    color: #666;
+    /* Use a lighter color for the subtitle (optional) */
+}
+
+.image-convert-modal .modal-header {
     text-align: center;
     margin-bottom: 1rem;
 }
 
-.modal-subtitle {
+.image-convert-modal .modal-subtitle {
     margin-top: -18px;
 }
 
-.modal-warning {
+.image-convert-modal .modal-warning {
     margin-top: -10px;
     padding: 20px;
     border-radius: 10px;
-    background-color: var(--background-modifier-message);
+    background-color: var(--background-secondary);
 }
 
-.settings-container {
+.image-convert-modal .settings-container {
     margin-top: 1rem;
 }
 
-.button-container {
+.image-convert-modal .button-container {
     margin-top: 1rem;
     text-align: center;
 }
 
-.resize-input-setting,
-.enlarge-reduce-setting {
+.image-convert-modal .resize-input-setting,
+.image-convert-modal .enlarge-reduce-setting {
     margin-top: 1em;
 }
 
-.conditional-settings {
+.image-convert-modal .conditional-settings {
     margin-top: 1em;
     padding: 1em;
     border: 1px solid var(--background-modifier-border);
     border-radius: 4px;
 }
 
-.format-quality-container,
-.resize-container,
-.skip-container {
+.image-convert-modal .image-source-setting-container,
+.image-convert-modal .format-quality-container,
+.image-convert-modal .resize-container,
+.image-convert-modal .skip-container {
     margin-bottom: 20px;
     padding: 10px;
     border: 1px solid var(--background-modifier-border);
@@ -2227,3 +2279,4 @@
         transform: translate(-50%, -50%) scale(1);
     }
 } */
+
