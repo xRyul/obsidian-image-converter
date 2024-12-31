@@ -1,5 +1,5 @@
 
-import { App, View, MarkdownView, Notice, setIcon, ItemView, DropdownComponent, FileView, Plugin, TFile, TFolder, Scope, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
+import { App, View, MarkdownView, Notice, setIcon, EventRef, ItemView, DropdownComponent, FileView, Plugin, TFile, TFolder, Scope, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
 
 
 // Browsers use the MIME type, not the file extension this module allows 
@@ -436,11 +436,14 @@ export default class ImageConvertPlugin extends Plugin {
 	// Escape key to stop conversion
 	private isKillSwitchActive = false;
 
+	private createEventHandlers: Set<EventRef> = new Set();
+	
 
 	async onload() {
 		await super.onload();
 
 		this.lastProcessedTime = 0;
+		
 		// Load settings first
 		await this.loadSettings();
 
@@ -467,16 +470,11 @@ export default class ImageConvertPlugin extends Plugin {
 		
 			// Register commands
 			this.registerCommands();
-			// Register all event handlers
-			this.registerEventHandlers();
-	
+
 			// Initialize UI features
 			this.initializeDragResize();
 			this.registerScrollWheelResize();
 			this.scrollwheelresize_registerMouseoverHandler();
-	
-			// Register for file creation events
-			this.registerFileEvents();
 
 			// Register for layout changes
 			this.registerEvent(
@@ -496,8 +494,7 @@ export default class ImageConvertPlugin extends Plugin {
 							console.error('Layout change error:', error);
 						}
 					})();
-	
-					this.registerEventHandlers();
+					this.registerInitialPasteAndDropEvents(); 
 					this.initializeDragResize();
 				})
 			);
@@ -625,6 +622,8 @@ export default class ImageConvertPlugin extends Plugin {
 			FabricObject.prototype.cornerColor = '#108ee9';
 			FabricObject.prototype.cornerStyle = 'circle';
 
+			// Register ONLY paste and drop events initially
+			this.registerInitialPasteAndDropEvents(); 
 		});
 	
 		// Register escape key handler
@@ -748,7 +747,12 @@ export default class ImageConvertPlugin extends Plugin {
 		
 		// Reset dropInfo
 		this.dropInfo = null;
-		
+
+		// Unregister 'create' event handlers
+		for (const handlerRef of this.createEventHandlers) {
+			this.app.vault.offref(handlerRef);
+		}
+		this.createEventHandlers.clear();
 		// Hide progress UI
 		this.hideProgressBar();
 		
@@ -761,75 +765,44 @@ export default class ImageConvertPlugin extends Plugin {
 		}, 1000);
 	}
 
-	private registerEventHandlers() {
-		// Register workspace-level events
-		const workspaceContainer = this.app.workspace.containerEl;
-		
-		if (!this.registeredContainers.has('workspace')) {
-			// Paste event
-			this.registerEvent(
-				this.app.workspace.on('editor-paste', async (evt: ClipboardEvent, editor, view) => {
-					if (this.shouldSkipEvent(evt)) return;
-					await this.handlePaste(evt);
-				})
-			);
-	
-			// Drop event
-			this.registerEvent(
-				this.app.workspace.on('editor-drop', async (evt: DragEvent, editor, view) => {
-					if (this.shouldSkipEvent(evt)) return;
-					await this.handleDrop(evt);
-				})
-			);
-	
-
-			// Direct DOM events for additional coverage: This is for OBSIDIAN CANVAS and EXCALIDRAW
-			this.registerDomEvent(workspaceContainer, 'paste', async (evt: ClipboardEvent) => {
+	private registerInitialPasteAndDropEvents() {
+		// Paste event (Obsidian editor)
+		this.registerEvent(
+			this.app.workspace.on('editor-paste', async (evt: ClipboardEvent, editor, view) => {
 				if (this.shouldSkipEvent(evt)) return;
 				await this.handlePaste(evt);
-			}, { capture: true });
+				this.registerCreateEventAfterAction(); // Register 'create' event *after* paste
+			})
+		);
 	
-			this.registerDomEvent(workspaceContainer, 'drop', async (evt: DragEvent) => {
+		// Drop event (Obsidian editor)
+		this.registerEvent(
+			this.app.workspace.on('editor-drop', async (evt: DragEvent, editor, view) => {
 				if (this.shouldSkipEvent(evt)) return;
 				await this.handleDrop(evt);
-			}, { capture: true });
+				this.registerCreateEventAfterAction(); // Register 'create' event *after* drop
+			})
+		);
 	
-			this.registeredContainers.add('workspace');
-		}
+		// DOM events for Canvas and Excalidraw (workspace level)
+		const workspaceContainer = this.app.workspace.containerEl;
+		this.registerDomEvent(workspaceContainer, 'paste', async (evt: ClipboardEvent) => {
+			if (this.shouldSkipEvent(evt)) return;
+			await this.handlePaste(evt);
+			this.registerCreateEventAfterAction();
+		}, { capture: true });
 	
-		// Register for specific view types
-		const supportedViewTypes = ['markdown', 'canvas', 'excalidraw'];
-		supportedViewTypes.forEach(viewType => {
-			const leaves = this.app.workspace.getLeavesOfType(viewType);
-			leaves.forEach((leaf, index) => {
-				// Use a combination of viewType and container element's data-id or index
-				const containerId = `${viewType}-${leaf.getViewState().state?.file || index}`;
-				
-				if (!this.registeredContainers.has(containerId)) {
-					this.setupViewHandlers(leaf.view, viewType);
-					this.registeredContainers.add(containerId);
-				}
-			});
-		});
+		this.registerDomEvent(workspaceContainer, 'drop', async (evt: DragEvent) => {
+			if (this.shouldSkipEvent(evt)) return;
+			await this.handleDrop(evt);
+			this.registerCreateEventAfterAction();
+		}, { capture: true });
 	}
 	
 	private clearExistingHandlers() {
 		// Clear container registrations when switching notes
 		this.registeredContainers.clear();
-	}
-	
-	private setupViewHandlers(view: View, viewType: string) {
-		const container = view.containerEl;
-		if (!container.hasAttribute('data-image-converter-registered')) {
-			container.setAttribute('data-image-converter-registered', 'true');
-			
-			// Remove preventDefault from dragover
-			this.registerDomEvent(container, 'dragover', (e: DragEvent) => {
-				// Let Obsidian handle the dragover behavior
-			}, { capture: true });
-		}
-	}
-	
+	}	
 
 	private shouldSkipEvent(evt: ClipboardEvent | DragEvent): boolean {
 
@@ -1139,34 +1112,47 @@ export default class ImageConvertPlugin extends Plugin {
 
 	}
 
-	private registerFileEvents() {
-		this.registerEvent(
-			this.app.vault.on('create', async (file: TFile) => {
-				if (!(file instanceof TFile) || !isImage(file)) return;
-				if (this.isConversionPaused) return;
-
-				if (this.shouldSkipFile(file.name)) {
-					console.log(`Skipping file ${file.name} due to pattern match`);
-					return;
+	private registerCreateEventAfterAction() {
+		const createEventHandler = this.app.vault.on('create', async (file: TFile) => {
+			if (!(file instanceof TFile) || !isImage(file)) return;
+			if (this.isConversionPaused) return;
+	
+			if (this.shouldSkipFile(file.name)) {
+				console.log(`Skipping file ${file.name} due to pattern match`);
+				return;
+			}
+	
+			if (await this.isExternalOperation(file)) return;
+	
+			// For multiple files, we want to maintain the batch state
+			if (!this.batchStarted) {
+				this.batchStarted = true;
+				this.userAction = true;
+			}
+	
+			const isMobile = Platform.isMobile;
+	
+			if (isMobile) {
+				await this.handleMobileFileCreation(file);
+			} else {
+				await this.handleDesktopFileCreation(file);
+			}
+	
+			// Check if all expected files for the current batch have been processed
+			if (this.dropInfo && this.dropInfo.totalProcessedFiles === this.dropInfo.totalExpectedFiles) {
+				// Unregister all 'create' event handlers associated with this batch
+				for (const handlerRef of this.createEventHandlers) {
+					this.app.vault.offref(handlerRef);
 				}
-
-				if (await this.isExternalOperation(file)) return;
-				// For multiple files, we want to maintain the batch state
-				if (!this.batchStarted) {
-					this.batchStarted = true;
-					this.userAction = true;
-				}
-				
-				const isMobile = Platform.isMobile;
-
-				if (isMobile) {
-					await this.handleMobileFileCreation(file);
-				} else {
-					await this.handleDesktopFileCreation(file);
-				}
-			})
-		);
+				this.createEventHandlers.clear();
+			}
+		});
+	
+		// Add the event handler to the plugin's event registry and our tracking Set
+		this.registerEvent(createEventHandler);
+		this.createEventHandlers.add(createEventHandler);
 	}
+
 	private async isExternalOperation(file: TFile): Promise<boolean> {
 		const now = Date.now();
 	
@@ -1690,6 +1676,11 @@ export default class ImageConvertPlugin extends Plugin {
 					// 	await leaf.setViewState(currentState);
 
 					// }
+					// Unregister 'create' event handlers after processing the batch
+					for (const handlerRef of this.createEventHandlers) {
+						this.app.vault.offref(handlerRef);
+					}
+					this.createEventHandlers.clear();
 
 				}
 	
@@ -4935,7 +4926,7 @@ export default class ImageConvertPlugin extends Plugin {
 		// Also reinitialize on layout changes
 		this.registerEvent(
 			this.app.workspace.on('layout-change', () => {
-				// You might want to remove and reapply the class
+				// Remove and reapply the class
 				this.app.workspace.containerEl.removeClass('image-resize-enabled');
 				this.app.workspace.containerEl.addClass('image-resize-enabled');
 			})

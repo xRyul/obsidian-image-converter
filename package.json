@@ -12,6 +12,7 @@
 	"author": "",
 	"license": "MIT",
 	"devDependencies": {
+		"@codemirror/language": "^6.10.6",
 		"@types/croppie": "^2.6.4",
 		"@types/fabric": "^5.3.9",
 		"@types/node": "^16.11.6",
