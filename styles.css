@@ -840,10 +840,42 @@
 
 /* Image Positioning  */
 /* /////////////////////////////////////////////////// */
+/* .markdown-reading-view img,
+.markdown-source-view img,
+.internal-embed.image-embed {
+    display: inline-block !important;
+    max-width: 100%;
+    vertical-align: top;
+    pointer-events: auto;
+    position: relative !important;
+    z-index: 2;
+} */
 
 .markdown-reading-view img,
 .markdown-source-view img,
 .internal-embed.image-embed {
+    vertical-align: top;
+    max-width: 100%;
+}
+
+.image-wrap.image-position-left,
+.image-wrap.internal-embed.image-embed.image-position-left,
+.image-wrap.image-position-right,
+.image-wrap.internal-embed.image-embed.image-position-right,
+.image-no-wrap.image-position-left,
+.image-no-wrap.internal-embed.image-embed.image-position-left,
+.image-no-wrap.image-position-right,
+.image-no-wrap.internal-embed.image-embed.image-position-right,
+.image-position-center,
+.internal-embed.image-embed.image-position-center,
+.markdown-source-view.mod-cm6 .image-wrap.image-position-left,
+.markdown-source-view.mod-cm6 .image-wrap.internal-embed.image-embed.image-position-left,
+.markdown-source-view.mod-cm6 .image-wrap.image-position-right,
+.markdown-source-view.mod-cm6 .image-wrap.internal-embed.image-embed.image-position-right,
+.markdown-source-view.mod-cm6 .image-position-center,
+.markdown-source-view.mod-cm6 .internal-embed.image-embed.image-position-center,
+.markdown-source-view.mod-cm6 .image-no-wrap.image-position-left,
+.markdown-source-view.mod-cm6 .image-no-wrap.internal-embed.image-embed.image-position-left {
     display: inline-block !important;
     max-width: 100%;
     vertical-align: top;
@@ -922,7 +954,17 @@
 }
 
 
-
+/* Image Container for Live Preview */
+.image-container[class*="image-position-"],
+.image-container[class*="image-wrap"],
+.image-container[class*="image-no-wrap"] {
+    display: contents;
+    line-height: 0;
+}
+.markdown-source-view.mod-cm6 .cm-line:has(img[width][style*="position"]) { 
+    text-indent: 0;
+    padding-inline-start: 0;
+}
 /* Live Preview positioning WITHOUT wrap */
 .markdown-source-view.mod-cm6 .image-no-wrap.image-position-left,
 .markdown-source-view.mod-cm6 .image-no-wrap.internal-embed.image-embed.image-position-left {
@@ -953,31 +995,67 @@
 }
 
 /* List image container styles */
-.image-list-container {
+.image-list-container[class*="image-position-"] {
     width: 100%;
-    margin: 0.5em 0;
 }
 
-/* Maintain list structure */
-.markdown-source-view.mod-cm6 .cm-line:has(.image-list-container) {
-    display: flex !important;
-    flex-direction: column !important;
-    align-items: flex-start !important;
+/* --- Image List Container --- */
+
+/* Create a dedicated container for the image within the list item */
+.markdown-source-view.mod-cm6 .cm-line.HyperMD-list-line:has(img[width][style*="position"]) .cm-line {
+    display: flex;
+    flex-direction: column;
+    width: calc(100% - var(--list-indent, 0px));
+    position: relative;
+    margin-left: var(--list-indent, 0px);
 }
 
-/* Container positioning within lists */
+.markdown-source-view.mod-cm6 .cm-line.HyperMD-list-line:has(img[width][style*="position"]) .cm-line > :not(.image-list-container) {
+    position: relative;
+    z-index: 3;
+}
+
+/* Styles for the image container */
+.markdown-source-view.mod-cm6 .cm-line.HyperMD-list-line:has(img[width][style*="position"]) .image-list-container {
+    display: flex;
+    justify-content: flex-start;
+    width: 100%;
+    overflow: hidden;
+    z-index: 1;
+}
+
+/* --- List Item Adjustments --- */
+
+/* Reset list item styles for resized images */
+.markdown-source-view.mod-cm6 .cm-line.HyperMD-list-line:has(.image-position-left),
+.markdown-source-view.mod-cm6 .cm-line.HyperMD-list-line:has(.image-position-right),
+.markdown-source-view.mod-cm6 .cm-line.HyperMD-list-line:has(.image-position-center) {
+    text-indent: 0 !important;
+    padding-inline-start: 0 !important;
+}
+
+/* --- Image Positioning within the Container --- */
+/* Left alignment */
 .image-list-container.image-position-left {
-    align-self: flex-start !important;
+    justify-content: flex-start; /* Already the default */
 }
 
+/* Center alignment */
 .image-list-container.image-position-center {
-    align-self: center !important;
+    justify-content: center;
 }
 
+/* Right alignment */
 .image-list-container.image-position-right {
-    align-self: flex-end !important;
+    justify-content: flex-end;
 }
 
+/* --- Image Styling --- */
+.markdown-source-view.mod-cm6 .cm-line.HyperMD-list-line:has(img[width][style*="position"]) img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+}
 
 
 

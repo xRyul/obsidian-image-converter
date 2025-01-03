@@ -15,5 +15,34 @@
       "width": "",
       "wrap": false
     }
+  },
+  "✔️ 1.2.17.md": {
+    "app://b2d0a81e2df69bbab0a4a96239aa24607770/C:/Users/Daniel/Desktop/image-converter-MAIN/121212/%E2%9C%94%EF%B8%8F%201.2.17-20241218091328801.png?1734513208894": {
+      "position": "center",
+      "width": "324px",
+      "wrap": false
+    }
+  },
+  "Clouds.md": {
+    "app://b2d0a81e2df69bbab0a4a96239aa24607770/C:/Users/Daniel/Desktop/image-converter-MAIN/121212/usage-20241218091857550.png?1734513539138": {
+      "position": "right",
+      "width": "305px",
+      "wrap": true
+    },
+    "app://b2d0a81e2df69bbab0a4a96239aa24607770/C:/Users/Daniel/Desktop/image-converter-MAIN/121212/Clouds-20241219003454186.png?1734568495887": {
+      "position": "left",
+      "width": "258px",
+      "wrap": true
+    },
+    "app://dbcce5ddbbf9ea8cdb8db630de47b615ad5d/C:/Users/Daniel/Desktop/image-converter-MAIN/121212/usage-20241216233929337.webp?1734392373224": {
+      "position": "left",
+      "width": "272px",
+      "wrap": false
+    },
+    "app://dbcce5ddbbf9ea8cdb8db630de47b615ad5d/C:/Users/Daniel/Desktop/image-converter-MAIN/121212/Clouds-20241219003454186.png?1734568495887": {
+      "position": "left",
+      "width": "241px",
+      "wrap": true
+    }
   }
 }

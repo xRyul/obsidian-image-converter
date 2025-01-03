@@ -472,9 +472,20 @@ export default class ImageConvertPlugin extends Plugin {
 			this.registerCommands();
 
 			// Initialize UI features
-			this.initializeDragResize();
-			this.registerScrollWheelResize();
-			this.scrollwheelresize_registerMouseoverHandler();
+			this.initializeDragResize(document);
+			this.registerScrollWheelResize(document);
+			this.scrollwheelresize_registerMouseoverHandler(document);
+	
+			// Register RIGHT click in new window too
+			this.app.workspace.on("window-open", (newWindow) => {
+				// Delay the execution slightly to ensure the new window's DOM is ready
+				setTimeout(() => {
+					this.registerContextMenuForWindow(newWindow.win.document);
+					this.initializeDragResize(newWindow.win.document);
+					this.registerScrollWheelResize(newWindow.win.document);
+					this.scrollwheelresize_registerMouseoverHandler(newWindow.win.document);
+				}, 500); 
+			});
 
 			// Register for layout changes
 			this.registerEvent(
@@ -495,7 +506,7 @@ export default class ImageConvertPlugin extends Plugin {
 						}
 					})();
 					this.registerInitialPasteAndDropEvents(); 
-					this.initializeDragResize();
+					this.initializeDragResize(document);
 				})
 			);
 	
@@ -4191,6 +4202,26 @@ export default class ImageConvertPlugin extends Plugin {
 		el.on(event, selector, listener, options);
 		return () => el.off(event, selector, listener, options);
 	}
+	
+	private registerContextMenuForWindow(doc: Document) {
+		this.registerDomEvent(
+			doc,
+			'contextmenu',
+			(event: MouseEvent) => {
+				const target = event.target as HTMLElement;
+	
+				// Check if target is an image or is within an image container
+				const img = target instanceof HTMLImageElement ? 
+					target : 
+					target.closest('img');
+	
+				if (img) {
+					this.onContextMenu(event, img as HTMLImageElement);
+				}
+			},
+			true  // capture phase
+		);
+	}
 
 	onContextMenu(event: MouseEvent, img: HTMLImageElement) {
 
@@ -4912,13 +4943,13 @@ export default class ImageConvertPlugin extends Plugin {
 
 	/* Drag Resize */
 	/* ------------------------------------------------------------- */
-	private initializeDragResize() {
+	private initializeDragResize(doc: Document) {
 		if (Platform.isMobile) { return; }
 
-		this.registerDomEvent(document, 'mousedown', this.dragResize_handleMouseDown.bind(this));
-		this.registerDomEvent(document, 'mousemove', this.dragResize_handleMouseMove.bind(this));
-		this.registerDomEvent(document, 'mouseup', this.dragResize_handleMouseUp.bind(this));
-		this.registerDomEvent(document, 'mouseout', this.dragResize_handleMouseOut.bind(this));
+		this.registerDomEvent(doc, 'mousedown', this.dragResize_handleMouseDown.bind(this));
+		this.registerDomEvent(doc, 'mousemove', this.dragResize_handleMouseMove.bind(this));
+		this.registerDomEvent(doc, 'mouseup', this.dragResize_handleMouseUp.bind(this));
+		this.registerDomEvent(doc, 'mouseout', this.dragResize_handleMouseOut.bind(this));
 	
 		// Add the base CSS class to workspace
 		this.app.workspace.containerEl.addClass('image-resize-enabled');
@@ -5240,10 +5271,10 @@ export default class ImageConvertPlugin extends Plugin {
 		}
 	}
 
-	private registerScrollWheelResize() {
+	private registerScrollWheelResize(doc: Document) {
 		this.register(
 			this.onElement(
-				document,
+				doc,
 				"wheel",
 				"img, video",
 				async (event: WheelEvent) => {
@@ -5337,10 +5368,10 @@ export default class ImageConvertPlugin extends Plugin {
 		);
 	}
 
-	private scrollwheelresize_registerMouseoverHandler() {
+	private scrollwheelresize_registerMouseoverHandler(doc: Document) {
 		this.register(
 			this.onElement(
-				document,
+				doc,
 				"mouseover",
 				"img, video",
 				(event: MouseEvent) => {
@@ -6760,8 +6791,11 @@ function getFullImagePath(activeView: MarkdownView | null, file: TFile): string 
     return file.path;
 }
 function deleteMarkdownLink(activeView: MarkdownView, imagePath: string | null) {
-    if (!imagePath) return;
+    if (!imagePath) {
+        return;
+    }
 
+    // const startTime = performance.now(); // Capture start time for performance tracking
     const editor = activeView.editor;
     const doc = editor.getDoc();
     const lineCount = doc.lineCount();
@@ -6774,15 +6808,31 @@ function deleteMarkdownLink(activeView: MarkdownView, imagePath: string | null) 
         .trim();
 
     let frontmatterEnd = -1;
+    let inFrontmatter = false; // Flag to track if we're inside frontmatter
 
     // First pass: identify frontmatter end
     for (let i = 0; i < lineCount; i++) {
         const line = editor.getLine(i).trim();
+
         if (line === '---') {
-            if (i === 0) continue; // Skip the first '---'
-            frontmatterEnd = i;
-            break;
+            if (!inFrontmatter && i === 0) {  // Frontmatter start
+                inFrontmatter = true;
+                // console.debug(`[deleteMarkdownLink] Found frontmatter start at line ${i}.`);
+            } else if (inFrontmatter) {  // Frontmatter end
+                frontmatterEnd = i;
+                inFrontmatter = false;
+                // console.debug(`[deleteMarkdownLink] Found frontmatter end at line ${i}.`);
+                break;
+            }
+            // If we are inside frontmatter, set this to -1 again, in case this is not really a frontmatter end after all.
+            else frontmatterEnd = -1;
+        } else if(inFrontmatter) {
+            // console.debug(`[deleteMarkdownLink] Line ${i}: Ignoring line in frontmatter: "${line}"`);
         }
+    }
+
+    if (frontmatterEnd === -1) {
+        // console.debug(`[deleteMarkdownLink] No frontmatter found.`);
     }
 
     // Store all matches to delete
@@ -6791,31 +6841,39 @@ function deleteMarkdownLink(activeView: MarkdownView, imagePath: string | null) 
     // Search through all lines in the document (excluding frontmatter)
     for (let i = frontmatterEnd + 1; i < lineCount; i++) {
         const line = editor.getLine(i);
+        console.trace(`[deleteMarkdownLink] Checking line ${i}: "${line}"`);
         
         // Find all possible matches in the current line
         const wikiMatches = [...line.matchAll(/!\[\[([^\]]+?)(?:\|[^\]]+?)?\]\]/g)];
         const mdMatches = [...line.matchAll(/!\[([^\]]*?)(?:\|\d+(?:\|\d+)?)?\]\(([^)]+)\)/g)];
         
+        // console.debug(`[deleteMarkdownLink] Line ${i}: Found ${wikiMatches.length} wiki-style matches and ${mdMatches.length} markdown-style matches.`);
+
         // Check wiki-style links
         for (const match of wikiMatches) {
+            const fullMatch = match[0];
             const linkPath = match[1].split('|')[0]
                 .replace(/\\/g, '/')
                 .replace(/%20/g, ' ')
                 .split('?')[0]
                 .toLowerCase()
                 .trim();
+            
+            const isMatch = linkPath.includes(normalizedImagePath);
+            // console.debug(`[deleteMarkdownLink] Wiki-style match: Full match: "${fullMatch}", Extracted path: "${linkPath}", Match: ${isMatch}`);
 
-            if (linkPath.includes(normalizedImagePath)) {
+            if (isMatch) {
                 matchesToDelete.push({
                     line: i,
                     start: match.index!,
-                    length: match[0].length
+                    length: fullMatch.length
                 });
             }
         }
 
         // Check markdown-style links
         for (const match of mdMatches) {
+            const fullMatch = match[0];
             const linkPath = match[2]
                 .replace(/\\/g, '/')
                 .replace(/%20/g, ' ')
@@ -6823,11 +6881,14 @@ function deleteMarkdownLink(activeView: MarkdownView, imagePath: string | null) 
                 .toLowerCase()
                 .trim();
 
-            if (linkPath.includes(normalizedImagePath)) {
+            const isMatch = linkPath.includes(normalizedImagePath);
+            // console.debug(`[deleteMarkdownLink] Markdown-style match: Full match: "${fullMatch}", Extracted path: "${linkPath}", Match: ${isMatch}`);
+            
+            if (isMatch) {
                 matchesToDelete.push({
                     line: i,
                     start: match.index!,
-                    length: match[0].length
+                    length: fullMatch.length
                 });
             }
         }
@@ -6835,16 +6896,19 @@ function deleteMarkdownLink(activeView: MarkdownView, imagePath: string | null) 
 
     // Delete matches in reverse order to maintain correct positions
     for (const match of matchesToDelete.reverse()) {
+        // console.debug(`[deleteMarkdownLink] Deleting match from line ${match.line}, start: ${match.start}, length: ${match.length}`);
         deleteMatchFromLine(editor, match.line, match.start, match.length);
     }
     
+    // const endTime = performance.now();
+    // const duration = (endTime - startTime).toFixed(2);
+
     if (matchesToDelete.length === 0) {
-        console.log("No match found for:", normalizedImagePath);
+        // console.info(`[deleteMarkdownLink] No match found for: "${normalizedImagePath}" in ${duration}ms`);
     } else {
-        console.log(`Deleted ${matchesToDelete.length} instances of:`, normalizedImagePath);
+        // console.info(`[deleteMarkdownLink] Deleted ${matchesToDelete.length} instances of: "${normalizedImagePath}" in ${duration}ms`);
     }
 }
-
 function deleteMatchFromLine(
     editor: Editor,
     lineNumber: number,
