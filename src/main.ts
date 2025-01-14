@@ -2,7 +2,7 @@
 import { App, View, MarkdownView, Notice, setIcon, EventRef, ItemView, DropdownComponent, FileView, Plugin, TFile, TFolder, Scope, PluginSettingTab, Platform, Setting, Editor, Modal, TextComponent, ButtonComponent, Menu, MenuItem, normalizePath } from 'obsidian';
 
 
-// Browsers use the MIME type, not the file extension this module allows 
+// Browsers use the MIME type, not the file extension this module allows
 // us to be more precise when default MIME checking options fail
 import mime from "./mime.min.js"
 
@@ -31,7 +31,7 @@ import { Canvas, FabricImage, IText, FabricObject, PencilBrush, ActiveSelection,
 // SOFTWARE.
 
 
-type BlendMode = 
+type BlendMode =
     | 'source-over'
     | 'multiply'
     | 'screen'
@@ -62,10 +62,10 @@ interface ToolPreset {
 /*
 
 UTIF, HEIC, and probe modules - Instead of always loading it,
-we now load them only and only, when TIFF, heic image is detected - this 
+we now load them only and only, when TIFF, heic image is detected - this
 increases load speed efficiency drastically.
 
-import UTIF from './UTIF.js'; 
+import UTIF from './UTIF.js';
 import probe from 'probe-image-size';
 let heic: any;
 if (!Platform.isMobile) {
@@ -91,7 +91,7 @@ declare module 'obsidian' {
         setIcon(icon: string): MenuItem;
         setTitle(title: string): MenuItem;
         onClick(callback: () => any): MenuItem;
-    }	
+    }
 }
 
 interface OperationState {
@@ -117,7 +117,7 @@ interface QueueItem {
     file: TFile;
     addedAt: number;
     viewType?: 'markdown' | 'canvas' | 'excalidraw';
-    parentFile?: TFile;		
+    parentFile?: TFile;
     processed: boolean;    // Track processing status
 	originalName?: string; // Track original file name, which prevents the same file from being processed multiple times
 	originalPath?: string;  // Track the original file path
@@ -143,7 +143,7 @@ interface ProcessedFileInfo {
     size: number;
     platform: 'mobile' | 'desktop';  // Track which platform processed the file
     hash?: string;					// Optional hash for additional verification
-	isQualityOnly?: boolean;                   
+	isQualityOnly?: boolean;
 }
 
 // Define possible modifier keys
@@ -202,7 +202,7 @@ interface ImageConvertSettings {
 	// ProcessCurrentImage_EnlargeOrReduce: 'Always' | 'Reduce' | 'Enlarge';
 	// ProcessCurrentImage_SkipFormats: string;
 
-	
+
 	attachmentLocation: 'default' | 'root' | 'current' | 'subfolder' | 'customOutput';
 	attachmentSubfolderName: string;
 	customOutputPath: string;
@@ -233,12 +233,14 @@ interface ImageConvertSettings {
 
 	useMdLinks: boolean;
 	useRelativePath: boolean;
-	
+
 	annotationPresets: {
         drawing: ToolPreset[];
         arrow: ToolPreset[];
         text: ToolPreset[];
     };
+
+	addRandomTag: boolean; // Add a random tag after image. Then user can use {@fig:thetag} to mention this image. More at https://github.com/lierdakil/pandoc-crossref
 }
 
 interface SettingsTab {
@@ -321,12 +323,12 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
 	destructive_desiredHeight: 800,
 	destructive_desiredLongestEdge: 800,
 	destructive_enlarge_or_reduce: 'Always',
-	
+
 	nondestructive_resizeMode: "disabled",
 	nondestructive_resizeMode_customSize: "",
-	nondestructive_resizeMode_fitImage: "", 
+	nondestructive_resizeMode_fitImage: "",
 	nondestructive_enlarge_or_reduce: 'Always',
-	
+
 	resizeByDragging: true,
     resizeWithScrollwheel: true,
 	scrollwheelModifier: 'Shift',
@@ -360,7 +362,9 @@ const DEFAULT_SETTINGS: ImageConvertSettings = {
             blendMode: 'source-over' as BlendMode,
             size: 24  // Add default size (for text, this is fontSize)
         })
-    }
+    },
+
+	addRandomTag: false
 }
 
 export default class ImageConvertPlugin extends Plugin {
@@ -378,7 +382,7 @@ export default class ImageConvertPlugin extends Plugin {
 	};
 
 	private registeredContextMenuCommands: string[] = [];
-	
+
 	// Queue
 	private fileHashes = new Set<string>();
     private progressEl: HTMLElement | null = null;
@@ -407,7 +411,7 @@ export default class ImageConvertPlugin extends Plugin {
 
 	// Pause/Resume
 	private isConversionPaused = false; // track the status, paused?
-	private isConversionPaused_statusTimeout: number | null = null; // hide status 
+	private isConversionPaused_statusTimeout: number | null = null; // hide status
 
 	private isConversionDisabled = false;  // For complete plugin disable
     private isProcessingDisabled = false;  // For conversion/compression/resize disable only
@@ -437,13 +441,13 @@ export default class ImageConvertPlugin extends Plugin {
 	private isKillSwitchActive = false;
 
 	private createEventHandlers: Set<EventRef> = new Set();
-	
+
 
 	async onload() {
 		await super.onload();
 
 		this.lastProcessedTime = 0;
-		
+
 		// Load settings first
 		await this.loadSettings();
 
@@ -467,7 +471,7 @@ export default class ImageConvertPlugin extends Plugin {
 			// Initialize UI elements
 			this.progressEl = document.body.createDiv('image-converter-progress');
 			this.progressEl.style.display = 'none';
-		
+
 			// Register commands
 			this.registerCommands();
 
@@ -475,7 +479,7 @@ export default class ImageConvertPlugin extends Plugin {
 			this.initializeDragResize(document);
 			this.registerScrollWheelResize(document);
 			this.scrollwheelresize_registerMouseoverHandler(document);
-	
+
 			// Register RIGHT click in new window too
 			this.app.workspace.on("window-open", (newWindow) => {
 				// Delay the execution slightly to ensure the new window's DOM is ready
@@ -484,7 +488,7 @@ export default class ImageConvertPlugin extends Plugin {
 					this.initializeDragResize(newWindow.win.document);
 					this.registerScrollWheelResize(newWindow.win.document);
 					this.scrollwheelresize_registerMouseoverHandler(newWindow.win.document);
-				}, 500); 
+				}, 500);
 			});
 
 			// Register for layout changes
@@ -505,13 +509,13 @@ export default class ImageConvertPlugin extends Plugin {
 							console.error('Layout change error:', error);
 						}
 					})();
-					this.registerInitialPasteAndDropEvents(); 
+					this.registerInitialPasteAndDropEvents();
 					this.initializeDragResize(document);
 				})
 			);
-	
 
-			// POSITION MANAGEMENT 
+
+			// POSITION MANAGEMENT
 			// All below events are needed for keeping CACHE UP-toDate and cleaned up
 			// Register event to apply positions when switching notes
 			this.registerEvent(
@@ -530,7 +534,7 @@ export default class ImageConvertPlugin extends Plugin {
 			// 		event.stopPropagation();
 			// 	}
 			// });
-			
+
 			// Apply to current note after a short delay to ensure everything is loaded
 			// setTimeout(async () => {
 			// 	const currentFile = this.app.workspace.getActiveFile();
@@ -548,7 +552,7 @@ export default class ImageConvertPlugin extends Plugin {
 			// 		}
 			// 	})
 			// );
-	
+
 			this.registerEvent(
 				this.app.vault.on('modify', async (file) => {
 					if (file instanceof TFile && file.extension === 'md') {
@@ -634,9 +638,9 @@ export default class ImageConvertPlugin extends Plugin {
 			FabricObject.prototype.cornerStyle = 'circle';
 
 			// Register ONLY paste and drop events initially
-			this.registerInitialPasteAndDropEvents(); 
+			this.registerInitialPasteAndDropEvents();
 		});
-	
+
 		// Register escape key handler
 		this.registerDomEvent(
 			document, 'keydown', (evt: KeyboardEvent) => {
@@ -666,7 +670,7 @@ export default class ImageConvertPlugin extends Plugin {
 				}
 			});
 		});
-	
+
 		// Remove workspace-level listeners
 		const workspaceContainer = this.app.workspace.containerEl;
 		workspaceContainer.removeEventListener('paste', this.handlePaste, true);
@@ -678,7 +682,7 @@ export default class ImageConvertPlugin extends Plugin {
 		if (this.isConversionPaused_statusTimeout) {
 			window.clearTimeout(this.isConversionPaused_statusTimeout);
 		}
-	
+
 		// Clean up UI elements
 		if (this.statusBarItemEl) {
 			this.statusBarItemEl.remove();
@@ -693,13 +697,13 @@ export default class ImageConvertPlugin extends Plugin {
 		document.removeEventListener('mousemove', this.dragResize_handleMouseMove);
 		document.removeEventListener('mouseup', this.dragResize_handleMouseUp);
 		document.removeEventListener('mouseout', this.dragResize_handleMouseOut);
-	
+
 		// Remove the resize class from workspace
-		this.app.workspace.containerEl.removeClass('image-resize-enabled');	
+		this.app.workspace.containerEl.removeClass('image-resize-enabled');
 
 		this.clearExistingHandlers();
 		this.registeredContainers.clear();
-		
+
 		// Clear all internal states
 		this.dragResize_cleanupResizeAttributes();
 		this.fileQueue = [];
@@ -736,7 +740,7 @@ export default class ImageConvertPlugin extends Plugin {
 		document.querySelectorAll('img').forEach(img => {
 			img.style.pointerEvents = 'auto';
 		});
-		
+
 		// Wait for any pending operations to complete
 		await new Promise(resolve => window.setTimeout(resolve, 100));
 
@@ -747,15 +751,15 @@ export default class ImageConvertPlugin extends Plugin {
 		this.isProcessingQueue = false;
 		this.userAction = false;
 		this.batchStarted = false;
-		
+
 		// Clear the file queue
 		this.fileQueue = [];
-		
+
 		// Clear any existing timeouts
 		if (this.dropInfo?.timeoutId) {
 			window.clearTimeout(this.dropInfo.timeoutId);
 		}
-		
+
 		// Reset dropInfo
 		this.dropInfo = null;
 
@@ -766,10 +770,10 @@ export default class ImageConvertPlugin extends Plugin {
 		this.createEventHandlers.clear();
 		// Hide progress UI
 		this.hideProgressBar();
-		
+
 		// Show notice to user
 		new Notice('Image processing cancelled');
-		
+
 		// Reset kill switch after cleanup
 		window.setTimeout(() => {
 			this.isKillSwitchActive = false;
@@ -785,7 +789,7 @@ export default class ImageConvertPlugin extends Plugin {
 				this.registerCreateEventAfterAction(); // Register 'create' event *after* paste
 			})
 		);
-	
+
 		// Drop event (Obsidian editor)
 		this.registerEvent(
 			this.app.workspace.on('editor-drop', async (evt: DragEvent, editor, view) => {
@@ -794,7 +798,7 @@ export default class ImageConvertPlugin extends Plugin {
 				this.registerCreateEventAfterAction(); // Register 'create' event *after* drop
 			})
 		);
-	
+
 		// DOM events for Canvas and Excalidraw (workspace level)
 		const workspaceContainer = this.app.workspace.containerEl;
 		this.registerDomEvent(workspaceContainer, 'paste', async (evt: ClipboardEvent) => {
@@ -802,25 +806,25 @@ export default class ImageConvertPlugin extends Plugin {
 			await this.handlePaste(evt);
 			this.registerCreateEventAfterAction();
 		}, { capture: true });
-	
+
 		this.registerDomEvent(workspaceContainer, 'drop', async (evt: DragEvent) => {
 			if (this.shouldSkipEvent(evt)) return;
 			await this.handleDrop(evt);
 			this.registerCreateEventAfterAction();
 		}, { capture: true });
 	}
-	
+
 	private clearExistingHandlers() {
 		// Clear container registrations when switching notes
 		this.registeredContainers.clear();
-	}	
+	}
 
 	private shouldSkipEvent(evt: ClipboardEvent | DragEvent): boolean {
 
 		if (this.isConversionPaused || evt.defaultPrevented) {
 			return true;
 		}
-		
+
 		const target = evt.target as HTMLElement;
 		const closestView = target.closest('.workspace-leaf-content');
 		if (!closestView) {
@@ -859,22 +863,22 @@ export default class ImageConvertPlugin extends Plugin {
 
 		this.userAction = true;
 		this.batchStarted = true;
-	
+
 		// Clear previous batch hashes
 		this.fileHashes.clear();
-	
+
 		// Reset statistics
 		this.totalSizeBeforeBytes = 0;
 		this.totalSizeAfterBytes = 0;
 		this.processedFiles = [];
-	
+
 		// Generate new batch ID
 		this.batchId = Date.now().toString();
-	
+
 		// Analyze clipboard items
 		const items = event.clipboardData?.items;
 		if (!items) return;
-	
+
 		// Get image items and their details
 		const imageItems = Array.from(items)
 			.filter(item => item.kind === 'file' && item.type.startsWith('image/'))
@@ -893,30 +897,30 @@ export default class ImageConvertPlugin extends Plugin {
 		if (imageItems.length === 0) {
 			return;
 		}
-		
+
 		// Calculate adaptive timeout based on files
 		const calculateTimeout = (files: typeof imageItems) => {
 			const BASE_TIMEOUT = 10000;  // 10 seconds base
 			const SIZE_FACTOR = 1000;    // 1 second per MB
-	
+
 			let timeout = BASE_TIMEOUT;
-			
+
 			files.forEach(file => {
 				const sizeInMB = file.size / (1024 * 1024);
-				const fileTypeMultiplier = 
+				const fileTypeMultiplier =
 					file.type === 'image/heic' ? 3 :
 					file.type === 'image/tiff' ? 2 :
 					file.type === 'image/png' ? 1.5 :
 					1;
-				
+
 				timeout += (sizeInMB * SIZE_FACTOR * fileTypeMultiplier);
 			});
-	
+
 			return Math.min(Math.max(timeout, 10000), 300000);
 		};
-	
+
 		const timeout = calculateTimeout(imageItems);
-	
+
 		// Initialize dropInfo for paste operation
 		this.dropInfo = {
 			totalExpectedFiles: imageItems.length,
@@ -940,11 +944,11 @@ export default class ImageConvertPlugin extends Plugin {
 				}
 			}, timeout)
 		};
-	
+
 		if (this.settings.showProgress) {
 			this.updateProgressUI(0, imageItems.length, 'Starting processing...');
 		}
-	
+
 		// Handle external link resizing if needed
 		/* ----------------------------------------------------------------------------*/
 		// Get the clipboard data as HTML and parse it as Markdown LINK
@@ -957,12 +961,16 @@ export default class ImageConvertPlugin extends Plugin {
 		if (img) {
 			const altText = img.alt;
 			const src = img.src;
-			markdownImagefromClipboard = `![${altText}](${src})`;
+			if (this.settings.addRandomTag) {
+				markdownImagefromClipboard = `![${altText}](${src}){#fig:${Math.random().toString(36).substring(2, 8)}}`;
+			} else {
+				markdownImagefromClipboard = `![${altText}](${src})`;
+			}
 		}
 
 		// CLEAN external link and Apply custom size on external links: e.g.: | 100
 		// Check if the clipboard data is an external link
-		if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" || 
+		if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" ||
 			this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_fitImage") {
 			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (activeView && markdownImagefromClipboard) {
@@ -994,14 +1002,14 @@ export default class ImageConvertPlugin extends Plugin {
 		this.totalSizeBeforeBytes = 0;
 		this.totalSizeAfterBytes = 0;
 		this.processedFiles = [];
-		
+
 		// Clear any existing timeout
 		if (this.dropInfo?.timeoutId) {
 			window.clearTimeout(this.dropInfo.timeoutId);
 		}
-	
+
 		this.batchId = Date.now().toString();
-	
+
 		// Enhanced file analysis with skip pattern check
 		let imageFiles: Array<{name: string; size: number; type: string}> = [];
 		if (event.dataTransfer?.files) {
@@ -1027,31 +1035,31 @@ export default class ImageConvertPlugin extends Plugin {
 		const calculateTimeout = (files: Array<{ name: string; size: number; type: string }>) => {
 			const BASE_TIMEOUT = 10000;  // 10 seconds base
 			const SIZE_FACTOR = 1000;    // 1 second per MB
-			
+
 			let timeout = BASE_TIMEOUT;
-		
+
 			files.forEach(file => {
 				// Get the MIME type using mime package if available
 				const mimeType = mime.getType(file.name) || file.type;
-				
+
 				// Calculate multiplier based on MIME type
-				const fileTypeMultiplier = 
+				const fileTypeMultiplier =
 					mimeType === 'image/heic' ? 3 :  // HEIC takes longer
 					mimeType === 'image/tiff' ? 2 :  // TIFF takes longer
 					mimeType === 'image/png' ? 1.5 : // PNG takes a bit longer
 					1;  // Default multiplier for other formats
-				
+
 				// Add to the base timeout
 				const sizeInMB = file.size / (1024 * 1024);
 				timeout += (sizeInMB * SIZE_FACTOR * fileTypeMultiplier);
 			});
-		
+
 			return Math.min(Math.max(timeout, 10000), 300000); // Between 10s and 5min
 		};
-		
-	
+
+
 		const timeout = calculateTimeout(imageFiles);
-	
+
 		// Initialize new dropInfo
 		this.dropInfo = {
 			totalExpectedFiles: imageFiles.length,
@@ -1077,30 +1085,35 @@ export default class ImageConvertPlugin extends Plugin {
 				}
 			}, timeout)
 		};
-	
+
 		// Handle external link resizing if needed
 		/* ----------------------------------------------------------------------------*/
 		// Get the clipboard data as HTML and parse it as Markdown LINK
 		if (event.dataTransfer) {
 			// Try HTML first as it preserves more formatting
 			const htmlData = event.dataTransfer.getData('text/html');
-			
+
 			let markdownImageFromDrop = '';
-			
+
 			if (htmlData) {
 				const parser = new DOMParser();
 				const doc = parser.parseFromString(htmlData, 'text/html');
 				const img = doc.querySelector('img');
-				
+
 				if (img) {
 					const altText = img.alt;
 					const src = img.src;
-					markdownImageFromDrop = `![${altText}](${src})`;
+
+					if (this.settings.addRandomTag) {
+						markdownImageFromDrop = `![${altText}](${src}){#fig:${Math.random().toString(36).substring(2, 8)}}`;
+					} else {
+						markdownImageFromDrop = `![${altText}](${src})`;
+					}
 				}
 			}
 
-			if (markdownImageFromDrop && 
-				(this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" || 
+			if (markdownImageFromDrop &&
+				(this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" ||
 				this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_fitImage")) {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView) {
@@ -1111,7 +1124,7 @@ export default class ImageConvertPlugin extends Plugin {
 		/* ----------------------------------------------------------------------------*/
 		/* ----------------------------------------------------------------------------*/
 
-		
+
 		if (this.settings.showProgress) {
 			this.updateProgressUI(0, imageFiles.length, 'Starting processing...');
 		}
@@ -1127,28 +1140,28 @@ export default class ImageConvertPlugin extends Plugin {
 		const createEventHandler = this.app.vault.on('create', async (file: TFile) => {
 			if (!(file instanceof TFile) || !isImage(file)) return;
 			if (this.isConversionPaused) return;
-	
+
 			if (this.shouldSkipFile(file.name)) {
 				console.log(`Skipping file ${file.name} due to pattern match`);
 				return;
 			}
-	
+
 			if (await this.isExternalOperation(file)) return;
-	
+
 			// For multiple files, we want to maintain the batch state
 			if (!this.batchStarted) {
 				this.batchStarted = true;
 				this.userAction = true;
 			}
-	
+
 			const isMobile = Platform.isMobile;
-	
+
 			if (isMobile) {
 				await this.handleMobileFileCreation(file);
 			} else {
 				await this.handleDesktopFileCreation(file);
 			}
-	
+
 			// Check if all expected files for the current batch have been processed
 			if (this.dropInfo && this.dropInfo.totalProcessedFiles === this.dropInfo.totalExpectedFiles) {
 				// Unregister all 'create' event handlers associated with this batch
@@ -1158,7 +1171,7 @@ export default class ImageConvertPlugin extends Plugin {
 				this.createEventHandlers.clear();
 			}
 		});
-	
+
 		// Add the event handler to the plugin's event registry and our tracking Set
 		this.registerEvent(createEventHandler);
 		this.createEventHandlers.add(createEventHandler);
@@ -1166,7 +1179,7 @@ export default class ImageConvertPlugin extends Plugin {
 
 	private async isExternalOperation(file: TFile): Promise<boolean> {
 		const now = Date.now();
-	
+
 		if (this.isSyncOperation) {
 			return true;
 		}
@@ -1201,44 +1214,44 @@ export default class ImageConvertPlugin extends Plugin {
 			'sync-index',
 			'.obsidian-git'
 		];
-	
+
 		const isSyncPath = syncPatterns.some(pattern => file.path.includes(pattern));
-	
+
 		try {
 			// Get both the processed info and current file stats
 			const processedInfo = this.mobileProcessedFiles.get(file.path);
-			
+
 			// If on mobile, be very strict about sync detection
 			if (Platform.isMobile) {
 				// If we have processed info, this is likely a synced file
 				if (processedInfo) {
 					// If it was processed on desktop or within the last 30 seconds
-					if (processedInfo.platform === 'desktop' || 
+					if (processedInfo.platform === 'desktop' ||
 						(now - processedInfo.timestamp) < 30000) {
 						return true;
 					}
 				}
-	
+
 				// If there's no user action, treat it as a sync
 				if (!this.userAction) {
 					return true;
 				}
 			}
-	
+
 			// If on desktop
 			if (!Platform.isMobile) {
 				if (!this.userAction || isSyncPath) {
 					return true;
 				}
 			}
-	
+
 			return isSyncPath;
 		} catch (error) {
 			console.error('Error in isExternalOperation:', error);
 			return true;
 		}
 	}
-	
+
 
 	private async handleMobileFileCreation(file: TFile) {
 		try {
@@ -1249,7 +1262,7 @@ export default class ImageConvertPlugin extends Plugin {
 				new Notice(`Could not get file stats for: ${file.name}`);
 				return;
 			}
-	
+
 			// Check processed info
 			const isQualityOnlyOperation =
 				this.settings.convertTo === 'disabled' &&
@@ -1258,11 +1271,11 @@ export default class ImageConvertPlugin extends Plugin {
 
 			// Check processed info with quality-only consideration
 			const processedInfo = this.mobileProcessedFiles.get(file.path);
-			const wasRecentlyProcessedOnDesktop = 
-				processedInfo && 
-				processedInfo.platform === 'desktop' && 
+			const wasRecentlyProcessedOnDesktop =
+				processedInfo &&
+				processedInfo.platform === 'desktop' &&
 				(Date.now() - processedInfo.timestamp) < 30000;
-	
+
 			// Skip processing and notifications for quality-only synced files
 			if (isQualityOnlyOperation && wasRecentlyProcessedOnDesktop) {
 				// Silently update tracking without triggering processing
@@ -1280,13 +1293,13 @@ export default class ImageConvertPlugin extends Plugin {
 			if (Platform.isMobile && isNewFile) {
 				this.userAction = true;
 			}
-	
-						
+
+
 			// If it's not a new file and not user action, skip
 			if (!isNewFile && !this.userAction) {
 				return;
 			}
-	
+
 			// Add to tracking
 			this.mobileProcessedFiles.set(file.path, {
 				path: file.path,
@@ -1294,14 +1307,14 @@ export default class ImageConvertPlugin extends Plugin {
 				size: fileStats.size,
 				platform: 'mobile'
 			});
-	
+
 			// Initialize batch if needed
 			if (!this.batchStarted) {
 				this.currentBatchTotal = 1;
 				this.batchId = Date.now().toString();
 				this.batchStarted = true;
 			}
-	
+
 			// Get active view type
 			const activeView = this.getActiveView();
 			if (!activeView) {
@@ -1309,9 +1322,9 @@ export default class ImageConvertPlugin extends Plugin {
 				return;
 			}
 			const viewType = activeView.getViewType() || 'markdown';
-	
+
 			// Add to queue with more detailed tracking
-			const queueItem: QueueItem = { 
+			const queueItem: QueueItem = {
 				file,
 				addedAt: Date.now(),
 				viewType: viewType as 'markdown' | 'canvas' | 'excalidraw',
@@ -1321,9 +1334,9 @@ export default class ImageConvertPlugin extends Plugin {
 				processed: false,
 				isMobileAttachment: true
 			};
-	
+
 			this.fileQueue.push(queueItem);
-	
+
 			// Process immediately for new files on mobile
 			if (isNewFile && Platform.isMobile) {
 				try {
@@ -1333,7 +1346,7 @@ export default class ImageConvertPlugin extends Plugin {
 					new Notice(`Error processing queue for ${file.name}: ${processError.message}`);
 				}
 			}
-	
+
 		} catch (error) {
 			console.error('Error in handleMobileFileCreation:', error);
 			if (error instanceof Error) {
@@ -1359,7 +1372,7 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 	private async handleDesktopFileCreation(file: TFile) {
 		if (!this.userAction) return;
-	
+
 		try {
 			const isQualityOnlyOperation =
 				this.settings.convertTo === 'disabled' &&
@@ -1372,13 +1385,13 @@ export default class ImageConvertPlugin extends Plugin {
 				timestamp: Date.now(),
 				size: (await this.app.vault.adapter.stat(file.path))?.size || 0,
 				platform: 'desktop', 		// Explicitly mark as desktop
-				isQualityOnly: isQualityOnlyOperation  
+				isQualityOnly: isQualityOnlyOperation
 			});
 
 			// Get active view type and validate
 			const activeView = this.getActiveView();
 			const viewType = activeView?.getViewType();
-			
+
 			if (!this.isValidViewType(viewType)) return;
 
 			// Handle single file drops
@@ -1398,19 +1411,19 @@ export default class ImageConvertPlugin extends Plugin {
 				processed: false
 			};
 
-	
+
 			// Check if this file was already processed
 			const originalNameWithExt = file.name;
 			if (this.fileQueue.some(item => item.originalName === originalNameWithExt)) {
 				return;
 			}
-	
+
 			// Add to queue
 			this.fileQueue.push(queueItem);
 
 			// Start processing
 			await this.processQueue();
-			
+
 			// Cleanup
 			setTimeout(() => {
 				this.mobileProcessedFiles.delete(file.path);
@@ -1424,25 +1437,25 @@ export default class ImageConvertPlugin extends Plugin {
 	private handleExternalImageLink(markdownText: string, editor: Editor): void {
 		const linkPattern = /!\[(.*?)\]\((.*?)\)/;
 		const match = markdownText.match(linkPattern);
-		
+
 		if (!match) return;
-		
+
 		const [, altText, currentLink] = match; // Using comma to skip first element
 		const cleanAltText = altText.replace(/\|\d+(\|\d+)?/g, ''); // remove any sizing info
-		
+
 		let imageSizeValue = '';
 		if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize") {
 			imageSizeValue = this.settings.nondestructive_resizeMode_customSize;
 		} else if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_fitImage") {
 			imageSizeValue = this.settings.nondestructive_resizeMode_fitImage;
 		}
-		
+
 		const newMarkdown = `![${cleanAltText}|${imageSizeValue}](${currentLink})`;
-		
+
 		const lineContent = editor.getLine(editor.getCursor().line);
 		const startPos = lineContent.indexOf(`![${cleanAltText}`);
 		const endPos = lineContent.indexOf(')', startPos) + 1;
-		
+
 		if (startPos !== -1 && endPos !== -1) {
 			editor.replaceRange(
 				newMarkdown,
@@ -1527,7 +1540,7 @@ export default class ImageConvertPlugin extends Plugin {
 					// console.log('Batch ID changed, starting new batch');
 					break;
 				}
-	
+
 				const item = this.fileQueue[0];
 				let currentFileSize = 0;
 
@@ -1552,7 +1565,7 @@ export default class ImageConvertPlugin extends Plugin {
 						// If custom renaming is enabled, proceed with processing
 					} else {
 						this.fileQueue.shift(); // Remove from queue
-						
+
 						// Update tracking without triggering notifications
 						if (Platform.isMobile) {
 							this.mobileProcessedFiles.set(item.file.path, {
@@ -1563,9 +1576,9 @@ export default class ImageConvertPlugin extends Plugin {
 						continue; // Skip to next iteration
 					}
 				}
-	
+
 				try {
-					
+
 					// Update progress before processing
 					if (this.settings.showProgress) {
 						this.updateProgressUI(
@@ -1574,14 +1587,14 @@ export default class ImageConvertPlugin extends Plugin {
 							item.file.name
 						);
 					}
-	
+
 					// Get initial file stats
 					const initialStat = await this.app.vault.adapter.stat(item.file.path);
 					currentFileSize = initialStat?.size || 0;
 					this.totalSizeBeforeBytes += currentFileSize;
 
 					const initialSizeBytes = initialStat?.size || 0;
-			
+
 					// Calculate adaptive timeout based on file size and type
 					const mimeType = mime.getType(item.file.extension.toLowerCase()) || `image/${item.file.extension.toLowerCase()}`;
 					const isComplexFormat = ['image/heic', 'image/tiff', 'image/png'].includes(mimeType);
@@ -1591,18 +1604,18 @@ export default class ImageConvertPlugin extends Plugin {
 						(initialSizeBytes / this.SIZE_FACTOR * this.settings.timeoutPerMB) *
 						(isComplexFormat ? 2 : 1) // Double timeout for complex formats
 					);
-	
+
 					// Process the file with timeout and retry mechanism
 					let attempts = 0;
 					const maxAttempts = 1;
 					let success = false;
-	
+
 					while (attempts < maxAttempts && !success) {
 						try {
 							await Promise.race([
 								this.renameFile1(item.file, item.parentFile),
 								new Promise((_, reject) =>
-									window.setTimeout(() => reject(new Error('Processing timeout')), 
+									window.setTimeout(() => reject(new Error('Processing timeout')),
 									timeoutDuration)
 								)
 							]);
@@ -1617,54 +1630,54 @@ export default class ImageConvertPlugin extends Plugin {
 							await new Promise(resolve => window.setTimeout(resolve, 1000));
 						}
 					}
-	
+
 					// Get final stats and calculate savings
 					const finalStat = await this.app.vault.adapter.stat(item.file.path);
 					const finalSizeBytes = finalStat?.size || 0;
 					const savedBytes = initialSizeBytes - finalSizeBytes;
-	
+
 					this.totalSizeAfterBytes += finalSizeBytes;
 					this.processedFiles.push({
 						name: item.file.name,
 						savedBytes: savedBytes
 					});
-	
+
 					// Update dropInfo counter after successful processing
 					if (this.dropInfo && this.dropInfo.batchId === currentBatchId) {
 						this.dropInfo.totalProcessedFiles++;
 					}
-	
+
 				} catch (error) {
 					console.error(`Error processing ${item.file.name}:`, error);
 					new Notice(`Failed to process ${item.file.name}: ${error.message}`);
 				}
-	
+
 				// Remove processed file from queue
 				item.processed = true; // Mark as processed before removing from queue
 				this.fileQueue.shift();
-	
+
 				// Add small delay between files to prevent system overload
 				// Longer delay for large files
 				const delayTime = currentFileSize > 5 * 1024 * 1024 ? 500 : 100;
 				await new Promise(resolve => window.setTimeout(resolve, delayTime));
-				
+
 			}
 		} finally {
 			// Only clean up if we're still on the same batch
 			if (currentBatchId === this.batchId) {
 				this.isProcessingQueue = false;
-	
+
 				// Show summary and cleanup only if batch is complete
-				if (!this.isKillSwitchActive && 
+				if (!this.isKillSwitchActive &&
 					this.dropInfo?.totalProcessedFiles === this.dropInfo?.totalExpectedFiles) {
-						
-					if (this.actualProcessingOccurred && 
-						this.settings.showSummary && 
+
+					if (this.actualProcessingOccurred &&
+						this.settings.showSummary &&
 						this.totalSizeBeforeBytes !== this.totalSizeAfterBytes) {
 
 						this.showBatchSummary();
 					}
-	
+
 					// Reset everything after showing summary
 					this.dropInfo = null;
 					this.totalSizeBeforeBytes = 0;
@@ -1676,7 +1689,7 @@ export default class ImageConvertPlugin extends Plugin {
 					// if (leaf) {
 					// 	// Store current state
 					// 	const currentState = leaf.getViewState();
-						
+
 					// 	// Switch to a different view type temporarily
 					// 	await leaf.setViewState({
 					// 		type: 'empty',
@@ -1694,14 +1707,14 @@ export default class ImageConvertPlugin extends Plugin {
 					this.createEventHandlers.clear();
 
 				}
-	
+
 				this.hideProgressBar();
 
 				// // Additional check for empty queue
 				// if (this.fileQueue.length === 0) {
 				// 	this.hideProgressBar();
 				// }
-	
+
 				// Safe garbage collection hint
 				this.triggerGarbageCollection();
 			}
@@ -1719,56 +1732,56 @@ export default class ImageConvertPlugin extends Plugin {
 			console.debug('Garbage collection not available');
 		}
 	}
-	
+
 	private updateProgressUI(current: number, total: number, fileName: string) {
 		if (!this.settings.showProgress || !this.actualProcessingOccurred) return;
 		if (!this.progressEl || this.isConversionPaused) {
 			this.hideProgressBar();
 			return;
 		}
-	
+
 		// Use dropInfo if available for consistent counting
 		if (this.dropInfo) {
 			total = this.dropInfo.totalExpectedFiles;
 			current = this.dropInfo.totalProcessedFiles + 1; // +1 for current file
 		}
-	
+
 		// Ensure we never show more processed than total
 		current = Math.min(current, total);
-	
+
 		// Only show progress UI if there are items to process
 		if (total === 0) {
 			this.hideProgressBar();
 			return;
 		}
-	
+
 		this.showProgressBar();
 		this.progressEl.empty();
-	
+
 		const progressText = this.progressEl.createDiv('progress-text');
 		progressText.setText(`Processing ${current} of ${total}`);
-		
+
 		const fileNameEl = this.progressEl.createDiv('file-name');
 		fileNameEl.setText(fileName);
-	
+
 		const progressBar = this.progressEl.createDiv('progress-bar');
 		const progressFill = progressBar.createDiv('progress-fill');
 		const percentage = Math.min((current / total) * 100, 100);
 		progressFill.style.width = `${percentage}%`;
-	
+
 		// Modified progress bar hiding logic
 		if (current === total && this.actualProcessingOccurred) {
 			// Add a longer delay before hiding to ensure file system catches up
 			window.setTimeout(() => {
 				// Double-check that processing is still complete when timeout fires
-				if (this.actualProcessingOccurred && 
+				if (this.actualProcessingOccurred &&
 					this.dropInfo?.totalProcessedFiles === this.dropInfo?.totalExpectedFiles) {
 					this.hideProgressBar();
 				}
 			}, 2000); // Increased from 1000 to 2000ms
 		}
 	}
-	
+
 	private hideProgressBar() {
 		if (this.progressEl) {
 			this.progressEl.style.display = 'none';
@@ -1779,7 +1792,7 @@ export default class ImageConvertPlugin extends Plugin {
 			this.rafId = null;
 		}
 	}
-	
+
 	private showProgressBar() {
 		if (this.progressEl) {
 			this.progressEl.style.display = 'flex';
@@ -1801,7 +1814,7 @@ export default class ImageConvertPlugin extends Plugin {
 
         const totalSaved = this.totalSizeBeforeBytes - this.totalSizeAfterBytes;
         const overallRatio = ((-totalSaved / this.totalSizeBeforeBytes) * 100).toFixed(1);
-        
+
         let summaryText = `📊 Image Converter Summary\n`;
         summaryText += `Files Processed: ${this.processedFiles.length}\n`;
         summaryText += `${this.formatBytes(this.totalSizeBeforeBytes)} -> ${this.formatBytes(this.totalSizeAfterBytes)} (${overallRatio}%)`;
@@ -1828,7 +1841,7 @@ export default class ImageConvertPlugin extends Plugin {
 		// Step 0: Initial Setup
 		const activeFile = parentFile || this.app.workspace.getActiveFile();
 		if (!activeFile) throw new Error('No active file found');
-	
+
 		// If plugin is completely disabled, return original path immediately
 		if (this.isConversionDisabled) {
 			return file.path;
@@ -1837,7 +1850,7 @@ export default class ImageConvertPlugin extends Plugin {
 		// Store original values for comparison and recovery if needed
 		const originalName = file.name;
 		let processedArrayBuffer: ArrayBuffer | undefined = undefined;
-	
+
 		try {
 			// Step 1: Check Processing Mode
 			// When processing is disabled, allow only renaming and non-destructive resizing
@@ -1909,16 +1922,16 @@ export default class ImageConvertPlugin extends Plugin {
 
 
 
-				
+
 			// Step 2: Name Generation
 			// - Generate new name or keep original based on settings
 			// - This happens regardless of processing state
 			let newName: string;
-			const keepingOriginal = this.settings.convertTo === 'disabled' && 
-				!this.needsResize() && 
+			const keepingOriginal = this.settings.convertTo === 'disabled' &&
+				!this.needsResize() &&
 				this.settings.quality === 100 &&
-				!this.settings.useCustomRenaming; 
-			
+				!this.settings.useCustomRenaming;
+
 			if (keepingOriginal) {
 				newName = file.name;  // Keep original name
 			} else if (this.settings.autoRename || this.settings.useCustomRenaming) {
@@ -1926,27 +1939,27 @@ export default class ImageConvertPlugin extends Plugin {
 			} else {
 				newName = await this.keepOrgName(file);
 			}
-			
+
 			// Step 3: Path Generation
 			// - Create necessary folders
 			// - Generate new path for file
 			// - This happens regardless of processing state
 			const basePath = await this.getBasePath(activeFile, file);
 			await this.ensureFolderExists(basePath);
-			
+
 			const newPath = await this.createOutputFolders(newName, file, activeFile);
 			const normalizedPath = normalizePath(newPath);
-	
+
 			// Step 4: Image Processing
 			// - Only process if needed and not disabled
 			if (needsProcessing) {
 				const binary = await this.app.vault.readBinary(file);
 				const imgBlob = await this.processImage(file, binary);
-				
+
 				if (imgBlob instanceof Blob) {
 					processedArrayBuffer = await imgBlob.arrayBuffer();
 					await this.app.vault.modifyBinary(file, processedArrayBuffer);
-	
+
 					// Step 4a: Width Calculation for Resizing
 					// - Calculate dimensions for non-destructive resize if enabled
 					if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize" ||
@@ -1964,22 +1977,22 @@ export default class ImageConvertPlugin extends Plugin {
 					}
 				}
 			}
-	
+
 			// Step 5: Duplicate Handling
 			// - Check for and handle duplicate filenames
 			// - This happens regardless of processing state
 			const finalPath = await this.handleDuplicate(
-				file, 
-				normalizedPath, 
+				file,
+				normalizedPath,
 				processedArrayBuffer
 			);
-	
+
 			// Step 6: File and Document Updates
 			// - Update file location and links in document
 			// - This happens regardless of processing state
 			const sourcePath = activeFile.path;
 			const linkText = this.makeLinkText(file, sourcePath);
-			
+
 			await this.updateFileAndDocument(
 				file,
 				finalPath,
@@ -1987,41 +2000,41 @@ export default class ImageConvertPlugin extends Plugin {
 				sourcePath,
 				linkText
 			);
-	
+
 			// Step 7: Notifications
 			// - Show rename notice if name changed and notifications are enabled
 			if (this.settings.showRenameNotice && originalName !== newName) {
 				new Notice(`Renamed: ${decodeURIComponent(originalName)} → ${decodeURIComponent(newName)}`);
 			}
-	
+
 			return finalPath;
-	
+
 		} catch (error) {
 			console.error('Error in renameFile1:', error);
 			throw error;
 		}
 	}
-	
+
 	// Helper function to determine if processing is needed
 	private shouldProcessImage(file: TFile): boolean {
 		// Check if plugin is completely disabled
 		if (this.isConversionDisabled) {
 			return false;
 		}
-	
+
 		// If processing is disabled, only check for non-destructive operations
 		if (this.isProcessingDisabled) {
 			return false; // We handle non-destructive resize separately
 		}
-	
+
 		// Check for destructive operations
 		const extension = file.extension.toLowerCase();
 		const targetFormat = this.settings.convertTo.toLowerCase();
-		
+
 		const needsConversion = targetFormat !== 'disabled' && extension !== targetFormat;
 		const needsQuality = this.settings.quality < 100;
 		const needsDestructiveResize = this.settings.destructive_resizeMode !== 'None';
-		
+
 		return needsConversion || needsQuality || needsDestructiveResize;
 	}
 
@@ -2029,16 +2042,16 @@ export default class ImageConvertPlugin extends Plugin {
 		try {
 			// Determine the MIME type using the mime module
 			const mimeType = mime.getType(file.extension) || `image/${file.extension}`;
-		
+
 			let imgBlob = new Blob([binary], { type: mimeType });
-		
+
 			// Handle special formats based on MIME type
 			if (mimeType === 'image/tiff') {
 				imgBlob = await handleTiffImage(binary);
 			} else if (mimeType === 'image/heic') {
 				imgBlob = await handleHeicImage(file, binary, this.settings, this.app);
 			}
-		
+
 			// Only process if we need to compress or resize
 			if (this.settings.convertTo === 'disabled') {
 				// If format is "Same as original"
@@ -2050,7 +2063,7 @@ export default class ImageConvertPlugin extends Plugin {
 				// Convert to specified format
 				imgBlob = await this.convertImageFormat(imgBlob, file.extension);
 			}
-			
+
 			return imgBlob;
 		} catch (error) {
 			console.error('Error processing image:', error);
@@ -2068,7 +2081,7 @@ export default class ImageConvertPlugin extends Plugin {
 	private async processOriginalFormat(imgBlob: Blob, extension: string): Promise<Blob> {
 		let buffer: ArrayBuffer;
 		const ext = extension.toLowerCase();
-	
+
 		switch (ext) {
 			case 'jpg':
 			case 'jpeg':
@@ -2083,7 +2096,7 @@ export default class ImageConvertPlugin extends Plugin {
 					this.settings.allowLargerFiles
 				);
 				return new Blob([buffer], { type: 'image/jpeg' });
-	
+
 			case 'png':
 				buffer = await convertToPNG(
 					imgBlob,
@@ -2096,7 +2109,7 @@ export default class ImageConvertPlugin extends Plugin {
 					this.settings.allowLargerFiles
 				);
 				return new Blob([buffer], { type: 'image/png' });
-	
+
 			case 'webp':
 				buffer = await convertToWebP(
 					imgBlob,
@@ -2109,7 +2122,7 @@ export default class ImageConvertPlugin extends Plugin {
 					this.settings.allowLargerFiles
 				);
 				return new Blob([buffer], { type: 'image/webp' });
-	
+
 			default:
 				// For unsupported formats, return original
 				return imgBlob;
@@ -2176,20 +2189,20 @@ export default class ImageConvertPlugin extends Plugin {
 	}
 
 	private async createOutputFolders(newName: string, file: TFile, activeFile: TFile): Promise<string> {
-		
+
 		const basePath = await this.getBasePath(activeFile, file);
 		await this.ensureFolderExists(basePath); // Add this line
-		
+
 		// Split the path and handle each component
 		const pathComponents = normalizePath(basePath).split('/').filter(Boolean);
 		let currentPath = '';
-	
+
 		for (const component of pathComponents) {
 			const nextPath = currentPath ? `${currentPath}/${component}` : component;
-			
+
 			// Check if a folder exists with any case
 			const existingFolder = await this.getFolderWithAnyCase(nextPath);
-			
+
 			if (existingFolder) {
 				// Use the existing folder's case
 				currentPath = existingFolder;
@@ -2199,7 +2212,7 @@ export default class ImageConvertPlugin extends Plugin {
 				currentPath = nextPath;
 			}
 		}
-	
+
 		return `${currentPath}/${newName}`;
 	}
 
@@ -2207,10 +2220,10 @@ export default class ImageConvertPlugin extends Plugin {
 		const components = path.split('/');
 		const folderName = components.pop();
 		const parentPath = components.join('/');
-	
+
 		try {
 			const parentContents = await this.app.vault.adapter.list(parentPath);
-			const matchingFolder = parentContents.folders.find(f => 
+			const matchingFolder = parentContents.folders.find(f =>
 				f.split('/').pop()?.toLowerCase() === folderName?.toLowerCase()
 			);
 			return matchingFolder || null;
@@ -2223,13 +2236,13 @@ export default class ImageConvertPlugin extends Plugin {
 		if (this.settings.manage_duplicate_filename === 'disabled') {
 			return path;
 		}
-	
+
 		try {
 			const exists = await this.fileExistsWithAnyCase(path);
 			if (!exists) {
 				return path;
 			}
-	
+
 			if (this.settings.manage_duplicate_filename === 'duplicate_replace') {
 				try {
 					const existingFile = await this.app.vault.getAbstractFileByPath(path);
@@ -2253,7 +2266,7 @@ export default class ImageConvertPlugin extends Plugin {
 					return newPath;
 				}
 			}
-	
+
 			if (this.settings.manage_duplicate_filename === 'duplicate_rename') {
 				let newPath = path;
 				let suffix = 1;
@@ -2263,14 +2276,14 @@ export default class ImageConvertPlugin extends Plugin {
 				}
 				return newPath;
 			}
-	
+
 			return path;
 		} catch (error) {
 			console.error('Error handling duplicate:', error);
 			throw new Error(`Failed to handle duplicate file: ${error.message}`);
 		}
 	}
-	
+
 
 	private async updateFileAndDocument(
 		file: TFile,
@@ -2282,15 +2295,15 @@ export default class ImageConvertPlugin extends Plugin {
 		try {
 			const decodedNewPath = decodeURIComponent(newPath);
 			const normalizedNewPath = normalizePath(decodedNewPath);
-			
+
 			await this.checkForCaseConflicts(normalizedNewPath);
 			const actualPath = await this.getActualCasePath(normalizedNewPath);
 			const finalPath = actualPath || normalizedNewPath;
-	
+
 			// Check if the file needs to be moved (different path) or renamed (different name)
 			const needsMove = this.getDirectoryPath(file.path) !== this.getDirectoryPath(finalPath);
 			const needsRename = !this.pathsAreEqual(file.path, finalPath);
-	
+
 			if (needsMove || needsRename) {
 				try {
 					// Handle existing file at destination
@@ -2300,7 +2313,7 @@ export default class ImageConvertPlugin extends Plugin {
 							await this.app.vault.delete(existingFile, true);
 						}
 					}
-	
+
 					// Perform the move/rename operation
 					await this.app.vault.rename(file, finalPath);
 				} catch (error) {
@@ -2390,34 +2403,34 @@ export default class ImageConvertPlugin extends Plugin {
 			pos.ch >= 0 &&
 			pos.ch <= lineContent.length;
 	}
-	
+
 	private getDirectoryPath(fullPath: string): string {
 		return fullPath.substring(0, fullPath.lastIndexOf('/'));
 	}
-	
+
 	// ///////////// Helper for output management
 	private async fileExistsWithAnyCase(path: string): Promise<boolean> {
 		// Split the path into components
 		const pathComponents = path.split('/').filter(Boolean);
 		const fileName = pathComponents.pop(); // Get the last component (file name)
 		let currentPath = '';
-	
+
 		// Check each folder level
 		for (const component of pathComponents) {
 			const files = await this.app.vault.adapter.list(currentPath);
-			const matchingFolder = files.folders.find(f => 
+			const matchingFolder = files.folders.find(f =>
 				f.split('/').pop()?.toLowerCase() === component.toLowerCase()
 			);
-			
+
 			if (!matchingFolder) {
 				return false;
 			}
 			currentPath = matchingFolder;
 		}
-	
+
 		// Finally check the file name
 		const files = await this.app.vault.adapter.list(currentPath);
-		return files.files.some(f => 
+		return files.files.some(f =>
 			f.split('/').pop()?.toLowerCase() === fileName?.toLowerCase()
 		);
 	}
@@ -2425,16 +2438,16 @@ export default class ImageConvertPlugin extends Plugin {
 	private async getActualCasePath(path: string): Promise<string | null> {
 		const components = path.split('/').filter(Boolean);
 		let currentPath = '';
-	
+
 		for (const component of components) {
 			try {
 				const list = await this.app.vault.adapter.list(currentPath);
-				
+
 				// Check both files and folders
-				const match = [...list.files, ...list.folders].find(p => 
+				const match = [...list.files, ...list.folders].find(p =>
 					p.split('/').pop()?.toLowerCase() === component.toLowerCase()
 				);
-				
+
 				if (match) {
 					currentPath = match;
 				} else {
@@ -2444,7 +2457,7 @@ export default class ImageConvertPlugin extends Plugin {
 				return null;
 			}
 		}
-	
+
 		return currentPath;
 	}
 
@@ -2453,7 +2466,7 @@ export default class ImageConvertPlugin extends Plugin {
 		if (!(await this.app.vault.adapter.exists(normalizedPath))) {
 			const folders = normalizedPath.split('/').filter(Boolean);
 			let currentPath = '';
-			
+
 			for (const folder of folders) {
 				currentPath += (currentPath ? '/' : '') + folder;
 				if (!(await this.app.vault.adapter.exists(currentPath))) {
@@ -2473,12 +2486,12 @@ export default class ImageConvertPlugin extends Plugin {
 	private async checkForCaseConflicts(path: string): Promise<void> {
 		const folder = path.substring(0, path.lastIndexOf('/'));
 		// const fileName = path.substring(path.lastIndexOf('/') + 1);
-		
+
 		const files = await this.app.vault.adapter.list(folder);
-		const conflictingFiles = files.files.filter(f => 
+		const conflictingFiles = files.files.filter(f =>
 			f.toLowerCase() === path.toLowerCase() && f !== path
 		);
-		
+
 		if (conflictingFiles.length > 0) {
 			console.warn(`Case conflict detected for ${path}. Existing files: ${conflictingFiles.join(', ')}`);
 		}
@@ -2488,7 +2501,7 @@ export default class ImageConvertPlugin extends Plugin {
 		// Option1 obsidian noralize path
 		// return normalizePath(path1).toLowerCase() === normalizePath(path2).toLowerCase();
 
-		// Option2 
+		// Option2
 		// Normalize paths before comparison
 		const normalize = (p: string) => {
 			// Remove leading/trailing slashes and normalize multiple slashes
@@ -2496,13 +2509,13 @@ export default class ImageConvertPlugin extends Plugin {
 					.replace(/\/+/g, '/')
 					.toLowerCase();
 		};
-		
+
 		return normalize(path1) === normalize(path2);
 	}
 
 	private async getBasePath(activeFile: TFile, file: TFile): Promise<string> {
 		let basePath: string;
-	
+
 		switch (this.settings.attachmentLocation) {
 			case 'default':
 				basePath = file.path.substring(0, file.path.lastIndexOf('/'));
@@ -2533,10 +2546,10 @@ export default class ImageConvertPlugin extends Plugin {
 			default:
 				basePath = '/';
 		}
-	
+
 		return normalizePath(basePath);
 	}
-	
+
 	// Helper function to generate a new filename with a numeric suffix
 	private generateNewNameWithSuffix(filePath: string, suffix: number): string {
 		const extensionIndex = filePath.lastIndexOf('.');
@@ -2583,7 +2596,7 @@ export default class ImageConvertPlugin extends Plugin {
 		if (!newName.endsWith(`.${extension}`)) {
 			return `${newName}.${extension}`;
 		}
-	
+
 		return newName;
 	}
 
@@ -2626,12 +2639,12 @@ export default class ImageConvertPlugin extends Plugin {
 		// Store the original case of the filename
 		const originalName = file.basename + '.' + file.extension;
 		const link = this.app.fileManager.generateMarkdownLink(file, sourcePath, subpath);
-		
+
 		// Ensure the link uses the original case
 		return link.replace(/\[\[(.*?)\]\]/, (match, p1) => {
 			const linkPath = p1.split('|')[0];
 			const displayText = p1.split('|')[1] || '';
-			
+
 			if (linkPath.toLowerCase() === originalName.toLowerCase()) {
 				return `[[${originalName}${displayText ? '|' + displayText : ''}]]`;
 			}
@@ -2643,22 +2656,22 @@ export default class ImageConvertPlugin extends Plugin {
 	private createImageLink(path: string): string {
 		// Remove any existing Markdown or Wikilink structures from the path
 		let cleanPath = path.trim();
-	
+
 		// Remove existing Markdown image link structure (e.g., ![](path))
 		if (cleanPath.startsWith('![') && cleanPath.includes('](')) {
 			cleanPath = cleanPath.replace(/!\[.*?\]\((.*?)\)/, '$1');
 		}
-	
+
 		// Remove existing Wikilink structure (e.g., ![[path]])
 		cleanPath = cleanPath.replace(/!?\[\[|\]\]/g, '');
-	
+
 		// Add './' if MD links is enabled and user wants ./ specifically to append it nad if it is already not at the start
 		if (this.settings.useRelativePath && this.settings.useMdLinks && !cleanPath.startsWith('./')) {
 			if (!cleanPath.startsWith('../')) {
 				cleanPath = `../${cleanPath}`;
 			}
 		}
-	
+
 		// Check user default settings whether their default is set for WIKI or Markdown links
 		// - when it is set to default WIKI links, then all URL encoding for relative/shortest/absolute paths e.g. for empty spaces is already  handled by Obsidian itself
 		// - but if it is disabled and we use Markdown links throughout ALL vault, we need to encode links ourselves
@@ -2672,27 +2685,27 @@ export default class ImageConvertPlugin extends Plugin {
 				.map(segment => encodeURIComponent(segment))
 				.join('/');
 		}
-	
+
 		// Create the link based on plugin settings
 		if (this.settings.useMdLinks) {
 			let size = '';
 			if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize") {
 				const targetSize = parseInt(this.settings.nondestructive_resizeMode_customSize);
 				const currentWidth = this.widthSide;
-	
+
 				if (currentWidth && targetSize) {
 					const shouldResize = (
 						this.settings.nondestructive_enlarge_or_reduce === 'Always' ||
 						(this.settings.nondestructive_enlarge_or_reduce === 'Reduce' && currentWidth > targetSize) ||
 						(this.settings.nondestructive_enlarge_or_reduce === 'Enlarge' && currentWidth < targetSize)
 					);
-	
+
 					size = shouldResize ? this.settings.nondestructive_resizeMode_customSize : '';
 				}
 			} else if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_fitImage") {
 				size = this.settings.nondestructive_resizeMode_fitImage;
 			}
-	
+
 			return size ? `![|${size}](${cleanPath})` : `![](${cleanPath})`;
 		} else {
 			// Similar logic for wiki links
@@ -2700,20 +2713,20 @@ export default class ImageConvertPlugin extends Plugin {
 			if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_customSize") {
 				const targetSize = parseInt(this.settings.nondestructive_resizeMode_customSize);
 				const currentWidth = this.widthSide;
-	
+
 				if (currentWidth && targetSize) {
 					const shouldResize = (
 						this.settings.nondestructive_enlarge_or_reduce === 'Always' ||
 						(this.settings.nondestructive_enlarge_or_reduce === 'Reduce' && currentWidth > targetSize) ||
 						(this.settings.nondestructive_enlarge_or_reduce === 'Enlarge' && currentWidth < targetSize)
 					);
-	
+
 					size = shouldResize ? this.settings.nondestructive_resizeMode_customSize : '';
 				}
 			} else if (this.settings.nondestructive_resizeMode === "nondestructive_resizeMode_fitImage") {
 				size = this.settings.nondestructive_resizeMode_fitImage;
 			}
-	
+
 			return size ? `![[${cleanPath}|${size}]]` : `![[${cleanPath}]]`;
 		}
 	}
@@ -2734,7 +2747,7 @@ export default class ImageConvertPlugin extends Plugin {
 			result = result.replace(hexMatch[0], finalHex);
 		}
 
-		// Allow user to specify what they want to hashe.g. filename, fodlerpaht , any name etc. 
+		// Allow user to specify what they want to hashe.g. filename, fodlerpaht , any name etc.
 		// {MD5:filename} -> full MD5 hash of filename
 		// {MD5:filename:8} -> first 8 characters of MD5 hash
 		// {MD5:path} -> hash of file path
@@ -2849,7 +2862,7 @@ export default class ImageConvertPlugin extends Plugin {
 			'{parentFolder}': activeFile.parent?.parent?.name || '',
 			'{directory}': activeFile.parent?.path || '',
 			'{folderName}': activeFile.parent?.name || '',
-			
+
 			'{depth}': (file.path.match(/\//g) || []).length.toString(),
 			'{vaultName}': this.app.vault.getName(),
 			'{vaultPath}': (this.app.vault.adapter as any).getBasePath?.() || '',
@@ -2868,7 +2881,7 @@ export default class ImageConvertPlugin extends Plugin {
 			'{endOfWeek}': moment().endOf('week').format('YYYY-MM-DD'),
 			'{startOfMonth}': moment().startOf('month').format('YYYY-MM-DD'),
 			'{endOfMonth}': moment().endOf('month').format('YYYY-MM-DD'),
-			
+
 			// Relative dates
 			'{nextWeek}': moment().add(1, 'week').format('YYYY-MM-DD'),
 			'{lastWeek}': moment().subtract(1, 'week').format('YYYY-MM-DD'),
@@ -2911,7 +2924,7 @@ export default class ImageConvertPlugin extends Plugin {
 			'{random}': Math.random().toString(36).substring(2, 8),
 			'{uuid}': crypto.randomUUID(),
 
-			// -  {randomHex:N} 
+			// -  {randomHex:N}
 			// - `{counter:000}` - Incremental counter with padding (e.g., 001, 002, 003)
 			// - `{date:YYYY-MM}` - Date using moment.js format (supports all moment.js patterns)
 			// - `{size:MB:2}` - File size with unit (MB/KB/B) and decimal places
@@ -2989,7 +3002,7 @@ export default class ImageConvertPlugin extends Plugin {
 					if (sizeInBytes < 1024 * 1024) return '201-1024KB';
 					if (sizeInBytes < 5 * 1024 * 1024) return '1025KB-5MB';
 					if (sizeInBytes < 10 * 1024 * 1024) return '5MB-10MB';
-					return '10MB+';                                  
+					return '10MB+';
 				})(),
 				'{dominantDimension}': img.width > img.height ? 'width' : (img.width < img.height ? 'height' : 'equal'),
 				'{dimensionDifference}': Math.abs(img.width - img.height).toString(),
@@ -3061,7 +3074,7 @@ export default class ImageConvertPlugin extends Plugin {
 		return this.processSubfolderVariables(template, file, file);
 	}
 
-	// Helper function to manage counters for renaming e.g. -001 002 003 etc. 
+	// Helper function to manage counters for renaming e.g. -001 002 003 etc.
 	private async getNextCounter(folderPath: string): Promise<number> {
 		const counterKey = `counter-${folderPath}`;
 		let counter = this.counters.get(counterKey) || 0;
@@ -3299,7 +3312,7 @@ export default class ImageConvertPlugin extends Plugin {
 			name: 'Process all vault images',
 			callback: () => new ProcessAllVault(this).open()
 		});
-	
+
 		// Process current note images
 		this.addCommand({
 			id: 'process-all-images-current-note',
@@ -3313,14 +3326,14 @@ export default class ImageConvertPlugin extends Plugin {
 				}
 			},
 		});
-	
+
 		// Open settings
 		this.addCommand({
 			id: 'open-image-converter-settings',
 			name: 'Open Image Converter Settings',
 			callback: () => this.command_openSettingsTab()
 		});
-	
+
 		// Toggle conversion
 		// Enable/Disable all image processing and renaming
 		this.addCommand({
@@ -3340,15 +3353,15 @@ export default class ImageConvertPlugin extends Plugin {
 	// Split the functionality into two commands
 	private command_togglePlugin(): void {
 		this.isConversionDisabled = !this.isConversionDisabled;
-		
+
 		if (!this.statusBarItemEl) {
 			this.statusBarItemEl = this.addStatusBarItem();
 		}
-		
+
 		if (this.isConversionDisabled) {
 			this.statusBarItemEl.setText('Image Plugin: Disabled ⏸️');
 			new Notice('Image plugin disabled');
-			
+
 			// Clear current queue and state
 			this.fileQueue = [];
 			this.isProcessingQueue = false;
@@ -3363,11 +3376,11 @@ export default class ImageConvertPlugin extends Plugin {
 	private command_toggleProcessing(): void {
 		if (!this.isConversionDisabled) {
 			this.isProcessingDisabled = !this.isProcessingDisabled;
-			
+
 			if (!this.statusBarItemEl) {
 				this.statusBarItemEl = this.addStatusBarItem();
 			}
-			
+
 			if (this.isProcessingDisabled) {
 				this.statusBarItemEl.setText('Image Processing: Paused ⏸️ (Renaming & Non-destructive Resize Only)');
 				new Notice('Image processing paused (Only renaming & non-destructive resizing will be performed)');
@@ -3388,7 +3401,7 @@ export default class ImageConvertPlugin extends Plugin {
 			}
 			this.dropInfo = null;
 		}
-		
+
 		this.batchStarted = false;
 		this.userAction = false;
 		this.hideProgressBar();
@@ -3398,7 +3411,7 @@ export default class ImageConvertPlugin extends Plugin {
 		if (this.isConversionPaused_statusTimeout) {
 			window.clearTimeout(this.isConversionPaused_statusTimeout);
 		}
-		
+
 		this.isConversionPaused_statusTimeout = window.setTimeout(() => {
 			if (this.statusBarItemEl) {
 				this.statusBarItemEl.remove();
@@ -3425,27 +3438,27 @@ export default class ImageConvertPlugin extends Plugin {
 			const noCompression = this.settings.ProcessAllVaultquality === 1;
 			const noResize = this.settings.ProcessAllVaultResizeModalresizeMode === 'None';
 			const targetFormat = this.settings.ProcessAllVaultconvertTo;
-	
+
 			// Parse skip formats
 			const skipFormats = this.settings.ProcessAllVaultSkipFormats
 				.toLowerCase()
 				.split(',')
 				.map(format => format.trim())
 				.filter(format => format.length > 0);
-	
+
 			// Get all image files in the vault
 			const allFiles = this.app.vault.getFiles();
-			const imageFiles = allFiles.filter(file => 
-				file instanceof TFile && 
+			const imageFiles = allFiles.filter(file =>
+				file instanceof TFile &&
 				isImage(file)
 			);
-	
+
 			// Get images from canvas files
-			const canvasFiles = allFiles.filter(file => 
-				file instanceof TFile && 
+			const canvasFiles = allFiles.filter(file =>
+				file instanceof TFile &&
 				file.extension === 'canvas'
 			);
-	
+
 			// Process canvas files and collect image paths
 			for (const canvasFile of canvasFiles) {
 				const canvasImages = await getImagesFromCanvas(canvasFile);
@@ -3464,13 +3477,13 @@ export default class ImageConvertPlugin extends Plugin {
 				new Notice('No images found in the vault.');
 				return;
 			}
-	
+
 			// Check if all images are either in target format or in skip list
-			const allImagesSkippable = imageFiles.every(file => 
+			const allImagesSkippable = imageFiles.every(file =>
 				(file.extension === (isKeepOriginalFormat ? file.extension : targetFormat)) ||
 				skipFormats.includes(file.extension.toLowerCase())
 			);
-	
+
 			// Early return with appropriate message if no processing is needed
 			if (allImagesSkippable && noCompression && noResize) {
 				if (isKeepOriginalFormat) {
@@ -3480,12 +3493,12 @@ export default class ImageConvertPlugin extends Plugin {
 				}
 				return;
 			}
-	
+
 			// Filter files that actually need processing
-			const filesToProcess = imageFiles.filter(file => 
+			const filesToProcess = imageFiles.filter(file =>
 				this.processAllVaultImages_shouldProcessImage(file)
 			);
-	
+
 			if (filesToProcess.length === 0) {
 				if (this.settings.ProcessAllVaultskipImagesInTargetFormat) {
 					new Notice(`No processing needed: All vault images are either in ${isKeepOriginalFormat ? 'their original' : targetFormat.toUpperCase()} format or in skip list.`);
@@ -3494,36 +3507,36 @@ export default class ImageConvertPlugin extends Plugin {
 				}
 				return;
 			}
-	
+
 			let imageCount = 0;
 			const statusBarItemEl = this.addStatusBarItem();
 			const startTime = Date.now();
-	
+
 			for (const file of filesToProcess) {
 				imageCount++;
 				console.log(`Processing image ${imageCount} of ${filesToProcess.length}: ${file.name} ${file.path}`);
-	
+
 				await this.convertAllVault(file);
 				await refreshImagesInActiveNote();
-	
+
 				const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
 				statusBarItemEl.setText(
 					`Processing image ${imageCount} of ${filesToProcess.length}, elapsed time: ${elapsedTime} seconds`
 				);
 				console.log(`${imageCount} of ${filesToProcess.length} ${file.name} ${file.path} ${elapsedTime} seconds elapsed`);
 			}
-	
+
 			const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
 			statusBarItemEl.setText(`Finished processing ${imageCount} images, total time: ${totalTime} seconds`);
-			
+
 			if (imageCount > 0) {
 				new Notice(`Successfully processed ${imageCount} images.`);
 			}
-	
+
 			window.setTimeout(() => {
 				statusBarItemEl.setText('');
 			}, 5000);
-	
+
 		} catch (error) {
 			console.error('Error processing vault images:', error);
 			new Notice(`Error processing images: ${error.message}`);
@@ -3536,33 +3549,33 @@ export default class ImageConvertPlugin extends Plugin {
 
 	async convertAllVault(file: TFile) {
 		// Early return if no processing is needed
-		if (this.settings.ProcessAllVaultconvertTo === 'disabled' && 
-			this.settings.ProcessAllVaultquality === 1 && 
+		if (this.settings.ProcessAllVaultconvertTo === 'disabled' &&
+			this.settings.ProcessAllVaultquality === 1 &&
 			this.settings.ProcessAllVaultResizeModalresizeMode === 'None') {
 			return; // Skip processing entirely
 		}
-	
+
 		let extension = file.extension;
 		let shouldRename = false;
 		let newFilePath: string | undefined;
-	
+
 		// Only prepare for rename if we're changing to a different format
-		if (this.settings.ProcessAllVaultconvertTo && 
+		if (this.settings.ProcessAllVaultconvertTo &&
 			this.settings.ProcessAllVaultconvertTo !== 'disabled' &&
 			this.settings.ProcessAllVaultconvertTo !== file.extension) {
 			extension = this.settings.ProcessAllVaultconvertTo;
 			shouldRename = true;
 			newFilePath = await this.getUniqueFilePath(file, extension);
 		}
-	
+
 		const binary = await this.app.vault.readBinary(file);
 		let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
-	
+
 		// Handle special formats
 		if (file.extension === 'tif' || file.extension === 'tiff') {
 			imgBlob = await handleTiffImage(binary);
 		}
-	
+
 		if (file.extension === 'heic') {
 			imgBlob = await convertHeicToFormat(
 				binary,
@@ -3570,7 +3583,7 @@ export default class ImageConvertPlugin extends Plugin {
 				this.settings.ProcessAllVaultquality
 			);
 		}
-	
+
 		const quality = this.settings.ProcessAllVaultquality;
 		const resizeMode = this.settings.ProcessAllVaultResizeModalresizeMode;
 		const desiredWidth = this.settings.ProcessAllVaultResizeModaldesiredWidth;
@@ -3579,7 +3592,7 @@ export default class ImageConvertPlugin extends Plugin {
 		const enlargeOrReduce = this.settings.ProcessAllVaultEnlargeOrReduce;
 		const convertTo = this.settings.ProcessAllVaultconvertTo;
 		const allowLargerFiles = this.settings.allowLargerFiles;
-	
+
 		// Handle quality < 1 (compression) case
 		if (quality !== 1) {
 			let arrayBuffer: ArrayBuffer | undefined;
@@ -3612,17 +3625,17 @@ export default class ImageConvertPlugin extends Plugin {
 						break;
 				}
 			}
-	
+
 			if (arrayBuffer) {
 				await this.app.vault.modifyBinary(file, arrayBuffer);
 			} else {
 				new Notice('Error: Failed to compress image.');
 			}
-		} 
+		}
 		// Handle resize only case (no compression)
 			else if (quality === 1 && resizeMode !== 'None') {
 			let arrayBuffer: ArrayBuffer | undefined;
-			
+
 			switch (file.extension) {
 				case 'jpg':
 				case 'jpeg':
@@ -3635,14 +3648,14 @@ export default class ImageConvertPlugin extends Plugin {
 					arrayBuffer = await convertToWebP(imgBlob, 1, resizeMode, desiredWidth, desiredHeight, desiredLength, enlargeOrReduce, allowLargerFiles);
 					break;
 			}
-	
+
 			if (arrayBuffer) {
 				await this.app.vault.modifyBinary(file, arrayBuffer);
 			} else {
 				new Notice('Error: Failed to resize image.');
 			}
 		}
-	
+
 		// Only rename and update links if we're changing formats
 		if (shouldRename && newFilePath) {
 			await this.updateAllVaultLinks(file, newFilePath);
@@ -3653,40 +3666,66 @@ export default class ImageConvertPlugin extends Plugin {
 		try {
 			// Rename the file first
 			await this.app.fileManager.renameFile(file, newFilePath);
-	
+
 			// Get the new file reference after renaming
 			const newFile = this.app.vault.getAbstractFileByPath(newFilePath) as TFile;
 			if (!newFile) {
 				console.error('Could not find renamed file:', newFilePath);
 				return;
 			}
-	
+
 			// Get all markdown and canvas files in the vault
 			const markdownFiles = this.app.vault.getMarkdownFiles();
 			const canvasFiles = this.app.vault.getFiles().filter(f => f.extension === 'canvas');
-	
+
 			// Iterate over each markdown file
 			for (const markdownFile of markdownFiles) {
 				let content = await this.app.vault.read(markdownFile);
 				let modified = false;
-	
-				// Handle different link formats
-				const linkPatterns = [
-					`![[${file.basename}]]`,                    // Basic wikilink
-					`![[${file.basename}.${file.extension}]]`,  // Full filename wikilink
-					`![](${file.name})`,                        // Markdown link
-				];
-	
-				const newLink = `![[${newFile.basename}.${newFile.extension}]]`;
-	
-				// Replace each pattern if found
+
+				let linkPatterns;
+				let newLink;
+				// User may use ![Caption](image.png) or ![[image.png]] or ![[image.png|Caption]]
+				// This is not the best solution, there is a very small probability of error
+				if (this.settings.useMdLinks) {
+					linkPatterns = [
+						`[${file.basename}]]`, // wiki format link, remaining part: ![...
+						`[${file.basename}.${file.extension}]]`, // remaining part: ![...
+						`](${file.name})`, // Markdown format link, remaining part: ![...
+					];
+					newLink = `](${newFile.basename}.${newFile.extension})`;
+				} else {
+					linkPatterns = [
+						`![[${file.basename}`, // wiki format link, remaining part: ]] or |...]]
+						`![[${file.basename}.${file.extension}`, // remaining part: ]] or |...]]
+					];
+					newLink = `![[${newFile.basename}.${newFile.extension}`;
+					// if the user use ![Caption](image.png) or ![](image.png) format, need to be considered separately
+					if (content.includes(`![](${file.name})`)) {
+						content = content.split(`![](${file.name})`).join(`![[${newFile.basename}.${newFile.extension}]`);
+						modified = true;
+					}
+					while (content.includes(`](${file.basename}.${file.extension})`)) {
+						// user use ![Caption](image.png) format, I need to change it to ![[image.png|Caption]]
+						// Find the location of the image
+						const start = content.indexOf(`](${file.basename}.${file.extension})`);
+						// Find the location of the ![ before the image
+						const pre = content.lastIndexOf('![', start);
+						// Extract the content between ![ and ](image.png)
+						const caption = content.slice(pre + 2, start);
+						// replace
+						content = content.slice(0, pre) + `![[${newFile.basename}.${newFile.extension}|${caption}]` + content.slice(start + file.basename.length + 4);
+						modified = true;
+					}
+				}
+
 				for (const pattern of linkPatterns) {
 					if (content.includes(pattern)) {
 						content = content.split(pattern).join(newLink);
 						modified = true;
 					}
 				}
-	
+
 				// Only modify the file if changes were made
 				if (modified) {
 					await this.app.vault.modify(markdownFile, content);
@@ -3710,30 +3749,30 @@ export default class ImageConvertPlugin extends Plugin {
 
 	processAllVaultImages_shouldProcessImage(image: TFile): boolean {
 		const isKeepOriginalFormat = this.settings.ProcessAllVaultconvertTo === 'disabled';
-		const effectiveTargetFormat = isKeepOriginalFormat 
-			? image.extension 
+		const effectiveTargetFormat = isKeepOriginalFormat
+			? image.extension
 			: this.settings.ProcessAllVaultconvertTo;
-	
+
 		// Get skip formats from settings and parse them
 		const skipFormats = this.settings.ProcessAllVaultSkipFormats
 			.toLowerCase()
 			.split(',')
 			.map(format => format.trim())
 			.filter(format => format.length > 0);
-		
+
 		// Skip files with extensions in the skip list
 		if (skipFormats.includes(image.extension.toLowerCase())) {
 			console.log(`Skipping ${image.name}: Format ${image.extension} is in skip list`);
 			return false;
 		}
-	
+
 		// Skip images already in target format (or original format if disabled)
-		if (this.settings.ProcessAllVaultskipImagesInTargetFormat && 
+		if (this.settings.ProcessAllVaultskipImagesInTargetFormat &&
 			image.extension === effectiveTargetFormat) {
 			console.log(`Skipping ${image.name}: Already in ${effectiveTargetFormat} format`);
 			return false;
 		}
-		
+
 		return true;
 	}
 
@@ -3753,14 +3792,14 @@ export default class ImageConvertPlugin extends Plugin {
 			const noCompression = this.settings.ProcessCurrentNotequality === 1;
 			const noResize = this.settings.ProcessCurrentNoteResizeModalresizeMode === 'None';
 			const targetFormat = this.settings.ProcessCurrentNoteconvertTo;
-	
+
 			// Parse skip formats
 			const skipFormats = this.settings.ProcessCurrentNoteSkipFormats
 				.toLowerCase()
 				.split(',')
 				.map(format => format.trim())
 				.filter(format => format.length > 0);
-			
+
 			// Get all image files in the note
 			let linkedFiles: TFile[] = [];
 
@@ -3768,7 +3807,7 @@ export default class ImageConvertPlugin extends Plugin {
 				// Handle canvas file
 				const canvasContent = await this.app.vault.read(note);
 				const canvasData = JSON.parse(canvasContent);
-				
+
 				const getImagesFromNodes = (nodes: any[]): string[] => {
 					let imagePaths: string[] = [];
 					for (const node of nodes) {
@@ -3797,8 +3836,8 @@ export default class ImageConvertPlugin extends Plugin {
 				const linksInCurrentNote = resolvedLinks[note.path];
 				linkedFiles = Object.keys(linksInCurrentNote)
 					.map(link => this.app.vault.getAbstractFileByPath(link))
-					.filter((file): file is TFile => 
-						file instanceof TFile && 
+					.filter((file): file is TFile =>
+						file instanceof TFile &&
 						isImage(file)
 					);
 			}
@@ -3808,13 +3847,13 @@ export default class ImageConvertPlugin extends Plugin {
 				new Notice('No images found in the note.');
 				return;
 			}
-	
+
 			// Check if all images are either in target format or in skip list
-			const allImagesSkippable = linkedFiles.every(file => 
+			const allImagesSkippable = linkedFiles.every(file =>
 				(file.extension === (isKeepOriginalFormat ? file.extension : targetFormat)) ||
 				skipFormats.includes(file.extension.toLowerCase())
 			);
-	
+
 			// Early return with appropriate message if no processing is needed
 			if (allImagesSkippable && noCompression && noResize) {
 				if (isKeepOriginalFormat) {
@@ -3825,18 +3864,18 @@ export default class ImageConvertPlugin extends Plugin {
 				return;
 			}
 
-	
+
 			// Early return if no processing is needed
 			if (isKeepOriginalFormat && noCompression && noResize) {
 				new Notice('No processing needed: Original format selected with no compression or resizing.');
 				return;
 			}
-	
+
 			// Filter files that actually need processing
-			const filesToProcess = linkedFiles.filter(file => 
+			const filesToProcess = linkedFiles.filter(file =>
 				this.processCurrentNoteImages_shouldProcessImage(file)
 			);
-	
+
 			if (filesToProcess.length === 0) {
 				if (this.settings.ProcessCurrentNoteskipImagesInTargetFormat) {
 					new Notice(`No processing needed: All images are already in ${isKeepOriginalFormat ? 'their original' : targetFormat.toUpperCase()} format.`);
@@ -3845,30 +3884,30 @@ export default class ImageConvertPlugin extends Plugin {
 				}
 				return;
 			}
-					
+
 			let imageCount = 0;
 			const statusBarItemEl = this.addStatusBarItem();
 			const startTime = Date.now();
-	
+
 			const totalImages = filesToProcess.length;
-	
+
 			for (const linkedFile of filesToProcess) {
 				imageCount++;
 				await this.convertCurrentNoteImages(linkedFile);
 				await refreshImagesInActiveNote();
-				
+
 				const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
 				statusBarItemEl.setText(
 					`Processing image ${imageCount} of ${totalImages}, elapsed time: ${elapsedTime} seconds`
 				);
 			}
-	
+
 			const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
 			statusBarItemEl.setText(`Finished processing ${imageCount} images, total time: ${totalTime} seconds`);
 			window.setTimeout(() => {
 				statusBarItemEl.setText('');
 			}, 5000);
-	
+
 		} catch (error) {
 			console.error('Error processing images in current note:', error);
 			new Notice(`Error processing images: ${error.message}`);
@@ -3884,13 +3923,13 @@ export default class ImageConvertPlugin extends Plugin {
 			const isKeepOriginalFormat = this.settings.ProcessCurrentNoteconvertTo === 'disabled';
 			const noCompression = this.settings.ProcessCurrentNotequality === 1;
 			const noResize = this.settings.ProcessCurrentNoteResizeModalresizeMode === 'None';
-	
+
 			// When "Same as original" is selected, treat the file's current extension
 			// as the target format
-			const effectiveTargetFormat = isKeepOriginalFormat 
-				? file.extension 
+			const effectiveTargetFormat = isKeepOriginalFormat
+				? file.extension
 				: this.settings.ProcessCurrentNoteconvertTo;
-	
+
 			// Skip processing if:
 			// 1. We're keeping original format (disabled)
 			// 2. No compression
@@ -3899,7 +3938,7 @@ export default class ImageConvertPlugin extends Plugin {
 				console.log(`Skipping ${file.name}: No processing needed`);
 				return;
 			}
-	
+
 			// Skip if the image is already in target format (or original format if disabled)
 			if (this.settings.ProcessCurrentNoteskipImagesInTargetFormat &&
 				file.extension === effectiveTargetFormat) {
@@ -3918,7 +3957,7 @@ export default class ImageConvertPlugin extends Plugin {
 			// if (skipFormats.includes(file.extension.toLowerCase())) {
 			// 	return;
 			// }
-			
+
 			const activeFile = this.app.workspace.getActiveFile();
 			if (!activeFile) {
 				new Notice('Error: No active file found.');
@@ -3930,7 +3969,7 @@ export default class ImageConvertPlugin extends Plugin {
 			let shouldRename = false;
 			let newFilePath: string | undefined;
 
-			if (effectiveTargetFormat && 
+			if (effectiveTargetFormat &&
 				effectiveTargetFormat !== 'disabled' &&
 				effectiveTargetFormat !== file.extension) {
 				extension = effectiveTargetFormat;
@@ -4022,13 +4061,41 @@ export default class ImageConvertPlugin extends Plugin {
 				let content = await this.app.vault.read(note);
 				let modified = false;
 
-				const linkPatterns = [
-					`![[${file.basename}]]`,
-					`![[${file.basename}.${file.extension}]]`,
-					`![](${file.name})`,
-				];
-
-				const newLink = `![[${newFile.basename}.${newFile.extension}]]`;
+				let linkPatterns;
+				let newLink;
+				// User may use ![Caption](image.png) or ![[image.png]] or ![[image.png|Caption]]
+				// This is not the best solution, there is a very small probability of error
+				if (this.settings.useMdLinks) {
+					linkPatterns = [
+						`[${file.basename}]]`, // wiki format link, remaining part: ![...
+						`[${file.basename}.${file.extension}]]`, // remaining part: ![...
+						`](${file.name})`, // Markdown format link, remaining part: ![...
+					];
+					newLink = `](${newFile.basename}.${newFile.extension})`;
+				} else {
+					linkPatterns = [
+						`![[${file.basename}`, // wiki format link, remaining part: ]] or |...]]
+						`![[${file.basename}.${file.extension}`, // remaining part: ]] or |...]]
+					];
+					newLink = `![[${newFile.basename}.${newFile.extension}`;
+					// if the user use ![Caption](image.png) or ![](image.png) format, need to be considered separately
+					if (content.includes(`![](${file.name})`)) {
+						content = content.split(`![](${file.name})`).join(`![[${newFile.basename}.${newFile.extension}]`);
+						modified = true;
+					}
+					while (content.includes(`](${file.basename}.${file.extension})`)) {
+						// user use ![Caption](image.png) format, I need to change it to ![[image.png|Caption]]
+						// Find the location of the image
+						const start = content.indexOf(`](${file.basename}.${file.extension})`);
+						// Find the location of the ![ before the image
+						const pre = content.lastIndexOf('![', start);
+						// Extract the content between ![ and ](image.png)
+						const caption = content.slice(pre + 2, start);
+						// replace
+						content = content.slice(0, pre) + `![[${newFile.basename}.${newFile.extension}|${caption}]` + content.slice(start + file.basename.length + 4);
+						modified = true;
+					}
+				}
 
 				for (const pattern of linkPatterns) {
 					if (content.includes(pattern)) {
@@ -4036,6 +4103,7 @@ export default class ImageConvertPlugin extends Plugin {
 						modified = true;
 					}
 				}
+
 
 				if (modified) {
 					await this.app.vault.modify(note, content);
@@ -4049,56 +4117,56 @@ export default class ImageConvertPlugin extends Plugin {
 
 	private processCurrentNoteImages_shouldProcessImage(image: TFile): boolean {
 		const isKeepOriginalFormat = this.settings.ProcessCurrentNoteconvertTo === 'disabled';
-		const effectiveTargetFormat = isKeepOriginalFormat 
-			? image.extension 
+		const effectiveTargetFormat = isKeepOriginalFormat
+			? image.extension
 			: this.settings.ProcessCurrentNoteconvertTo;
-	
+
 		// Get skip formats from settings and parse them
 		const skipFormats = this.settings.ProcessCurrentNoteSkipFormats
 			.toLowerCase()
 			.split(',')
 			.map(format => format.trim())
 			.filter(format => format.length > 0);
-		
+
 		// Skip files with extensions in the skip list
 		if (skipFormats.includes(image.extension.toLowerCase())) {
 			console.log(`Skipping ${image.name}: Format ${image.extension} is in skip list`);
 			return false;
 		}
-	
+
 		// Skip images already in target format (or original format if disabled)
-		if (this.settings.ProcessCurrentNoteskipImagesInTargetFormat && 
+		if (this.settings.ProcessCurrentNoteskipImagesInTargetFormat &&
 			image.extension === effectiveTargetFormat) {
 			console.log(`Skipping ${image.name}: Already in ${effectiveTargetFormat} format`);
 			return false;
 		}
-		
+
 		return true;
 	}
 	/* ------------------------------------------------------------- */
 
-	
+
 	private async getUniqueFilePath(file: TFile, newExtension: string): Promise<string> {
 		const dir = file.parent?.path || "";
 		const baseName = file.basename;
 		let counter = 0;
 		let newPath: string;
-		
+
 		do {
-			newPath = counter === 0 
+			newPath = counter === 0
 				? `${dir}/${baseName}.${newExtension}`
 				: `${dir}/${baseName}-${counter}.${newExtension}`;
 			newPath = newPath.replace(/^\//, ''); // Remove leading slash if present
 			counter++;
 		} while (await this.processAllVaultImages_fileExists(newPath));
-	
+
 		return newPath;
 	}
 	async updateCanvasFileLinks(canvasFile: TFile, oldPath: string, newPath: string) {
 		try {
 			const content = await this.app.vault.read(canvasFile);
 			const canvasData = JSON.parse(content);
-	
+
 			const updateNodePaths = (nodes: any[]) => {
 				for (const node of nodes) {
 					if (node.type === 'file' && node.file === oldPath) {
@@ -4109,7 +4177,7 @@ export default class ImageConvertPlugin extends Plugin {
 					}
 				}
 			};
-	
+
 			if (canvasData.nodes && Array.isArray(canvasData.nodes)) {
 				updateNodePaths(canvasData.nodes);
 				await this.app.vault.modify(canvasFile, JSON.stringify(canvasData, null, 2));
@@ -4135,12 +4203,12 @@ export default class ImageConvertPlugin extends Plugin {
 			'contextmenu',
 			(event: MouseEvent) => {
 				const target = event.target as HTMLElement;
-				
+
 				// Check if target is an image or is within an image container
-				const img = target instanceof HTMLImageElement ? 
-					target : 
+				const img = target instanceof HTMLImageElement ?
+					target :
 					target.closest('img');
-				
+
 				if (img) {
 
 					this.onContextMenu(event, img as HTMLImageElement);
@@ -4148,7 +4216,7 @@ export default class ImageConvertPlugin extends Plugin {
 			},
 			true  // capture phase
 		);
-		
+
 		this.registerEvent(
 			this.app.workspace.on('file-menu', (menu, file) => {
 				if (file instanceof TFile && isImage(file)) {
@@ -4202,19 +4270,19 @@ export default class ImageConvertPlugin extends Plugin {
 		el.on(event, selector, listener, options);
 		return () => el.off(event, selector, listener, options);
 	}
-	
+
 	private registerContextMenuForWindow(doc: Document) {
 		this.registerDomEvent(
 			doc,
 			'contextmenu',
 			(event: MouseEvent) => {
 				const target = event.target as HTMLElement;
-	
+
 				// Check if target is an image or is within an image container
-				const img = target instanceof HTMLImageElement ? 
-					target : 
+				const img = target instanceof HTMLImageElement ?
+					target :
 					target.closest('img');
-	
+
 				if (img) {
 					this.onContextMenu(event, img as HTMLImageElement);
 				}
@@ -4232,7 +4300,7 @@ export default class ImageConvertPlugin extends Plugin {
 		// Prevent default context menu from being displayed
 		event.preventDefault();
 		event.stopPropagation();
-		
+
 		// Check if we're in Canvas view first
 		const activeView = this.getActiveView();
 		const isCanvasView = activeView?.getViewType() === 'canvas';
@@ -4242,7 +4310,7 @@ export default class ImageConvertPlugin extends Plugin {
 			event.preventDefault();
 			return;
 		}
-	
+
 		const target = (event.target as Element);
 		if (!(target instanceof HTMLImageElement)) {
 			return; // Exit if not an image
@@ -4325,7 +4393,7 @@ export default class ImageConvertPlugin extends Plugin {
 					if (file instanceof TFile) {
 						// Create directories if they don't exist
 						await this.ensureFolderExists(pathInput.value);
-						
+
 						await this.app.fileManager.renameFile(file, newPath);
 						img.src = newPath;
 						new Notice('Image name updated successfully');
@@ -4342,13 +4410,13 @@ export default class ImageConvertPlugin extends Plugin {
 			try {
 				const newDirectoryPath = pathInput.value;
 				const newPath = `${newDirectoryPath}/${nameInput.value}${fileExtension}`;
-				
+
 				if (imagePath && newPath !== imagePath) {
 					const file = this.app.vault.getAbstractFileByPath(imagePath);
 					if (file instanceof TFile) {
 						// Create directories if they don't exist
 						await this.ensureFolderExists(newDirectoryPath);
-						
+
 						await this.app.fileManager.renameFile(file, newPath);
 						img.src = newPath;
 						new Notice('Image path updated successfully');
@@ -4357,7 +4425,7 @@ export default class ImageConvertPlugin extends Plugin {
 						if (leaf) {
 							// Store current state
 							const currentState = leaf.getViewState();
-							
+
 							// Switch to a different view type temporarily
 							await leaf.setViewState({
 								type: 'empty',
@@ -4379,7 +4447,7 @@ export default class ImageConvertPlugin extends Plugin {
 			const itemDom = (item as any).dom as HTMLElement;
 			itemDom.empty();
 			itemDom.appendChild(inputContainer);
-			
+
 			setTimeout(() => {
 				nameInput.focus();
 				nameInput.select();
@@ -4551,7 +4619,7 @@ export default class ImageConvertPlugin extends Plugin {
 						});
 				});
 		});
-		
+
 		// Add option to resize image
 		menu.addItem((item: MenuItem) =>
 			item
@@ -4819,7 +4887,7 @@ export default class ImageConvertPlugin extends Plugin {
 					}
 				});
 		});
-        
+
 		menu.addSeparator();
 
 		menu.addItem((item) => {
@@ -4834,7 +4902,7 @@ export default class ImageConvertPlugin extends Plugin {
 							if (file instanceof TFile) {
 								// First, try to get existing file explorer
 								let fileExplorerLeaf = this.app.workspace.getLeavesOfType('file-explorer')[0];
-								
+
 								// If file explorer isn't open, create it
 								if (!fileExplorerLeaf) {
 									const newLeaf = this.app.workspace.getLeftLeaf(false);
@@ -4845,14 +4913,14 @@ export default class ImageConvertPlugin extends Plugin {
 										fileExplorerLeaf = newLeaf;
 									}
 								}
-		
+
 								// Proceed only if we have a valid leaf
 								if (fileExplorerLeaf) {
 									// Ensure the left sidebar is expanded
 									if (this.app.workspace.leftSplit) {
 										this.app.workspace.leftSplit.expand();
 									}
-		
+
 									// Now reveal the file
 									const fileExplorerView = fileExplorerLeaf.view;
 									if (fileExplorerView) {
@@ -4868,7 +4936,7 @@ export default class ImageConvertPlugin extends Plugin {
 					}
 				});
 		});
-		
+
 		menu.addItem((item) => {
 			item
 				.setTitle('Show in system explorer')
@@ -4885,8 +4953,8 @@ export default class ImageConvertPlugin extends Plugin {
 					}
 				});
 		});
-		
-		
+
+
 		menu.addSeparator();
 
 		// Delete (Image + md link)
@@ -4897,39 +4965,39 @@ export default class ImageConvertPlugin extends Plugin {
 					deleteImageFromVault(event, this.app);
 				});
 		});
-				
+
 		menu.showAtPosition({ x: event.pageX, y: event.pageY });
-		
+
 
 		// // Prevent the default context menu from appearing
 		// event.preventDefault();
-		
+
 
 	}
 
-	
+
 	private getImagePath(img: HTMLImageElement): string | null {
 		try {
 			const srcAttribute = img.getAttribute('src');
 			if (!srcAttribute) return null;
-	
+
 			// Get Vault Name
 			const rootFolder = this.app.vault.getName();
-			
+
 			// Decode and clean up the path
 			let imagePath = decodeURIComponent(srcAttribute);
-			
+
 			// Find the position of the root folder in the path
 			const rootFolderIndex = imagePath.indexOf(rootFolder);
-			
+
 			// Remove everything before the root folder
 			if (rootFolderIndex !== -1) {
 				imagePath = imagePath.substring(rootFolderIndex + rootFolder.length + 1);
 			}
-			
+
 			// Remove any query parameters
 			imagePath = imagePath.split('?')[0];
-			
+
 			return imagePath;
 		} catch (error) {
 			console.error('Error getting image path:', error);
@@ -4950,10 +5018,10 @@ export default class ImageConvertPlugin extends Plugin {
 		this.registerDomEvent(doc, 'mousemove', this.dragResize_handleMouseMove.bind(this));
 		this.registerDomEvent(doc, 'mouseup', this.dragResize_handleMouseUp.bind(this));
 		this.registerDomEvent(doc, 'mouseout', this.dragResize_handleMouseOut.bind(this));
-	
+
 		// Add the base CSS class to workspace
 		this.app.workspace.containerEl.addClass('image-resize-enabled');
-	
+
 		// Also reinitialize on layout changes
 		this.registerEvent(
 			this.app.workspace.on('layout-change', () => {
@@ -4966,50 +5034,50 @@ export default class ImageConvertPlugin extends Plugin {
 
 	private dragResize_isValidTarget(element: HTMLElement): element is HTMLImageElement | HTMLVideoElement {
 		if (!this.settings.resizeByDragging) return false;
-		
+
 		// Check if we're in reading mode and if it's allowed
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!activeView) return false;
-		
+
 		if (activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode) {
 			return false;
 		}
-	
+
 		// Check if element is valid image/video
 		if (!(element instanceof HTMLImageElement || element instanceof HTMLVideoElement)) {
 			return false;
 		}
-	
+
 		// Check if element is in the active view
 		return activeView.containerEl.contains(element);
 	}
 
 	private dragResize_handleMouseDown(event: MouseEvent) {
 		if (!this.settings.resizeByDragging || Platform.isMobile) return;
-		
+
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (!activeView || 
+		if (!activeView ||
 			(activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode)) {
 			return;
 		}
-	
+
 		// Find the image element, either as the target or as a parent
 		const target = (event.target as HTMLElement).closest('img, video') as HTMLElement;
 		if (!target || !this.dragResize_isValidTarget(target)) return;
-	
+
 		const rect = target.getBoundingClientRect();
 		const x = event.clientX - rect.left;
 		const y = event.clientY - rect.top;
 		const edgeSize = 30;
-	
-		if ((x >= rect.width - edgeSize || x <= edgeSize) || 
+
+		if ((x >= rect.width - edgeSize || x <= edgeSize) ||
 			(y >= rect.height - edgeSize || y <= edgeSize)) {
-			
+
 			event.preventDefault();
 			event.stopPropagation();
-			
+
 			target.setAttribute('data-resize-active', 'true');
-			
+
 			this.resizeState = {
 				isResizing: true,
 				startX: event.clientX,
@@ -5124,14 +5192,14 @@ export default class ImageConvertPlugin extends Plugin {
 
 	private dragResize_calculateNewDimensions(event: MouseEvent) {
 		if (!this.resizeState.element) return { newWidth: 0, newHeight: 0 };
-	
+
 		const deltaX = event.clientX - this.resizeState.startX;
 		const aspectRatio = this.resizeState.startWidth / this.resizeState.startHeight;
-		
+
 		// Use integer math for better performance
 		const newWidth = Math.max(~~(this.resizeState.startWidth + deltaX), 50);
 		const newHeight = ~~(newWidth / aspectRatio);
-	
+
 		return {
 			newWidth: Math.max(50, newWidth),
 			newHeight: Math.max(50, newHeight)
@@ -5140,10 +5208,10 @@ export default class ImageConvertPlugin extends Plugin {
 
 	private dragResize_updateMarkdownContent = this.throttle((newWidth: number, newHeight: number, imageName: string | null) => {
 		if (!imageName) return;
-	
+
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!activeView) return;
-	
+
 		updateImageLink({
 			activeView,
 			imageName,
@@ -5156,18 +5224,18 @@ export default class ImageConvertPlugin extends Plugin {
 	private dragResize_updateCursorPosition() {
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!activeView || !this.resizeState.element) return;
-	
+
 		const editor = activeView.editor;
 		const cursorPos = editor.getCursor();
 		const lineContent = editor.getLine(cursorPos.line);
-		
+
 		// Get image name safely
 		const imageName = getImageName(this.resizeState.element);
 		if (!imageName) return;
-	
+
 		// Ensure we have valid content to work with
 		if (!lineContent.includes(imageName)) return;
-	
+
 		let newCursorPos;
 		if (this.settings.cursorPosition === 'front') {
 			// Look for both internal and external link syntax
@@ -5175,16 +5243,16 @@ export default class ImageConvertPlugin extends Plugin {
 			newCursorPos = { line: cursorPos.line, ch: Math.max(linkStart, 0) };
 		} else {
 			// Handle both internal and external link endings
-			const linkEnd = lineContent.indexOf(']]') !== -1 ? 
-				lineContent.indexOf(']]') + 2 : 
+			const linkEnd = lineContent.indexOf(']]') !== -1 ?
+				lineContent.indexOf(']]') + 2 :
 				lineContent.indexOf(')') + 1;
 			newCursorPos = { line: cursorPos.line, ch: Math.min(linkEnd, lineContent.length) };
 		}
-	
+
 		// Set cursor position immediately without setTimeout
 		editor.setCursor(newCursorPos);
 	}
-	
+
 	// Add cleanup method to remove any lingering attributes
 	private dragResize_cleanupResizeAttributes() {
 		if (Platform.isMobile) { return; }
@@ -5197,23 +5265,23 @@ export default class ImageConvertPlugin extends Plugin {
 			element.removeAttribute('data-resize-active');
 		});
 	}
-	
+
 	private handleNonResizingMouseMove = this.debounce((event: MouseEvent) => {
 		if (Platform.isMobile) { return; }
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (!activeView || 
+		if (!activeView ||
 			(activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode)) {
 			return;
 		}
-	
+
 		const target = event.target as HTMLElement;
 		if (this.dragResize_isValidTarget(target)) {
 			const rect = target.getBoundingClientRect();
 			const x = event.clientX - rect.left;
 			const y = event.clientY - rect.top;
 			const edgeSize = 30;
-	
-			if ((x >= rect.width - edgeSize || x <= edgeSize) || 
+
+			if ((x >= rect.width - edgeSize || x <= edgeSize) ||
 				(y >= rect.height - edgeSize || y <= edgeSize)) {
 				target.setAttribute('data-resize-edge', 'true');
 			} else {
@@ -5232,7 +5300,7 @@ export default class ImageConvertPlugin extends Plugin {
 			timeout = window.setTimeout(() => func(...args), wait);
 		};
 	}
-	
+
 	private throttle<T extends (...args: any[]) => void>(
 		func: T,
 		limit: number
@@ -5279,24 +5347,24 @@ export default class ImageConvertPlugin extends Plugin {
 				"img, video",
 				async (event: WheelEvent) => {
 					if (Platform.isMobile || !this.settings.resizeWithScrollwheel) return;
-	
+
 					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 					if (!activeView ||
 						(activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode)) {
 						return;
 					}
-	
+
 					const markdownContainer = activeView.containerEl;
 					const target = event.target as HTMLElement;
 					if (!markdownContainer.contains(target)) return;
-	
+
 					// Check for the configured modifier key
 					if (!this.scrollwheelresize_checkModifierKey(event)) return;
-	
+
 					try {
 						const element = event.target as HTMLImageElement | HTMLVideoElement;
 						const imageName = getImageName(element);
-	
+
 						// Get image position data from cache using imagePositionManager
 						const activeFile = this.app.workspace.getActiveFile();
 
@@ -5312,16 +5380,16 @@ export default class ImageConvertPlugin extends Plugin {
 						if (activeFile && this.imagePositionManager) {
 							positionData = this.imagePositionManager.getImagePosition(activeFile.path, element.getAttribute('src') || '');
 						}
-	
+
 						if (!imageName) {
 							return;
 						}
-	
+
 						const { newWidth, newHeight } = resizeImageScrollWheel(event, element);
-	
+
 						// Find all instances of the same image
 						const allInstances = this.findAllImageInstances(imageName);
-	
+
 						allInstances.forEach(async (el) => {
 							if (el instanceof HTMLImageElement) {
 								// Apply cached position before resize using imagePositionManager
@@ -5336,7 +5404,7 @@ export default class ImageConvertPlugin extends Plugin {
 								el.style.width = `${newWidth}%`;
 							}
 						});
-	
+
 						// Update the markdown links for all instances
 						updateImageLink({
 							activeView,
@@ -5345,9 +5413,9 @@ export default class ImageConvertPlugin extends Plugin {
 							newHeight,
 							settings: this.settings
 						});
-	
+
 						this.scrollwheelresize_updateCursorPosition(activeView.editor, imageName);
-	
+
 						// Update cache with new dimensions, preserving position
 						if (activeFile && this.imagePositionManager) {
 							const src = element.getAttribute('src');
@@ -5359,7 +5427,7 @@ export default class ImageConvertPlugin extends Plugin {
 								);
 							}
 						}
-	
+
 					} catch (error) {
 						console.error('Error during scroll wheel resize:', error);
 					}
@@ -5379,20 +5447,20 @@ export default class ImageConvertPlugin extends Plugin {
 					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 					if (!activeView) return;
 					// Check if resizing is enabled for Reading Mode
-					if (!activeView || 
+					if (!activeView ||
 						(activeView.getMode() === 'preview' && !this.settings.allowResizeInReadingMode)) {
 						return;
 					}
 					const markdownContainer = activeView.containerEl;
 					const target = event.target as HTMLElement;
 					if (!markdownContainer.contains(target)) return;
-	
+
 					// Check if the current modifier is pressed
 					const modifierPressed = this.settings.scrollwheelModifier === 'None' ? false :
 						event[`${this.settings.scrollwheelModifier.toLowerCase()}Key` as keyof MouseEvent];
-					
+
 					if (modifierPressed) return;
-	
+
 					const img = event.target as HTMLImageElement | HTMLVideoElement;
 					this.storedImageName = getImageName(img);
 				}
@@ -5403,17 +5471,17 @@ export default class ImageConvertPlugin extends Plugin {
 	private scrollwheelresize_updateCursorPosition(editor: Editor, imageName: string | null) {
 		if (Platform.isMobile) { return; }
 		if (!imageName) return;  // Early return if imageName is null
-	
+
 		const cursorPos = editor.getCursor();
 		const lineContent = editor.getLine(cursorPos.line);
-		
+
 		let newCursorPos;
 		if (this.settings.cursorPosition === 'front') {
 			const linkStart = Math.max(lineContent.indexOf('![['), lineContent.indexOf('!['));
 			newCursorPos = { line: cursorPos.line, ch: Math.max(linkStart, 0) };
 		} else {
-			const linkEnd = lineContent.indexOf(']]') !== -1 ? 
-				lineContent.indexOf(']]') + 2 : 
+			const linkEnd = lineContent.indexOf(']]') !== -1 ?
+				lineContent.indexOf(']]') + 2 :
 				lineContent.indexOf(')') + 1;
 			newCursorPos = { line: cursorPos.line, ch: Math.min(linkEnd, lineContent.length) };
 		}
@@ -5455,32 +5523,32 @@ export default class ImageConvertPlugin extends Plugin {
 
 	getActiveEditor(sourcePath: string): Editor | null {
 		let editor: Editor | null = null;
-	
+
 		const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (mdView?.file?.path === sourcePath) {
 			editor = mdView.editor;
 		}
-	
+
 		const canvasLeaf = this.app.workspace.getLeavesOfType("canvas").find(leaf => (leaf.view as any)?.file?.path === sourcePath);
 		if (canvasLeaf) {
 			editor = (canvasLeaf.view as any).canvas?.editor || null;
 		}
-	
+
 		const excalidrawLeaf = this.app.workspace.getLeavesOfType("excalidraw").find(leaf => (leaf.view as any)?.file?.path === sourcePath);
 		if (excalidrawLeaf) {
 			editor = (excalidrawLeaf.view as any).excalidrawEditor || null;
 		}
-	
+
 		return editor;
 	}
-	
+
 	private getActiveView(): MarkdownView | View | null {
 		return this.app.workspace.getActiveViewOfType(MarkdownView)
 			|| this.app.workspace.getLeavesOfType("canvas").find(leaf => leaf.view)?.view
 			|| this.app.workspace.getLeavesOfType("excalidraw").find(leaf => leaf.view)?.view
 			|| null;
 	}
-	
+
 	private isValidViewType(viewType: string | undefined): boolean {
 		return ['markdown', 'canvas', 'excalidraw'].includes(viewType || '');
 	}
@@ -5716,13 +5784,13 @@ async function handleHeicImage(
 }
 
 
-// We're working with the original blob at the beginning, but the crucial 
+// We're working with the original blob at the beginning, but the crucial
 // part is HOW we're creating the new compressed version. The path we take
-// to create the compressed version (toDataURL vs toBlob) can result in 
+// to create the compressed version (toDataURL vs toBlob) can result in
 // different compression algorithms being used internally by the browser.
 // THIS is IMPORTANT FOR MOBILE.
 async function compressOriginalImage(
-    file: Blob, 
+    file: Blob,
     quality: number,
     destructive_resizeMode: string,
     destructive_desiredWidth: number,
@@ -5773,7 +5841,7 @@ async function compressOriginalImage(
                     imageWidth, imageHeight
                 );
                 ctx.restore();
-				
+
 				const blobType = file.type || 'image/jpeg';
 
                 // Use original format instead of hardcoding JPEG
@@ -5904,9 +5972,9 @@ async function convertToWebP(
 
         // Get original format compression as well
 
-		// We're working with the original blob at the beginning,but the crucial 
+		// We're working with the original blob at the beginning,but the crucial
 		// part is HOW we're creating the new compressed version. The path we take
-		// to create the compressed version (toDataURL vs toBlob) can result in 
+		// to create the compressed version (toDataURL vs toBlob) can result in
 		// different compression algorithms being used internally by the browser.
         const originalCompressed = await compressOriginalImage(
             file,
@@ -6073,10 +6141,10 @@ async function convertToJPG(
             { type: 'blob', data: blobResult, size: blobResult.byteLength },
             { type: 'dataUrl', data: dataUrlResult, size: dataUrlResult.byteLength },
             // Only include original compression if the input wasn't already JPEG
-            ...(file.type !== 'image/jpeg' ? [{ 
-                type: 'original', 
-                data: originalCompressed, 
-                size: originalCompressed.byteLength 
+            ...(file.type !== 'image/jpeg' ? [{
+                type: 'original',
+                data: originalCompressed,
+                size: originalCompressed.byteLength
             }] : [])
         ].filter(result => result.size > 0);
 
@@ -6388,11 +6456,11 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
     const length = binary.length;
     const buffer = new ArrayBuffer(length);
     const view = new Uint8Array(buffer);
-    
+
     for (let i = 0; i < length; i++) {
         view[i] = binary.charCodeAt(i);
     }
-    
+
     return buffer;
 }
 /* ------------------------------------------------------------- */
@@ -6481,23 +6549,23 @@ function updateImageLink({ activeView, imageName, newWidth, newHeight, settings 
     const isFrontmatter = (lineNumber: number, editor: Editor): boolean => {
         let inFrontmatter = false;
         let frontmatterStart = false;
-        
+
         for (let i = 0; i <= lineNumber; i++) {
             const line = editor.getLine(i);
-            
+
             // Check for frontmatter start
             if (i === 0 && line === '---') {
                 inFrontmatter = true;
                 frontmatterStart = true;
                 continue;
             }
-            
+
             // Check for frontmatter end
             if (inFrontmatter && line === '---') {
                 inFrontmatter = false;
                 continue;
             }
-            
+
             // If we reach our target line and we're still in frontmatter
             if (i === lineNumber && inFrontmatter && frontmatterStart) {
                 return true;
@@ -6557,10 +6625,10 @@ function updateImageLink({ activeView, imageName, newWidth, newHeight, settings 
 		if (isFrontmatter(i, editor)) {
 			continue;
 		}
-	
+
 		const line = editor.getLine(i);
 		const matches = findAllMatches(line);
-	
+
 		for (const match of matches) {
 			const matchFilename = isBase64Image(match.path) ? match.path : getFilenameFromPath(match.path);
 			if (matchFilename === normalizedTargetName) {
@@ -6603,14 +6671,14 @@ function getImageName(img: HTMLImageElement | HTMLVideoElement | null): string |
 	// 4. Handle null in getImageName
 	if (!img) return null;
     let imageName = img.getAttribute("src");
-    
+
     if (!imageName) return null;
 
     // Handle base64 images
     if (isBase64Image(imageName)) {
         return imageName;
     }
-    
+
     // Handle external links
     if (isExternalLink(imageName)) {
         return imageName;
@@ -6619,13 +6687,13 @@ function getImageName(img: HTMLImageElement | HTMLVideoElement | null): string |
     try {
         // Decode URI components to handle spaces and special characters
         imageName = decodeURIComponent(imageName);
-        
+
         // Split on forward or backward slashes
         const parts = imageName.split(/[/\\]/);
-        
+
         // Get the filename (last part)
         const fileName = parts[parts.length - 1].split('?')[0];
-        
+
         // Return the full filename including any spaces
         return fileName;
     } catch (error) {
@@ -6667,8 +6735,8 @@ function resizeImageScrollWheel(event: WheelEvent, img: HTMLImageElement | HTMLV
     return {
         newWidth,
         newHeight,
-        newLeft: 0,  
-        newTop: 0    
+        newLeft: 0,
+        newTop: 0
     };
 }
 /* ------------------------------------------------------------- */
@@ -6763,24 +6831,24 @@ function getFullImagePath(activeView: MarkdownView | null, file: TFile): string 
     // Search for the full image path in the document
     for (let i = 0; i < lineCount; i++) {
         const line = doc.getLine(i);
-        
+
         // Check for wiki-style links with dimensions
         const wikiLinkMatch = line.match(/!\[\[(.*?)(?:\|.*?)?\]\]/);
         if (wikiLinkMatch) {
             const linkPath = wikiLinkMatch[1].split('|')[0];
             const normalizedLinkPath = normalizeForComparison(linkPath);
-            if (normalizedLinkPath.endsWith(normalizedFileName) || 
+            if (normalizedLinkPath.endsWith(normalizedFileName) ||
                 normalizedLinkPath === normalizedFilePath) {
                 return linkPath;
             }
         }
-        
+
         // Check for standard markdown links with dimensions
         const mdLinkMatch = line.match(/!\[([^\]]*?)(?:\|\d+(?:\|\d+)?)?\]\(([^)]+)\)/);
         if (mdLinkMatch) {
             const linkPath = mdLinkMatch[2];
             const normalizedLinkPath = normalizeForComparison(linkPath);
-            if (normalizedLinkPath.endsWith(normalizedFileName) || 
+            if (normalizedLinkPath.endsWith(normalizedFileName) ||
                 normalizedLinkPath === normalizedFilePath) {
                 return linkPath;
             }
@@ -6799,7 +6867,7 @@ function deleteMarkdownLink(activeView: MarkdownView, imagePath: string | null) 
     const editor = activeView.editor;
     const doc = editor.getDoc();
     const lineCount = doc.lineCount();
-    
+
     // Normalize the image path for comparison
     const normalizedImagePath = imagePath.replace(/\\/g, '/')
         .replace(/%20/g, ' ')
@@ -6842,11 +6910,11 @@ function deleteMarkdownLink(activeView: MarkdownView, imagePath: string | null) 
     for (let i = frontmatterEnd + 1; i < lineCount; i++) {
         const line = editor.getLine(i);
         console.trace(`[deleteMarkdownLink] Checking line ${i}: "${line}"`);
-        
+
         // Find all possible matches in the current line
         const wikiMatches = [...line.matchAll(/!\[\[([^\]]+?)(?:\|[^\]]+?)?\]\]/g)];
         const mdMatches = [...line.matchAll(/!\[([^\]]*?)(?:\|\d+(?:\|\d+)?)?\]\(([^)]+)\)/g)];
-        
+
         // console.debug(`[deleteMarkdownLink] Line ${i}: Found ${wikiMatches.length} wiki-style matches and ${mdMatches.length} markdown-style matches.`);
 
         // Check wiki-style links
@@ -6858,7 +6926,7 @@ function deleteMarkdownLink(activeView: MarkdownView, imagePath: string | null) 
                 .split('?')[0]
                 .toLowerCase()
                 .trim();
-            
+
             const isMatch = linkPath.includes(normalizedImagePath);
             // console.debug(`[deleteMarkdownLink] Wiki-style match: Full match: "${fullMatch}", Extracted path: "${linkPath}", Match: ${isMatch}`);
 
@@ -6883,7 +6951,7 @@ function deleteMarkdownLink(activeView: MarkdownView, imagePath: string | null) 
 
             const isMatch = linkPath.includes(normalizedImagePath);
             // console.debug(`[deleteMarkdownLink] Markdown-style match: Full match: "${fullMatch}", Extracted path: "${linkPath}", Match: ${isMatch}`);
-            
+
             if (isMatch) {
                 matchesToDelete.push({
                     line: i,
@@ -6899,7 +6967,7 @@ function deleteMarkdownLink(activeView: MarkdownView, imagePath: string | null) 
         // console.debug(`[deleteMarkdownLink] Deleting match from line ${match.line}, start: ${match.start}, length: ${match.length}`);
         deleteMatchFromLine(editor, match.line, match.start, match.length);
     }
-    
+
     // const endTime = performance.now();
     // const duration = (endTime - startTime).toFixed(2);
 
@@ -6916,7 +6984,7 @@ function deleteMatchFromLine(
     length: number
 ) {
     const line = editor.getLine(lineNumber);
-    
+
     // Calculate trailing whitespace
 	let trailingWhitespace = 0;
 	while (line[startCh + length + trailingWhitespace] === ' ' ||
@@ -6962,7 +7030,7 @@ async function cutImageFromNote(event: MouseEvent, app: App) {
         // Find the markdown link in the current line
         const wikiMatch = line.match(/!\[\[([^\]]+?)(?:\|[^\]]+?)?\]\]/);
         const mdMatch = line.match(/!\[([^\]]*?)(?:\|\d+(?:\|\d+)?)?\]\(([^)]+)\)/);
-        
+
         const match = wikiMatch || mdMatch;
         if (!match) {
             new Notice('Failed to find image link');
@@ -7029,7 +7097,7 @@ export class ImageConvertTab extends PluginSettingTab {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
-	
+
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
@@ -7155,7 +7223,7 @@ export class ImageConvertTab extends PluginSettingTab {
 
 		// Add a heading for resize settings
 		resizeSettingsContainer.createEl('h3', { text: '', cls: 'setting-group-heading' });
-		
+
 		// Resize Mode Setting
 		new Setting(resizeSettingsContainer)
 			.setName('Resize mode ⓘ')
@@ -7254,11 +7322,11 @@ export class ImageConvertTab extends PluginSettingTab {
 		if (existingInputs) {
 			existingInputs.remove();
 		}
-	
+
 		if (resizeMode === 'None') return;
-	
+
 		const inputsContainer = container.createDiv('resize-inputs');
-	
+
 		if (['Fit', 'Fill'].includes(resizeMode)) {
 			new Setting(inputsContainer)
 				.setName('Resize dimensions')
@@ -7331,9 +7399,9 @@ export class ImageConvertTab extends PluginSettingTab {
 	private displayOutputSettings(): void {
 		// Clear the container to prevent duplication
 		this.contentContainer.empty();
-	
+
 		const container = this.contentContainer.createDiv('settings-container');
-	
+
 		// Output Location Setting
 		new Setting(container)
 			.setName("Output Location")
@@ -7353,15 +7421,15 @@ export class ImageConvertTab extends PluginSettingTab {
 						this.updateConsolidatedPreview();
 					});
 			});
-	
+
 		// Create containers for settings
 		this.folderSettingsContainer = container.createDiv('folder-settings');
-	
+
 		// File Naming Setting
 		new Setting(container)
 			.setName('File Naming')
 			.setDesc('Choose how to rename processed images')
-			.addDropdown(dropdown => 
+			.addDropdown(dropdown =>
 				dropdown
 					.addOptions({
 						'disabled': 'Keep original name',
@@ -7376,9 +7444,9 @@ export class ImageConvertTab extends PluginSettingTab {
 						this.updateFilenameSettings();
 						this.updateConsolidatedPreview();
 					}));
-	
+
 		this.filenameSettingsContainer = container.createDiv('filename-settings');
-	
+
 		// Only show the duplicate file management setting if convertTo is not 'disabled'
 		if (this.plugin.settings.convertTo !== 'disabled') {
 			new Setting(container)
@@ -7400,7 +7468,7 @@ export class ImageConvertTab extends PluginSettingTab {
 						})
 				);
 		}
-	
+
 		new Setting(container)
 			.setName('Use Markdown links')
 			.setDesc('Auto generate Markdown links for dropped/pasted images')
@@ -7411,11 +7479,11 @@ export class ImageConvertTab extends PluginSettingTab {
 					this.plugin.settings.useMdLinks = value;
 					await this.plugin.saveSettings();
 					new Notice(`Image links will now be in ${value ? 'Markdown' : 'Wiki'} format`);
-					
+
 					// Update the settings display to reflect the changes
 					this.displayOutputSettings();
 				}));
-	
+
 		if (this.plugin.settings.useMdLinks) {
 			new Setting(container)
 				.setName('Prepend paths with "./" for relative linking')
@@ -7426,10 +7494,10 @@ export class ImageConvertTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					}));
 		}
-		
+
 		// Create preview element first
 		this.previewEl = container.createDiv('preview-container');
-	
+
 		// Initialize settings
 		this.updateFolderSettings();
 		this.updateFilenameSettings();
@@ -7460,7 +7528,7 @@ export class ImageConvertTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.attachmentSubfolderName = value;
 						await this.plugin.saveSettings();
-						this.updateConsolidatedPreview(); 
+						this.updateConsolidatedPreview();
 					});
 			});
 	}
@@ -7486,14 +7554,14 @@ export class ImageConvertTab extends PluginSettingTab {
 			const activeFile = this.app.workspace.getActiveFile();
 			const mockFile = activeFile || this.app.vault.getFiles()[0];
 			if (!mockFile) return;
-	
+
 			// Create preview sections
 			this.previewEl.empty();
-			
+
 			// Main preview showing just the final path
 			const previewContainer = this.previewEl.createDiv('preview-container');
 			previewContainer.createEl('div', { text: 'Preview:', cls: 'preview-label' });
-			
+
 			// Get path template based on settings
 			let pathTemplate = '';
 			switch (this.plugin.settings.attachmentLocation) {
@@ -7512,27 +7580,27 @@ export class ImageConvertTab extends PluginSettingTab {
 				default:
 					pathTemplate = '{Default Obsidian Settings}';
 			}
-	
+
 			// Get filename template
 			const filenameTemplate = this.plugin.settings.autoRename && this.plugin.settings.useCustomRenaming
 				? this.plugin.settings.customRenameTemplate
 				: '{imageName}';
-	
+
 			// Process variables
 			const fullTemplate = `${pathTemplate}/${filenameTemplate}.${this.plugin.settings.convertTo}`;
 			const processedPath = await this.plugin.processSubfolderVariables(fullTemplate, mockFile, mockFile);
-	
+
 			// Show the final processed path
-			previewContainer.createEl('div', { 
+			previewContainer.createEl('div', {
 				text: processedPath,
-				cls: 'preview-path' 
+				cls: 'preview-path'
 			});
-	
+
 			// Show available variables only when relevant settings are selected
 			if (this.shouldShowVariables()) {
 				this.addVariablesHelper(previewContainer);
 			}
-	
+
 		} catch (error) {
 			console.error('Preview generation error:', error);
 			this.previewEl.empty();
@@ -7556,12 +7624,12 @@ export class ImageConvertTab extends PluginSettingTab {
 			text: 'Show available variables',
 			cls: 'variables-toggle'
 		});
-		
+
 		const variablesContent = helperContainer.createDiv('variables-content');
 		variablesContent.style.display = 'none';
-	
+
 		const variables = this.getRelevantVariables();
-		
+
 		if (variables.length > 0) {
 			const variablesList = variablesContent.createEl('div', { cls: 'variables-list' });
 			variables.forEach(variable => {
@@ -7579,16 +7647,16 @@ export class ImageConvertTab extends PluginSettingTab {
 				}
 			});
 		}
-	
+
 		toggleButton.addEventListener('click', () => {
 			const isHidden = variablesContent.style.display === 'none';
 			variablesContent.style.display = isHidden ? 'block' : 'none';
-			toggleButton.textContent = isHidden 
-				? 'Hide available variables' 
+			toggleButton.textContent = isHidden
+				? 'Hide available variables'
 				: 'Show available variables';
 		});
 	}
-	
+
 	private getRelevantVariables(): string[] {
 		const categories = {
 			'File & Note Information': [
@@ -7602,7 +7670,7 @@ export class ImageConvertTab extends PluginSettingTab {
 				'{vaultName} - Obsidian vault name',
 				'{vaultPath} - Full vault path'
 			],
-	
+
 			'Date & Time Formats': [
 				'{date:YYYY-MM-DD} - Custom date format (supports moment.js patterns)',
 				'{today} - Current date (YYYY-MM-DD)',
@@ -7616,7 +7684,7 @@ export class ImageConvertTab extends PluginSettingTab {
 				'{HH} - Current hour',
 				'{timestamp} - Unix timestamp'
 			],
-	
+
 			'Natural Language Dates': [
 				'{monthName} - Full month name (e.g., January)',
 				'{MMMM} - Full month name (moment.js format)',
@@ -7627,7 +7695,7 @@ export class ImageConvertTab extends PluginSettingTab {
 				'{relativeTime} - Relative time (e.g., 2 hours ago)',
 				'{calendar} - Natural calendar format'
 			],
-	
+
 			'Time Periods': [
 				'{startOfWeek} - First day of current week',
 				'{endOfWeek} - Last day of current week',
@@ -7638,7 +7706,7 @@ export class ImageConvertTab extends PluginSettingTab {
 				'{nextMonth} - Same day next month',
 				'{lastMonth} - Same day last month'
 			],
-	
+
 			'Time Units': [
 				'{daysInMonth} - Number of days in current month',
 				'{weekOfYear} - Current week number',
@@ -7649,7 +7717,7 @@ export class ImageConvertTab extends PluginSettingTab {
 				'{dayOfYear} - Day of year (1-365)',
 				'{DDD} - Day of year (moment.js format)'
 			],
-	
+
 			'Image Properties': [
 				'{width} - Image width in pixels',
 				'{height} - Image height in pixels',
@@ -7674,7 +7742,7 @@ export class ImageConvertTab extends PluginSettingTab {
 				'{aspectRatioSimplified} - Simplified ratio (e.g., 16:9)',
 				'{screenFitCategory} - fits-1080p, fits-1440p, fits-4k, above-4k'
 			],
-	
+
 			'Size Variables': [
 				'{size:MB:2} - Size in MB with 2 decimal places',
 				'{size:KB:1} - Size in KB with 1 decimal place',
@@ -7683,19 +7751,19 @@ export class ImageConvertTab extends PluginSettingTab {
 				'{sizeKB} - Size in KB',
 				'{sizeB} - Size in bytes'
 			],
-	
+
 			'File Statistics': [
 				'{creationDate} - File creation date',
 				'{modifiedDate} - Last modified date'
 			],
-	
+
 			'System Information': [
 				'{timezone} - System timezone',
 				'{locale} - System locale',
 				'{platform} - Operating system platform',
 				'{userAgent} - Browser user agent'
 			],
-	
+
 			'Unique Identifiers': [
 				'{MD5:filename} - MD5 hash of filename',
 				'{MD5:filename:8} - First 8 chars of filename MD5 hash',
@@ -7714,17 +7782,17 @@ export class ImageConvertTab extends PluginSettingTab {
 				'{uuid} - Random UUID'
 			]
 		};
-	
+
 		return Object.entries(categories).flatMap(([category, vars]) => [
 			`== ${category} ==`,
 			...vars,
 			'' // Add empty string for spacing between categories
 		]);
 	}
-	
+
 	private updateFilenameSettings(): void {
 		this.filenameSettingsContainer.empty();
-	
+
 		if (this.plugin.settings.autoRename && this.plugin.settings.useCustomRenaming) {
 			new Setting(this.filenameSettingsContainer)
 				.setName("Filename template")
@@ -7742,13 +7810,13 @@ export class ImageConvertTab extends PluginSettingTab {
 		}
 	}
 
-	
+
 	// Settings / Extras
 	private displayGeneralSettings(): void {
 		// Clear the container first
 		const container = this.contentContainer;
 		container.empty();
-		
+
 		container.createDiv('settings-container', (settingsContainer) => {
 			// Image Resize Controls Group
 			settingsContainer.createEl('h3', { text: 'Non-destructive image resizing' });
@@ -7811,7 +7879,7 @@ export class ImageConvertTab extends PluginSettingTab {
 							})
 					);
 			}
-		
+
 
 			// Resize by dragging (main toggle)
 			new Setting(settingsContainer)
@@ -7862,7 +7930,7 @@ export class ImageConvertTab extends PluginSettingTab {
 							});
 					});
 			}
-			
+
 			// Add new setting
 			new Setting(settingsContainer)
 				.setName('Allow drag resize in Reading mode')
@@ -7879,7 +7947,7 @@ export class ImageConvertTab extends PluginSettingTab {
 
 			// Editor Behavior Group
 			settingsContainer.createEl('h3', { text: 'Editor Behavior' });
-	
+
 			// Cursor Position Setting
 			new Setting(settingsContainer)
 				.setName('Cursor position')
@@ -7918,11 +7986,11 @@ export class ImageConvertTab extends PluginSettingTab {
 							await this.plugin.saveSettings();
 						})
 				);
-				
+
 
 			// Notifications Group
 			settingsContainer.createEl('h3', { text: 'Notifications' });
-				
+
 			new Setting(settingsContainer)
 				.setName('Show progress notification')
 				.setDesc('Show processing status report when multiple images were detected e.g.: When enabled it will show "Processing 1 of 20" ')
@@ -7932,7 +8000,7 @@ export class ImageConvertTab extends PluginSettingTab {
 						this.plugin.settings.showProgress = value;
 						await this.plugin.saveSettings();
 					}));
-	
+
 			new Setting(settingsContainer)
 				.setName('Show summary notification')
 				.setDesc('Show summary after processing completes')
@@ -7942,7 +8010,7 @@ export class ImageConvertTab extends PluginSettingTab {
 						this.plugin.settings.showSummary = value;
 						await this.plugin.saveSettings();
 					}));
-	
+
 			new Setting(settingsContainer)
 				.setName('Show rename notification')
 				.setDesc('Show notification when files are renamed')
@@ -7952,6 +8020,24 @@ export class ImageConvertTab extends PluginSettingTab {
 						this.plugin.settings.showRenameNotice = value;
 						await this.plugin.saveSettings();
 					}));
+
+			// Other settings
+			if (this.plugin.settings.useMdLinks) {
+				settingsContainer.createEl('h3', { text: 'Other settings' });
+
+				new Setting(settingsContainer)
+					.setName('Add random tag after the image')
+					.setDesc('Add a tag like "{#fig:dob52x}" after the image link. If you are currently using pandoc-crossref, it may be very helpful.')
+					.addToggle(toggle => toggle
+						.setValue(this.plugin.settings.addRandomTag)
+						.onChange(async value => {
+							this.plugin.settings.addRandomTag = value;
+							await this.plugin.saveSettings();
+						})
+					)
+
+			}
+
 		});
 	}
 
@@ -8046,7 +8132,7 @@ export class ImageConvertTab extends PluginSettingTab {
 				.setValue((this.plugin.settings.imageAlignment_cacheCleanupInterval / (60 * 1000)).toString())
 				.onChange(async (value) => {
 					// parseFloat to handle decimal values
-					const minutes = parseFloat(value); 
+					const minutes = parseFloat(value);
 
 					// Check for valid input
 					if (isNaN(minutes) || minutes < 0) {
@@ -8067,7 +8153,7 @@ export class ImageConvertTab extends PluginSettingTab {
 	private async getCacheSize(): Promise<{notes: number, images: number}> {
 		const cache = this.plugin.imagePositionManager.getCache();
 		const notes = Object.keys(cache).length;
-		const images = Object.values(cache).reduce((total, noteCache) => 
+		const images = Object.values(cache).reduce((total, noteCache) =>
 			total + Object.keys(noteCache).length, 0
 		);
 		return { notes, images };
@@ -8166,11 +8252,11 @@ class ProcessAllVault extends Modal {
             } else {
                 this.updateResizeInputSettings(resizeMode);
             }
-            
+
             if (!this.enlargeReduceSettings) {
                 this.createEnlargeReduceSettings();
             }
-            
+
             this.resizeInputSettings?.settingEl.show();
             this.enlargeReduceSettings?.settingEl.show();
         }
@@ -8178,9 +8264,9 @@ class ProcessAllVault extends Modal {
 
     private createEnlargeReduceSettings(): void {
         if (!this.enlargeReduceDiv) return;
-        
+
         this.enlargeReduceDiv.empty();
-        
+
         this.enlargeReduceSettings = new Setting(this.enlargeReduceDiv)
             .setClass('enlarge-reduce-setting')
             .setName('Enlarge or Reduce ⓘ')
@@ -8203,12 +8289,12 @@ class ProcessAllVault extends Modal {
 
     private createResizeInputSettings(resizeMode: string): void {
         if (!this.resizeInputsDiv) return;
-        
+
         this.resizeInputsDiv.empty();
-        
+
         this.resizeInputSettings = new Setting(this.resizeInputsDiv)
             .setClass('resize-input-setting');
-        
+
         this.updateResizeInputSettings(resizeMode);
     }
 
@@ -8493,7 +8579,7 @@ export class ImageProcessor {
 				new Notice('Error: Invalid folder path.');
 				return;
 			}
-	
+
 			// Get settings from the modal
 			const quality = this.plugin.settings.ProcessCurrentNotequality;
 			const convertTo = this.plugin.settings.ProcessCurrentNoteconvertTo;
@@ -8507,25 +8593,25 @@ export class ImageProcessor {
 			const desiredHeight = this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight;
 			const desiredLength = this.plugin.settings.ProcessCurrentNoteresizeModaldesiredLength;
 			const enlargeOrReduce = this.plugin.settings.ProcessCurrentNoteEnlargeOrReduce;
-	
+
 			const images = this.getImageFiles(folder, recursive);
 			if (images.length === 0) {
 				new Notice('No images found in the folder.');
 				return;
 			}
-	
+
 			let imageCount = 0;
 			const statusBarItemEl = this.plugin.addStatusBarItem();
 			const startTime = Date.now();
 			const totalImages = images.length;
-	
+
 			for (const image of images) {
 				// Skip image if its format is in the skipFormats list
 				if (skipFormats.includes(image.extension.toLowerCase())) {
 					console.log(`Skipping image ${image.name} (format in skip list)`);
 					continue; // Skip to the next image
 				}
-	
+
 				imageCount++;
 				await this.convertImage(
 					image,
@@ -8537,19 +8623,19 @@ export class ImageProcessor {
 					desiredLength,
 					enlargeOrReduce
 				);
-	
+
 				const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
 				statusBarItemEl.setText(
 					`Processing image ${imageCount} of ${totalImages}, elapsed time: ${elapsedTime} seconds`
 				);
 			}
-	
+
 			const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
 			statusBarItemEl.setText(`Finished processing ${imageCount} images, total time: ${totalTime} seconds`);
 			window.setTimeout(() => {
 				statusBarItemEl.remove();
 			}, 5000);
-	
+
 		} catch (error) {
 			console.error('Error processing images in folder:', error);
 			new Notice(`Error processing images: ${error.message}`);
@@ -8713,13 +8799,13 @@ export class ImageProcessor {
 			const isKeepOriginalFormat = convertTo === 'disabled';
 			const noCompression = quality === 1;
 			const noResize = resizeMode === 'None';
-	
+
 			// When "Same as original" is selected, treat the file's current extension
 			// as the target format
 			const effectiveTargetFormat = isKeepOriginalFormat
 				? file.extension
 				: convertTo;
-	
+
 			// Skip processing if:
 			// 1. We're keeping original format (disabled)
 			// 2. No compression
@@ -8728,21 +8814,21 @@ export class ImageProcessor {
 				console.log(`Skipping ${file.name}: No processing needed`);
 				return;
 			}
-	
+
 			// Skip if the image is already in target format (or original format if disabled)
 			if (this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat &&
 				file.extension === effectiveTargetFormat) {
 				console.log(`Skipping ${file.name}: Already in ${isKeepOriginalFormat ? 'original' : 'target'} format`);
 				return;
 			}
-	
+
 			const activeFile = this.app.workspace.getActiveFile();
-	
+
 			// Prepare for format conversion and renaming
 			let extension = file.extension;
 			let shouldRename = false;
 			let newFilePath: string | undefined;
-	
+
 			if (effectiveTargetFormat &&
 				effectiveTargetFormat !== 'disabled' &&
 				effectiveTargetFormat !== file.extension) {
@@ -8750,15 +8836,15 @@ export class ImageProcessor {
 				shouldRename = true;
 				newFilePath = await this.getUniqueFilePath(file, extension);
 			}
-	
+
 			const binary = await this.app.vault.readBinary(file);
 			let imgBlob = new Blob([binary], { type: `image/${file.extension}` });
-	
+
 			// Handle special formats
 			if (file.extension === 'tif' || file.extension === 'tiff') {
 				imgBlob = await handleTiffImage(binary);
 			}
-	
+
 			if (file.extension === 'heic') {
 				imgBlob = await convertHeicToFormat(
 					binary,
@@ -8766,11 +8852,11 @@ export class ImageProcessor {
 					quality
 				);
 			}
-	
+
 			const allowLargerFiles = this.plugin.settings.allowLargerFiles;
-	
+
 			let arrayBuffer: ArrayBuffer | undefined;
-	
+
 			// Handle image conversion and compression/resizing
 			switch (extension) {
 				case 'jpg':
@@ -8787,7 +8873,7 @@ export class ImageProcessor {
 					new Notice(`Unsupported image format: ${file.extension}`);
 					return;
 			}
-	
+
 			// Apply the processed image if available
 			if (arrayBuffer) {
 				await this.app.vault.modifyBinary(file, arrayBuffer);
@@ -8795,7 +8881,7 @@ export class ImageProcessor {
 				new Notice('Error: Failed to process image.');
 				return;
 			}
-	
+
 			// Rename and update links if necessary
 			if (shouldRename && newFilePath) {
 				if (activeFile) { // Check if activeFile is not null
@@ -8832,14 +8918,41 @@ export class ImageProcessor {
 					// Handle markdown file
 					let content = await this.app.vault.read(fileOrFolder);
 					let modified = false;
-
-					const linkPatterns = [
-						`![[${file.basename}]]`,
-						`![[${file.basename}.${file.extension}]]`,
-						`![](${file.name})`,
-					];
-
-					const newLink = `![[${newFile.basename}.${newFile.extension}]]`;
+					let linkPatterns;
+					let newLink;
+					// User may use ![Caption](image.png) or ![[image.png]] or ![[image.png|Caption]]
+					// This is not the best solution, there is a very small probability of error
+					if (this.plugin.settings.useMdLinks) {
+						linkPatterns = [
+							`[${file.basename}]]`, // wiki format link, remaining part: ![...
+							`[${file.basename}.${file.extension}]]`, // remaining part: ![...
+							`](${file.name})`, // Markdown format link, remaining part: ![...
+						];
+						newLink = `](${newFile.basename}.${newFile.extension})`;
+					} else {
+						linkPatterns = [
+							`![[${file.basename}`, // wiki format link, remaining part: ]] or |...]]
+							`![[${file.basename}.${file.extension}`, // remaining part: ]] or |...]]
+						];
+						newLink = `![[${newFile.basename}.${newFile.extension}`;
+						// if the user use ![Caption](image.png) or ![](image.png) format, need to be considered separately
+						if (content.includes(`![](${file.name})`)) {
+							content = content.split(`![](${file.name})`).join(`![[${newFile.basename}.${newFile.extension}]`);
+							modified = true;
+						}
+						while (content.includes(`](${file.basename}.${file.extension})`)) {
+							// user use ![Caption](image.png) format, I need to change it to ![[image.png|Caption]]
+							// Find the location of the image
+							const start = content.indexOf(`](${file.basename}.${file.extension})`);
+							// Find the location of the ![ before the image
+							const pre = content.lastIndexOf('![', start);
+							// Extract the content between ![ and ](image.png)
+							const caption = content.slice(pre + 2, start);
+							// replace
+							content = content.slice(0, pre) + `![[${newFile.basename}.${newFile.extension}|${caption}]` + content.slice(start + file.basename.length + 4);
+							modified = true;
+						}
+					}
 
 					for (const pattern of linkPatterns) {
 						if (content.includes(pattern)) {
@@ -8916,7 +9029,7 @@ export class ImageProcessor {
 		try {
 			const content = await this.app.vault.read(canvasFile);
 			const canvasData = JSON.parse(content);
-	
+
 			const updateNodePaths = (nodes: any[]) => {
 				for (const node of nodes) {
 					if (node.type === 'file' && node.file === oldPath) {
@@ -8927,7 +9040,7 @@ export class ImageProcessor {
 					}
 				}
 			};
-	
+
 			if (canvasData.nodes && Array.isArray(canvasData.nodes)) {
 				updateNodePaths(canvasData.nodes);
 				await this.app.vault.modify(canvasFile, JSON.stringify(canvasData, null, 2));
@@ -9383,10 +9496,10 @@ class ProcessCurrentNote extends Modal {
 
     private createEnlargeReduceSettings(): void {
         if (!this.enlargeReduceDiv) return;
-        
+
         // Clear existing content using Obsidian's method
         this.enlargeReduceDiv.empty();
-        
+
         this.enlargeReduceSettings = new Setting(this.enlargeReduceDiv)
             .setClass('enlarge-reduce-setting')
             .setName('Enlarge or Reduce ⓘ')
@@ -9409,25 +9522,25 @@ class ProcessCurrentNote extends Modal {
 
     private createResizeInputSettings(resizeMode: string): void {
         if (!this.resizeInputsDiv) return;
-        
+
         // Clear existing content using Obsidian's method
         this.resizeInputsDiv.empty();
-        
+
         // Create new setting
         this.resizeInputSettings = new Setting(this.resizeInputsDiv)
             .setClass('resize-input-setting'); // Add a class for styling if needed
-        
+
         this.updateResizeInputSettings(resizeMode);
     }
 
 	private updateResizeInputSettings(resizeMode: string): void {
 		if (!this.resizeInputSettings) return;
-	
+
 		this.resizeInputSettings.clear();
-	
+
 		let name = '';
 		let desc = '';
-	
+
 		if (['Fit', 'Fill'].includes(resizeMode)) {
 			name = 'Resize dimensions';
 			desc = 'Enter the desired width and height in pixels';
@@ -9470,7 +9583,7 @@ class ProcessCurrentNote extends Modal {
 					desc = 'Enter the desired height in pixels';
 					break;
 			}
-	
+
 			this.resizeInputSettings
 				.setName(name)
 				.setDesc(desc)
@@ -9484,7 +9597,7 @@ class ProcessCurrentNote extends Modal {
 						}
 					}));
 		}
-	
+
 		// Update the enlarge/reduce settings in place instead of recreating
 		if (!this.enlargeReduceSettings) {
 			this.createEnlargeReduceSettings();
@@ -9554,7 +9667,7 @@ class ProcessCurrentNote extends Modal {
 
         countsDisplay.createEl('span', { text: 'Skipped: ' });
         this.skippedCountDisplay = countsDisplay.createEl('span');
-		
+
         // Warning message
         headerContainer.createEl('p', {
             cls: 'modal-warning',
@@ -9758,7 +9871,7 @@ class ProcessCurrentNote extends Modal {
         return imagePaths;
     }
 
-	
+
     private getLinkedImageFiles(file: TFile): TFile[] {
         const resolvedLinks = this.app.metadataCache.resolvedLinks;
         const linksInCurrentNote = resolvedLinks[file.path];
@@ -9846,7 +9959,7 @@ export class ProcessFolderModal extends Modal {
         // --- Warning Message ---
         this.createWarningMessage(contentEl);
 
-				
+
         // --- Image Counts ---
         this.createImageCountsDisplay(contentEl);
 
@@ -10750,14 +10863,14 @@ class ImageAnnotationModal extends Modal {
     private minWidth = 400;
     private minHeight = 300;
     private resizeHandle: HTMLDivElement | null = null;
-	
+
     private isPanning = false;
 	private isSpacebarDown = false; // Add this new property
     private lastPanPoint: { x: number; y: number } | null = null;
     private currentZoom = 1;
     private readonly minZoom = 0.1;
     private readonly maxZoom = 10;
-	
+
 	private undoStack: string[] = [];
     private redoStack: string[] = [];
     private isUndoRedoAction = false;
@@ -10767,13 +10880,13 @@ class ImageAnnotationModal extends Modal {
 	private backgroundDropdown: HTMLElement | null = null;
 
 	private textBackgroundControls: HTMLElement | null = null; // Add this as a class property
-	
+
 	constructor(app: App, plugin: ImageConvertPlugin, imageFile: TFile) {
 		super(app);
 		this.plugin = plugin;
 		this.file = imageFile;
 		this.modalEl.addClass('image-annotation-modal');
-	
+
 		// Ensure close button works
 		const closeButton = this.modalEl.querySelector('.modal-close-button');
 		if (closeButton) {
@@ -10789,19 +10902,19 @@ class ImageAnnotationModal extends Modal {
 
 		// Create a new scope for handling shortcuts
 		this.scope = new Scope();
-		
+
 		// Register our custom scope
 		this.scope.register([], 'Escape', (e: KeyboardEvent) => {
 			e.preventDefault();
 			e.stopPropagation();
-			
+
 			const activeObject = this.canvas?.getActiveObject();
 			if (activeObject instanceof IText && activeObject.isEditing) {
 				activeObject.exitEditing();
 			}
 			return false;
 		});
-		
+
 		// Prevent default handlers
 		this.preventDefaultHandlers();
 	}
@@ -10814,7 +10927,7 @@ class ImageAnnotationModal extends Modal {
         const modalContainer = contentEl.createDiv('modal-container');
 		this.setupResizable();
 		this.setupToolbar(modalContainer);
-		
+
         const canvasContainer = modalContainer.createDiv('canvas-container');
         const canvasEl = canvasContainer.createEl('canvas');
 
@@ -10830,16 +10943,16 @@ class ImageAnnotationModal extends Modal {
 				// Calculate dimensions to fit the window while maintaining aspect ratio
 				const padding = 80;
 				const toolbarHeight = 60;
-				
+
 				// Calculate maximum available space
 				const maxWidth = window.innerWidth * 0.9 - padding;
 				const maxHeight = window.innerHeight * 0.9 - padding - toolbarHeight;
-				
+
 
 				// Set canvas dimensions to maximum available space
 				const canvasWidth = maxWidth;
 				const canvasHeight = maxHeight;
-				
+
 
 				// Initialize canvas with full dimensions
 				this.canvas = new Canvas(canvasEl, {
@@ -10873,11 +10986,11 @@ class ImageAnnotationModal extends Modal {
 				this.canvas.add(fabricImg);
 
 				this.centerFabricImage(fabricImg);
-				
+
 				// Set modal dimensions
 				this.modalEl.style.width = `${canvasWidth + padding}px`;
 				this.modalEl.style.height = `${canvasHeight + padding + toolbarHeight}px`;
-				
+
 				this.analyzeImageColors(img);
 				this.setupZoomAndPan();
 				this.initializeUndoRedo();
@@ -10918,25 +11031,25 @@ class ImageAnnotationModal extends Modal {
             return;
         }
     }
-	
-	
+
+
 	private centerFabricImage(fabricImg: FabricImage) {
 		if (!this.canvas) return;
-	
+
 		// Get canvas dimensions with defaults
 		const canvasWidth = this.canvas.width ?? 0;
 		const canvasHeight = this.canvas.height ?? 0;
-	
+
 		// Get image dimensions with defaults
 		const imageWidth = fabricImg.width ?? 0;
 		const imageHeight = fabricImg.height ?? 0;
 		const scaleX = fabricImg.scaleX ?? 1;
 		const scaleY = fabricImg.scaleY ?? 1;
-	
+
 		// Calculate centered position
 		const left = (canvasWidth - imageWidth * scaleX) / 2;
 		const top = (canvasHeight - imageHeight * scaleY) / 2;
-	
+
 		// Set the position
 		fabricImg.set({
 			left,
@@ -10944,14 +11057,14 @@ class ImageAnnotationModal extends Modal {
 		});
 	}
 
-	
+
 	private updateDrawingModeUI(isDrawing: boolean) {
 		this.isDrawingMode = isDrawing;
 		this.canvas.isDrawingMode = isDrawing;
-		
+
 		// Update object interactivity based on new drawing mode state
 		this.updateObjectInteractivity();
-		
+
 		if (this.drawButton) {
 			if (isDrawing) {
 				// this.drawButton.setButtonText('Stop Drawing');
@@ -10961,14 +11074,14 @@ class ImageAnnotationModal extends Modal {
 				this.drawButton.buttonEl.removeClass('is-active');
 			}
 		}
-		
+
 		// Ensure canvas is updated
 		this.canvas.requestRenderAll();
 	}
-	
+
 	private updateObjectInteractivity() {
 		if (!this.canvas) return;
-	
+
 		this.canvas.forEachObject(obj => {
 			if (obj instanceof FabricImage) {
 				// Background image is never interactive
@@ -10999,7 +11112,7 @@ class ImageAnnotationModal extends Modal {
 				}
 			}
 		});
-	
+
 		// Update canvas selection property
 		this.canvas.selection = !this.isDrawingMode && !this.isTextMode;
 		this.canvas.requestRenderAll();
@@ -11009,15 +11122,15 @@ class ImageAnnotationModal extends Modal {
 	private createColorSwatches() {
 		const colorPickerWrapper = this.modalEl.querySelector('.color-picker-wrapper');
 		if (!colorPickerWrapper) return;
-	
+
 		const updateObjectColor = (color: string) => {
 			const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
 			if (colorPicker) {
 				colorPicker.value = color;
-				
+
 				// Update brush color for drawing mode
 				this.updateBrushColor();
-				
+
 				// Update selected object(s) color
 				if (this.canvas) {
 					const activeObject = this.canvas.getActiveObject();
@@ -11045,19 +11158,19 @@ class ImageAnnotationModal extends Modal {
 				}
 			}
 		};
-		
+
 		// Remove existing swatches if any
 		const existingSwatches = colorPickerWrapper.querySelector('.color-swatches');
 		if (existingSwatches) {
 			existingSwatches.remove();
 		}
-	
+
 		const swatchesContainer = colorPickerWrapper.createDiv('color-swatches');
-	
+
 		// Predefined color rows
 		const grayScaleColors = ['#000000', '#ffffff', '#d1d3d4', '#a7a9acCC', '#808285', '#58595b'];
 		const paletteColors = ['#ff80ff', '#ffc680', '#ffff80', '#80ff9e', '#80d6ff', '#bcb3ff'];
-	
+
 		// Create grayscale row
 		const grayScaleRow = swatchesContainer.createDiv('color-row');
 		grayScaleRow.createSpan('row-label').setText('Grayscale:');
@@ -11068,7 +11181,7 @@ class ImageAnnotationModal extends Modal {
 			swatch.setAttribute('title', color);
 			swatch.addEventListener('click', () => updateObjectColor(color));
 		});
-	
+
 		// Create palette row
 		const paletteRow = swatchesContainer.createDiv('color-row');
 		paletteRow.createSpan('row-label').setText('Palette:');
@@ -11079,14 +11192,14 @@ class ImageAnnotationModal extends Modal {
 			swatch.setAttribute('title', color);
 			swatch.addEventListener('click', () => updateObjectColor(color));
 		});
-	
+
 		// Sort dominant colors by luminosity
 		const colorPairs = this.dominantColors.map((dominantColor, index) => ({
 			dominant: dominantColor,
 			complementary: this.complementaryColors[index][0],
 			luminosity: this.getLuminosity(dominantColor)
 		})).sort((a, b) => a.luminosity - b.luminosity);
-	
+
 		// Create dominant colors row
 		const dominantRow = swatchesContainer.createDiv('color-row');
 		dominantRow.createSpan('row-label').setText('Dominant:');
@@ -11119,13 +11232,13 @@ class ImageAnnotationModal extends Modal {
 
 	private updateBrushColor() {
 		if (!this.canvas?.freeDrawingBrush) return;
-		
+
 		const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
 		if (!colorPicker) return;
-	
+
 		const currentColor = colorPicker.value;
 		const currentOpacity = this.brushOpacities[this.currentOpacityIndex];
-		
+
 		this.canvas.freeDrawingBrush.color = this.hexToRgba(currentColor, currentOpacity);
 		this.canvas.freeDrawingBrush.width = this.brushSizes[this.currentBrushSizeIndex];
 	}
@@ -11134,7 +11247,7 @@ class ImageAnnotationModal extends Modal {
 		const textBgContainer = container.createDiv('control-group');
 		textBgContainer.createDiv('control-label').setText('Text Background:');
 		const controlsContainer = textBgContainer.createDiv('button-group');
-		
+
 		// Create color picker wrapper with alpha support
 		const bgColorWrapper = controlsContainer.createDiv('background-color-wrapper');
 		const bgColorPicker = bgColorWrapper.createEl('input', {
@@ -11142,7 +11255,7 @@ class ImageAnnotationModal extends Modal {
 			cls: 'background-color-picker',
 			value: '#ffffff'
 		});
-		
+
 		// Add alpha slider next to color picker
 		const alphaSlider = bgColorWrapper.createEl('input', {
 			type: 'range',
@@ -11153,7 +11266,7 @@ class ImageAnnotationModal extends Modal {
 				value: '70' // default to 0 - transparent
 			}
 		});
-	
+
 		// Transparent background
 		new ButtonComponent(controlsContainer)
 			.setTooltip('Transparent')
@@ -11161,7 +11274,7 @@ class ImageAnnotationModal extends Modal {
 			.onClick(() => {
 				this.setTextBackground('transparent');
 			});
-	
+
 		// Semi-transparent white
 		new ButtonComponent(controlsContainer)
 			.setTooltip('Semi-transparent white')
@@ -11170,7 +11283,7 @@ class ImageAnnotationModal extends Modal {
 				this.setTextBackground('rgba(255, 255, 255, 0.7)');
 			})
 			.buttonEl.addClass('bg-white-semi');
-	
+
 		// Semi-transparent black
 		new ButtonComponent(controlsContainer)
 			.setTooltip('Semi-transparent black')
@@ -11179,7 +11292,7 @@ class ImageAnnotationModal extends Modal {
 				this.setTextBackground('rgba(0, 0, 0, 0.7)');
 			})
 			.buttonEl.addClass('bg-black-semi');
-	
+
 		// Update background with both color and alpha
 		const updateBackground = () => {
 			const color = bgColorPicker.value;
@@ -11187,7 +11300,7 @@ class ImageAnnotationModal extends Modal {
 			const rgba = this.hexToRgba(color, alpha);
 			this.setTextBackground(rgba);
 		};
-	
+
 		bgColorPicker.addEventListener('input', updateBackground);
 		alphaSlider.addEventListener('input', updateBackground);
 	}
@@ -11195,10 +11308,10 @@ class ImageAnnotationModal extends Modal {
 
 	private setTextBackground(color: string) {
 		if (!this.canvas) return;
-		
+
 		const activeObject = this.canvas.getActiveObject();
 		if (!activeObject) return;
-		
+
 		if (activeObject instanceof IText) {
 			activeObject.set('backgroundColor', color);
 		} else if (activeObject instanceof ActiveSelection) {
@@ -11208,29 +11321,29 @@ class ImageAnnotationModal extends Modal {
 				}
 			});
 		}
-		
+
 		this.canvas.requestRenderAll();
 		this.saveState();
 	}
-	
-	
+
+
 	private createAndAddText(color: string, x: number, y: number) {
 		if (this.isTextEditingBlocked) {
 			console.debug('Text creation blocked');
 			return;
 		}
-	
+
 		try {
 			// Get background color from current settings
 			const bgColorPicker = this.modalEl.querySelector('.background-color-picker') as HTMLInputElement;
 			const alphaSlider = this.modalEl.querySelector('.background-alpha-slider') as HTMLInputElement;
 			let backgroundColor = 'transparent';
-			
+
 			if (bgColorPicker && alphaSlider) {
 				const alpha = parseInt(alphaSlider.value) / 100;
 				backgroundColor = this.hexToRgba(bgColorPicker.value, alpha);
 			}
-	
+
 			const text = new IText('Type here', {
 				left: x,
 				top: y,
@@ -11246,19 +11359,19 @@ class ImageAnnotationModal extends Modal {
 				originX: 'center',
 				originY: 'center'
 			});
-	
+
 			this.canvas?.add(text);
 			this.canvas?.setActiveObject(text);
-			
+
 			// Force render before entering edit mode
 			this.canvas?.requestRenderAll();
-			
+
 			setTimeout(() => {
 				text.enterEditing();
 				text.selectAll();
 				this.canvas?.requestRenderAll();
 			}, 50);
-	
+
 		} catch (error) {
 			console.error('Error in createAndAddText:', error);
 			this.isTextEditingBlocked = false;
@@ -11270,7 +11383,7 @@ class ImageAnnotationModal extends Modal {
 			evt.preventDefault();
 			this.saveAnnotation();
 		});
-	
+
 		// Add CMD/CTRL + A handler
 		this.scope.register(['Mod'], 'A', (evt: KeyboardEvent) => {
 			// Check if we're currently editing text
@@ -11288,7 +11401,7 @@ class ImageAnnotationModal extends Modal {
 		this.scope.register(['Mod'], 'Z', (evt: KeyboardEvent) => {
 			evt.preventDefault();
 			if (evt.shiftKey) {
-	
+
 				this.redo();
 			} else {
 
@@ -11296,10 +11409,10 @@ class ImageAnnotationModal extends Modal {
 			}
 			return false;
 		});
-		
+
 		this.scope.register(['Mod', 'Shift'], 'Z', (evt: KeyboardEvent) => {
 			evt.preventDefault();
-		
+
 			this.redo();
 			return false;
 		});
@@ -11310,7 +11423,7 @@ class ImageAnnotationModal extends Modal {
 			this.switchTool(this.currentTool === ToolMode.Arrow ? ToolMode.None : ToolMode.Arrow);
 			return false;
 		});
-	
+
 
 		this.scope.register([], 'B', (evt: KeyboardEvent) => {
 			// Check if we're currently editing text
@@ -11328,7 +11441,7 @@ class ImageAnnotationModal extends Modal {
 			this.toggleDrawingMode(this.drawButton);
 			return false;
 		});
-	
+
 		this.scope.register([], 'T', (evt: KeyboardEvent) => {
 			// Check if we're currently editing text
 			if (this.canvas) {
@@ -11366,8 +11479,8 @@ class ImageAnnotationModal extends Modal {
 
 	}
 
-	
-	
+
+
 
 
 	private switchTool(newTool: ToolMode) {
@@ -11375,12 +11488,12 @@ class ImageAnnotationModal extends Modal {
 		this.isDrawingMode = false;
 		this.isTextMode = false;
 		this.isArrowMode = false;
-		
+
 		// Remove active class from all tool buttons
 		if (this.drawButton) this.drawButton.buttonEl.removeClass('is-active');
 		if (this.textButton) this.textButton.buttonEl.removeClass('is-active');
 		if (this.arrowButton) this.arrowButton.buttonEl.removeClass('is-active');
-		
+
 		// Enable the selected tool
 		switch (newTool) {
 			case ToolMode.Draw:
@@ -11394,7 +11507,7 @@ class ImageAnnotationModal extends Modal {
 					this.canvas.freeDrawingBrush.width = this.brushSizes[this.currentBrushSizeIndex];
 				}
 				break;
-				
+
 			case ToolMode.Text:
 				this.isTextMode = true;
 				if (this.textButton) this.textButton.buttonEl.addClass('is-active');
@@ -11402,7 +11515,7 @@ class ImageAnnotationModal extends Modal {
 					this.canvas.isDrawingMode = false;
 				}
 				break;
-				
+
 			case ToolMode.Arrow:
 				this.isArrowMode = true;
 				if (this.arrowButton) this.arrowButton.buttonEl.addClass('is-active');
@@ -11415,21 +11528,21 @@ class ImageAnnotationModal extends Modal {
 					arrowBrush.width = this.brushSizes[this.currentBrushSizeIndex];
 				}
 				break;
-				
+
 			case ToolMode.None:
 				if (this.canvas) {
 					this.canvas.isDrawingMode = false;
 				}
 				break;
 		}
-		
+
 		this.currentTool = newTool;
 		this.updateObjectInteractivity();
 
 		// Handle text background controls visibility
 		const textBgControls = this.modalEl.querySelector('.text-background-controls');
 		if (textBgControls instanceof HTMLElement) {
-			textBgControls.style.display = 
+			textBgControls.style.display =
 				newTool === ToolMode.Text ? 'flex' : 'none';
 		}
 
@@ -11445,12 +11558,12 @@ class ImageAnnotationModal extends Modal {
 		const newTool = this.currentTool === ToolMode.Draw ? ToolMode.None : ToolMode.Draw;
 		this.switchTool(newTool);
 	}
-	
+
 	private toggleTextMode() {
 		const newTool = this.currentTool === ToolMode.Text ? ToolMode.None : ToolMode.Text;
 		this.switchTool(newTool);
 	}
-	
+
 
 
 	private toggleArrowMode(arrowBtn?: ButtonComponent) {
@@ -11468,13 +11581,13 @@ class ImageAnnotationModal extends Modal {
 		const containerEl = container as HTMLElement;
 		const presetContainer = containerEl.createDiv('preset-buttons');
 		presetContainer.style.display = 'none';
-		
+
 		// Create 3 preset buttons
 		for (let i = 0; i < 3; i++) {
 			const presetButton = presetContainer.createDiv(`preset-button preset-${i + 1}`);
 			presetButton.createDiv('preset-color');
 			presetButton.createSpan('preset-number').setText(`${i + 1}`);
-			
+
 			presetButton.addEventListener('click', (e) => {
 				if (e.shiftKey) {
 					this.savePreset(i);
@@ -11482,10 +11595,10 @@ class ImageAnnotationModal extends Modal {
 					this.loadPreset(i);
 				}
 			});
-			
+
 			presetButton.setAttribute('title', 'Click to load, Shift+Click to save');
 		}
-		
+
 
 		return presetContainer;
 	}
@@ -11495,9 +11608,9 @@ class ImageAnnotationModal extends Modal {
 		const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
 		const bgColorPicker = this.modalEl.querySelector('.background-color-picker') as HTMLInputElement;
 		const bgAlphaSlider = this.modalEl.querySelector('.background-alpha-slider') as HTMLInputElement;
-		
+
 		if (!colorPicker) return;
-	
+
 		const preset: ToolPreset = {
 			size: this.brushSizes[this.currentBrushSizeIndex],
 			color: colorPicker.value,
@@ -11515,17 +11628,17 @@ class ImageAnnotationModal extends Modal {
 		} else if (this.isTextMode) {
 			this.plugin.settings.annotationPresets.text[index] = preset;
 		}
-	
+
 		// Save settings
 		await this.plugin.saveSettings();
-	
+
 		this.updatePresetButtons();
 		new Notice(`Preset ${index + 1} saved`);
 	}
 
 	private loadPreset(index: number) {
 		let preset: ToolPreset;
-		
+
 		if (this.isDrawingMode) {
 			preset = this.plugin.settings.annotationPresets.drawing[index];
 		} else if (this.isArrowMode) {
@@ -11535,46 +11648,46 @@ class ImageAnnotationModal extends Modal {
 		} else {
 			return;
 		}
-	
+
 		// Check if preset exists
 		if (!preset) return;
-	
+
 		// Apply color to color picker
 		const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
 		if (colorPicker) {
 			colorPicker.value = preset.color;
 		}
-	
+
 		// If in text mode, handle text-specific settings
 		if (this.isTextMode) {
 			// Update background controls
 			const bgColorPicker = this.modalEl.querySelector('.background-color-picker') as HTMLInputElement;
 			const bgAlphaSlider = this.modalEl.querySelector('.background-alpha-slider') as HTMLInputElement;
-			
+
 			if (bgColorPicker && preset.backgroundColor) {
 				bgColorPicker.value = preset.backgroundColor;
 			}
-			
+
 			if (bgAlphaSlider && preset.backgroundOpacity !== undefined) {
 				bgAlphaSlider.value = (preset.backgroundOpacity * 100).toString();
 			}
-	
+
 			// Apply to selected text object if one exists
 			const activeObject = this.canvas?.getActiveObject();
 			if (activeObject) {
 				if (activeObject instanceof IText) {
 					// Apply text color
 					activeObject.set('fill', preset.color);
-					
+
 					// Apply background color if defined
 					if (preset.backgroundColor) {
 						const bgColor = this.hexToRgba(
-							preset.backgroundColor, 
+							preset.backgroundColor,
 							preset.backgroundOpacity ?? 1
 						);
 						activeObject.set('backgroundColor', bgColor);
 					}
-					
+
 					this.canvas?.requestRenderAll();
 				} else if (activeObject instanceof ActiveSelection) {
 					// Handle multiple selected text objects
@@ -11583,7 +11696,7 @@ class ImageAnnotationModal extends Modal {
 							obj.set('fill', preset.color);
 							if (preset.backgroundColor) {
 								const bgColor = this.hexToRgba(
-									preset.backgroundColor, 
+									preset.backgroundColor,
 									preset.backgroundOpacity ?? 1
 								);
 								obj.set('backgroundColor', bgColor);
@@ -11609,7 +11722,7 @@ class ImageAnnotationModal extends Modal {
 				this.canvas?.requestRenderAll();
 			}
 		}
-	
+
 		// Find and click the appropriate opacity button
 		const opacityIndex = this.brushOpacities.indexOf(preset.opacity);
 		if (opacityIndex !== -1) {
@@ -11620,7 +11733,7 @@ class ImageAnnotationModal extends Modal {
 				button.click();
 			}
 		}
-	
+
 		// Apply size
 		const sizeIndex = this.brushSizes.indexOf(preset.size);
 		if (sizeIndex !== -1) {
@@ -11631,14 +11744,14 @@ class ImageAnnotationModal extends Modal {
 				button.click();
 			}
 		}
-	
+
 		// Set blend mode
 		this.currentBlendMode = preset.blendMode;
 		const blendModeDropdown = this.modalEl.querySelector('.blend-modes-container select') as HTMLSelectElement;
 		if (blendModeDropdown) {
 			blendModeDropdown.value = preset.blendMode;
 		}
-	
+
 		this.updateBrushColor();
 	}
 
@@ -11679,18 +11792,18 @@ class ImageAnnotationModal extends Modal {
 
 	private setupToolbar(container: HTMLElement) {
 		const toolbar = container.createDiv('annotation-toolbar');
-	
+
 		// Create tool groups
 		const drawingGroup = toolbar.createDiv('annotation-toolbar-group drawing-group');
 		const brushControls = toolbar.createDiv('annotation-toolbar-group brush-controls');
 		const utilityGroup = toolbar.createDiv('annotation-toolbar-group');
-	
+
 		// Left section container for drawing tools and colors
 		const leftSection = drawingGroup.createDiv('left-section');
-	
+
 		// Create a column container for drawing tools
 		const drawingToolsColumn = leftSection.createDiv('drawing-tools-column');
-	
+
 		// Drawing button
 		this.drawButton = new ButtonComponent(drawingToolsColumn)
 			.setTooltip('Draw (B)')
@@ -11698,7 +11811,7 @@ class ImageAnnotationModal extends Modal {
 			.onClick(() => {
 				this.toggleDrawingMode(this.drawButton);
 			});
-	
+
 		const arrowButton = new ButtonComponent(drawingToolsColumn)
 			.setTooltip('Arrow (A)')
 			.setIcon('arrow-right')
@@ -11728,8 +11841,8 @@ class ImageAnnotationModal extends Modal {
 			value: '#ff0000'
 		});
 		colorPicker.addClass('color-picker');
-	
-		
+
+
 		// Update color picker event listener
 		colorPicker.addEventListener('input', (e) => {
 			const color = (e.target as HTMLInputElement).value;
@@ -11771,7 +11884,7 @@ class ImageAnnotationModal extends Modal {
 			.setTooltip('Send to Back')
 			.setIcon('arrow-down-to-line')
 			.onClick(() => this.sendToBack());
-		
+
 
 		// Create a separate container for text background controls
 		this.textBackgroundControls = brushControlsColumn.createDiv('text-background-controls');
@@ -11783,35 +11896,35 @@ class ImageAnnotationModal extends Modal {
 			.setTooltip('Clear All')
 			.setIcon('trash')
 			.onClick(() => this.clearAll());
-	
+
 		this.createBackgroundControls(utilityGroup);
-		
+
 		const saveBtn = new ButtonComponent(utilityGroup)
 			.setTooltip('Save (Ctrl/Cmd + S)')
 			.setIcon('checkmark')
 			.onClick(() => this.saveAnnotation());
 
 		saveBtn.buttonEl.addClass('mod-cta');
-		
+
 		// new ButtonComponent(utilityGroup)
 		// 	.setTooltip('Recover Text Editing')
 		// 	.setIcon('refresh-cw')
 		// 	.onClick(() => this.recoverTextEditing());
-	
+
 		this.registerHotkeys();
 	}
 
 
 	private createSizeButtons(container: HTMLElement) {
 		const brushControlsColumn = container.createDiv('brush-controls-column');
-		
+
 		// Size controls
 		const sizeButtonsContainer = brushControlsColumn.createDiv('size-buttons-container');
 		const sizeLabel = sizeButtonsContainer.createDiv('control-label');
 		sizeLabel.setText('Size:');
-		
+
 		const sizeButtonContainer = sizeButtonsContainer.createDiv('button-group');
-		
+
 		this.brushSizes.forEach((size, index) => {
 			const button = new ButtonComponent(sizeButtonContainer)
 				.setButtonText(size.toString())
@@ -11820,38 +11933,38 @@ class ImageAnnotationModal extends Modal {
 					if (this.canvas?.freeDrawingBrush) {
 						this.canvas.freeDrawingBrush.width = this.brushSizes[this.currentBrushSizeIndex];
 					}
-					sizeButtonContainer.querySelectorAll('button').forEach(btn => 
+					sizeButtonContainer.querySelectorAll('button').forEach(btn =>
 						btn.removeClass('is-active'));
 					button.buttonEl.addClass('is-active');
 				});
-				
+
 			if (index === this.currentBrushSizeIndex) {
 				button.buttonEl.addClass('is-active');
 			}
 		});
 	}
-	
+
 	private createOpacityButtons(container: HTMLElement) {
 		let brushControlsColumn = container.querySelector('.brush-controls-column');
 		if (!brushControlsColumn) {
 			brushControlsColumn = container.createDiv('brush-controls-column');
 		}
-		
+
 		const opacityButtonsContainer = brushControlsColumn.createDiv('opacity-buttons-container');
 		const opacityLabel = opacityButtonsContainer.createDiv('control-label');
 		opacityLabel.setText('Opacity:');
-		
+
 		const opacityButtonContainer = opacityButtonsContainer.createDiv('button-group');
-		
+
 		this.brushOpacities.forEach((opacity, index) => {
 			const button = new ButtonComponent(opacityButtonContainer)
 				.setButtonText((opacity * 100).toString() + '') // removed percentage from buttons
 				.onClick(() => {
 					this.currentOpacityIndex = index;
-					
+
 					// Update brush color for drawing mode
 					this.updateBrushColor();
-					
+
 					// Update selected object(s) opacity
 					if (this.canvas) {
 						const activeObject = this.canvas.getActiveObject();
@@ -11870,12 +11983,12 @@ class ImageAnnotationModal extends Modal {
 							this.canvas.requestRenderAll();
 						}
 					}
-					
-					opacityButtonContainer.querySelectorAll('button').forEach(btn => 
+
+					opacityButtonContainer.querySelectorAll('button').forEach(btn =>
 						btn.removeClass('is-active'));
 					button.buttonEl.addClass('is-active');
 				});
-				
+
 			if (index === this.currentOpacityIndex) {
 				button.buttonEl.addClass('is-active');
 			}
@@ -11918,10 +12031,10 @@ class ImageAnnotationModal extends Modal {
 		const blendModesContainer = container.createDiv('blend-modes-container');
 		const blendModeLabel = blendModesContainer.createDiv('control-label');
 		blendModeLabel.setText('Blend:');
-		
+
 		// Create a dropdown container
 		const dropdownContainer = blendModesContainer.createDiv('dropdown-container');
-	
+
 		// Create friendly names mapping
 		const friendlyNames: Record<BlendMode, string> = {
 			'source-over': 'Normal',
@@ -11937,28 +12050,28 @@ class ImageAnnotationModal extends Modal {
 			'difference': 'Difference',
 			'exclusion': 'Exclusion'
 		} as Record<BlendMode, string>;
-	
+
 		// Create the dropdown
 		const dropdown = new DropdownComponent(dropdownContainer);
-		
+
 		// Add options to the dropdown
 		this.blendModes.forEach((mode) => {
 			dropdown.addOption(mode, friendlyNames[mode]);
 		});
-	
+
 		// Set initial value
 		dropdown.setValue(this.currentBlendMode);
-	
+
 		// Add change handler
 		dropdown.onChange((value) => {
 			const mode = value as BlendMode;
 			this.currentBlendMode = mode;
-			
+
 			// Update brush blend mode
 			if (this.canvas?.freeDrawingBrush) {
 				(this.canvas.freeDrawingBrush as any).globalCompositeOperation = mode;
 			}
-			
+
 			// Update selected object(s)
 			if (this.canvas) {
 				const activeObject = this.canvas.getActiveObject();
@@ -11986,7 +12099,7 @@ class ImageAnnotationModal extends Modal {
 		if (!this.canvas) return;
 		const activeObject = this.canvas.getActiveObject();
 		if (!activeObject) return;
-	
+
 		if (activeObject.type === 'activeselection') {
 			// Handle multiple selection
 			const selection = activeObject as ActiveSelection;
@@ -12001,12 +12114,12 @@ class ImageAnnotationModal extends Modal {
 		this.canvas.requestRenderAll();
 		this.saveState();
 	}
-	
+
 	private bringForward() {
 		if (!this.canvas) return;
 		const activeObject = this.canvas.getActiveObject();
 		if (!activeObject) return;
-	
+
 		if (activeObject.type === 'activeselection') {
 			// Handle multiple selection
 			const selection = activeObject as ActiveSelection;
@@ -12021,12 +12134,12 @@ class ImageAnnotationModal extends Modal {
 		this.canvas.requestRenderAll();
 		this.saveState();
 	}
-	
+
 	private sendBackward() {
 		if (!this.canvas) return;
 		const activeObject = this.canvas.getActiveObject();
 		if (!activeObject) return;
-	
+
 		if (activeObject.type === 'activeselection') {
 			// Handle multiple selection
 			const selection = activeObject as ActiveSelection;
@@ -12042,12 +12155,12 @@ class ImageAnnotationModal extends Modal {
 		this.canvas.requestRenderAll();
 		this.saveState();
 	}
-	
+
 	private sendToBack() {
 		if (!this.canvas) return;
 		const activeObject = this.canvas.getActiveObject();
 		if (!activeObject) return;
-	
+
 		if (activeObject.type === 'activeselection') {
 			// Handle multiple selection
 			const selection = activeObject as ActiveSelection;
@@ -12086,17 +12199,17 @@ class ImageAnnotationModal extends Modal {
 
 	private setupSelectionEvents() {
 		if (!this.canvas) return;
-	
+
 		this.canvas.on('selection:created', (e) => {
 			const event = e as unknown as { selected: FabricObject[] };
 			this.syncColorPickerWithSelection(event);
 		});
-	
+
 		this.canvas.on('selection:updated', (e) => {
 			const event = e as unknown as { selected: FabricObject[] };
 			this.syncColorPickerWithSelection(event);
 		});
-	
+
 		// Add color picker event listener
 		const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
 		if (colorPicker) {
@@ -12110,10 +12223,10 @@ class ImageAnnotationModal extends Modal {
 
 	private deleteSelectedObjects() {
 		if (!this.canvas) return;
-	
+
 		const activeObject = this.canvas.getActiveObject();
 		if (!activeObject) return;
-	
+
 		// Allow normal backspace behavior when editing text
 		if (activeObject instanceof IText && activeObject.isEditing) {
 			return;
@@ -12123,14 +12236,14 @@ class ImageAnnotationModal extends Modal {
 		if (activeObject.type === 'activeselection') {
 			const activeSelection = activeObject as ActiveSelection;
 			const objectsToRemove = activeSelection.getObjects();
-			
+
 			// Remove each object in the selection except background image
 			objectsToRemove.forEach(obj => {
 				if (!(obj instanceof FabricImage)) {
 					this.canvas?.remove(obj);
 				}
 			});
-			
+
 			// Clear the selection
 			this.canvas.discardActiveObject();
 		} else {
@@ -12139,15 +12252,15 @@ class ImageAnnotationModal extends Modal {
 				this.canvas.remove(activeObject);
 			}
 		}
-	
+
 		this.canvas.requestRenderAll();
 	}
-	
+
 
 
 	private initializeCanvasEventHandlers() {
 		if (!this.canvas) return;
-		
+
 		// Initialize drawing brush
 		this.canvas.freeDrawingBrush = new PencilBrush(this.canvas);
 		this.canvas.freeDrawingBrush.width = this.brushSizes[this.currentBrushSizeIndex];
@@ -12185,7 +12298,7 @@ class ImageAnnotationModal extends Modal {
 			if (e.target instanceof FabricImage || this.isUndoRedoAction) return;
 			this.saveState();
 		});
-		
+
 		this.canvas.on('object:removed', (e) => {
 			// Don't save state for background image or during undo/redo
 			if (e.target instanceof FabricImage || this.isUndoRedoAction) return;
@@ -12195,7 +12308,7 @@ class ImageAnnotationModal extends Modal {
 		this.canvas.on('mouse:down', (opt) => {
 			const target = opt.target;
 			// logState('mouse:down', target);
-			
+
 			if (target instanceof IText) {
 				this.updateDrawingModeUI(false);
 				this.isTextEditingBlocked = false;
@@ -12203,12 +12316,12 @@ class ImageAnnotationModal extends Modal {
 				target.evented = true;
 			}
 		});
-	
+
 		// Enhanced text editing handlers
 		this.canvas.on('text:editing:entered', (opt) => {
 			const textObject = opt.target;
 			// logState('text:editing:entered', textObject);
-			
+
 			if (textObject) {
 				this.isTextEditingBlocked = false;
 				this.updateDrawingModeUI(false);
@@ -12216,25 +12329,25 @@ class ImageAnnotationModal extends Modal {
 				textObject.evented = true;
 			}
 		});
-	
+
 		this.canvas.on('text:editing:exited', (opt) => {
 			const textObject = opt.target;
 			// logState('text:editing:exited', textObject);
-			
+
 			if (textObject) {
 				this.isTextEditingBlocked = false;
 				textObject.selectable = true;
 				textObject.evented = true;
 			}
 		});
-	
+
 		// Enhanced double click handler
 		this.canvas.on('mouse:dblclick', (opt) => {
 			if (!this.isTextMode || this.isDrawingMode || this.isTextEditingBlocked) {
 				console.debug('Blocked text creation - not in text mode or text editing blocked');
 				return;
 			}
-	
+
 			const target = opt.target;
 			if (target instanceof IText) {
 				this.isTextEditingBlocked = false;
@@ -12243,7 +12356,7 @@ class ImageAnnotationModal extends Modal {
 				this.canvas?.requestRenderAll();
 				return;
 			}
-	
+
 			try {
 				const pointer = this.canvas.getScenePoint(opt.e);
 				const colorPicker = this.modalEl.querySelector('.color-picker') as HTMLInputElement;
@@ -12254,7 +12367,7 @@ class ImageAnnotationModal extends Modal {
 				this.isTextEditingBlocked = false; // Reset block on error
 			}
 		});
-	
+
 		// Add a periodic state check
 		setInterval(() => {
 			const activeObject = this.canvas?.getActiveObject();
@@ -12269,13 +12382,13 @@ class ImageAnnotationModal extends Modal {
 		// Create a whitelist of elements we want to allow events on
 		const shouldAllowEvent = (e: Event): boolean => {
 			const target = e.target as HTMLElement;
-			
+
 			// If we're editing text, allow all keyboard events
 			const activeObject = this.canvas?.getActiveObject();
 			if (activeObject instanceof IText && activeObject.isEditing && e instanceof KeyboardEvent) {
 				return true;
 			}
-	
+
 			return (
 				target.tagName.toLowerCase() === 'canvas' ||
 				target.closest('.annotation-toolbar') !== null ||
@@ -12284,18 +12397,18 @@ class ImageAnnotationModal extends Modal {
 				target.hasClass('modal-close-button')
 			);
 		};
-	
+
 		// More precise event handling
 		const handleEvent = (e: Event) => {
 			if (!shouldAllowEvent(e)) {
 				e.stopPropagation();
 			}
 		};
-	
+
 		// Handle keyboard events separately
 		const handleKeyboard = (e: KeyboardEvent) => {
 			const activeObject = this.canvas?.getActiveObject();
-			
+
 			// Always allow text editing events
 			if (activeObject instanceof IText && activeObject.isEditing) {
 				// Only handle specific shortcuts like Ctrl+S
@@ -12305,46 +12418,46 @@ class ImageAnnotationModal extends Modal {
 				}
 				return;
 			}
-	
+
 			// Handle specific keyboard shortcuts
 			if (this.isHandledKey(e)) {
 				e.preventDefault();
 				e.stopPropagation();
 				return;
 			}
-	
+
 			// Let other keyboard events through to the canvas
 			if (shouldAllowEvent(e)) {
 				return;
 			}
-	
+
 			// Stop propagation for non-canvas events
 			e.stopPropagation();
 		};
-	
+
 		// Add event listeners with proper targeting
 		this.modalEl.addEventListener('mousedown', handleEvent, true);
 		this.modalEl.addEventListener('mousemove', handleEvent, true);
 		this.modalEl.addEventListener('mouseup', handleEvent, true);
 		this.modalEl.addEventListener('click', handleEvent, true);
 		this.modalEl.addEventListener('dblclick', handleEvent, true);
-		
+
 		// Keyboard events
 		this.modalEl.addEventListener('keydown', handleKeyboard, true);
 		this.modalEl.addEventListener('keyup', handleKeyboard, true);
-	
+
 		// Store the handlers for cleanup
 		this._boundHandleEvent = handleEvent;
 		this._boundHandleKeyboard = handleKeyboard;
 	}
-	
+
 	private isHandledKey(e: KeyboardEvent): boolean {
 		// Don't handle any keys when editing text
 		const activeObject = this.canvas?.getActiveObject();
 		if (activeObject instanceof IText && activeObject.isEditing) {
 			return false;
 		}
-	
+
 		return (
 			(e.ctrlKey || e.metaKey) && (
 				e.key.toLowerCase() === 's' || // Save
@@ -12360,12 +12473,12 @@ class ImageAnnotationModal extends Modal {
 			))
 		);
 	}
-	
+
 	private isTextEditing(): boolean {
 		const activeObject = this.canvas?.getActiveObject();
 		return !!(activeObject instanceof IText && activeObject.isEditing);
 	}
-	
+
 
 	private _boundHandleEvent: ((e: Event) => void) | null = null;
 	private _boundHandleKeyboard: ((e: KeyboardEvent) => void) | null = null;
@@ -12376,9 +12489,9 @@ class ImageAnnotationModal extends Modal {
 		const bgColorPicker = this.modalEl.querySelector('.background-color-picker') as HTMLInputElement;
 		const alphaSlider = this.modalEl.querySelector('.background-alpha-slider') as HTMLInputElement;
 		if (!colorPicker || !bgColorPicker || !alphaSlider) return;
-	
+
 		if (e.selected.length === 0) return;
-	
+
 		const firstObject = e.selected[0];
 		if (firstObject instanceof IText) {
 			// Only update if the color is actually defined
@@ -12386,7 +12499,7 @@ class ImageAnnotationModal extends Modal {
 			if (color && color !== colorPicker.value) {
 				colorPicker.value = this.rgbaToHex(color);
 			}
-	
+
 			// Update background color and alpha only if they're different
 			const bgColor = firstObject.backgroundColor as string;
 			if (bgColor && bgColor !== 'transparent') {
@@ -12401,16 +12514,16 @@ class ImageAnnotationModal extends Modal {
 			}
 		}
 	}
-	
-	
+
+
 	private updateColorForSelectedObjects(color: string) {
 		if (!this.canvas) return;
-	
+
 		const activeObject = this.canvas.getActiveObject();
 		if (!activeObject) return;
-	
+
 		const opacity = this.brushOpacities[this.currentOpacityIndex];
-	
+
 		if (activeObject instanceof ActiveSelection) {
 			// Handle multiple selection
 			const selection = activeObject as ActiveSelection;
@@ -12431,36 +12544,36 @@ class ImageAnnotationModal extends Modal {
 				activeObject.set('stroke', this.hexToRgba(color, opacity));
 			}
 		}
-	
+
 		this.canvas.requestRenderAll();
 	}
 
 	private rgbaToHex(rgba: string): string {
 		const rgbaMatch = rgba.match(/rgba?\((\d+), (\d+), (\d+)/);
 		if (!rgbaMatch) return '#ff0000'; // Default to white if parsing fails -> RED COLOR TEXT
-	
+
 		const [, r, g, b] = rgbaMatch.map(Number); // Skip the first element (full match)
 		return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
 	}
-	
+
 	private rgbaToHexWithAlpha(rgba: string): { hex: string; alpha: number } {
 		const rgbaMatch = rgba.match(/rgba\((\d+), (\d+), (\d+), ([0-9.]+)\)/);
 		if (!rgbaMatch) return { hex: '#ffffff', alpha: 1 }; // Default to white and opaque
-	
+
 		const [, r, g, b, a] = rgbaMatch.map((v, i) => (i === 4 ? parseFloat(v) : Number(v))); // Skip first element
 		const hex = `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
 		return { hex, alpha: a };
 	}
-	
+
 	private hexToRgba(hex: string, opacity: number): string {
 		// Remove the hash if present
 		hex = hex.replace('#', '');
-		
+
 		// Parse the hex values
 		const r = parseInt(hex.substring(0, 2), 16);
 		const g = parseInt(hex.substring(2, 4), 16);
 		const b = parseInt(hex.substring(4, 6), 16);
-		
+
 		// Return rgba string
 		return `rgba(${r}, ${g}, ${b}, ${opacity})`;
 	}
@@ -12538,7 +12651,7 @@ class ImageAnnotationModal extends Modal {
 	private getComplementaryColors(hex: string): string[] {
 		const rgb = this.hexToRgb(hex);
 		const hsl = this.rgbToHsl(rgb.r, rgb.g, rgb.b);
-	
+
 		// Return only the complementary color at 180 degrees
 		return [this.hslToString((hsl.h + 180) % 360, hsl.s, hsl.l)];
 	}
@@ -12642,50 +12755,50 @@ class ImageAnnotationModal extends Modal {
 
 	private resize(e: MouseEvent) {
 		if (!this.isResizing || !this.canvas) return;
-	
+
 		const modalRect = this.modalEl.getBoundingClientRect();
 		const newWidth = Math.max(this.minWidth, e.clientX - modalRect.left);
 		const newHeight = Math.max(this.minHeight, e.clientY - modalRect.top);
-	
+
 		this.modalEl.style.width = `${newWidth}px`;
 		this.modalEl.style.height = `${newHeight}px`;
-	
+
 		const toolbar = this.modalEl.querySelector('.annotation-toolbar') as HTMLElement;
 		const toolbarHeight = toolbar?.offsetHeight ?? 0;
 		const padding = 40;
-	
+
 		// Update canvas size
 		this.canvas.setDimensions({
 			width: newWidth - padding,
 			height: newHeight - toolbarHeight - padding
 		});
-	
+
 		// Get background image
 		const backgroundImage = this.canvas.getObjects()[0] as FabricImage;
 		if (backgroundImage) {
 			// Safely get image dimensions with defaults
 			const imageWidth = backgroundImage.width ?? 1;  // Use 1 to avoid division by zero
 			const imageHeight = backgroundImage.height ?? 1;
-	
+
 			// Calculate scale safely
 			const scale = Math.min(
 				(newWidth - padding) / imageWidth,
 				(newHeight - toolbarHeight - padding) / imageHeight
 			) * 0.8; // Keep some margin
-	
+
 			backgroundImage.set({
 				scaleX: scale,
 				scaleY: scale
 			});
 		}
-	
+
 		// Keep all objects within visible canvas area
 		const canvasWidth = this.canvas.width ?? 0;
 		const canvasHeight = this.canvas.height ?? 0;
-	
+
 		this.canvas.getObjects().slice(1).forEach(obj => {
 			const objBounds = obj.getBoundingRect();
-			
+
 			// Ensure object stays within canvas bounds
 			if (objBounds.left < 0) {
 				obj.set('left', 0);
@@ -12700,7 +12813,7 @@ class ImageAnnotationModal extends Modal {
 				obj.set('top', Math.max(0, canvasHeight - objBounds.height));
 			}
 		});
-	
+
 		this.canvas.requestRenderAll();
 	}
 
@@ -12715,7 +12828,7 @@ class ImageAnnotationModal extends Modal {
 
 	private setupZoomAndPan() {
 		if (!this.canvas) return;
-	
+
 		// Zoom with mouse wheel
 		this.canvas.on('mouse:wheel', (opt) => {
 			const event = opt.e as WheelEvent;
@@ -12725,13 +12838,13 @@ class ImageAnnotationModal extends Modal {
 			const point = this.canvas.getScenePoint(event);
 			const delta = event.deltaY;
 			let newZoom = this.currentZoom * (delta > 0 ? 0.95 : 1.05);
-			
+
 			newZoom = Math.min(Math.max(newZoom, this.minZoom), this.maxZoom);
-			
+
 			if (newZoom !== this.currentZoom) {
 				// Get background image before zooming
 				const backgroundImage = this.canvas.getObjects()[0] as FabricImage;
-				
+
 				// Disable object caching temporarily
 				if (backgroundImage) {
 					backgroundImage.objectCaching = false;
@@ -12748,11 +12861,11 @@ class ImageAnnotationModal extends Modal {
 				}, 100);
 			}
 		});
-	
+
 		// Add event listeners using the bound handlers
 		document.addEventListener('keydown', this.boundKeyDownHandler);
 		document.addEventListener('keyup', this.boundKeyUpHandler);
-	
+
 		// Update mouse events
 		this.canvas.on('mouse:down', (opt) => {
 			if (this.isSpacebarDown && opt.e) {
@@ -12762,20 +12875,20 @@ class ImageAnnotationModal extends Modal {
 				this.lastPanPoint = { x: event.clientX, y: event.clientY };
 			}
 		});
-	
+
 		this.canvas.on('mouse:move', (opt) => {
 			if (!this.isPanning || !this.lastPanPoint || !opt.e) return;
-			
+
 			const event = opt.e as MouseEvent;
 			const currentPoint = { x: event.clientX, y: event.clientY };
-			
+
 			const deltaX = currentPoint.x - this.lastPanPoint.x;
 			const deltaY = currentPoint.y - this.lastPanPoint.y;
-			
+
 			this.canvas.relativePan(new Point(deltaX, deltaY));
 			this.lastPanPoint = currentPoint;
 		});
-	
+
 		this.canvas.on('mouse:up', () => {
 			if (this.isPanning) {
 				this.isPanning = false;
@@ -12784,7 +12897,7 @@ class ImageAnnotationModal extends Modal {
 			}
 		});
 	}
-	
+
 
 	private handleKeyDown(e: KeyboardEvent) {
 		if (e.code === 'Space') {
@@ -12795,21 +12908,21 @@ class ImageAnnotationModal extends Modal {
 					return; // Allow normal spacebar behavior for text editing
 				}
 			}
-	
+
 			// Prevent default only if we're not editing text
 			if (!this.isSpacebarDown) {
 				e.preventDefault();
 				this.isSpacebarDown = true;
 				this.canvas.defaultCursor = 'grab';
-				
+
 				// Store previous drawing mode state
 				const wasDrawingMode = this.isDrawingMode;
-				
+
 				// Temporarily disable drawing and text modes
 				if (this.isDrawingMode) {
 					this.canvas.isDrawingMode = false;
 				}
-	
+
 				// Store these states to restore them later
 				this._previousStates = {
 					drawingMode: wasDrawingMode
@@ -12821,7 +12934,7 @@ class ImageAnnotationModal extends Modal {
 		if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
 			e.preventDefault();
 			e.stopPropagation();
-			
+
 			if (e.shiftKey) {
 				this.redo();
 			} else {
@@ -12829,7 +12942,7 @@ class ImageAnnotationModal extends Modal {
 			}
 		}
 	}
-	
+
 	private handleKeyUp(e: KeyboardEvent) {
 		if (e.code === 'Space') {
 			// Check if we're editing text or if there's an active text object
@@ -12839,19 +12952,19 @@ class ImageAnnotationModal extends Modal {
 					return; // Allow normal spacebar behavior for text editing
 				}
 			}
-	
+
 			e.preventDefault();
 			this.isSpacebarDown = false;
 			this.isPanning = false;
 			this.lastPanPoint = null;
 			this.canvas.defaultCursor = 'default';
-			
+
 			// Restore previous states
 			if (this._previousStates?.drawingMode) {
 				this.canvas.isDrawingMode = true;
 				this.isDrawingMode = true;
 			}
-			
+
 			this._previousStates = null;
 		}
 	}
@@ -12859,20 +12972,20 @@ class ImageAnnotationModal extends Modal {
 
 	private zoomToPoint(point: Point, newZoom: number) {
 		if (!this.canvas) return;
-	
+
 		const scaleFactor = newZoom / this.currentZoom;
 		this.currentZoom = newZoom;
-	
+
 		// Get current viewport transform
 		const vpt = [...this.canvas.viewportTransform];
 		if (!vpt) return;
-	
+
 		// Calculate new viewport transform
 		const canvasPoint = {
 			x: point.x - vpt[4],
 			y: point.y - vpt[5]
 		};
-	
+
 		// Update viewport transform with better precision
 		const newVpt: [number, number, number, number, number, number] = [
 			newZoom,    // 0: horizontal scaling
@@ -12882,20 +12995,20 @@ class ImageAnnotationModal extends Modal {
 			point.x - canvasPoint.x * scaleFactor,  // 4: horizontal moving
 			point.y - canvasPoint.y * scaleFactor   // 5: vertical moving
 		];
-	
+
 		// Apply new transform
 		this.canvas.setViewportTransform(newVpt);
 		this.enforceViewportBounds();
-	
+
 		// Force background image to update
 		const backgroundImage = this.canvas.getObjects()[0] as FabricImage;
 		if (backgroundImage) {
 			backgroundImage.setCoords();
 		}
-	
+
 		// Request multiple renders to ensure proper update
 		this.canvas.requestRenderAll();
-		
+
 		// Additional render after a short delay
 		setTimeout(() => {
 			this.canvas?.requestRenderAll();
@@ -12904,30 +13017,30 @@ class ImageAnnotationModal extends Modal {
 
 	private enforceViewportBounds() {
 		if (!this.canvas) return;
-	
+
 		const vpt = this.canvas.viewportTransform;
 		if (!vpt) return;
-	
+
 		// Get canvas dimensions
 		const canvasWidth = this.canvas.width ?? 0;
 		const canvasHeight = this.canvas.height ?? 0;
-	
+
 		// Calculate maximum allowed panning based on zoom
 		const zoom = this.currentZoom;
 		const maxX = canvasWidth * (1 - zoom);
 		const maxY = canvasHeight * (1 - zoom);
-	
+
 		// Constrain viewport transform
 		vpt[4] = Math.min(Math.max(vpt[4], maxX), 0);
 		vpt[5] = Math.min(Math.max(vpt[5], maxY), 0);
-	
+
 		this.canvas.setViewportTransform(vpt);
 	}
 
 
 	private resetZoom() {
 		if (!this.canvas) return;
-		
+
 		this.currentZoom = 1;
 		this.canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
 		this.canvas.requestRenderAll();
@@ -12943,14 +13056,14 @@ class ImageAnnotationModal extends Modal {
 				e.stopPropagation();
 				this.toggleBackgroundDropdown(bgButton.buttonEl);
 			});
-	
+
 		// Create dropdown (initially hidden)
 		this.backgroundDropdown = container.createDiv('background-dropdown');
 		this.backgroundDropdown.style.display = 'none';
-	
+
 		this.backgroundOptions.forEach(option => {
 			const item = this.backgroundDropdown!.createDiv('background-option');
-			
+
 			switch (option) {
 				case 'transparent': {
 					item.createDiv('option-icon').innerHTML = `<svg viewBox="0 0 100 100" width="20" height="20">
@@ -12976,21 +13089,21 @@ class ImageAnnotationModal extends Modal {
 					preview.style.backgroundColor = option;
 				}
 			}
-	
+
 			item.addEventListener('click', (e) => {
 				e.stopPropagation();
 				const activeObject = this.canvas?.getActiveObject();
 				if (activeObject instanceof IText && activeObject.isEditing) return;
-				
+
 				this.setBackground(option);
 				this.hideBackgroundDropdown();
 			});
-	
+
 			if (option === this.currentBackground) {
 				item.addClass('is-active');
 			}
 		});
-	
+
 		// Close dropdown when clicking outside
 		document.addEventListener('click', () => {
 			this.hideBackgroundDropdown();
@@ -13002,10 +13115,10 @@ class ImageAnnotationModal extends Modal {
 			const patternCanvas = document.createElement('canvas');
 			const ctx = patternCanvas.getContext('2d');
 			if (!ctx) return 'transparent';
-	
+
 			patternCanvas.width = 20;
 			patternCanvas.height = 20;
-	
+
 			switch (type) {
 				case 'grid': {
 					ctx.strokeStyle = '#ddd';
@@ -13038,7 +13151,7 @@ class ImageAnnotationModal extends Modal {
 
 	private toggleBackgroundDropdown(buttonEl: HTMLElement) {
 		if (!this.backgroundDropdown) return;
-	
+
 		if (this.backgroundDropdown.style.display === 'none') {
 			// Position dropdown below button
 			const rect = buttonEl.getBoundingClientRect();
@@ -13049,7 +13162,7 @@ class ImageAnnotationModal extends Modal {
 			this.hideBackgroundDropdown();
 		}
 	}
-	
+
 	private hideBackgroundDropdown() {
 		if (this.backgroundDropdown) {
 			this.backgroundDropdown.style.display = 'none';
@@ -13058,15 +13171,15 @@ class ImageAnnotationModal extends Modal {
 
 	private setBackground(type: BackgroundType) {
 		if (!this.canvas) return;
-	
+
 		const pattern = this.createBackgroundPattern(type);
-		
+
 		// Use the correct property to set background
 		this.canvas.backgroundColor = pattern;
 		this.canvas.requestRenderAll();
-	
+
 		this.currentBackground = type;
-	
+
 		// Update UI
 		const buttons = this.modalEl.querySelectorAll('.background-controls .button-group button');
 		buttons.forEach(btn => btn.removeClass('is-active'));
@@ -13086,48 +13199,48 @@ class ImageAnnotationModal extends Modal {
 			// console.log('Skipping state save - isUndoRedoAction:', this.isUndoRedoAction);
 			return;
 		}
-	
+
 		// Save an empty state initially if this is the first state
 		if (this.undoStack.length === 0) {
 			this.undoStack.push(JSON.stringify([]));
 		}
-	
+
 		const objects = this.canvas.getObjects().slice(1);
 		const newState = JSON.stringify(objects.map(obj => obj.toObject()));
-		
+
 		// Don't save if it's the same as the last state
 		if (this.undoStack[this.undoStack.length - 1] === newState) {
 			// console.log('Skipping duplicate state');
 			return;
 		}
-	
+
 		this.undoStack.push(newState);
 		this.redoStack = []; // Clear redo stack when new action is performed
-		
+
 	}
-	
+
 	private async undo() {
 		if (!this.canvas || this.undoStack.length <= 1) { // Changed from 0 to 1 because of initial empty state
 			// console.log('Cannot undo: no more states');
 			return;
 		}
-	
+
 		this.isUndoRedoAction = true;
-	
+
 		try {
 			// Get current state before making any changes
 			const currentState = this.undoStack.pop(); // Remove current state
 			if (currentState) {
 				this.redoStack.push(currentState); // Save it to redo stack
 			}
-	
+
 			// Get the previous state (which we'll restore to)
 			const previousState = this.undoStack[this.undoStack.length - 1];
-			
+
 			// Clear current objects (except background)
 			const objectsToRemove = this.canvas.getObjects().slice(1);
 			objectsToRemove.forEach(obj => this.canvas.remove(obj));
-	
+
 			// Restore previous state
 			if (previousState) {
 				const objects = JSON.parse(previousState);
@@ -13140,39 +13253,39 @@ class ImageAnnotationModal extends Modal {
 					});
 				}
 			}
-	
+
 			this.canvas.requestRenderAll();
-			
-	
+
+
 		} catch (error) {
 			console.error('Error during undo:', error);
 		} finally {
 			this.isUndoRedoAction = false;
 		}
 	}
-	
+
 	private async redo() {
 		if (!this.canvas || this.redoStack.length === 0) {
 			// console.log('Cannot redo: no more states');
 			return;
 		}
-	
+
 		this.isUndoRedoAction = true;
-	
+
 		try {
 			// Get the next state from redo stack
 			const nextState = this.redoStack.pop();
 			if (!nextState) return;
-	
+
 			// Save current state to undo stack
 			const currentObjects = this.canvas.getObjects().slice(1);
 			const currentState = JSON.stringify(currentObjects.map(obj => obj.toObject()));
 			this.undoStack.push(currentState);
-			
+
 			// Clear current objects (except background)
 			const objectsToRemove = this.canvas.getObjects().slice(1);
 			objectsToRemove.forEach(obj => this.canvas.remove(obj));
-	
+
 			// Restore the next state
 			const objects = JSON.parse(nextState);
 			for (const objData of objects) {
@@ -13183,25 +13296,25 @@ class ImageAnnotationModal extends Modal {
 					}
 				});
 			}
-	
+
 			this.canvas.requestRenderAll();
-			
-	
+
+
 		} catch (error) {
 			console.error('Error during redo:', error);
 		} finally {
 			this.isUndoRedoAction = false;
 		}
 	}
-	
+
 
 	private clearAll() {
 		if (!this.canvas) return;
-		
+
 		// Show confirmation dialog
 		const confirm = window.confirm('Are you sure you want to clear all annotations?');
 		if (!confirm) return;
-	
+
 		const objects = this.canvas.getObjects();
 		// Remove all objects except the background image (first object)
 		objects.slice(1).forEach(obj => this.canvas.remove(obj));
@@ -13210,22 +13323,22 @@ class ImageAnnotationModal extends Modal {
 
 	private selectAll() {
 		if (!this.canvas) return;
-	
+
 		// Get all objects except the background image
 		const objects = this.canvas.getObjects().slice(1);
 		if (objects.length === 0) return;
-	
+
 		// If we're in drawing or text mode, temporarily disable it
 		const wasDrawingMode = this.isDrawingMode;
 		const wasTextMode = this.isTextMode;
-	
+
 		if (wasDrawingMode) {
 			this.updateDrawingModeUI(false);
 		}
 		if (wasTextMode) {
 			this.toggleTextMode();
 		}
-	
+
 		// Create a selection of all objects
 		if (objects.length === 1) {
 			// If there's only one object, select it directly
@@ -13237,9 +13350,9 @@ class ImageAnnotationModal extends Modal {
 			});
 			this.canvas.setActiveObject(activeSelection);
 		}
-	
+
 		this.canvas.requestRenderAll();
-	
+
 		// Restore previous modes if necessary
 		if (wasDrawingMode) {
 			this.updateDrawingModeUI(true);
@@ -13252,12 +13365,12 @@ class ImageAnnotationModal extends Modal {
 
 	async saveAnnotation() {
 		if (!this.canvas) return;
-		
+
 		try {
 
 			// Store original preserveObjectStacking value
 			const originalStacking = this.canvas.preserveObjectStacking;
-			
+
 			// Temporarily disable preserveObjectStacking for export
 			this.canvas.preserveObjectStacking = false;
 
@@ -13265,10 +13378,10 @@ class ImageAnnotationModal extends Modal {
 			// Get MIME type from the file
 			const mimeType = mime.getType(this.file.name) || `image/${this.file.extension}`;
 			if (!mimeType) throw new Error('Unable to determine file type');
-	
+
 			// Determine export format, defaulting to PNG for unsupported types
 			let exportFormat: ExtendedImageFormat = 'png';
-			
+
 			// Only override if it's one of our supported formats
 			if (mimeType === 'image/jpeg' || mimeType === 'image/jpg') {
 				exportFormat = 'jpeg';
@@ -13282,15 +13395,15 @@ class ImageAnnotationModal extends Modal {
 
 			const objects = this.canvas.getObjects();
 			if (objects.length === 0) return;
-	
+
 			// Find the background image (it's the only FabricImage in our canvas)
 			const backgroundImage = objects.find(obj => obj instanceof FabricImage) as FabricImage;
 			if (!backgroundImage) return;
-	
+
 			// Force render to ensure all objects are properly positioned
 			this.canvas.renderAll();
 			await new Promise(resolve => setTimeout(resolve, 100));
-	
+
 			// Store original image dimensions and scale
 			const originalWidth = backgroundImage.width ?? 0;
 			const originalHeight = backgroundImage.height ?? 0;
@@ -13298,32 +13411,32 @@ class ImageAnnotationModal extends Modal {
 				x: backgroundImage.scaleX ?? 1,
 				y: backgroundImage.scaleY ?? 1
 			};
-	
+
 			// Calculate actual displayed dimensions
 			const displayWidth = originalWidth * scale.x;
 			const displayHeight = originalHeight * scale.y;
-	
+
 			// Get background image bounds with safety checks
 			const bgLeft = backgroundImage.left ?? 0;
 			const bgTop = backgroundImage.top ?? 0;
 			const bgRight = bgLeft + displayWidth;
 			const bgBottom = bgTop + displayHeight;
-	
+
 			// Initialize bounds with background image
 			let minX = bgLeft;
 			let minY = bgTop;
 			let maxX = bgRight;
 			let maxY = bgBottom;
-	
+
 			// Include annotations in bounds calculation
 			const annotations = objects.filter(obj => obj !== backgroundImage);
 			if (annotations.length > 0) {
 				annotations.forEach(obj => {
 					if (!obj.visible) return;
-					
+
 					// Get object's absolute bounds
 					const objBounds = obj.getBoundingRect();
-					
+
 					// Update bounds only if they're valid numbers
 					if (isFinite(objBounds.left)) minX = Math.min(minX, objBounds.left);
 					if (isFinite(objBounds.top)) minY = Math.min(minY, objBounds.top);
@@ -13331,22 +13444,22 @@ class ImageAnnotationModal extends Modal {
 					if (isFinite(objBounds.height)) maxY = Math.max(maxY, objBounds.top + objBounds.height);
 				});
 			}
-	
+
 			// Ensure bounds include at least the background image
 			minX = Math.min(minX, bgLeft);
 			minY = Math.min(minY, bgTop);
 			maxX = Math.max(maxX, bgRight);
 			maxY = Math.max(maxY, bgBottom);
-	
+
 			// Calculate final dimensions
 			const finalWidth = maxX - minX;
 			const finalHeight = maxY - minY;
-	
+
 			// Safety check for dimensions
 			if (finalWidth <= 0 || finalHeight <= 0) {
 				throw new Error('Invalid export dimensions');
 			}
-	
+
 			// Calculate scale to maintain original resolution
 			const scaleToOriginal = Math.max(
 				originalWidth / displayWidth,
@@ -13363,11 +13476,11 @@ class ImageAnnotationModal extends Modal {
 				obj.setCoords();
 				obj.visible = true;
 			});
-			
+
 			// Force another render
 			this.canvas.renderAll();
 			await new Promise(resolve => setTimeout(resolve, 100));
-	
+
 
 			// Try multiple export methods
 			let arrayBuffer: ArrayBuffer | null = null;
@@ -13377,35 +13490,35 @@ class ImageAnnotationModal extends Modal {
 
 				// First create the canvas element at original scale
 				const canvasElement = this.canvas.toCanvasElement(scaleToOriginal);
-				
+
 				// Create a temporary canvas for cropping
 				const tempCanvas = document.createElement('canvas');
 				tempCanvas.width = finalWidth * scaleToOriginal;
 				tempCanvas.height = finalHeight * scaleToOriginal;
 				const tempCtx = tempCanvas.getContext('2d');
-	
+
 				if (tempCtx) {
-				
+
 					// Draw the portion we want to keep
 					tempCtx.drawImage(
 						canvasElement,
-						minX * scaleToOriginal, 
-						minY * scaleToOriginal, 
-						finalWidth * scaleToOriginal, 
+						minX * scaleToOriginal,
+						minY * scaleToOriginal,
+						finalWidth * scaleToOriginal,
 						finalHeight * scaleToOriginal,
-						0, 0, 
-						tempCanvas.width, 
+						0, 0,
+						tempCanvas.width,
 						tempCanvas.height
 					);
-	
+
 					// Convert to blob
 					arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
 						tempCanvas.toBlob((blob: Blob | null) => {
-					
+
 							if (blob) {
 								blob.arrayBuffer().then(resolve).catch(reject);
 							} else {
-						
+
 								reject(new Error('Blob creation failed'));
 							}
 						}, mimeType, 1);
@@ -13415,12 +13528,12 @@ class ImageAnnotationModal extends Modal {
 				console.log('toCanvasElement method failed, trying alternative...', e);
 			}
 
-	
+
 			// Method 2: Try toDataURL if toBlob failed
 			if (!arrayBuffer) {
-		
+
 				try {
-				
+
 					const dataUrl = this.canvas.toDataURL({
 						format: exportFormat as ImageFormat,
 						quality: 1,
@@ -13431,7 +13544,7 @@ class ImageAnnotationModal extends Modal {
 						height: finalHeight,
 						enableRetinaScaling: true
 					});
-					
+
 					if (!dataUrl || dataUrl === 'data:,') {
 						throw new Error('Invalid data URL');
 					}
@@ -13459,7 +13572,7 @@ class ImageAnnotationModal extends Modal {
 							minX, minY, finalWidth, finalHeight,
 							0, 0, tempCanvas.width, tempCanvas.height
 						);
-						
+
 						const blob = await new Promise<Blob>((resolve, reject) => {
 							tempCanvas.toBlob((b: Blob | null) => {
 								if (b) resolve(b);
@@ -13478,17 +13591,17 @@ class ImageAnnotationModal extends Modal {
 				throw new Error('All export methods failed');
 			}
 
-			
+
 			// Restore viewport transform
 			this.canvas.setViewportTransform(currentVPT);
 			this.canvas.renderAll();
 
 			await this.app.vault.modifyBinary(this.file, arrayBuffer);
-			
+
 			// Success notification
 			new Notice('Image saved successfully');
 
-	
+
 			// Get the active view
 			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (!activeView) return;
@@ -13500,7 +13613,7 @@ class ImageAnnotationModal extends Modal {
 			if (leaf) {
 				// Store current state
 				const currentState = leaf.getViewState();
-				
+
 				// Switch to a different view type temporarily
 				await leaf.setViewState({
 					type: 'empty',
@@ -13521,18 +13634,18 @@ class ImageAnnotationModal extends Modal {
 			new Notice('Error saving image');
 		}
 	}
-	
+
 	// Update the cleanup method
 	private cleanup() {
 		if (this.canvas) {
 			this.canvas.off();
 			this.canvas.dispose();
 		}
-	
+
 		// Remove the keyboard event listeners
 		document.removeEventListener('keydown', this.boundKeyDownHandler);
 		document.removeEventListener('keyup', this.boundKeyUpHandler);
-		
+
 		// Remove event listeners using stored bound handlers
 		if (this._boundHandleEvent) {
 			this.modalEl.removeEventListener('mousedown', this._boundHandleEvent, true);
@@ -13541,12 +13654,12 @@ class ImageAnnotationModal extends Modal {
 			this.modalEl.removeEventListener('click', this._boundHandleEvent, true);
 			this.modalEl.removeEventListener('dblclick', this._boundHandleEvent, true);
 		}
-	
+
 		if (this._boundHandleKeyboard) {
 			this.modalEl.removeEventListener('keydown', this._boundHandleKeyboard, true);
 			this.modalEl.removeEventListener('keyup', this._boundHandleKeyboard, true);
 		}
-	
+
 		// Clear references
 		this._boundHandleEvent = null;
 		this._boundHandleKeyboard = null;
@@ -13574,7 +13687,7 @@ class ImageAnnotationModal extends Modal {
 		this.isPanning = false;
 		this.isSpacebarDown = false;
 		this.lastPanPoint = null;
-		
+
 		if (this.canvas) {
 			this.canvas.defaultCursor = 'default';
 		}
@@ -13606,7 +13719,7 @@ class ArrowBrush extends PencilBrush {
     private readonly minDistance = 3;
     private currentPath: Path | null = null;
     private currentArrowHead: Path | null = null;
-    
+
     constructor(canvas: Canvas) {
         super(canvas);
         // Initialize with default width if not set
@@ -13626,13 +13739,13 @@ class ArrowBrush extends PencilBrush {
 
         const lastPoint = this.points[this.points.length - 1];
         const distance = Math.sqrt(
-            Math.pow(pointer.x - lastPoint.x, 2) + 
+            Math.pow(pointer.x - lastPoint.x, 2) +
             Math.pow(pointer.y - lastPoint.y, 2)
         );
-        
+
         if (distance >= this.minDistance) {
             this.points.push(pointer);
-            
+
             // Remove previous preview
             if (this.currentPath) {
                 this.canvas.remove(this.currentPath);
@@ -13679,12 +13792,12 @@ class ArrowBrush extends PencilBrush {
 
             this.canvas.requestRenderAll();
         }
-        
+
         // Clear for next stroke
         this.points = [];
         this.currentPath = null;
         this.currentArrowHead = null;
-        
+
         return false;
     }
 
@@ -13694,13 +13807,13 @@ class ArrowBrush extends PencilBrush {
         try {
             // Simplify points first
             const simplifiedPoints = this.simplifyPoints(this.points, 50);
-            
+
             // Generate control points for smooth curve
             const controlPoints = this.getControlPoints(simplifiedPoints);
-            
+
             // Build the SVG path
             let pathData = `M ${simplifiedPoints[0].x} ${simplifiedPoints[0].y}`;
-            
+
             for (let i = 0; i < controlPoints.length - 1; i++) {
                 const cp = controlPoints[i];
                 const nextCp = controlPoints[i + 1];
@@ -13790,7 +13903,7 @@ class ArrowBrush extends PencilBrush {
         // Use the last two points for direction
         const p1 = lastPoints[lastPoints.length - 2];
         const p2 = lastPoints[lastPoints.length - 1];
-        
+
         const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
 
         return {
@@ -13844,10 +13957,10 @@ export class CropModal extends Modal {
 	private readonly HEADER_HEIGHT = 60;
 	private readonly FOOTER_HEIGHT = 60;
 	private readonly ASPECT_RATIO_HEIGHT = 80;
-	
+
 	// Calculate total chrome height (all UI elements except image)
 	private readonly CHROME_HEIGHT = this.HEADER_HEIGHT + this.FOOTER_HEIGHT + this.ASPECT_RATIO_HEIGHT;
-	
+
 	// Minimum dimensions
 	private readonly MIN_WIDTH = 320;
 	private readonly MIN_HEIGHT = 400;
@@ -13897,22 +14010,22 @@ export class CropModal extends Modal {
     async onOpen() {
 		const { contentEl } = this;
 		contentEl.empty();
-		
+
 		// Add a wrapper div for better control of modal size
 		const modalWrapper = contentEl.createDiv('crop-modal-wrapper');
-	
+
 		// Create modal structure
 		const modalHeader = modalWrapper.createDiv('crop-modal-header');
 		modalHeader.createEl('h2', { text: 'Crop image' });
-	
+
 		// Create main container
 		const modalContent = modalWrapper.createDiv('crop-modal-content');
 		this.cropContainer = modalContent.createDiv('crop-container');
-			
+
 		// Create selection area
 		this.selectionArea = this.cropContainer.createDiv('selection-area');
 		this.selectionArea.style.display = 'none';
-	
+
 		// Create buttons - Move this inside modalWrapper
 		const buttonContainer = modalWrapper.createDiv('crop-modal-buttons');
 		const saveButton = buttonContainer.createEl('button', { text: 'Save' });
@@ -13925,7 +14038,7 @@ export class CropModal extends Modal {
 		// Add transform controls
 		this.createTransformControls(aspectRatioContainer);
 		aspectRatioContainer.createEl('span', { text: ' ' });
-		
+
 		// Create ratio buttons container
 		const ratioButtonsContainer = aspectRatioContainer.createDiv('ratio-buttons-container');
 
@@ -13940,23 +14053,23 @@ export class CropModal extends Modal {
 				text: label,
 				cls: 'aspect-ratio-button'
 			});
-			
+
 			button.addEventListener('click', () => {
 				// Remove active class from all buttons
-				aspectRatioContainer.querySelectorAll('.aspect-ratio-button').forEach(btn => 
+				aspectRatioContainer.querySelectorAll('.aspect-ratio-button').forEach(btn =>
 					btn.removeClass('active'));
-				
+
 				// Add active class to clicked button
 				button.addClass('active');
-				
+
 				// Clear custom inputs when selecting a preset
 				if (ratio !== null) {
 					widthInput.value = '';
 					heightInput.value = '';
 				}
-				
+
 				this.currentAspectRatio = ratio;
-				
+
 				// If there's an existing selection, adjust it to the new aspect ratio
 				if (this.selectionArea.style.display !== 'none') {
 					this.adjustSelectionToAspectRatio();
@@ -13971,15 +14084,15 @@ export class CropModal extends Modal {
 
 		// Create custom ratio inputs
 		const customRatioContainer = aspectRatioContainer.createDiv('custom-ratio-container');
-		
+
 		const widthInput = customRatioContainer.createEl('input', {
 			type: 'number',
 			placeholder: 'W',
 			cls: 'custom-ratio-input'
 		});
-		
+
 		customRatioContainer.createEl('span', { text: ':' });
-		
+
 		const heightInput = customRatioContainer.createEl('input', {
 			type: 'number',
 			placeholder: 'H',
@@ -13990,12 +14103,12 @@ export class CropModal extends Modal {
 		const updateCustomRatio = () => {
 			const width = parseFloat(widthInput.value);
 			const height = parseFloat(heightInput.value);
-			
+
 			if (width > 0 && height > 0) {
 				// Remove active class from preset buttons
-				aspectRatioContainer.querySelectorAll('.aspect-ratio-button').forEach(btn => 
+				aspectRatioContainer.querySelectorAll('.aspect-ratio-button').forEach(btn =>
 					btn.removeClass('active'));
-					
+
 				this.currentAspectRatio = width / height;
 				if (this.selectionArea.style.display !== 'none') {
 					this.adjustSelectionToAspectRatio();
@@ -14042,7 +14155,7 @@ export class CropModal extends Modal {
         // Create and load the original image
         this.originalImage = document.createElement('img');
         this.originalImage.className = 'crop-original-image';
-        
+
         return new Promise<void>((resolve, reject) => {
             this.originalImage.onload = () => {
 				this.adjustModalSize();
@@ -14060,19 +14173,19 @@ export class CropModal extends Modal {
 
 	private adjustModalSize() {
 		if (!this.originalImage) return;
-	
+
 		const modalElement = this.containerEl.querySelector('.modal') as HTMLElement;
 		if (!modalElement) return;
-	
+
 		const isMobile = window.innerWidth <= 768;
-		
+
 		// Get image dimensions
 		const imgWidth = this.originalImage.naturalWidth;
 		const imgHeight = this.originalImage.naturalHeight;
 		const imgAspectRatio = imgWidth / imgHeight;
-	
+
 		let modalWidth, modalHeight;
-	
+
 		if (isMobile) {
 			// Mobile layout: full width with padding
 			modalWidth = window.innerWidth - (this.MODAL_PADDING * 2);
@@ -14084,11 +14197,11 @@ export class CropModal extends Modal {
 			// Desktop layout: static size at 80% of window
 			modalWidth = window.innerWidth * this.STATIC_DESKTOP_WIDTH_RATIO;
 			modalHeight = window.innerHeight * this.STATIC_DESKTOP_HEIGHT_RATIO;
-	
+
 			// Ensure the image container maintains aspect ratio within these bounds
 			const availableImageHeight = modalHeight - this.CHROME_HEIGHT;
 			const availableImageWidth = modalWidth;
-	
+
 			// Adjust container size to maintain aspect ratio
 			if (imgAspectRatio > availableImageWidth / availableImageHeight) {
 				// Image is wider than available space
@@ -14098,11 +14211,11 @@ export class CropModal extends Modal {
 				modalWidth = (availableImageHeight * imgAspectRatio);
 			}
 		}
-	
+
 		// Apply minimum dimensions
 		modalWidth = Math.max(this.MIN_WIDTH, modalWidth);
 		modalHeight = Math.max(this.MIN_HEIGHT, modalHeight);
-	
+
 		// Apply styles
 		modalElement.style.width = `${modalWidth}px`;
 		modalElement.style.height = `${modalHeight}px`;
@@ -14111,40 +14224,40 @@ export class CropModal extends Modal {
 		modalElement.style.transform = 'translate(-50%, -50%)';
 	}
 
-   // Flip/ Rotate 
+   // Flip/ Rotate
 	private createTransformControls(modalHeader: HTMLElement) {
 		const transformControls = modalHeader.createDiv({ cls: 'transform-controls' });
-		
+
 		// Rotation controls
 		const rotateContainer = transformControls.createDiv({ cls: 'rotate-container' });
-		
+
 		const rotateLeftBtn = rotateContainer.createEl('button', {
 			cls: 'transform-button',
 			text: '↺',
 			attr: { title: '90° Counter Clockwise' }
 		});
-		
+
 		const rotateRightBtn = rotateContainer.createEl('button', {
 			cls: 'transform-button',
 			text: '↻',
 			attr: { title: '90° Clockwise' }
 		});
-		
+
 		// Flip controls
 		const flipContainer = transformControls.createDiv({ cls: 'flip-container' });
-		
+
 		const flipHorizontalBtn = flipContainer.createEl('button', {
 			cls: 'transform-button',
 			text: '↔',
 			attr: { title: 'Flip Horizontally' }
 		});
-		
+
 		const flipVerticalBtn = flipContainer.createEl('button', {
 			cls: 'transform-button',
 			text: '↕',
 			attr: { title: 'Flip Vertically' }
 		});
-		
+
 		// Add event listeners
 		this.registerEvent(rotateLeftBtn, 'click', () => this.rotate(-90));
 		this.registerEvent(rotateRightBtn, 'click', () => this.rotate(90));
@@ -14156,7 +14269,7 @@ export class CropModal extends Modal {
 		this.currentRotation = (this.currentRotation + degrees) % 360;
 		this.applyTransforms();
 	}
-	
+
 	private flip(direction: 'horizontal' | 'vertical') {
 		if (direction === 'horizontal') {
 			this.isFlippedX = !this.isFlippedX;
@@ -14165,11 +14278,11 @@ export class CropModal extends Modal {
 		}
 		this.applyTransforms();
 	}
-	
 
 
 
-	// Zoom / Rotate slider 
+
+	// Zoom / Rotate slider
 	private createImageControls(modalHeader: HTMLElement) {
 		const controlsContainer = modalHeader.createDiv({ cls: 'image-controls' });
 
@@ -14246,17 +14359,17 @@ export class CropModal extends Modal {
 
 	private applyTransforms() {
 		const transforms: string[] = [];
-		
+
 		// Add zoom
 		if (this.zoom !== 1) {
 			transforms.push(`scale(${this.zoom})`);
 		}
-		
+
 		// Add rotation
 		if (this.currentRotation !== 0) {
 			transforms.push(`rotate(${this.currentRotation}deg)`);
 		}
-		
+
 		// Add flips
 		if (this.isFlippedX) {
 			transforms.push('scaleX(-1)');
@@ -14264,11 +14377,11 @@ export class CropModal extends Modal {
 		if (this.isFlippedY) {
 			transforms.push('scaleY(-1)');
 		}
-		
+
 		this.originalImage.style.transform = transforms.join(' ');
-		
+
 		// Adjust container size if needed
-		if (Math.abs(this.currentRotation) === 90 || 
+		if (Math.abs(this.currentRotation) === 90 ||
 			Math.abs(this.currentRotation) === 270 ||
 			this.zoom !== 1) {
 			this.adjustModalSize();
@@ -14284,7 +14397,7 @@ export class CropModal extends Modal {
                 const rect = this.cropContainer.getBoundingClientRect();
                 this.startX = e.clientX - rect.left;
                 this.startY = e.clientY - rect.top;
-                
+
                 this.selectionArea.style.display = 'block';
                 this.selectionArea.style.left = `${this.startX}px`;
                 this.selectionArea.style.top = `${this.startY}px`;
@@ -14321,50 +14434,50 @@ export class CropModal extends Modal {
 	private makeSelectionMovable() {
 		this.addResizeHandles();
 		this.setupResizeHandlers();
-		
+
 		let isDragging = false;
 		let dragStartX = 0;
 		let dragStartY = 0;
 		let initialLeft = 0;
 		let initialTop = 0;
-	
+
 		this.registerEvent(this.selectionArea, 'mousedown', (e) => {
 			e.stopPropagation(); // Prevent container's mousedown from firing
 			isDragging = true;
-			
+
 			// Store the initial positions
 			initialLeft = parseInt(this.selectionArea.style.left) || 0;
 			initialTop = parseInt(this.selectionArea.style.top) || 0;
 			dragStartX = e.clientX;
 			dragStartY = e.clientY;
-			
+
 			this.selectionArea.style.cursor = 'move';
 		});
-	
+
 		this.registerEvent(document, 'mousemove', (e) => {
 			if (!isDragging) return;
-	
+
 			// Calculate the distance moved from the start position
 			const deltaX = e.clientX - dragStartX;
 			const deltaY = e.clientY - dragStartY;
-	
+
 			// Calculate new positions
 			let newLeft = initialLeft + deltaX;
 			let newTop = initialTop + deltaY;
-	
+
 			// Get container boundaries
 			const containerRect = this.cropContainer.getBoundingClientRect();
 			const selectionRect = this.selectionArea.getBoundingClientRect();
-	
+
 			// Constrain to container boundaries
 			newLeft = Math.max(0, Math.min(newLeft, containerRect.width - selectionRect.width));
 			newTop = Math.max(0, Math.min(newTop, containerRect.height - selectionRect.height));
-	
+
 			// Apply new position
 			this.selectionArea.style.left = `${newLeft}px`;
 			this.selectionArea.style.top = `${newTop}px`;
 		});
-	
+
 		this.registerEvent(document, 'mouseup', () => {
 			isDragging = false;
 			this.selectionArea.style.cursor = 'move';
@@ -14414,7 +14527,7 @@ export class CropModal extends Modal {
 
 		const currentWidth = parseInt(this.selectionArea.style.width);
 		const currentHeight = parseInt(this.selectionArea.style.height);
-		
+
 		if (currentWidth / currentHeight > this.currentAspectRatio) {
 			// Adjust width to match height * ratio
 			const newWidth = currentHeight * this.currentAspectRatio;
@@ -14434,14 +14547,14 @@ export class CropModal extends Modal {
 			'w', 'e',
 			'sw', 's', 'se'
 		];
-	
+
 		handles.forEach(position => {
 			const handle = document.createElement('div');
 			handle.className = `resize-handle ${position}-resize`;
 			this.selectionArea.appendChild(handle);
 		});
 	}
-	
+
 	private setupResizeHandlers() {
 		let isResizing = false;
 		let currentHandle: string | null = null;
@@ -14451,15 +14564,15 @@ export class CropModal extends Modal {
 		let startHeight = 0;
 		let startLeft = 0;
 		let startTop = 0;
-	
+
 		const handles = this.selectionArea.querySelectorAll('.resize-handle');
-	
+
 		handles.forEach(handle => {
 			this.registerEvent(handle, 'mousedown', (e: MouseEvent) => {
 				e.stopPropagation(); // Prevent dragging from starting
 				isResizing = true;
 				currentHandle = handle.className.split(' ')[1].split('-')[0]; // Get position (nw, n, ne, etc.)
-				
+
 				startX = e.clientX;
 				startY = e.clientY;
 				startWidth = this.selectionArea.offsetWidth;
@@ -14468,44 +14581,44 @@ export class CropModal extends Modal {
 				startTop = this.selectionArea.offsetTop;
 			});
 		});
-	
+
 		this.registerEvent(document, 'mousemove', (e: MouseEvent) => {
 			if (!isResizing) return;
-	
+
 			const deltaX = e.clientX - startX;
 			const deltaY = e.clientY - startY;
-			
+
 			let newWidth = startWidth;
 			let newHeight = startHeight;
 			let newLeft = startLeft;
 			let newTop = startTop;
-	
+
 			// Calculate new dimensions based on which handle is being dragged
 			switch (currentHandle) {
 				case 'se':
 					newWidth = startWidth + deltaX;
-					newHeight = this.currentAspectRatio 
-						? newWidth / this.currentAspectRatio 
+					newHeight = this.currentAspectRatio
+						? newWidth / this.currentAspectRatio
 						: startHeight + deltaY;
 					break;
 				case 'sw':
 					newWidth = startWidth - deltaX;
-					newHeight = this.currentAspectRatio 
-						? newWidth / this.currentAspectRatio 
+					newHeight = this.currentAspectRatio
+						? newWidth / this.currentAspectRatio
 						: startHeight + deltaY;
 					newLeft = startLeft + deltaX;
 					break;
 				case 'ne':
 					newWidth = startWidth + deltaX;
-					newHeight = this.currentAspectRatio 
-						? newWidth / this.currentAspectRatio 
+					newHeight = this.currentAspectRatio
+						? newWidth / this.currentAspectRatio
 						: startHeight - deltaY;
 					newTop = startTop + (startHeight - newHeight);
 					break;
 				case 'nw':
 					newWidth = startWidth - deltaX;
-					newHeight = this.currentAspectRatio 
-						? newWidth / this.currentAspectRatio 
+					newHeight = this.currentAspectRatio
+						? newWidth / this.currentAspectRatio
 						: startHeight - deltaY;
 					newLeft = startLeft + deltaX;
 					newTop = startTop + (startHeight - newHeight);
@@ -14541,21 +14654,21 @@ export class CropModal extends Modal {
 					newLeft = startLeft + deltaX;
 					break;
 			}
-	
+
 			// Constrain to container boundaries
 			const containerRect = this.cropContainer.getBoundingClientRect();
 			newWidth = Math.max(20, Math.min(newWidth, containerRect.width - newLeft));
 			newHeight = Math.max(20, Math.min(newHeight, containerRect.height - newTop));
 			newLeft = Math.max(0, Math.min(newLeft, containerRect.width - newWidth));
 			newTop = Math.max(0, Math.min(newTop, containerRect.height - newHeight));
-	
+
 			// Apply new dimensions
 			this.selectionArea.style.width = `${newWidth}px`;
 			this.selectionArea.style.height = `${newHeight}px`;
 			this.selectionArea.style.left = `${newLeft}px`;
 			this.selectionArea.style.top = `${newTop}px`;
 		});
-	
+
 		this.registerEvent(document, 'mouseup', () => {
 			isResizing = false;
 			currentHandle = null;
@@ -14577,7 +14690,7 @@ export class CropModal extends Modal {
 			if (!ctx) {
 				throw new Error('Could not get canvas context');
 			}
-	
+
 			// If there's a selection, crop and transform
 			if (this.selectionArea.style.display !== 'none' && this.selectionArea.offsetWidth) {
 				// Get the selection area dimensions
@@ -14585,40 +14698,40 @@ export class CropModal extends Modal {
 				const imageRect = this.originalImage.getBoundingClientRect();
 				const scaleX = this.originalImage.naturalWidth / imageRect.width;
 				const scaleY = this.originalImage.naturalHeight / imageRect.height;
-	
+
 				// Calculate crop dimensions in original image coordinates
 				const cropX = (selectionRect.left - imageRect.left) * scaleX;
 				const cropY = (selectionRect.top - imageRect.top) * scaleY;
 				const cropWidth = selectionRect.width * scaleX;
 				const cropHeight = selectionRect.height * scaleY;
-	
+
 				// Set canvas dimensions based on rotation
 				let finalWidth = cropWidth;
 				let finalHeight = cropHeight;
-				
+
 				if (Math.abs(this.currentRotation) === 90 || Math.abs(this.currentRotation) === 270) {
 					[finalWidth, finalHeight] = [finalHeight, finalWidth];
 				}
-	
+
 				canvas.width = finalWidth;
 				canvas.height = finalHeight;
-	
+
 				// Clear the canvas and save state
 				ctx.clearRect(0, 0, canvas.width, canvas.height);
 				ctx.save();
-	
+
 				// Move to center of canvas
 				ctx.translate(canvas.width / 2, canvas.height / 2);
-	
+
 				// Apply rotation
 				ctx.rotate((this.currentRotation * Math.PI) / 180);
-	
+
 				// Apply flips
 				ctx.scale(
 					this.isFlippedX ? -1 : 1,
 					this.isFlippedY ? -1 : 1
 				);
-	
+
 				// Draw the cropped portion
 				ctx.drawImage(
 					this.originalImage,
@@ -14629,7 +14742,7 @@ export class CropModal extends Modal {
 				// Just transform the entire image without cropping
 				let finalWidth = this.originalImage.naturalWidth;
 				let finalHeight = this.originalImage.naturalHeight;
-				
+
 				// Apply zoom to dimensions
 				finalWidth *= this.zoom;
 				finalHeight *= this.zoom;
@@ -14638,26 +14751,26 @@ export class CropModal extends Modal {
 				if (Math.abs(this.currentRotation) === 90 || Math.abs(this.currentRotation) === 270) {
 					[finalWidth, finalHeight] = [finalHeight, finalWidth];
 				}
-	
+
 				canvas.width = finalWidth;
 				canvas.height = finalHeight;
-	
+
 				// Clear the canvas and save state
 				ctx.clearRect(0, 0, canvas.width, canvas.height);
 				ctx.save();
-	
+
 				// Move to center of canvas
 				ctx.translate(canvas.width / 2, canvas.height / 2);
-	
+
 				// Apply rotation
 				ctx.rotate((this.currentRotation * Math.PI) / 180);
-	
+
 				// Apply flips
 				ctx.scale(
 					this.isFlippedX ? -1 : 1,
 					this.isFlippedY ? -1 : 1
 				);
-	
+
 				// Draw the entire image
 				ctx.drawImage(
 					this.originalImage,
@@ -14665,15 +14778,15 @@ export class CropModal extends Modal {
 					-this.originalImage.naturalHeight / 2
 				);
 			}
-	
+
 			// Restore canvas state
 			ctx.restore();
-	
+
 			// Determine the output format
 			const extension = this.imageFile.extension.toLowerCase();
 			let outputFormat: SupportedImageFormat = 'png';
 			let quality = 1.0;
-	
+
 			switch (extension) {
 				case 'jpg':
 				case 'jpeg':
@@ -14692,7 +14805,7 @@ export class CropModal extends Modal {
 					outputFormat = 'png';
 					break;
 			}
-	
+
 			// Convert to blob
 			const blob = await new Promise<Blob>((resolve, reject) => {
 				canvas.toBlob(
@@ -14707,23 +14820,23 @@ export class CropModal extends Modal {
 					quality
 				);
 			});
-	
+
 			if (!blob) {
 				throw new Error('Failed to create image blob');
 			}
-	
+
 			// Convert blob to array buffer
 			const arrayBuffer = await blob.arrayBuffer();
-			
+
 			if (!arrayBuffer) {
 				throw new Error('Failed to create array buffer from blob');
 			}
-	
+
 			// Save the transformed image
 			await this.app.vault.modifyBinary(this.imageFile, arrayBuffer);
-			
+
 			new Notice('Image saved successfully');
-	
+
 			// Refresh image in the editor
 			const leaf = this.app.workspace.getMostRecentLeaf();
 			if (leaf) {
@@ -14734,9 +14847,9 @@ export class CropModal extends Modal {
 				});
 				await leaf.setViewState(currentState);
 			}
-	
+
 			this.close();
-	
+
 		} catch (error) {
 			console.error('Save error:', error);
 			new Notice(`Error saving image: ${error.message}`);
@@ -14747,7 +14860,7 @@ export class CropModal extends Modal {
         // Clean up all registered events
         this.eventRefs.forEach(cleanup => cleanup());
         this.eventRefs.length = 0;
-        
+
         const { contentEl } = this;
         contentEl.empty();
     }
@@ -14759,8 +14872,8 @@ interface ImagePositionCache {
             position: 'left' | 'center' | 'right';
             width?: string;
             wrap: boolean;
-        } 
-    } 
+        }
+    }
 }
 
 // This is mainly to handle CACHE
@@ -14785,7 +14898,7 @@ export class ImagePositionManager {
 		operationQueue: [],
 		currentLock: null
 	};
-	
+
 	private imageStates: Map<string, ImageState> = new Map();
 
     private readonly CACHE_FILE = '.image-positions.json';
@@ -14813,12 +14926,12 @@ export class ImagePositionManager {
     public getCache(): ImagePositionCache {
         return this.cache;
     }
-	
+
     private async loadCache() {
         try {
             const adapter = this.plugin.app.vault.adapter;
             const cachePath = `${this.pluginDir}/${this.CACHE_FILE}`;
-            
+
             if (await adapter.exists(cachePath)) {
                 const data = await adapter.read(cachePath);
                 this.cache = JSON.parse(data);
@@ -14839,7 +14952,7 @@ export class ImagePositionManager {
 
             const adapter = this.plugin.app.vault.adapter;
             const cachePath = `${this.pluginDir}/${this.CACHE_FILE}`;
-            
+
             await adapter.write(
                 cachePath,
                 JSON.stringify(this.cache, null, 2)
@@ -14854,45 +14967,45 @@ export class ImagePositionManager {
 		if (this.imageObserver) {
 			this.imageObserver.disconnect();
 		}
-	
+
 		this.imageObserver = new MutationObserver((mutations) => {
 			void (async () => {
                 try {
 					await this.lock.acquire('observerOperation', async () => {
 						const mainPlugin = this.plugin as ImageConvertPlugin;
-						
+
 						// Get current file once for all mutations
 						const currentFile = this.plugin.app.workspace.getActiveFile();
 						if (!currentFile || !this.cache[currentFile.path]) return;
-				
+
 						const processImage = (img: HTMLImageElement) => {
 							// Skip if we're currently resizing
 							if (mainPlugin.resizeState?.isResizing) return;
-				
+
 							// Skip if the image has resize attributes
-							if (img.hasAttribute('data-resize-edge') || 
+							if (img.hasAttribute('data-resize-edge') ||
 								img.hasAttribute('data-resize-active')) {
 								return;
 							}
-				
+
 							const src = img.getAttribute('src');
 							if (!src) return;
-				
+
 							// Normalize the source path
 							const normalizedSrc = this.normalizeImagePath(src);
-							
+
 							// Find matching cache entry
 							const positions = this.cache[currentFile.path];
-							const cacheEntry = Object.entries(positions).find(([key, _]) => 
+							const cacheEntry = Object.entries(positions).find(([key, _]) =>
 								this.normalizeImagePath(key) === normalizedSrc
 							);
-				
+
 							if (cacheEntry) {
 								const [, positionData] = cacheEntry;
 								this.applyPositionToImage(img, positionData);
 							}
 						};
-				
+
 						mutations.forEach((mutation) => {
 							// Handle added nodes
 							mutation.addedNodes.forEach((node) => {
@@ -14903,9 +15016,9 @@ export class ImagePositionManager {
 									node.querySelectorAll('img').forEach(img => processImage(img));
 								}
 							});
-				
+
 							// Handle attribute modifications on existing images
-							if (mutation.type === 'attributes' && 
+							if (mutation.type === 'attributes' &&
 								mutation.target instanceof HTMLImageElement &&
 								!mutation.target.hasAttribute('data-resize-active')) {
 								processImage(mutation.target);
@@ -14917,7 +15030,7 @@ export class ImagePositionManager {
                 }
             })();
 		});
-	
+
 		// Observe both structure and attribute changes
 		this.imageObserver.observe(document.body, {
 			childList: true,
@@ -14983,7 +15096,7 @@ export class ImagePositionManager {
                 }
 
                 await this.saveCache();
-                
+
                 // Update state after successful operation
                 await this.updateImageState(imageSrc, { isUpdating: false });
             });
@@ -15055,16 +15168,16 @@ export class ImagePositionManager {
 		width?: string
 	) {
 		const normalizedSrc = this.normalizeImagePath(imageSrc);
-		
+
 		// Find the matching cache entry
 		const noteCache = this.cache[notePath];
 		if (!noteCache) return;
-	
+
 		// Look for matching entry in cache
-		const cacheKey = Object.keys(noteCache).find(key => 
+		const cacheKey = Object.keys(noteCache).find(key =>
 			this.normalizeImagePath(key) === normalizedSrc
 		);
-	
+
 		if (cacheKey && noteCache[cacheKey]) {
 			const positions = noteCache[cacheKey];
 			// Update only the width while preserving position and wrap
@@ -15121,23 +15234,23 @@ export class ImagePositionManager {
 	public async validateNoteCache(notePath: string, noteContent: string) {
 		await this.lock.acquire('validateCache', async () => {
 			if (!this.cache[notePath]) return;
-		
+
 			const imageLinks = this.extractImageLinks(noteContent);
 			const cachedImages = Object.keys(this.cache[notePath]);
-			
+
 			// Find cached images that are no longer in the note
 			const imagesToRemove = cachedImages.filter(cachedImage => {
 				const normalizedCachedImage = this.normalizeImagePath(cachedImage);
-				return !imageLinks.some(link => 
+				return !imageLinks.some(link =>
 					this.normalizeImagePath(link) === normalizedCachedImage
 				);
 			});
-		
+
 			// Remove orphaned entries
 			for (const imageToRemove of imagesToRemove) {
 				await this.removeImageFromCache(notePath, imageToRemove);
 			}
-		
+
 			// If no images left in cache for this note, remove the note entry
 			if (Object.keys(this.cache[notePath]).length === 0) {
 				delete this.cache[notePath];
@@ -15145,10 +15258,10 @@ export class ImagePositionManager {
 			}
 		});
 	}
-	
+
     private async handleOperationError(error: Error, operation: string) {
         console.error(`Error during ${operation}:`, error);
-        
+
         await this.lock.acquire('errorHandling', async () => {
             // Clear any pending operations
             this.operationQueue = [];
@@ -15180,7 +15293,7 @@ export class ImagePositionManager {
             wrap: false,
             isUpdating: false
         };
-        
+
         const newState = { ...currentState, ...state };
         this.imageStates.set(imagePath, newState);
 
@@ -15207,26 +15320,26 @@ export class ImagePositionManager {
 	// Helper method to extract image links from note content
 	private extractImageLinks(content: string): string[] {
 		const imageLinks: string[] = [];
-		
+
 		// Match both standard markdown images and Obsidian wiki-style images
 		const markdownImageRegex = /!\[.*?\]\((.*?)\)/g;
 		const wikiImageRegex = /!\[\[(.*?)\]\]/g;
-		
+
 		// Extract standard markdown images
 		let match;
 		while ((match = markdownImageRegex.exec(content)) !== null) {
 			if (match[1]) imageLinks.push(match[1].split('|')[0]);
 		}
-		
+
 		// Extract wiki-style images
 		while ((match = wikiImageRegex.exec(content)) !== null) {
 			if (match[1]) imageLinks.push(match[1].split('|')[0]);
 		}
-		
+
 		return imageLinks;
 	}
 
-	
+
 	// Add method to remove cache for specific image
 	public async removeImageFromCache(notePath: string, imageSrc: string) {
 		if (this.cache[notePath]) {
