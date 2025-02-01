@@ -131,31 +131,31 @@ export class ImageAlignmentManager {
 
     private registerEvents() {
         // console.log("Registering events")
-        this.eventRefs.push(
-            this.app.workspace.on("window-open", (newWindow, leaf) => {
-                // Delay the execution slightly to ensure the new window's DOM is ready
-                setTimeout(() => {
-                    this.setupImageObserver();
-                }, 500);
-                const currentFile = this.app.workspace.getActiveFile();
+        // this.eventRefs.push(
+        //     this.app.workspace.on("window-open", (newWindow, leaf) => {
+        //         // Delay the execution slightly to ensure the new window's DOM is ready
+        //         setTimeout(() => {
+        //             this.setupImageObserver();
+        //         }, 500);
+        //         const currentFile = this.app.workspace.getActiveFile();
                 
-                if (currentFile) {
-                    // console.log("current file path:", currentFile.path)
-                    void this.applyAlignmentsToNote(currentFile.path);
-                }
-            })
-        );
+        //         if (currentFile) {
+        //             // console.log("current file path:", currentFile.path)
+        //             void this.applyAlignmentsToNote(currentFile.path);
+        //         }
+        //     })
+        // );
 
-        this.eventRefs.push(
-            this.app.workspace.on('layout-change', () => {
-                // Trigger a full re-application of alignments for the current note
-                const currentFile = this.app.workspace.getActiveFile();
-                if (currentFile) {
-                    // console.log("current file path:", currentFile.path)
-                    void this.applyAlignmentsToNote(currentFile.path);
-                }
-            })
-        );
+        // this.eventRefs.push(
+        //     this.app.workspace.on('layout-change', () => {
+        //         // Trigger a full re-application of alignments for the current note
+        //         const currentFile = this.app.workspace.getActiveFile();
+        //         if (currentFile) {
+        //             // console.log("current file path:", currentFile.path)
+        //             void this.applyAlignmentsToNote(currentFile.path);
+        //         }
+        //     })
+        // );
 
         this.eventRefs.push(
             this.app.vault.on('delete', async (file) => {
@@ -428,12 +428,16 @@ export class ImageAlignmentManager {
             }
         }
 
-        // Fallback: try to extract filename
-        const parts = imageSrc.split('/');
-        const filename = parts[parts.length - 1];
+        // If we couldn't get a relative path from the app:// URI,
+        // let's try to find the image in the vault and get its path.**
+        const imageFile = this.app.vault.getFiles().find(file => file.path.endsWith(imageSrc));
+        if (imageFile) {
+            return imageFile.path;
+        }
 
-        // console.log("FAILED extracting relative path (it didnt start with app file URI or basepath)", filename);
-        return filename;
+        // Fallback: return the original (which might be a relative path or just a filename)
+        // console.log("FAILED extracting relative path (it didnt start with app file URI or basepath)", imageSrc);
+        return imageSrc;
     }
 
 
@@ -445,6 +449,7 @@ export class ImageAlignmentManager {
 
     public async applyAlignmentsToNote(notePath: string) {
         try {
+            // console.log("applyAlignmentsToNote")
             await this.lock.acquire('applyAlignments', async () => {
                 const alignments = this.cache[notePath];
                 if (!alignments) return;

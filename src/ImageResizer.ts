@@ -104,18 +104,21 @@ export class ImageResizer {
         }
     }
 
-    onActiveLeafChange(markdownView: MarkdownView) {
-        this.cleanupHandles();
-        this.onload(markdownView);
-        if (this.lastMouseEvent) {
-            this.handleImageHover(this.lastMouseEvent);
-        }
-    }
+    // onActiveLeafChange(markdownView: MarkdownView) {
+    //     this.cleanupHandles();
+    //     this.onload(markdownView);
+    //     if (this.lastMouseEvent) {
+    //         this.handleImageHover(this.lastMouseEvent);
+    //     }
+    // }
 
     onLayoutChange(markdownView: MarkdownView) {
         // Handle layout changes (e.g., reposition handles)
         this.cleanupHandles();
         this.onload(markdownView);
+        if (this.lastMouseEvent) {
+            this.handleImageHover(this.lastMouseEvent);
+        }
     }
 
     // onEditorChange(editor: Editor, view: MarkdownView) {

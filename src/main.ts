@@ -67,17 +67,82 @@ export default class ImageConverterPlugin extends Plugin {
     // Process whole fodler
     processFolderModal: ProcessFolderModal;
     // Processcurrent note/canvas
-    processCurrentNote: ProcessCurrentNote; 
+    processCurrentNote: ProcessCurrentNote;
     // ProcessAllVault
-    processAllVaultModal: ProcessAllVaultModal 
+    processAllVaultModal: ProcessAllVaultModal
 
 
     async onload() {
         await this.loadSettings();
         this.addSettingTab(new ImageConverterSettingTab(this.app, this));
 
-        // Use then() to handle the Promise returned by onLayoutReady
+        // Initialize core components immediately
+        this.supportedImageFormats = new SupportedImageFormats(this.app);
+        // First create ImageResizer since ImageAlignment depends on it
+        if (this.settings.isImageResizeEnbaled) {
+            this.imageResizer = new ImageResizer(this);
+            // Don't attach events yet - that will happen in onLayoutReady
+        }
+
+        // Initialize ImageAlignment early since it's time-sensitive
+        if (this.settings.isImageAlignmentEnabled) {
+            this.ImageAlignmentManager = new ImageAlignmentManager(
+                this,
+                this.supportedImageFormats,
+                this.imageResizer!
+            );
+            await this.ImageAlignmentManager.initialize();
+            this.imageAlignment = new ImageAlignment(this, this.ImageAlignmentManager);
+
+            // Apply alignments immediately
+            const currentFile = this.app.workspace.getActiveFile();
+            if (currentFile) {
+                this.ImageAlignmentManager.applyAlignmentsToNote(currentFile.path);
+            }
+        }
+
+        // Initialize DRAG/SCROLL rESIZING when swithing notes
+
+        this.registerEvent(
+            this.app.workspace.on('active-leaf-change', (leaf) => {
+                const markdownView = leaf?.view instanceof MarkdownView ? leaf.view : null;
+                if (markdownView && this.imageResizer && this.settings.isImageResizeEnbaled) {
+                    this.imageResizer.onload(markdownView);
+                }
+            })
+        );
+        
+
+        // Apply Image Alignment and Resizing when switching Live to Reading mode etc.
+        this.registerEvent(
+            this.app.workspace.on('layout-change', () => {
+                if (this.settings.isImageAlignmentEnabled) {
+                    const currentFile = this.app.workspace.getActiveFile();
+                    if (currentFile) {
+                        void this.ImageAlignmentManager?.applyAlignmentsToNote(currentFile.path);
+                    }
+                }
+    
+                if (this.settings.isImageResizeEnbaled) {
+                    const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+                    if (activeView && this.imageResizer) {
+                        this.imageResizer.onLayoutChange(activeView);
+                    }
+                }
+            })
+        );
+
+        // Wait for layout to be ready before initializing view-dependent components
         this.app.workspace.onLayoutReady(() => {
+            // Now initialize the event handlers for ImageResizer
+            if (this.settings.isImageResizeEnbaled && this.imageResizer) {
+                const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+                if (activeView) {
+                    this.imageResizer.onload(activeView);
+                }
+            }
+
+            // Initialize remaining components
             this.initializeComponents();
         });
 
@@ -85,8 +150,7 @@ export default class ImageConverterPlugin extends Plugin {
 
     // extracted initialization logic into a separate async method
     async initializeComponents() {
-        // 0. Initialize
-        this.supportedImageFormats = new SupportedImageFormats(this.app);
+        // Initialize core management components
         this.folderAndFilenameManagement = new FolderAndFilenameManagement(this.app, this.settings, this.supportedImageFormats);
         this.variableProcessor = new VariableProcessor(this.app, this.settings);
         this.linkFormatSettings = new LinkFormatSettings();
@@ -94,96 +158,20 @@ export default class ImageConverterPlugin extends Plugin {
         this.imageProcessor = new ImageProcessor(this.app, this.supportedImageFormats);
         this.batchImageProcessor = new BatchImageProcessor(this.app, this);
 
-        // Context menu initialization
+        // Initialize context menu if enabled
         if (this.settings.enableContextMenu) {
             this.contextMenu = new ContextMenu(this);
         }
 
-        // Initialize NonDestructiveResizeSettings if it doesn't exist
+        // Initialize NonDestructiveResizeSettings if needed
         if (!this.settings.nonDestructiveResizeSettings) {
             this.settings.nonDestructiveResizeSettings = new NonDestructiveResizeSettings();
         }
 
-        // Initialize ImageResizer only if enabled
-        if (this.settings.isImageResizeEnbaled) {
-            this.imageResizer = new ImageResizer(this);
-            if (this.app.workspace.getActiveViewOfType(MarkdownView)) {
-                this.imageResizer.onload(this.app.workspace.getActiveViewOfType(MarkdownView)!); // Initialize resizer for the initial editor
-            }
-        }
+        // Register PASTE/DROP events
+        this.dropPaste_registerEvents();
 
-        // Initialize ImageAlignmentManager and ImageAlignment only if enabled
-        if (this.settings.isImageAlignmentEnabled) {
-            // Initialize ImageAlignmentManager, and passing ImageResizer instance to track state of resizing
-            this.ImageAlignmentManager = new ImageAlignmentManager(
-                this,
-                this.supportedImageFormats,
-                this.imageResizer! // Pass imageResizer if it's enabled
-            );
-            await this.ImageAlignmentManager.initialize();
-            // Initialize ImageAlignment
-            this.imageAlignment = new ImageAlignment(this, this.ImageAlignmentManager);
-        }
-
-        // Centralized event handling
-        this.registerEvent(
-            this.app.workspace.on('active-leaf-change', (leaf) => {
-                const markdownView = leaf?.view instanceof MarkdownView ? leaf.view : null;
-                if (markdownView) {
-                    // Delegate to ImageAlignmentManager
-                    if (this.settings.isImageAlignmentEnabled && this.ImageAlignmentManager) {
-                        const file = markdownView.file;
-                        if (file) {
-                            setTimeout(() => {
-                                this.ImageAlignmentManager!.applyAlignmentsToNote(file.path);
-                            }, 100);
-                        }
-                    }
-
-                    // Delegate to ImageResizer
-                    if (this.imageResizer) {
-                        this.imageResizer.onActiveLeafChange(markdownView);
-                    }
-                }
-            })
-        );
-
-        this.registerEvent(
-            this.app.workspace.on('editor-change', (editor, view) => {
-                if (view instanceof MarkdownView) {
-                    // Delegate to ImageAlignmentManager
-                    if (this.settings.isImageAlignmentEnabled && this.ImageAlignmentManager) {
-                        const file = view.file;
-                        if (file) {
-                            setTimeout(() => {
-                                this.ImageAlignmentManager!.applyAlignmentsToNote(file.path);
-                            }, 100);
-                        }
-                    }
-
-                    // Delegate to ImageResizer (re-consider for later use)
-                    // if (this.imageResizer) {
-                    //     this.imageResizer.onEditorChange(editor, view);
-                    // }
-                }
-            })
-        );
-
-        this.registerEvent(
-            this.app.workspace.on('layout-change', () => {
-                // Delegate to ImageResizer
-                const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-                if (activeView && this.imageResizer) {
-                    this.imageResizer.onLayoutChange(activeView);
-                }
-            })
-        );
-
-        // 1. Register PASTE/DROP
-        this.dropPaste_registerEvents()
-
-        // 2. Register File Menu
-        // Add the option to the file menu (File Explorer)
+        // Register file menu events
         this.registerEvent(
             this.app.workspace.on("file-menu", (menu, file) => {
                 if (file instanceof TFile && this.supportedImageFormats.isSupported(undefined, file.name)) {
@@ -191,7 +179,6 @@ export default class ImageConverterPlugin extends Plugin {
                         item.setTitle("Process image")
                             .setIcon("cog")
                             .onClick(() => {
-                                // Show modal for single image options
                                 new ProcessSingleImageModal(this.app, this, file).open();
                             });
                     });
@@ -200,25 +187,14 @@ export default class ImageConverterPlugin extends Plugin {
                         item.setTitle("Process all images in Folder")
                             .setIcon("cog")
                             .onClick(() => {
-                                // Open the updated ProcessFolderModal
                                 new ProcessFolderModal(this.app, this, file.path).open();
                             });
                     });
-                } else if (file instanceof TFile && file.extension === 'md') {
+                } else if (file instanceof TFile && (file.extension === 'md' || file.extension === 'canvas')) {
                     menu.addItem((item) => {
-                        item.setTitle("Process all images in Note")
+                        item.setTitle(`Process all images in ${file.extension === 'md' ? 'Note' : 'Canvas'}`)
                             .setIcon("cog")
                             .onClick(() => {
-                                // Open the ProcessCurrentNoteModal
-                                new ProcessCurrentNote(this.app, this, file).open();
-                            });
-                    });
-                } else if (file instanceof TFile && file.extension === 'canvas') {
-                    menu.addItem((item) => {
-                        item.setTitle("Process all images in Canvas") // Corrected text
-                            .setIcon("cog")
-                            .onClick(() => {
-                                // Open the ProcessCurrentNoteModal
                                 new ProcessCurrentNote(this.app, this, file).open();
                             });
                     });
@@ -226,37 +202,33 @@ export default class ImageConverterPlugin extends Plugin {
             })
         );
 
-        // Process all vault images
+        // Register commands
         this.addCommand({
             id: 'process-all-vault-images',
             name: 'Process all vault images',
             callback: () => {
-                new ProcessAllVaultModal(this.app, this).open(); // Pass 'this.app' and 'this' 
+                new ProcessAllVaultModal(this.app, this).open();
             }
         });
-	
-		// Process current note images
-		this.addCommand({
-			id: 'process-all-images-current-note',
-			name: 'Process all images in current note',
-			callback: () => {
-				const activeFile = this.app.workspace.getActiveFile();
-				if (activeFile) {
-					new ProcessCurrentNote(this.app, this, activeFile).open();
-				} else {
-					new Notice('Error: No active file found.');
-				}
-			},
-		});
 
-        // Open settings
-		this.addCommand({
-			id: 'open-image-converter-settings',
-			name: 'Open Image Converter Settings',
-			callback: () => this.command_openSettingsTab()
-		});
+        this.addCommand({
+            id: 'process-all-images-current-note',
+            name: 'Process all images in current note',
+            callback: () => {
+                const activeFile = this.app.workspace.getActiveFile();
+                if (activeFile) {
+                    new ProcessCurrentNote(this.app, this, activeFile).open();
+                } else {
+                    new Notice('Error: No active file found.');
+                }
+            }
+        });
 
-
+        this.addCommand({
+            id: 'open-image-converter-settings',
+            name: 'Open Image Converter Settings',
+            callback: () => this.command_openSettingsTab()
+        });
     }
 
     async onunload() {
@@ -277,9 +249,6 @@ export default class ImageConverterPlugin extends Plugin {
     }
 
 
-
-
-
     // Load settings method
     async loadSettings() {
         this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -291,15 +260,15 @@ export default class ImageConverterPlugin extends Plugin {
     }
 
     // Command to open settings tab
-	async command_openSettingsTab() {
-		const setting = (this.app as any).setting;
-		if (setting) {
-			await setting.open();
-			setting.openTabById(this.manifest.id);
-		} else {
-			new Notice('Unable to open settings. Please check if the settings plugin is enabled.');
-		}
-	}
+    async command_openSettingsTab() {
+        const setting = (this.app as any).setting;
+        if (setting) {
+            await setting.open();
+            setting.openTabById(this.manifest.id);
+        } else {
+            new Notice('Unable to open settings. Please check if the settings plugin is enabled.');
+        }
+    }
 
     private dropPaste_registerEvents() {
         // On mobile DROP events are not supported, but lets still check as a precaution
@@ -455,25 +424,25 @@ export default class ImageConverterPlugin extends Plugin {
                         this.settings.conversionPresets,
                         'Conversion'
                     );
-                    
+
                     selectedFilenamePreset = this.getPresetByName(
                         this.settings.selectedFilenamePreset,
                         this.settings.filenamePresets,
                         'Filename'
                     );
-                    
+
                     selectedFolderPreset = this.getPresetByName(
                         this.settings.selectedFolderPreset,
                         this.settings.folderPresets,
                         'Folder'
                     );
-                    
+
                     selectedLinkFormatPreset = this.getPresetByName(
                         this.settings.linkFormatSettings.selectedLinkFormatPreset,
                         this.settings.linkFormatSettings.linkFormatPresets,
                         'Link Format'
                     );
-                    
+
                     selectedResizePreset = this.getPresetByName(
                         this.settings.nonDestructiveResizeSettings.selectedResizePreset,
                         this.settings.nonDestructiveResizeSettings.resizePresets,
@@ -753,25 +722,25 @@ export default class ImageConverterPlugin extends Plugin {
                     this.settings.conversionPresets,
                     'Conversion'
                 );
-                
+
                 selectedFilenamePreset = this.getPresetByName(
                     this.settings.selectedFilenamePreset,
                     this.settings.filenamePresets,
                     'Filename'
                 );
-                
+
                 selectedFolderPreset = this.getPresetByName(
                     this.settings.selectedFolderPreset,
                     this.settings.folderPresets,
                     'Folder'
                 );
-                
+
                 selectedLinkFormatPreset = this.getPresetByName(
                     this.settings.linkFormatSettings.selectedLinkFormatPreset,
                     this.settings.linkFormatSettings.linkFormatPresets,
                     'Link Format'
                 );
-                
+
                 selectedResizePreset = this.getPresetByName(
                     this.settings.nonDestructiveResizeSettings.selectedResizePreset,
                     this.settings.nonDestructiveResizeSettings.resizePresets,
@@ -1046,7 +1015,7 @@ export default class ImageConverterPlugin extends Plugin {
         const message = `${originalSizeFormatted} → ${newSizeFormatted} (${changeSymbol}${percentChange}%)`;
         new Notice(message);
     }
-    
+
     private getPresetByName<T extends { name: string }>(
         presetName: string,
         presetArray: T[],
