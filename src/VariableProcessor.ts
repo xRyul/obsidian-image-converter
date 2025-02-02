@@ -16,14 +16,13 @@ export interface VariableInfo {
 }
 
 export class VariableProcessor {
-    private app: App;
-    private settings: ImageConverterSettings;
+
     private counters: Map<string, number> = new Map();
 
-    constructor(app: App, settings: ImageConverterSettings) {
-        this.app = app;
-        this.settings = settings;
-    }
+    constructor(
+        private app: App,
+        private settings: ImageConverterSettings
+    ) { }
 
     // Updated list of all available variables
     private allVariables: VariableInfo[] = [

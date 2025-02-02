@@ -12,11 +12,11 @@ import { SupportedImageFormats } from "./SupportedImageFormats";
 import { FolderAndFilenameManagement } from "./FolderAndFilenameManagement";
 import { ImageProcessor } from "./ImageProcessor";
 import { VariableProcessor } from "./VariableProcessor";
-import { LinkFormatSettings, LinkFormatPreset } from "./LinkFormatSettings";
+import { LinkFormatPreset } from "./LinkFormatSettings";
 import { LinkFormatter } from "./LinkFormatter";
-import { NonDestructiveResizeSettings, NonDestructiveResizePreset } from "./NonDestructiveResizeSettings";
+import { NonDestructiveResizePreset } from "./NonDestructiveResizeSettings";
 import { ContextMenu } from "./ContextMenu";
-import { ImageAlignment } from './ImageAlignment';
+// import { ImageAlignment } from './ImageAlignment';
 import { ImageAlignmentManager } from './ImageAlignmentManager';
 import { ImageResizer } from "./ImageResizer";
 import { BatchImageProcessor } from "./BatchImageProcessor";
@@ -49,14 +49,13 @@ export default class ImageConverterPlugin extends Plugin {
     imageProcessor: ImageProcessor;
     // Handle variable processing
     variableProcessor: VariableProcessor;
-    // Link format
-    linkFormatSettings: LinkFormatSettings;
+    // linkFormatSettings: LinkFormatSettings;     // Link format - it is initialised via ImageConverterSettings
     // Link formatter
     linkFormatter: LinkFormatter;
     // Context menu
     contextMenu: ContextMenu;
     // Alignment
-    imageAlignment: ImageAlignment | null = null;
+    // imageAlignment: ImageAlignment | null = null;
     ImageAlignmentManager: ImageAlignmentManager | null = null;
     // drag-resize
     imageResizer: ImageResizer | null = null;
@@ -87,12 +86,12 @@ export default class ImageConverterPlugin extends Plugin {
         // Initialize ImageAlignment early since it's time-sensitive
         if (this.settings.isImageAlignmentEnabled) {
             this.ImageAlignmentManager = new ImageAlignmentManager(
+                this.app,
                 this,
                 this.supportedImageFormats,
                 this.imageResizer!
             );
             await this.ImageAlignmentManager.initialize();
-            this.imageAlignment = new ImageAlignment(this, this.ImageAlignmentManager);
 
             // Apply alignments immediately
             const currentFile = this.app.workspace.getActiveFile();
@@ -102,13 +101,21 @@ export default class ImageConverterPlugin extends Plugin {
         }
 
         // Initialize DRAG/SCROLL rESIZING when swithing notes
-
         this.registerEvent(
             this.app.workspace.on('active-leaf-change', (leaf) => {
                 const markdownView = leaf?.view instanceof MarkdownView ? leaf.view : null;
                 if (markdownView && this.imageResizer && this.settings.isImageResizeEnbaled) {
                     this.imageResizer.onload(markdownView);
                 }
+                // // Delay the execution slightly to ensure the new window's DOM is ready
+                // setTimeout(() => {
+                //     this.ImageAlignmentManager!.setupImageObserver();
+                // }, 500);
+                // const currentFile = this.app.workspace.getActiveFile();
+                // if (currentFile) {
+                //     // console.log("current file path:", currentFile.path)
+                //     void this.ImageAlignmentManager!.applyAlignmentsToNote(currentFile.path);
+                // }
             })
         );
         
@@ -150,23 +157,41 @@ export default class ImageConverterPlugin extends Plugin {
 
     // extracted initialization logic into a separate async method
     async initializeComponents() {
-        // Initialize core management components
-        this.folderAndFilenameManagement = new FolderAndFilenameManagement(this.app, this.settings, this.supportedImageFormats);
+
+        // Initialize base components first
         this.variableProcessor = new VariableProcessor(this.app, this.settings);
-        this.linkFormatSettings = new LinkFormatSettings();
         this.linkFormatter = new LinkFormatter(this.app);
-        this.imageProcessor = new ImageProcessor(this.app, this.supportedImageFormats);
-        this.batchImageProcessor = new BatchImageProcessor(this.app, this);
+        this.imageProcessor = new ImageProcessor(this.supportedImageFormats);
+
+        // Initialize components that depend on others
+        this.folderAndFilenameManagement = new FolderAndFilenameManagement(
+            this.app,
+            this.settings,
+            this.supportedImageFormats,
+            this.variableProcessor
+        );
+
+        this.batchImageProcessor = new BatchImageProcessor(
+            this.app,
+            this,
+            this.imageProcessor,
+            this.folderAndFilenameManagement
+        );
 
         // Initialize context menu if enabled
         if (this.settings.enableContextMenu) {
-            this.contextMenu = new ContextMenu(this);
+            this.contextMenu = new ContextMenu(
+                this.app,
+                this,
+                this.folderAndFilenameManagement,
+                this.variableProcessor
+            );
         }
 
-        // Initialize NonDestructiveResizeSettings if needed
-        if (!this.settings.nonDestructiveResizeSettings) {
-            this.settings.nonDestructiveResizeSettings = new NonDestructiveResizeSettings();
-        }
+        // REDUNDANT as it is already initialized inside ImageConverterSettings %%Initialize NonDestructiveResizeSettings if needed%%
+        // if (!this.settings.nonDestructiveResizeSettings) {
+        //     this.settings.nonDestructiveResizeSettings = new NonDestructiveResizeSettings();
+        // }
 
         // Register PASTE/DROP events
         this.dropPaste_registerEvents();
@@ -187,7 +212,7 @@ export default class ImageConverterPlugin extends Plugin {
                         item.setTitle("Process all images in Folder")
                             .setIcon("cog")
                             .onClick(() => {
-                                new ProcessFolderModal(this.app, this, file.path).open();
+                                new ProcessFolderModal(this.app, this, file.path, this.batchImageProcessor).open();
                             });
                     });
                 } else if (file instanceof TFile && (file.extension === 'md' || file.extension === 'canvas')) {
@@ -195,7 +220,7 @@ export default class ImageConverterPlugin extends Plugin {
                         item.setTitle(`Process all images in ${file.extension === 'md' ? 'Note' : 'Canvas'}`)
                             .setIcon("cog")
                             .onClick(() => {
-                                new ProcessCurrentNote(this.app, this, file).open();
+                                new ProcessCurrentNote(this.app, this, file, this.batchImageProcessor).open();
                             });
                     });
                 }
@@ -207,7 +232,7 @@ export default class ImageConverterPlugin extends Plugin {
             id: 'process-all-vault-images',
             name: 'Process all vault images',
             callback: () => {
-                new ProcessAllVaultModal(this.app, this).open();
+                new ProcessAllVaultModal(this.app, this, this.batchImageProcessor).open();
             }
         });
 
@@ -217,7 +242,7 @@ export default class ImageConverterPlugin extends Plugin {
             callback: () => {
                 const activeFile = this.app.workspace.getActiveFile();
                 if (activeFile) {
-                    new ProcessCurrentNote(this.app, this, activeFile).open();
+                    new ProcessCurrentNote(this.app, this, activeFile, this.batchImageProcessor).open();
                 } else {
                     new Notice('Error: No active file found.');
                 }
@@ -232,20 +257,42 @@ export default class ImageConverterPlugin extends Plugin {
     }
 
     async onunload() {
+        // Clean up alignment related components first
+        if (this.ImageAlignmentManager) {
+            this.ImageAlignmentManager.onunload();
+            this.ImageAlignmentManager = null;
+        }
+    
+        // Clean up resizer next since other components might depend on it
+        if (this.imageResizer) {
+            this.imageResizer.onunload();
+            this.imageResizer = null;
+        }
+    
+        // Clean up UI components
         if (this.contextMenu) {
             this.contextMenu.onunload();
         }
-
-        if (this.imageAlignment) { // ADD NULL CHECK
-            this.imageAlignment.onunload(); // call Component's cleanup
-        }
-        if (this.ImageAlignmentManager) { // ADD NULL CHECK
-            this.ImageAlignmentManager.cleanupObserver();
-            this.ImageAlignmentManager.onunload();
-        }
-        if (this.imageResizer) {
-            this.imageResizer.onunload();
-        }
+    
+        // Clean up modals
+        [
+            this.processSingleImageModal,
+            this.processFolderModal,
+            this.processCurrentNote,
+            this.processAllVaultModal
+        ].forEach(modal => {
+            if (modal?.close) modal.close();
+        });
+    
+        // Clean up any open modals
+        [
+            this.processSingleImageModal,
+            this.processFolderModal,
+            this.processCurrentNote,
+            this.processAllVaultModal
+        ].forEach(modal => {
+            if (modal?.close) modal.close();
+        });
     }
 
 
@@ -407,15 +454,21 @@ export default class ImageConverterPlugin extends Plugin {
                         selectedLinkFormatPreset: LinkFormatPreset;
                         selectedResizePreset: NonDestructiveResizePreset;
                     }>((resolve) => {
-                        new PresetSelectionModal(this.app, this.settings, (conversionPreset, filenamePreset, folderPreset, linkFormatPreset, resizePreset) => {
-                            resolve({
-                                selectedConversionPreset: conversionPreset,
-                                selectedFilenamePreset: filenamePreset,
-                                selectedFolderPreset: folderPreset,
-                                selectedLinkFormatPreset: linkFormatPreset,
-                                selectedResizePreset: resizePreset,
-                            });
-                        }, this).open();
+                        new PresetSelectionModal(
+                            this.app, 
+                            this.settings, 
+                            (conversionPreset, filenamePreset, folderPreset, linkFormatPreset, resizePreset) => {
+                                resolve({
+                                    selectedConversionPreset: conversionPreset,
+                                    selectedFilenamePreset: filenamePreset,
+                                    selectedFolderPreset: folderPreset,
+                                    selectedLinkFormatPreset: linkFormatPreset,
+                                    selectedResizePreset: resizePreset,
+                                });
+                            }, 
+                            this,
+                            this.variableProcessor
+                        ).open();
                     }));
                 } else {
                     // Use default presets from settings using the generic getter
@@ -705,15 +758,21 @@ export default class ImageConverterPlugin extends Plugin {
                     selectedLinkFormatPreset: LinkFormatPreset;
                     selectedResizePreset: NonDestructiveResizePreset;
                 }>((resolve) => {
-                    new PresetSelectionModal(this.app, this.settings, (conversionPreset, filenamePreset, folderPreset, linkFormatPreset, resizePreset) => {
-                        resolve({
-                            selectedConversionPreset: conversionPreset,
-                            selectedFilenamePreset: filenamePreset,
-                            selectedFolderPreset: folderPreset,
-                            selectedLinkFormatPreset: linkFormatPreset,
-                            selectedResizePreset: resizePreset,
-                        });
-                    }, this).open();
+                    new PresetSelectionModal(
+                        this.app, 
+                        this.settings, 
+                        (conversionPreset, filenamePreset, folderPreset, linkFormatPreset, resizePreset) => {
+                            resolve({
+                                selectedConversionPreset: conversionPreset,
+                                selectedFilenamePreset: filenamePreset,
+                                selectedFolderPreset: folderPreset,
+                                selectedLinkFormatPreset: linkFormatPreset,
+                                selectedResizePreset: resizePreset,
+                            });
+                        }, 
+                        this,
+                        this.variableProcessor
+                    ).open();
                 }));
             } else {
                 // Use default presets from settings using the generic getter
@@ -1016,7 +1075,7 @@ export default class ImageConverterPlugin extends Plugin {
         new Notice(message);
     }
 
-    private getPresetByName<T extends { name: string }>(
+    getPresetByName<T extends { name: string }>(
         presetName: string,
         presetArray: T[],
         presetType: string

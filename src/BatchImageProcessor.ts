@@ -10,18 +10,13 @@ import { FolderAndFilenameManagement } from "./FolderAndFilenameManagement";
 
 
 export class BatchImageProcessor {
-    private app: App;
-    private plugin: ImageConverterPlugin;
-    imageProcessor: ImageProcessor;
-    folderAndFilenameManagement: FolderAndFilenameManagement;
-
-    constructor(app: App, plugin: ImageConverterPlugin) {
-        this.app = app;
-        this.plugin = plugin;
-        this.imageProcessor = new ImageProcessor(app, this.plugin.supportedImageFormats);
-        this.folderAndFilenameManagement = new FolderAndFilenameManagement(app, this.plugin.settings, this.plugin.supportedImageFormats);
-    }
-
+    constructor(
+        private app: App,
+        private plugin: ImageConverterPlugin,
+        private imageProcessor: ImageProcessor,
+        private folderAndFilenameManagement: FolderAndFilenameManagement
+    ) { }
+    
     async processImagesInNote(noteFile: TFile): Promise<void> {
 
         try {

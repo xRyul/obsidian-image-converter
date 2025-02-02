@@ -1,4 +1,4 @@
-import { Modal, Notice, App, Setting, ButtonComponent, Plugin, DropdownComponent, TextComponent } from "obsidian";
+import { Modal, Notice, App, Setting, ButtonComponent, DropdownComponent, TextComponent } from "obsidian";
 import {
     ImageConverterSettings,
     ConversionPreset,
@@ -10,18 +10,10 @@ import {
 import { LinkFormatPreset } from "./LinkFormatSettings"
 import { NonDestructiveResizePreset } from "./NonDestructiveResizeSettings";
 import { VariableProcessor } from "./VariableProcessor";
+import ImageConverterPlugin from "./main";
 
 export class PresetSelectionModal extends Modal {
-    plugin: Plugin;
-
-    private settings: ImageConverterSettings;
-    private onApply: (
-        conversionPreset: ConversionPreset,
-        filenamePreset: FilenamePreset,
-        folderPreset: FolderPreset,
-        linkFormatPreset: LinkFormatPreset,
-        resizePreset: NonDestructiveResizePreset
-    ) => void;
+    private variableProcessor: VariableProcessor; 
 
     private selectedConversionPreset: ConversionPreset;
     private selectedFilenamePreset: FilenamePreset;
@@ -40,7 +32,6 @@ export class PresetSelectionModal extends Modal {
     private linkFormatPresetDropdown: Setting;
     private resizePresetDropdown: Setting;
 
-    private variableProcessor: VariableProcessor;
     private customFilenameSetting: Setting | null = null;
     private customFilenameText: TextComponent | null = null;
     private customFolderSetting: Setting | null = null; // Add custom folder setting
@@ -51,28 +42,50 @@ export class PresetSelectionModal extends Modal {
 
     constructor(
         app: App,
-        settings: ImageConverterSettings,
-        onApply: (
+        private settings: ImageConverterSettings,
+        private onApply: (
             conversionPreset: ConversionPreset,
             filenamePreset: FilenamePreset,
             folderPreset: FolderPreset,
             linkFormatPreset: LinkFormatPreset,
             resizePreset: NonDestructiveResizePreset
         ) => void,
-        plugin: Plugin
+        private plugin: ImageConverterPlugin,
+        variableProcessor: VariableProcessor
     ) {
         super(app);
-        this.settings = settings;
-        this.onApply = onApply;
-        this.plugin = plugin;
-        this.variableProcessor = new VariableProcessor(app, settings);
-
+        this.variableProcessor = variableProcessor;
+    
         // Initialize selected presets with current settings or defaults
-        this.selectedConversionPreset = this.settings.conversionPresets.find(p => p.name === this.settings.selectedConversionPreset) || this.settings.conversionPresets[0];
-        this.selectedFilenamePreset = this.settings.filenamePresets.find(p => p.name === this.settings.selectedFilenamePreset) || this.settings.filenamePresets[0];
-        this.selectedFolderPreset = this.settings.folderPresets.find(p => p.name === this.settings.selectedFolderPreset) || this.settings.folderPresets[0];
-        this.selectedLinkFormatPreset = this.settings.linkFormatSettings.linkFormatPresets.find(p => p.name === this.settings.linkFormatSettings.selectedLinkFormatPreset) || this.settings.linkFormatSettings.linkFormatPresets[0];
-        this.selectedResizePreset = this.settings.nonDestructiveResizeSettings.resizePresets.find(p => p.name === this.settings.nonDestructiveResizeSettings.selectedResizePreset) || this.settings.nonDestructiveResizeSettings.resizePresets[0];
+        this.selectedConversionPreset = this.plugin.getPresetByName(
+            this.settings.selectedConversionPreset,
+            this.settings.conversionPresets,
+            'Conversion'
+        );
+        
+        this.selectedFilenamePreset = this.plugin.getPresetByName(
+            this.settings.selectedFilenamePreset,
+            this.settings.filenamePresets,
+            'Filename'
+        );
+        
+        this.selectedFolderPreset = this.plugin.getPresetByName(
+            this.settings.selectedFolderPreset,
+            this.settings.folderPresets,
+            'Folder'
+        );
+        
+        this.selectedLinkFormatPreset = this.plugin.getPresetByName(
+            this.settings.linkFormatSettings.selectedLinkFormatPreset,
+            this.settings.linkFormatSettings.linkFormatPresets,
+            'LinkFormat'
+        );
+        
+        this.selectedResizePreset = this.plugin.getPresetByName(
+            this.settings.nonDestructiveResizeSettings.selectedResizePreset,
+            this.settings.nonDestructiveResizeSettings.resizePresets,
+            'Resize'
+        );
     }
 
     onOpen() {
@@ -643,6 +656,22 @@ export class PresetSelectionModal extends Modal {
     }
 
     onClose() {
+        // Clear any pending update timeout
+        if (this.updateTimeout) {
+            window.clearTimeout(this.updateTimeout);
+            this.updateTimeout = null;
+        }
+    
+        // Clear nullable settings and components
+        this.conversionQualitySetting = null;
+        this.conversionColorDepthSetting = null;
+        this.customFilenameSetting = null;
+        this.customFilenameText = null;
+        this.customFolderSetting = null;
+        this.customFolderText = null;
+        this.previewContainer = null;
+    
+        // Empty the modal content
         const { contentEl } = this;
         contentEl.empty();
     }

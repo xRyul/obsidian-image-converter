@@ -11,17 +11,12 @@ import { VariableProcessor, VariableContext } from "./VariableProcessor";
 import { SupportedImageFormats } from "./SupportedImageFormats";
 
 export class FolderAndFilenameManagement {
-    private app: App;
-    private settings: ImageConverterSettings;
-    variableProcessor: VariableProcessor;
-    supportedImageFormats: SupportedImageFormats;
-
-    constructor(app: App, settings: ImageConverterSettings, supportedImageFormats: SupportedImageFormats) {
-        this.app = app;
-        this.settings = settings;
-        this.variableProcessor = new VariableProcessor(app, settings);
-        this.supportedImageFormats = supportedImageFormats
-    }
+    constructor(
+        private app: App,
+        private settings: ImageConverterSettings,
+        private supportedImageFormats: SupportedImageFormats,
+        private variableProcessor: VariableProcessor
+    ) { }
 
     async determineDestination(
         file: File,
@@ -30,7 +25,6 @@ export class FolderAndFilenameManagement {
         selectedFilenamePreset: FilenamePreset,
         selectedFolderPreset: FolderPreset
     ): Promise<{ destinationPath: string; newFilename: string }> {
-
         // Step 1: Determine the target directory based on folder preset
         const destinationDir = await this.getDestinationDirectory(
             selectedFolderPreset,

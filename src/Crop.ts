@@ -47,9 +47,46 @@ export class Crop extends Modal {
 		super(app);
 		this.imageFile = imageFile;
 		this.componentContainer.load();
-		// Add specific class to modal
 		this.containerEl.addClass('crop-tool-modal');
 	}
+
+	private setupEventListeners() {
+        // Mouse down - start drawing selection
+        this.componentContainer.registerDomEvent(this.cropContainer, 'mousedown', (e: MouseEvent) => {
+            if (e.target === this.originalImage) {
+                this.isDrawing = true;
+                const rect = this.cropContainer.getBoundingClientRect();
+                this.startX = e.clientX - rect.left;
+                this.startY = e.clientY - rect.top;
+                
+                this.selectionArea.style.display = 'block';
+                this.selectionArea.style.left = `${this.startX}px`;
+                this.selectionArea.style.top = `${this.startY}px`;
+                this.selectionArea.style.width = '0';
+                this.selectionArea.style.height = '0';
+            }
+        });
+
+        // Mouse move - update selection size
+        this.componentContainer.registerDomEvent(this.cropContainer, 'mousemove', (e: MouseEvent) => {
+            if (!this.isDrawing) return;
+            const rect = this.cropContainer.getBoundingClientRect();
+            const currentX = e.clientX - rect.left;
+            const currentY = e.clientY - rect.top;
+            this.updateSelectionSize(currentX, currentY);
+        });
+
+        // Mouse up - finish drawing selection
+        this.componentContainer.registerDomEvent(this.cropContainer, 'mouseup', (e: MouseEvent) => {
+            this.isDrawing = false;
+            this.makeSelectionMovable();
+        });
+
+        // Prevent selection from getting stuck if mouse leaves the container
+        this.componentContainer.registerDomEvent(this.cropContainer, 'mouseleave', (e: MouseEvent) => {
+            this.isDrawing = false;
+        });
+    }
 
     async onOpen() {
 		const { contentEl } = this;
@@ -433,46 +470,6 @@ export class Crop extends Modal {
 			this.adjustModalSize();
 		}
 	}
-
-
-	private setupEventListeners() {
-        // Mouse down - start drawing selection
-        this.componentContainer.registerDomEvent(this.cropContainer, 'mousedown', (e: MouseEvent) => {
-            if (e.target === this.originalImage) {
-                this.isDrawing = true;
-                const rect = this.cropContainer.getBoundingClientRect();
-                this.startX = e.clientX - rect.left;
-                this.startY = e.clientY - rect.top;
-                
-                this.selectionArea.style.display = 'block';
-                this.selectionArea.style.left = `${this.startX}px`;
-                this.selectionArea.style.top = `${this.startY}px`;
-                this.selectionArea.style.width = '0';
-                this.selectionArea.style.height = '0';
-            }
-        });
-
-        // Mouse move - update selection size
-        this.componentContainer.registerDomEvent(this.cropContainer, 'mousemove', (e: MouseEvent) => {
-            if (!this.isDrawing) return;
-            const rect = this.cropContainer.getBoundingClientRect();
-            const currentX = e.clientX - rect.left;
-            const currentY = e.clientY - rect.top;
-            this.updateSelectionSize(currentX, currentY);
-        });
-
-        // Mouse up - finish drawing selection
-        this.componentContainer.registerDomEvent(this.cropContainer, 'mouseup', (e: MouseEvent) => {
-            this.isDrawing = false;
-            this.makeSelectionMovable();
-        });
-
-        // Prevent selection from getting stuck if mouse leaves the container
-        this.componentContainer.registerDomEvent(this.cropContainer, 'mouseleave', (e: MouseEvent) => {
-            this.isDrawing = false;
-        });
-    }
-
 
 	private makeSelectionMovable() {
 		this.addResizeHandles();

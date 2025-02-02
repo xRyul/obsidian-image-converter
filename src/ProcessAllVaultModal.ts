@@ -9,19 +9,18 @@ import ImageConverterPlugin from "./main";
 import { BatchImageProcessor } from "./BatchImageProcessor";
 
 export class ProcessAllVaultModal extends Modal {
-    plugin: ImageConverterPlugin;
-    private batchImageProcessor: BatchImageProcessor;
-
     private enlargeReduceSettings: Setting | null = null;
     private resizeInputSettings: Setting | null = null;
-    private submitButton: ButtonComponent | null = null;
+    // private submitButton: ButtonComponent | null = null;
     private resizeInputsDiv: HTMLDivElement | null = null;
     private enlargeReduceDiv: HTMLDivElement | null = null;
 
-    constructor(app: App, plugin: ImageConverterPlugin) {
+    constructor(
+        app: App,
+        private plugin: ImageConverterPlugin,
+        private batchImageProcessor: BatchImageProcessor
+    ) {
         super(app);
-        this.plugin = plugin;
-        this.batchImageProcessor = new BatchImageProcessor(app, plugin);
         this.modalEl.addClass("image-convert-modal");
     }
 
@@ -31,6 +30,12 @@ export class ProcessAllVaultModal extends Modal {
     }
 
     onClose() {
+        // Clear nullable UI elements
+        this.enlargeReduceSettings = null;
+        this.resizeInputSettings = null;
+        this.resizeInputsDiv = null;
+        this.enlargeReduceDiv = null;
+    
         const { contentEl } = this;
         contentEl.empty();
     }

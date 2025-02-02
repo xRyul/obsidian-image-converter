@@ -1,4 +1,4 @@
-import { App, Notice, TFile, EventRef, FileSystemAdapter, debounce, Debouncer } from 'obsidian';
+import { App, Menu, TFile, EventRef, FileSystemAdapter, debounce, Debouncer } from 'obsidian';
 import { ImageAlignment, ImageAlignmentOptions } from './ImageAlignment';
 import { AsyncLock } from './AsyncLock';
 import ImageConverterPlugin from './main';
@@ -19,52 +19,51 @@ export interface ImageAlignmentCache {
 }
 
 export class ImageAlignmentManager {
-    private app: App;
-    private plugin: ImageConverterPlugin;
-    private supportedImageFormats: SupportedImageFormats;
-    private imageResizer: ImageResizer;
+    private imageAlignment: ImageAlignment; // Instance of the new class
+
+    // BE cautions of using DOT files. Obsidian Sync will not sync dot files.
+    // private readonly CACHE_FILE = '.obsidian/image-converter-image-alignments.json';
+    private pluginDir: string;
+    private cacheFilePath: string;
+
 
     cache: ImageAlignmentCache = {};
     private imageObserver: MutationObserver | null = null;
     public lock = new AsyncLock();
-    private imageAlignment: ImageAlignment; // Instance of the new class
     private imageStates: Map<string, ImageAlignmentOptions> = new Map();
-
-    // BE cautions of using DOT files. Obsidian Sync will not sync dot files.
-    // private readonly CACHE_FILE = '.obsidian/image-converter-image-alignments.json';
-    private cacheFilePath: string;
-    private pluginDir: string;
-
-    // Array to store event references
     private eventRefs: EventRef[] = [];
     private cleanupIntervalId: number | null = null;
-    private debouncedValidateNoteCache: Debouncer<[notePath: string, noteContent: string], Promise<void>>;
-    
-    constructor(plugin: ImageConverterPlugin, supportedImageFormats: SupportedImageFormats, imageResizer: ImageResizer) {
-        this.app = plugin.app;
-        this.plugin = plugin;
+    debouncedValidateNoteCache: Debouncer<[notePath: string, noteContent: string], Promise<void>>;
+
+    constructor(
+        private app: App,
+        private plugin: ImageConverterPlugin,
+        private supportedImageFormats: SupportedImageFormats,
+        private imageResizer: ImageResizer
+    ) {
         this.pluginDir = this.getPluginDir();
         this.updateCacheFilePath();
 
-        this.imageAlignment = new ImageAlignment(this.plugin, this);
-        this.supportedImageFormats = supportedImageFormats;
-        this.imageResizer = imageResizer;
+        this.imageAlignment = new ImageAlignment(this.app, this.plugin, this);
 
         this.debouncedValidateNoteCache = debounce(
             this.validateNoteCache.bind(this),
-            300, 
-            true 
+            300,
+            true
         ) as Debouncer<[notePath: string, noteContent: string], Promise<void>>;
     }
 
     public async initialize() {
-        // console.log("Initializing")
         await this.loadCache();
         this.registerEvents();
-        this.setupImageObserver(); // STILL needed for managing images inside callouts etc
+        // this.setupIsmageObserver(); // STILL needed for managing images inside callouts etc
         this.scheduleCacheCleanup();
     }
 
+    // Simple method for imageAlignment instance
+    addAlignmentOptionsToContextMenu(menu: Menu, img: HTMLImageElement, file: TFile) {
+        this.imageAlignment.addAlignmentOptionsToContextMenu(menu, img, file);
+    }
 
     public updateCacheFilePath() {
         const cacheLocation = this.plugin.settings.imageAlignment_cacheLocation;
@@ -75,7 +74,7 @@ export class ImageAlignmentManager {
             this.cacheFilePath = `${this.pluginDir}/image-converter-image-alignments.json`;
         }
     }
-    
+
     private getPluginDir(): string {
         const pluginMainFile = (this.plugin as any).manifest.dir;
         if (!pluginMainFile) {
@@ -126,9 +125,6 @@ export class ImageAlignmentManager {
         }
     }
 
-
-
-
     private registerEvents() {
         // console.log("Registering events")
         // this.eventRefs.push(
@@ -138,7 +134,7 @@ export class ImageAlignmentManager {
         //             this.setupImageObserver();
         //         }, 500);
         //         const currentFile = this.app.workspace.getActiveFile();
-                
+
         //         if (currentFile) {
         //             // console.log("current file path:", currentFile.path)
         //             void this.applyAlignmentsToNote(currentFile.path);
@@ -228,66 +224,82 @@ export class ImageAlignmentManager {
         // );
     }
 
-    private setupImageObserver() {
-        if (this.imageObserver) {
-            this.imageObserver.disconnect();
-        }
+    // setupImageObserver() {
+    //     if (this.imageObserver) {
+    //         this.imageObserver.disconnect();
+    //     }
 
-        const processImage = (img: HTMLImageElement) => {
-            // Skip if resizing is in progress using imageResizer's resizeState
-            if (this.imageResizer.resizeState.isResizing ||
-                this.imageResizer.resizeState.isDragging ||
-                this.imageResizer.resizeState.isScrolling ||
-                img.hasAttribute('data-resize-edge') ||
-                img.hasAttribute('data-resize-active') ||
-                img.hasClass('image-converter-aligned')) {
-                return;
-            }
+    //     const processImage = (img: HTMLImageElement) => {
+    //         // Skip if not in editor
+    //         if (!this.isImageInEditor(img)) return;
 
-            const src = img.getAttr('src');
-            if (!src) return;
+    //         // Skip if resizing is in progress using imageResizer's resizeState
+    //         if (this.imageResizer.resizeState.isResizing ||
+    //             this.imageResizer.resizeState.isDragging ||
+    //             this.imageResizer.resizeState.isScrolling ||
+    //             img.hasAttribute('data-resize-edge') ||
+    //             img.hasAttribute('data-resize-active') ||
+    //             img.hasClass('image-converter-aligned')) {
+    //             return;
+    //         }
 
-            const relativeSrc = this.getRelativePath(src); // Normalize the src
+    //         const src = img.getAttr('src');
+    //         if (!src) return;
 
-            const currentFile = this.app.workspace.getActiveFile();
-            if (!currentFile) return;
+    //         const relativeSrc = this.getRelativePath(src); // Normalize the src
 
-            // Use getImageHash function which includes the note path
-            const imageHash = this.getImageHash(currentFile.path, relativeSrc);
-            // console.log("Image hash inside observer:", imageHash)
-            const alignments = this.cache[currentFile.path];
-            if (!alignments) return;
+    //         const currentFile = this.app.workspace.getActiveFile();
+    //         if (!currentFile) return;
 
-            const positionData = alignments[imageHash];
-            if (positionData) {
-                this.imageAlignment.applyAlignmentToImage(img, positionData);
-            }
-        };
+    //         // Use getImageHash function which includes the note path
+    //         const imageHash = this.getImageHash(currentFile.path, relativeSrc);
+    //         // console.log("Image hash inside observer:", imageHash)
+    //         const alignments = this.cache[currentFile.path];
+    //         if (!alignments) return;
 
-        this.imageObserver = new MutationObserver((mutations) => {
-            mutations.forEach((mutation) => {
-                if (mutation.type === 'childList') {
-                    mutation.addedNodes.forEach((node) => {
-                        if (node instanceof HTMLImageElement) {
-                            processImage(node);
-                        } else if (node instanceof Element) {
-                            node.findAll('img').forEach((img) =>
-                                processImage(img as HTMLImageElement)
-                            );
-                        }
-                    });
-                }
-            });
-        });
+    //         const positionData = alignments[imageHash];
+    //         if (positionData) {
+    //             this.imageAlignment.applyAlignmentToImage(img, positionData);
+    //         }
+    //     };
 
-        this.imageObserver.observe(document.body, {
-            childList: true,
-            subtree: true,
-            attributes: true,
-            attributeFilter: ['src', 'class']
-        });
-    }
+    //     this.imageObserver = new MutationObserver((mutations) => {
+    //         mutations.forEach((mutation) => {
+    //             if (mutation.type === 'childList') {
+    //                 mutation.addedNodes.forEach((node) => {
+    //                     if (node instanceof HTMLImageElement) {
+    //                         processImage(node);
+    //                     } else if (node instanceof Element) { // If the added node is not an HTMLImageElement but is an instance of Element e.g. inside DIV of a callout etc
+    //                         node.findAll('img').forEach((img) =>
+    //                             processImage(img as HTMLImageElement)
+    //                         );
+    //                     }
+    //                 });
+    //             }
+    //         });
+    //     });
 
+    //     // Get the current active markdown view
+    //     const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    //     if (!markdownView) return;
+
+    //     // Observe only the editor content element
+    //     this.imageObserver.observe(markdownView.contentEl, {
+    //         childList: true,
+    //         subtree: true,
+    //         attributes: true,
+    //         attributeFilter: ['src', 'class']
+    //     });
+    // }
+
+    // // Helper method to check if image is in editor
+    // private isImageInEditor(img: HTMLImageElement): boolean {
+    //     const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    //     if (!markdownView) return false;
+
+    //     const editorElement = markdownView.contentEl;
+    //     return editorElement.contains(img);
+    // }
 
     public async saveImageAlignmentToCache(
         notePath: string,
@@ -300,34 +312,34 @@ export class ImageAlignmentManager {
         try {
             await this.lock.acquire("cacheOperation", async () => {
 
-                 // Skip cache updates during active scrolling
+                // Skip cache updates during active scrolling
                 // if (this.imageResizer.resizeState.isScrolling) {
                 //     return;
                 // }
 
                 // Normalize imageSrc to a relative path
                 const relativeImageSrc = this.getRelativePath(imageSrc);
-    
+
                 // console.log("saveImageAlignmentToCache DETAILS:");
                 // console.log("- Note Path:", notePath);
                 // console.log("- Original Image Src:", imageSrc);
                 // console.log("- Relative Image Src:", relativeImageSrc);
-    
+
                 // Use the normalized relative path for hash generation
                 const imageHash = this.getImageHash(notePath, relativeImageSrc);
                 // console.log("Calculated Image Hash:", imageHash);
-    
+
                 if (!this.cache[notePath]) {
                     this.cache[notePath] = {};
                 }
-    
+
                 this.cache[notePath][imageHash] = {
                     position,
                     width: width || "",
                     height: height || "", // Store height
                     wrap,
                 };
-    
+
                 // console.log("Updated Cache:", this.cache);
                 await this.saveCache();
             });
@@ -340,38 +352,38 @@ export class ImageAlignmentManager {
     public getImageHash(notePath: string, imageSrc: string): string {
         // First, normalize the image source
         const relativePath = this.getRelativePath(imageSrc);
-    
+
         // console.log("getImageHash DETAILS:");
         // console.log("- Note Path:", notePath);
         // console.log("- Original Image Src:", imageSrc);
         // console.log("- Normalized Relative Path:", relativePath);
-    
+
         // Always use the normalized relative path for hashing
         const combinedPath = `${notePath}:${relativePath}`;
         const hash = murmurHash3_128(combinedPath, 0);
-        
+
         // console.log("Calculated Image Hash:", hash);
         return hash;
     }
-    
+
     public getImageAlignment(notePath: string, imageSrc: string) {
         // console.log("getImageAlignment DETAILS:");
         // console.log("- Note Path:", notePath);
         // console.log("- Image Source:", imageSrc);
-        
+
         const imageHash = this.getImageHash(notePath, imageSrc);
         // console.log("Calculated Image Hash:", imageHash);
-        
+
         // console.log("Full Cache:", this.cache);
         // console.log("Note-specific Cache:", this.cache[notePath]);
-        
+
         const alignment = this.cache[notePath]?.[imageHash];
         // console.log("Found Alignment:", alignment);
-        
+
         return alignment;
     }
 
-    
+
     public getRelativePath(imageSrc: string): string {
         // console.log("Original image SRC:", imageSrc);
 
@@ -441,12 +453,6 @@ export class ImageAlignmentManager {
     }
 
 
-
-
-
-
-
-
     public async applyAlignmentsToNote(notePath: string) {
         try {
             // console.log("applyAlignmentsToNote")
@@ -482,7 +488,6 @@ export class ImageAlignmentManager {
             console.error('Error in applyAlignmentsToNote:', error);
         }
     }
-
 
     public async cleanCache() {
         await this.lock.acquire('cacheCleanup', async () => {
@@ -540,7 +545,7 @@ export class ImageAlignmentManager {
         await this.lock.acquire('validateCache', async () => {
 
             // if simply resizing the image no need to validate, this place is only to remove from cache
-            if (this.imageResizer.resizeState.isDragging || this.imageResizer.resizeState.isResizing || this.imageResizer.resizeState.isScrolling ) {
+            if (this.imageResizer.resizeState.isDragging || this.imageResizer.resizeState.isResizing || this.imageResizer.resizeState.isScrolling) {
                 return;
             }
 
@@ -595,75 +600,28 @@ export class ImageAlignmentManager {
         });
     }
 
-    private async handleOperationError(error: Error, operation: string) {
-        console.error(`Error during ${operation}:`, error);
-
-        await this.lock.acquire('errorHandling', async () => {
-            // Clear any pending operations
-            this.imageStates.clear();
-
-            // Validate and repair cache
-            await this.validateCache();
-
-            // Notify user of error (if you have a notification system)
-            if (this.plugin instanceof ImageConverterPlugin) {
-                // Example notification (implement according to your UI system)
-                new Notice(
-                    `Error during ${operation}. Cache has been validated.`,
-                    5000
-                );
-            }
-        });
-    }
-
-    // private async updateImageState(imagePath: string, state: Partial<ImageAlignmentOptions>) {
-    //     const currentState = this.imageStates.get(imagePath) || { align: 'none', wrap: false };
-    //     const newState = { ...currentState, ...state };
-    //     this.imageStates.set(imagePath, newState);
-
-    //     // Apply visual feedback for updating state
-    //     const images = document.querySelectorAll(`img[src="${imagePath}"]`);
-    //     images.forEach(img => {
-    //         if (newState.align !== 'none') {
-    //             img.classList.add('image-updating');
-    //         } else {
-    //             img.classList.remove('image-updating');
-    //         }
-    //     });
-    // }
-
-    private async validateCache() {
-        await this.lock.acquire('validation', async () => {
-            const currentFile = this.app.workspace.getActiveFile();
-            if (currentFile) {
-                const content = await this.app.vault.cachedRead(currentFile); // Use cachedRead here
-                await this.validateNoteCache(currentFile.path, content);
-            }
-        });
-    }
-
     // Helper method to extract image links from note content
     private extractImageLinks(content: string): string[] {
         const imageLinks: string[] = [];
-    
+
         // Match standard markdown images
         const markdownImageRegex = /!\[[^\]]*?(?:\|\d+(?:\|\d+)?)?\]\(([^)\s"]+)(?:\s+"[^"]*")?\)/g;
-    
+
         // Match Obsidian wiki-style images
         const wikiImageRegex = /!\[\[([^\]]+?)(?:\|[^\]]+?)?\]\]/g;
-    
+
         // Extract standard markdown images
         let match;
         while ((match = markdownImageRegex.exec(content)) !== null) {
             // Capture only the URL part (group 1)
             imageLinks.push(match[1]);
         }
-    
+
         // Extract wiki-style images
         while ((match = wikiImageRegex.exec(content)) !== null) {
             imageLinks.push(match[1]);
         }
-    
+
         return imageLinks;
     }
 
@@ -698,69 +656,6 @@ export class ImageAlignmentManager {
         }
     }
 
-    
-    // public async preserveAlignmentDuringResize(
-    //     notePath: string,
-    //     imageSrc: string,
-    //     width?: string
-    // ) {
-    //     const normalizedSrc = this.normalizeImagePath(imageSrc);
-
-    //     // Find the matching cache entry
-    //     const noteCache = this.cache[notePath];
-    //     if (!noteCache) return;
-
-    //     // Look for matching entry in cache
-    //     const cacheKey = Object.keys(noteCache).find(key =>
-    //         this.normalizeImagePath(key) === normalizedSrc
-    //     );
-
-    //     if (cacheKey && noteCache[cacheKey]) {
-    //         const alignments = noteCache[cacheKey];
-    //         // Update only the width while preserving position and wrap
-    //         await this.saveImageAlignmentToCache(
-    //             notePath,
-    //             imageSrc,
-    //             alignments.position,
-    //             width,
-    //             alignments.wrap
-    //         );
-    //     }
-    // }
-
-    // public async debugCache() {
-    //     console.log("Current cache contents:", this.cache);
-    //     const activeFile = this.app.workspace.getActiveFile();
-    //     if (activeFile) {
-    //         console.log("Active file:", activeFile.path);
-    //         console.log("Cache for active file:", this.cache[activeFile.path]);
-    //     }
-
-    //     const images = document.querySelectorAll('img');
-    //     console.log("Current images in document:", Array.from(images).map(img => ({
-    //         src: img.getAttribute('src'),
-    //         normalized: this.normalizeImagePath(img.getAttribute('src'))
-    //     })));
-    // }
-
-    // normalizeImagePath(src: string | null): string {
-    //     if (!src) return '';
-
-    //     // Remove query parameters and decode URI components
-    //     const cleanSrc = decodeURIComponent(src.split('?')[0]);
-
-    //     // Extract the base filename without extension
-    //     const match = cleanSrc.match(/([^/\\]+?)(?:-\d+)?(?:\.[^.]+)?$/);
-    //     const filename = match ? match[1] : cleanSrc;
-
-    //     console.log("Normalized path:", filename, "from:", src);
-    //     return filename;
-    // }
-
-
-    // Clean up entries for non-existent files
-    
-
     scheduleCacheCleanup() {
         // Clear any existing interval
         if (this.cleanupIntervalId) {
@@ -780,25 +675,32 @@ export class ImageAlignmentManager {
             this.imageObserver.disconnect();
             this.imageObserver = null;
         }
-
     }
 
     onunload() {
         // Disconnect the MutationObserver
-        if (this.imageObserver) {
-            this.imageObserver.disconnect();
-            this.imageObserver = null;
-        }
+        this.cleanupObserver();
 
         // Unregister all events
-        this.eventRefs.forEach((eventRef) => {
-            this.app.workspace.offref(eventRef);
-        });
+        this.eventRefs.forEach(eventRef => this.app.workspace.offref(eventRef));
         this.eventRefs = [];
 
+        // Clear interval
         if (this.cleanupIntervalId) {
             window.clearInterval(this.cleanupIntervalId);
+            this.cleanupIntervalId = null;
         }
+
+        // Cleanup imageAlignment component
+        if (this.imageAlignment) {
+            this.imageAlignment.onunload();
+        }
+
+        // Clear other references
+        this.imageObserver = null;
+        this.cache = {};
+        this.imageStates.clear();
+        this.debouncedValidateNoteCache?.cancel();  // Cancel any pending debounced operation
     }
 }
 

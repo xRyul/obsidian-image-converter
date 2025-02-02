@@ -19,9 +19,6 @@ import { BatchImageProcessor } from './BatchImageProcessor';
 
 
 export class ProcessCurrentNote extends Modal {
-    plugin: ImageConverterPlugin;
-    activeFile: TFile;
-
     private imageCount = 0;
     private processedCount = 0;
     private skippedCount = 0;
@@ -31,181 +28,21 @@ export class ProcessCurrentNote extends Modal {
 
     private enlargeReduceSettings: Setting | null = null;
     private resizeInputSettings: Setting | null = null;
-    private submitButton: ButtonComponent | null = null;
+    submitButton: ButtonComponent | null = null;
     private resizeInputsDiv: HTMLDivElement | null = null;
     private enlargeReduceDiv: HTMLDivElement | null = null;
-    private convertToSetting: Setting;
-    private skipFormatsSetting: Setting;
-    private resizeModeSetting: Setting;
-    private skipTargetFormatSetting: Setting;
+    convertToSetting: Setting;
+    skipFormatsSetting: Setting;
+    resizeModeSetting: Setting;
+    skipTargetFormatSetting: Setting;
 
-    private batchImageProcessor: BatchImageProcessor;
-
-    constructor(app: App, plugin: ImageConverterPlugin, activeFile: TFile) {
+    constructor(
+        app: App,
+        private plugin: ImageConverterPlugin,
+        private activeFile: TFile,
+        private batchImageProcessor: BatchImageProcessor  // Inject instead of creating new
+    ) {
         super(app);
-        this.plugin = plugin;
-        this.activeFile = activeFile;
-        this.batchImageProcessor = new BatchImageProcessor(app, plugin);
-    }
-
-    private updateResizeInputVisibility(resizeMode: string): void {
-        if (resizeMode === "None") {
-            this.resizeInputsDiv?.empty();
-            this.enlargeReduceDiv?.hide(); // Explicitly hide it
-            this.resizeInputSettings = null;
-            this.enlargeReduceSettings = null;
-        } else {
-            if (!this.resizeInputSettings) {
-                this.createResizeInputSettings(resizeMode);
-            } else {
-                this.updateResizeInputSettings(resizeMode);
-            }
-
-            if (!this.enlargeReduceSettings) {
-                this.createEnlargeReduceSettings();
-            }
-            this.enlargeReduceDiv?.show(); // Show only when not None
-        }
-    }
-
-    private createEnlargeReduceSettings(): void {
-        if (!this.enlargeReduceDiv) return;
-
-        // Clear existing content using Obsidian's method
-        this.enlargeReduceDiv.empty();
-
-        this.enlargeReduceSettings = new Setting(this.enlargeReduceDiv)
-            .setClass('enlarge-reduce-setting')
-            .setName('Enlarge or Reduce ⓘ')
-            .setDesc('Controls how images are adjusted relative to target size:')
-            .setTooltip('• Reduce and Enlarge: Adjusts all images to fit specified dimensions\n• Reduce only: Only shrinks images larger than target\n• Enlarge only: Only enlarges images smaller than target')
-            .addDropdown((dropdown) => {
-                dropdown
-                    .addOptions({
-                        Always: 'Reduce and Enlarge',
-                        Reduce: 'Reduce only',
-                        Enlarge: 'Enlarge only',
-                    })
-                    .setValue(this.plugin.settings.ProcessCurrentNoteEnlargeOrReduce)
-                    .onChange(async (value: 'Always' | 'Reduce' | 'Enlarge') => {
-                        this.plugin.settings.ProcessCurrentNoteEnlargeOrReduce = value;
-                        await this.plugin.saveSettings();
-                    });
-            });
-    }
-
-    private createResizeInputSettings(resizeMode: string): void {
-        if (!this.resizeInputsDiv) return;
-
-        // Clear existing content using Obsidian's method
-        this.resizeInputsDiv.empty();
-
-        // Create new setting
-        this.resizeInputSettings = new Setting(this.resizeInputsDiv)
-            .setClass('resize-input-setting'); // Add a class for styling if needed
-
-        this.updateResizeInputSettings(resizeMode);
-    }
-
-    private updateResizeInputSettings(resizeMode: string): void {
-        if (!this.resizeInputSettings) return;
-
-        this.resizeInputSettings.clear();
-
-        let name = '';
-        let desc = '';
-
-        if (['Fit', 'Fill'].includes(resizeMode)) {
-            name = 'Resize dimensions';
-            desc = 'Enter the desired width and height in pixels';
-            this.resizeInputSettings
-                .setName(name)
-                .setDesc(desc)
-                .addText((text: TextComponent) => text
-                    .setPlaceholder('Width')
-                    .setValue(this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth.toString())
-                    .onChange(async (value: string) => {
-                        const width = parseInt(value);
-                        if (/^\d+$/.test(value) && width > 0) {
-                            this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth = width;
-                            await this.plugin.saveSettings();
-                        }
-                    }))
-                .addText((text: TextComponent) => text
-                    .setPlaceholder('Height')
-                    .setValue(this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight.toString())
-                    .onChange(async (value: string) => {
-                        const height = parseInt(value);
-                        if (/^\d+$/.test(value) && height > 0) {
-                            this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight = height;
-                            await this.plugin.saveSettings();
-                        }
-                    }));
-        } else {
-            switch (resizeMode) {
-                case 'LongestEdge':
-                case 'ShortestEdge':
-                    name = `${resizeMode}`;
-                    desc = 'Enter the desired length in pixels';
-                    break;
-                case 'Width':
-                    name = 'Width';
-                    desc = 'Enter the desired width in pixels';
-                    break;
-                case 'Height':
-                    name = 'Height';
-                    desc = 'Enter the desired height in pixels';
-                    break;
-            }
-
-            this.resizeInputSettings
-                .setName(name)
-                .setDesc(desc)
-                .addText((text: TextComponent) => text
-                    .setPlaceholder('')
-                    .setValue(this.getInitialValue(resizeMode).toString())
-                    .onChange(async (value: string) => {
-                        const length = parseInt(value);
-                        if (/^\d+$/.test(value) && length > 0) {
-                            await this.updateSettingValue(resizeMode, length);
-                        }
-                    }));
-        }
-
-        // Update the enlarge/reduce settings in place instead of recreating
-        if (!this.enlargeReduceSettings) {
-            this.createEnlargeReduceSettings();
-        }
-    }
-
-    private getInitialValue(resizeMode: string): number {
-        switch (resizeMode) {
-            case 'LongestEdge':
-            case 'ShortestEdge':
-                return this.plugin.settings.ProcessCurrentNoteresizeModaldesiredLength;
-            case 'Width':
-                return this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth;
-            case 'Height':
-                return this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight;
-            default:
-                return 0;
-        }
-    }
-
-    private async updateSettingValue(resizeMode: string, value: number): Promise<void> {
-        switch (resizeMode) {
-            case 'LongestEdge':
-            case 'ShortestEdge':
-                this.plugin.settings.ProcessCurrentNoteresizeModaldesiredLength = value;
-                break;
-            case 'Width':
-                this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth = value;
-                break;
-            case 'Height':
-                this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight = value;
-                break;
-        }
-        await this.plugin.saveSettings();
     }
 
     async onOpen() {
@@ -377,6 +214,168 @@ export class ProcessCurrentNote extends Modal {
                 }
             });
     }
+    
+    private updateResizeInputVisibility(resizeMode: string): void {
+        if (resizeMode === "None") {
+            this.resizeInputsDiv?.empty();
+            this.enlargeReduceDiv?.hide(); // Explicitly hide it
+            this.resizeInputSettings = null;
+            this.enlargeReduceSettings = null;
+        } else {
+            if (!this.resizeInputSettings) {
+                this.createResizeInputSettings(resizeMode);
+            } else {
+                this.updateResizeInputSettings(resizeMode);
+            }
+
+            if (!this.enlargeReduceSettings) {
+                this.createEnlargeReduceSettings();
+            }
+            this.enlargeReduceDiv?.show(); // Show only when not None
+        }
+    }
+
+    private createEnlargeReduceSettings(): void {
+        if (!this.enlargeReduceDiv) return;
+
+        // Clear existing content using Obsidian's method
+        this.enlargeReduceDiv.empty();
+
+        this.enlargeReduceSettings = new Setting(this.enlargeReduceDiv)
+            .setClass('enlarge-reduce-setting')
+            .setName('Enlarge or Reduce ⓘ')
+            .setDesc('Controls how images are adjusted relative to target size:')
+            .setTooltip('• Reduce and Enlarge: Adjusts all images to fit specified dimensions\n• Reduce only: Only shrinks images larger than target\n• Enlarge only: Only enlarges images smaller than target')
+            .addDropdown((dropdown) => {
+                dropdown
+                    .addOptions({
+                        Always: 'Reduce and Enlarge',
+                        Reduce: 'Reduce only',
+                        Enlarge: 'Enlarge only',
+                    })
+                    .setValue(this.plugin.settings.ProcessCurrentNoteEnlargeOrReduce)
+                    .onChange(async (value: 'Always' | 'Reduce' | 'Enlarge') => {
+                        this.plugin.settings.ProcessCurrentNoteEnlargeOrReduce = value;
+                        await this.plugin.saveSettings();
+                    });
+            });
+    }
+
+    private createResizeInputSettings(resizeMode: string): void {
+        if (!this.resizeInputsDiv) return;
+
+        // Clear existing content using Obsidian's method
+        this.resizeInputsDiv.empty();
+
+        // Create new setting
+        this.resizeInputSettings = new Setting(this.resizeInputsDiv)
+            .setClass('resize-input-setting'); // Add a class for styling if needed
+
+        this.updateResizeInputSettings(resizeMode);
+    }
+
+    private updateResizeInputSettings(resizeMode: string): void {
+        if (!this.resizeInputSettings) return;
+
+        this.resizeInputSettings.clear();
+
+        let name = '';
+        let desc = '';
+
+        if (['Fit', 'Fill'].includes(resizeMode)) {
+            name = 'Resize dimensions';
+            desc = 'Enter the desired width and height in pixels';
+            this.resizeInputSettings
+                .setName(name)
+                .setDesc(desc)
+                .addText((text: TextComponent) => text
+                    .setPlaceholder('Width')
+                    .setValue(this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth.toString())
+                    .onChange(async (value: string) => {
+                        const width = parseInt(value);
+                        if (/^\d+$/.test(value) && width > 0) {
+                            this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth = width;
+                            await this.plugin.saveSettings();
+                        }
+                    }))
+                .addText((text: TextComponent) => text
+                    .setPlaceholder('Height')
+                    .setValue(this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight.toString())
+                    .onChange(async (value: string) => {
+                        const height = parseInt(value);
+                        if (/^\d+$/.test(value) && height > 0) {
+                            this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight = height;
+                            await this.plugin.saveSettings();
+                        }
+                    }));
+        } else {
+            switch (resizeMode) {
+                case 'LongestEdge':
+                case 'ShortestEdge':
+                    name = `${resizeMode}`;
+                    desc = 'Enter the desired length in pixels';
+                    break;
+                case 'Width':
+                    name = 'Width';
+                    desc = 'Enter the desired width in pixels';
+                    break;
+                case 'Height':
+                    name = 'Height';
+                    desc = 'Enter the desired height in pixels';
+                    break;
+            }
+
+            this.resizeInputSettings
+                .setName(name)
+                .setDesc(desc)
+                .addText((text: TextComponent) => text
+                    .setPlaceholder('')
+                    .setValue(this.getInitialValue(resizeMode).toString())
+                    .onChange(async (value: string) => {
+                        const length = parseInt(value);
+                        if (/^\d+$/.test(value) && length > 0) {
+                            await this.updateSettingValue(resizeMode, length);
+                        }
+                    }));
+        }
+
+        // Update the enlarge/reduce settings in place instead of recreating
+        if (!this.enlargeReduceSettings) {
+            this.createEnlargeReduceSettings();
+        }
+    }
+
+    private getInitialValue(resizeMode: string): number {
+        switch (resizeMode) {
+            case 'LongestEdge':
+            case 'ShortestEdge':
+                return this.plugin.settings.ProcessCurrentNoteresizeModaldesiredLength;
+            case 'Width':
+                return this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth;
+            case 'Height':
+                return this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight;
+            default:
+                return 0;
+        }
+    }
+
+    private async updateSettingValue(resizeMode: string, value: number): Promise<void> {
+        switch (resizeMode) {
+            case 'LongestEdge':
+            case 'ShortestEdge':
+                this.plugin.settings.ProcessCurrentNoteresizeModaldesiredLength = value;
+                break;
+            case 'Width':
+                this.plugin.settings.ProcessCurrentNoteresizeModaldesiredWidth = value;
+                break;
+            case 'Height':
+                this.plugin.settings.ProcessCurrentNoteresizeModaldesiredHeight = value;
+                break;
+        }
+        await this.plugin.saveSettings();
+    }
+
+
 
     private async updateImageCountsAndDisplay() {
         await this.updateImageCounts();
@@ -487,6 +486,13 @@ export class ProcessCurrentNote extends Modal {
 
 
     onClose() {
+        // Clear nullable UI elements
+        this.enlargeReduceSettings = null;
+        this.resizeInputSettings = null;
+        this.submitButton = null;
+        this.resizeInputsDiv = null;
+        this.enlargeReduceDiv = null;
+        
         const { contentEl } = this;
         contentEl.empty();
     }

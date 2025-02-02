@@ -15,14 +15,11 @@ import {
 import * as path from 'path';
 import ImageConverterPlugin from "./main";
 import { FolderAndFilenameManagement } from './FolderAndFilenameManagement';
-import { SupportedImageFormats } from './SupportedImageFormats';
 import { ConfirmDialog } from './ImageConverterSettings';
 import { VariableProcessor, VariableContext } from './VariableProcessor';
 import { ImageAnnotationModal } from './ImageAnnotation';
 import { Crop } from './Crop';
 import { ProcessSingleImageModal } from "./ProcessSingleImageModal";
-import { ImageAlignmentManager } from './ImageAlignmentManager';
-import { ImageResizer } from './ImageResizer';
 
 interface ImageMatch {
 	lineNumber: number;
@@ -31,14 +28,6 @@ interface ImageMatch {
 }
 
 export class ContextMenu extends Component {
-	app: App;
-	plugin: ImageConverterPlugin;
-
-	folderAndFilenameManagement: FolderAndFilenameManagement;
-	supportedImageFormats: SupportedImageFormats;
-	variableProcessor: VariableProcessor;
-	imageAlignmentManager: ImageAlignmentManager;
-	imageResizer: ImageResizer
 	private contextMenuRegistered = false;
 	private currentMenu: Menu | null = null;
 
@@ -50,25 +39,15 @@ export class ContextMenu extends Component {
 		}
 	};
 
-	constructor(plugin: ImageConverterPlugin) {
-		super();
-		this.plugin = plugin;
-		this.app = plugin.app;
-		this.folderAndFilenameManagement = new FolderAndFilenameManagement(
-			this.app,
-			this.plugin.settings,
-			this.supportedImageFormats
-		);
-		this.supportedImageFormats = new SupportedImageFormats(this.app);
-		// this.registerContextMenuListener();
-		this.variableProcessor = new VariableProcessor(this.app, this.plugin.settings);
-		this.registerContextMenuListener();
-		this.imageAlignmentManager = new ImageAlignmentManager(
-			this.plugin,
-			this.supportedImageFormats,
-			this.imageResizer! // Pass imageResizer if it's enabled
-		);
-	}
+    constructor(
+		private app: App,
+        private plugin: ImageConverterPlugin,
+        private folderAndFilenameManagement: FolderAndFilenameManagement,
+        private variableProcessor: VariableProcessor,
+    ) {
+        super();
+        this.registerContextMenuListener();
+    }
 
 	/*-----------------------------------------------------------------*/
 	/*                       CONTEXT MENU SETUP                        */
@@ -171,8 +150,8 @@ export class ContextMenu extends Component {
 		menu.addSeparator();
 
 		// Only add image alignment if enabled
-		if (this.plugin.settings.isImageAlignmentEnabled && this.plugin.imageAlignment) {
-			this.plugin.imageAlignment.addAlignmentOptionsToContextMenu(menu, img, activeFile);
+		if (this.plugin.settings.isImageAlignmentEnabled && this.plugin.ImageAlignmentManager) {
+			this.plugin.ImageAlignmentManager.addAlignmentOptionsToContextMenu(menu, img, activeFile);
 		}
 
 		this.addProcessImageMenuItem(menu, img, event); // Pass the event here
@@ -975,7 +954,6 @@ export class ContextMenu extends Component {
 			item.setTitle("Convert/compress...")
 				.setIcon("cog")
 				.onClick(async () => {
-					new Notice("Menu item clicked!"); // Notice 1: Check if click handler is triggered
 
 					try {
 						// Ensure there is an active markdown view
@@ -1424,23 +1402,6 @@ export class ContextMenu extends Component {
 			console.error('Error deleting image:', error);
 			new Notice('Failed to delete image. Check console for details.');
 		}
-	}
-
-
-
-
-
-
-
-
-	async handleImageConversion(img: HTMLImageElement, activeFile: TFile) {
-		// Implementation for image conversion
-		console.log("Handling image conversion", img, activeFile);
-	}
-
-	async handleImageResize(img: HTMLImageElement, activeFile: TFile) {
-		// Implementation for image resizing
-		console.log("Handling image resize", img, activeFile);
 	}
 
 	onunload() {

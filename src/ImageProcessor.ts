@@ -1,5 +1,5 @@
 // ImageProcessor.ts
-import { App, Notice } from "obsidian";
+import { Notice } from "obsidian";
 import { SupportedImageFormats } from "./SupportedImageFormats";
 
 // Import types
@@ -13,11 +13,10 @@ interface Dimensions {
 }
 
 export class ImageProcessor {
-    private app: App;
+
     supportedImageFormats: SupportedImageFormats
 
-    constructor(app: App, supportedImageFormats: SupportedImageFormats) {
-        this.app = app;
+    constructor(supportedImageFormats: SupportedImageFormats) {
         this.supportedImageFormats = supportedImageFormats;
     }
 

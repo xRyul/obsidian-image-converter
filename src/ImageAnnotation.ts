@@ -64,110 +64,106 @@ enum ToolMode {
 }
 
 export class ImageAnnotationModal extends Modal {
+    private componentContainer = new Component();
+    private currentTool: ToolMode = ToolMode.None;
     private canvas: Canvas;
-    private file: TFile;
-    private plugin: ImageConverterPlugin;
-	private componentContainer = new Component();
-
-	private currentTool: ToolMode = ToolMode.None;
-	private drawButton: ButtonComponent | undefined = undefined;
-	private textButton: ButtonComponent | undefined;
-	private arrowButton: ButtonComponent | undefined;
-    private isDrawingMode = false;
-	private isTextMode = false;
-	private isArrowMode = false;
-	private isTextEditingBlocked = false;
-	private _previousStates: { drawingMode: boolean; } | null = null;
-	private boundKeyDownHandler: (e: KeyboardEvent) => void;
-	private boundKeyUpHandler: (e: KeyboardEvent) => void;
-	private preserveObjectStacking = true;
-
-	private readonly brushSizes = [2, 4, 8, 12, 16, 24]; // 6 preset sizes
-	private readonly brushOpacities = [0.2, 0.4, 0.6, 0.8, 0.9, 1.0]; // 6 preset opacities
-	private currentBrushSizeIndex = 2; // Default to middle size
-    private currentOpacityIndex = 5; // Default to full opacity
-
-	private readonly blendModes: BlendMode[] = [
-		'source-over',    // Normal
-		'multiply',
-		'screen',
-		'overlay',
-		'darken',
-		'lighten',
-		'color-dodge',
-		'color-burn',
-		'hard-light',
-		'soft-light',
-		'difference',
-		'exclusion'
-	];
-
-	private currentBlendMode: BlendMode = 'source-over';
-
-	private dominantColors: string[] = [];
-    private complementaryColors: string[][] = [];
-
-    private isResizing = false;
-    private minWidth = 400;
-    private minHeight = 300;
+    
+    // UI Components
+    private drawButton: ButtonComponent | undefined = undefined;
+    private textButton: ButtonComponent | undefined;
+    private arrowButton: ButtonComponent | undefined;
     private resizeHandle: HTMLDivElement | null = null;
-	
+    private backgroundDropdown: HTMLElement | null = null;
+    private textBackgroundControls: HTMLElement | null = null;
+    
+    // State Management
+    private isDrawingMode = false;
+    private isTextMode = false;
+    private isArrowMode = false;
+    private isTextEditingBlocked = false;
+    private _previousStates: { drawingMode: boolean; } | null = null;
+    private isResizing = false;
     private isPanning = false;
-	private isSpacebarDown = false; // Add this new property
-    private lastPanPoint: { x: number; y: number } | null = null;
-    private currentZoom = 1;
+    private isSpacebarDown = false;
+    private isUndoRedoAction = false;
+    private preserveObjectStacking = true;
+	
+    // Drawing Settings
+    private readonly brushSizes = [2, 4, 8, 12, 16, 24];
+    private readonly brushOpacities = [0.2, 0.4, 0.6, 0.8, 0.9, 1.0];
+    private currentBrushSizeIndex = 2;
+    private currentOpacityIndex = 5;
+    private currentBlendMode: BlendMode = 'source-over';
+    private currentBackground: BackgroundType = 'transparent';
+    
+    // Constants and Limits
+    private readonly minWidth = 400;
+    private readonly minHeight = 300;
     private readonly minZoom = 0.1;
     private readonly maxZoom = 10;
-	
-	private undoStack: string[] = [];
+    private currentZoom = 1;
+    
+    // Event Handlers
+    private boundKeyDownHandler: (e: KeyboardEvent) => void;
+    private boundKeyUpHandler: (e: KeyboardEvent) => void;
+    private lastPanPoint: { x: number; y: number } | null = null;
+    
+    // History Management
+    private undoStack: string[] = [];
     private redoStack: string[] = [];
-    private isUndoRedoAction = false;
+    
+    // Arrays and Options
+    private readonly blendModes: BlendMode[] = [/*...*/];
+    private readonly backgroundOptions: BackgroundOptions = ['transparent', '#ffffff', '#000000', 'grid', 'dots'] as const;
+    private dominantColors: string[] = [];
+    private complementaryColors: string[][] = [];
+    
+    constructor(
+        app: App,
+        private plugin: ImageConverterPlugin,
+        private file: TFile
+    ) {
+        super(app);
+        this.setupModal();
+        this.setupEventHandlers();
+    }
 
-	private currentBackground: BackgroundType = 'transparent';
-	private readonly backgroundOptions: BackgroundOptions = ['transparent', '#ffffff', '#000000', 'grid', 'dots'] as const;
-	private backgroundDropdown: HTMLElement | null = null;
+    private setupModal() {
+        this.componentContainer.load();
+        this.modalEl.addClass('image-converter-annotation-tool-image-annotation-modal');
+        this.setupCloseButton();
+    }
 
-	private textBackgroundControls: HTMLElement | null = null; // Add this as a class property
-	
-	constructor(app: App, plugin: ImageConverterPlugin, imageFile: TFile) {
-		super(app);
-		this.plugin = plugin;
-		this.file = imageFile;
+    private setupEventHandlers() {
+        this.boundKeyDownHandler = this.handleKeyDown.bind(this);
+        this.boundKeyUpHandler = this.handleKeyUp.bind(this);
+        this.scope = new Scope();
+        this.registerShortcuts();
+        this.preventDefaultHandlers();
+    }
 
-		this.componentContainer.load();
-		this.modalEl.addClass('image-converter-annotation-tool-image-annotation-modal');
-	
-		// Ensure close button works
-		const closeButton = this.modalEl.querySelector('.modal-close-button') as HTMLElement | null; // Cast to HTMLElement | null
-		if (closeButton) {
-			this.componentContainer.registerDomEvent(closeButton, 'click', (e: MouseEvent) => { // Correct type for 'e'
-				e.stopPropagation();
-				this.close();
-			});
-		}
+    private setupCloseButton() {
+        const closeButton = this.modalEl.querySelector('.modal-close-button') as HTMLElement | null;
+        if (closeButton) {
+            this.componentContainer.registerDomEvent(closeButton, 'click', (e: MouseEvent) => {
+                e.stopPropagation();
+                this.close();
+            });
+        }
+    }
 
-		// Bind the event handlers in the constructor
-		this.boundKeyDownHandler = this.handleKeyDown.bind(this);
-		this.boundKeyUpHandler = this.handleKeyUp.bind(this);
-
-		// Create a new scope for handling shortcuts
-		this.scope = new Scope();
-		
-		// Register our custom scope
-		this.scope.register([], 'Escape', (e: KeyboardEvent) => {
-			e.preventDefault();
-			e.stopPropagation();
-			
-			const activeObject = this.canvas?.getActiveObject();
-			if (activeObject instanceof IText && activeObject.isEditing) {
-				activeObject.exitEditing();
-			}
-			return false;
-		});
-		
-		// Prevent default handlers
-		this.preventDefaultHandlers();
-	}
+    private registerShortcuts() {
+        this.scope.register([], 'Escape', (e: KeyboardEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const activeObject = this.canvas?.getActiveObject();
+            if (activeObject instanceof IText && activeObject.isEditing) {
+                activeObject.exitEditing();
+            }
+            return false;
+        });
+    }
 
     async onOpen() {
         const { contentEl } = this;

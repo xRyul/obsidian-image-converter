@@ -2,25 +2,18 @@ import { App, Component, Menu, TFile } from 'obsidian';
 import ImageConverterPlugin from './main';
 import { ImageAlignmentManager, ImagePositionData } from './ImageAlignmentManager';
 
-
-
-
 export interface ImageAlignmentOptions {
     align: 'left' | 'center' | 'right' | 'none';
     wrap: boolean;
 }
 
 export class ImageAlignment extends Component {
-    app: App;
-    plugin: ImageConverterPlugin;
-    ImageAlignmentManager: ImageAlignmentManager;
 
-    constructor(plugin: ImageConverterPlugin, imageAlignmentManager: ImageAlignmentManager) {
-        super();
-        this.plugin = plugin;
-        this.app = plugin.app;
-        this.ImageAlignmentManager = plugin.ImageAlignmentManager!; // we know from our plugin's initialization logic in main.ts that if ImageAlignment is being constructed, ImageAlignmentManager will definitely be initialized and not null.
-    }
+    constructor(
+        private app: App,
+        private plugin: ImageConverterPlugin,
+        private imageAlignmentManager: ImageAlignmentManager
+    ) { super(); }
 
     /**
      * Adds image alignment options to the context menu.
@@ -150,7 +143,7 @@ export class ImageAlignment extends Component {
         if (!src) return;
 
         // Use getRelativePath to normalize the src before saving
-        const relativeSrc = this.ImageAlignmentManager.getRelativePath(src);
+        const relativeSrc = this.imageAlignmentManager.getRelativePath(src);
 
         // --- Apply Visual Changes to IMG ---
         img.removeClass(
@@ -212,7 +205,7 @@ export class ImageAlignment extends Component {
         if (!src) return { align: 'none', wrap: false };
 
         // First, try to get alignment from cache
-        const cachedAlignment = this.ImageAlignmentManager.getImageAlignment(
+        const cachedAlignment = this.imageAlignmentManager.getImageAlignment(
             activeFile.path,
             src
         );
@@ -232,9 +225,5 @@ export class ImageAlignment extends Component {
         const wrap = img.hasClass('image-wrap'); // Use hasClass instead of classList.contains
         return { align, wrap };
     }
-
-
-
-
 
 }

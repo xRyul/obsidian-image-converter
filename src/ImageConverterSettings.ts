@@ -320,15 +320,13 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
 // --- Settings Tab Class ---
 
 export class ImageConverterSettingTab extends PluginSettingTab {
-    plugin: ImageConverterPlugin;
     activeTab: "folder" | "filename" | "conversion" | "linkformat" | "resize" = "folder";
     presetUIState: PresetUIState;
     editingPresetKey: ActivePresetSetting | string | null = null;
     formContainer: HTMLElement;
 
-    constructor(app: App, plugin: ImageConverterPlugin) {
+    constructor(app: App, private plugin: ImageConverterPlugin) {
         super(app, plugin);
-        this.plugin = plugin;
         // Initialize UI state with everything collapsed
         this.presetUIState = {
             folder: { editingPreset: null, newPreset: null },
@@ -339,7 +337,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             resize: { editingPreset: null, newPreset: null },
             imageAlignmentSectionCollapsed: true,
             imageDragResizeSectionCollapsed: true
-
         };
     }
 

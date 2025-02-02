@@ -13,9 +13,6 @@ import {
 import ImageConverterPlugin from "./main";
 
 export class ProcessSingleImageModal extends Modal {
-    plugin: ImageConverterPlugin;
-    imageFile: TFile;
-
     // --- Settings UI Elements ---
     qualitySetting: Setting | null = null;
     convertToSetting: Setting | null = null;
@@ -25,10 +22,12 @@ export class ProcessSingleImageModal extends Modal {
     resizeInputsDiv: HTMLDivElement | null = null;
     enlargeReduceDiv: HTMLDivElement | null = null;
 
-    constructor(app: App, plugin: ImageConverterPlugin, imageFile: TFile) {
+    constructor(
+        app: App,
+        private plugin: ImageConverterPlugin,
+        private imageFile: TFile
+    ) {
         super(app);
-        this.plugin = plugin;
-        this.imageFile = imageFile;
         this.modalEl.addClass("image-convert-modal");
     }
 
@@ -39,6 +38,15 @@ export class ProcessSingleImageModal extends Modal {
     }
 
     onClose() {
+        // Clear settings UI elements
+        this.qualitySetting = null;
+        this.convertToSetting = null;
+        this.resizeModeSetting = null;
+        this.resizeInputSettings = null;
+        this.enlargeReduceSettings = null;
+        this.resizeInputsDiv = null;
+        this.enlargeReduceDiv = null;
+    
         const { contentEl } = this;
         contentEl.empty();
     }

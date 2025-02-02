@@ -20,8 +20,6 @@ enum ImageSource {
 }
 
 export class ProcessFolderModal extends Modal {
-    plugin: ImageConverterPlugin;
-    folderPath: string;
     private recursive = false;
 
     // --- Image Source Enum ---
@@ -47,19 +45,19 @@ export class ProcessFolderModal extends Modal {
     private processedCountDisplay: HTMLSpanElement;
     private skippedCountDisplay: HTMLSpanElement;
 
-    private batchImageProcessor: BatchImageProcessor;
-
     // --- Description Updating ---
     private updateImageSourceDescription:
         | ((source: ImageSource | null) => void)
         | null = null;
 
-    constructor(app: App, plugin: ImageConverterPlugin, folderPath: string) {
-        super(app);
-        this.plugin = plugin;
-        this.folderPath = folderPath;
-        this.batchImageProcessor = new BatchImageProcessor(app, plugin);
-    }
+        constructor(
+            app: App,
+            private plugin: ImageConverterPlugin,
+            private folderPath: string,
+            private batchImageProcessor: BatchImageProcessor  // Inject instead of creating new
+        ) {
+            super(app);
+        }
 
 
 
@@ -73,6 +71,21 @@ export class ProcessFolderModal extends Modal {
     }
 
     onClose() {
+        // Clear settings UI elements
+        this.imageSourceSetting = null;
+        this.qualitySetting = null;
+        this.convertToSetting = null;
+        this.skipFormatsSetting = null;
+        this.resizeModeSetting = null;
+        this.resizeInputSettings = null;
+        this.enlargeReduceSettings = null;
+        this.skipTargetFormatSetting = null;
+        this.resizeInputsDiv = null;
+        this.enlargeReduceDiv = null;
+    
+        // Clear description updater
+        this.updateImageSourceDescription = null;
+    
         const { contentEl } = this;
         contentEl.empty();
     }

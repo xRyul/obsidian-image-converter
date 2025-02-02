@@ -5,11 +5,8 @@ import { NonDestructiveResizePreset, ResizeScaleMode, ResizeUnits } from "./NonD
 
 
 export class LinkFormatter {
-    private app: App;
 
-    constructor(app: App) {
-        this.app = app;
-    }
+    constructor( private app: App) { }
 
     async formatLink(
         linkPath: string,
