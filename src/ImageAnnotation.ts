@@ -113,7 +113,20 @@ export class ImageAnnotationModal extends Modal {
     private redoStack: string[] = [];
     
     // Arrays and Options
-    private readonly blendModes: BlendMode[] = [/*...*/];
+	private readonly blendModes: BlendMode[] = [
+		'source-over',
+		'multiply',
+		'screen',
+		'overlay',
+		'darken',
+		'lighten',
+		'color-dodge',
+		'color-burn',
+		'hard-light',
+		'soft-light',
+		'difference',
+		'exclusion'
+	];
     private readonly backgroundOptions: BackgroundOptions = ['transparent', '#ffffff', '#000000', 'grid', 'dots'] as const;
     private dominantColors: string[] = [];
     private complementaryColors: string[][] = [];

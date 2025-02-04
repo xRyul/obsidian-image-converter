@@ -1044,7 +1044,7 @@ export default class ImageConverterPlugin extends Plugin {
 
         // Use positive check for "back"
         // - We have to be carefull not to place it to the back 2 times.
-        if (this.settings.cursorLocation === "back") {
+        if (this.settings.dropPasteCursorLocation === "back") {
             editor.setCursor({
                 line: cursor.line,
                 ch: cursor.ch + formattedLink.length,

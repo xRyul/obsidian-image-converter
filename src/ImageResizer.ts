@@ -805,7 +805,7 @@ export class ImageResizer {
         // Prepare changes before applying them
         const changes: EditorChange[] = [];
         let cursorPosition: EditorPosition | null = null; // Initialize cursor position
-        const cursorLocation = this.plugin.settings.cursorLocation;
+        const cursorLocation = this.plugin.settings.resizeCursorLocation;
 
         editor.getValue()
             .split('\n')
@@ -887,7 +887,8 @@ export class ImageResizer {
         // Apply changes and set cursor position atomically
         if (changes.length > 0) {
             editor.transaction({ changes });
-            if (cursorPosition) {
+            // Only set cursor position if cursorLocation is not "none"
+            if (cursorPosition && this.plugin.settings.resizeCursorLocation !== "none") {
                 editor.setCursor(cursorPosition);
             }
         }
@@ -897,6 +898,9 @@ export class ImageResizer {
      * Updates the cursor position during resizing based on plugin settings.
      */
     private updateCursorPositionDuringResize() {
+        // Early return if cursor updates are disabled
+        if (this.plugin.settings.resizeCursorLocation === "none") return;
+
         if (!this.markdownView || !this.activeImage || !this.editor) return;
 
         const editor = this.editor;
@@ -913,9 +917,9 @@ export class ImageResizer {
         const externalLinkStart = lineContent.indexOf("![");
         const linkEnd = lineContent.search(/\]\]|\)/); // Find closing ]] or )
 
-        let newCursorPos: EditorPosition;
+        let newCursorPos: EditorPosition | undefined;
 
-        if (this.plugin.settings.cursorLocation === "front") {
+        if (this.plugin.settings.resizeCursorLocation === "front") {
             // Set cursor to the front of the link, but not before position 0
             if (internalLinkStart !== -1 || externalLinkStart !== -1) {
                 newCursorPos = {
@@ -925,7 +929,7 @@ export class ImageResizer {
             } else {
                 return;
             }
-        } else {
+        } else if (this.plugin.settings.resizeCursorLocation === "back") {
             // Set cursor to the end of the link
             if (linkEnd !== -1) {
                 newCursorPos = {
@@ -937,8 +941,8 @@ export class ImageResizer {
             }
         }
 
-        // Avoid unnecessary updates if cursor position hasn't changed
-        if (!this.areEditorPositionsEqual(cursorPos, newCursorPos)) {
+        // Only update cursor if we have a new position and it's different from current
+        if (newCursorPos && !this.areEditorPositionsEqual(cursorPos, newCursorPos)) {
             editor.setCursor(newCursorPos);
         }
     }

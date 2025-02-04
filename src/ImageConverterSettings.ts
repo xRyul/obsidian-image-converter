@@ -130,7 +130,10 @@ export interface ImageConverterSettings {
     subfolderTemplate: string;
     linkFormatSettings: LinkFormatSettings;
     nonDestructiveResizeSettings: NonDestructiveResizeSettings;
-    cursorLocation: "front" | "back";
+
+    resizeCursorLocation: "front" | "back" | "none";
+    dropPasteCursorLocation: "front" | "back";
+
     neverProcessFilenames: string;
     modalBehavior: ModalBehavior;
 
@@ -251,7 +254,8 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
     selectedGlobalPreset: "", // No global preset selected by default
     linkFormatSettings: new LinkFormatSettings(),
     nonDestructiveResizeSettings: new NonDestructiveResizeSettings(),
-    cursorLocation: "back",
+    resizeCursorLocation: "none",
+    dropPasteCursorLocation: "back",
     neverProcessFilenames: "",
     modalBehavior: "never",
 
@@ -312,7 +316,7 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
     resizeState: { isResizing: false },
 
     enableContextMenu: true,
-    
+
     showSpaceSavedNotification: true,
     revertToOriginalIfLarger: false,
 };
@@ -437,15 +441,15 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             );
 
         new Setting(containerEl)
-            .setName("Cursor position 🛈")
-            .setTooltip("Where to place the cursor when resizing or after inserting an image link")
+            .setName("Cursor position after drop/paste 🛈")
+            .setTooltip("Where to place the cursor after dropping or pasting the image")
             .addDropdown((dropdown) => {
                 dropdown
                     .addOption("front", "At the front of the link")
                     .addOption("back", "At the back of the link")
-                    .setValue(this.plugin.settings.cursorLocation)
+                    .setValue(this.plugin.settings.dropPasteCursorLocation)
                     .onChange(async (value: "front" | "back") => {
-                        this.plugin.settings.cursorLocation = value;
+                        this.plugin.settings.dropPasteCursorLocation = value;
                         await this.plugin.saveSettings();
                     });
             });
@@ -475,7 +479,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 })
             );
 
-            
+
         new Setting(containerEl)
             .setName("Show window")
             .setDesc("Choose wether to show processing options on each image drop/paste")
@@ -865,6 +869,21 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                             await this.plugin.saveSettings();
                         }));
             }
+            // New Setting: Resize Cursor Location
+            new Setting(imageDragResizeSection)
+                .setName("Cursor position during resize 🛈")
+                .setTooltip("Where to place the cursor when resizing an image. Note: 'Don't move cursor' - will try to keep your exisiting cursor in place but if you DRAG-RESIZE and cursor is still over the image when you finish resizing, it will get the text selected.")
+                .addDropdown((dropdown) => {
+                    dropdown
+                        .addOption("front", "At the front of the link")
+                        .addOption("back", "At the back of the link")
+                        .addOption("none", "Don't move cursor")
+                        .setValue(this.plugin.settings.resizeCursorLocation)
+                        .onChange(async (value: "front" | "back" | "none") => {
+                            this.plugin.settings.resizeCursorLocation = value;
+                            await this.plugin.saveSettings();
+                        });
+                });
 
             new Setting(imageDragResizeSection)
                 .setName("Allow resizing in Reading mode")
@@ -877,6 +896,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                             await this.plugin.saveSettings();
                         })
                 );
+
         }
     }
 
