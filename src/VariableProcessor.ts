@@ -4,7 +4,7 @@ import { ImageConverterSettings } from "./ImageConverterSettings";
 
 
 export interface VariableContext {
-    file: TFile | File; 
+    file: TFile | File;
     activeFile: TFile;
 }
 
@@ -452,6 +452,21 @@ export class VariableProcessor {
             description: "Image size in a specific unit (B, KB, MB) with custom decimal places.",
             example: "{size:KB:3} -> 24.000",
         },
+        {
+            name: "{sha256:image}",
+            description: "The SHA-256 hash of the image content.",
+            example: "{sha256:image} -> full hash, {sha256:image:8} -> e3b0c442",
+        },
+        {
+            name: "{sha256:type}",
+            description: "The SHA-256 hash of the specified type. Supports: filename, fullpath, parentfolder, rootfolder, extension, notename, notefolder, notepath.",
+            example: "{sha256:filename} -> e3b0c442",
+        },
+        {
+            name: "{sha256:type:X}",
+            description: "The first X characters of the SHA-256 hash of the specified type. Supports the same types as {sha256:type}.",
+            example: "{sha256:fullpath:10} -> e3b0c44298",
+        },
     ];
 
     async processTemplate(
@@ -461,12 +476,12 @@ export class VariableProcessor {
         // Pass the template to getAvailableVariables
         const variables = await this.getAvailableVariables(context, template);
         let result = template;
-    
+
         for (const [key, value] of Object.entries(variables)) {
             const regex = new RegExp(this.escapeRegExp(key), "gi");
             result = result.replace(regex, value);
         }
-    
+
         return result;
     }
 
@@ -546,12 +561,12 @@ export class VariableProcessor {
             // --- Image Metadata (for TFile) ---
             // ADD THIS CHECK HERE:
             if (!['heic', 'heif', 'tiff', 'tif'].includes(file.extension.toLowerCase())) {
-            try {
-                const imgData = await this.getImageMetadata(file);
-                Object.assign(variables, imgData);
-            } catch (error) {
-                console.debug("Image metadata extraction failed:", error);
-            }
+                try {
+                    const imgData = await this.getImageMetadata(file);
+                    Object.assign(variables, imgData);
+                } catch (error) {
+                    console.debug("Image metadata extraction failed:", error);
+                }
             }
         } else {
             // File is a File object (dragged/pasted)
@@ -567,13 +582,13 @@ export class VariableProcessor {
             // ADD THIS CHECK HERE:
             const fileExtension = file.name.split('.').pop()?.toLowerCase() || '';
             if (!['heic', 'heif', 'tiff', 'tif'].includes(fileExtension)) {
-            try {
-                const imgData = await this.getImageMetadata(file);
-                Object.assign(variables, imgData);
-            } catch (error) {
-                console.debug("Image metadata extraction failed:", error);
+                try {
+                    const imgData = await this.getImageMetadata(file);
+                    Object.assign(variables, imgData);
+                } catch (error) {
+                    console.debug("Image metadata extraction failed:", error);
+                }
             }
-        }
         }
 
         variables["{notename}"] = activeFile.basename;
@@ -776,6 +791,60 @@ export class VariableProcessor {
             variables[`{MD5:${hashType}${(length ? ":" + length : "")}}`] = md5Hash;
         }
 
+        // Handle SHA-256 hashes
+        const sha256Pattern = /{sha256:([\w\-./]+?)(?::(\d+))?}/g;
+        let sha256Match;
+        while ((sha256Match = sha256Pattern.exec(template)) !== null) {
+            const hashType = sha256Match[1].toLowerCase();
+            const length = sha256Match[2] ? parseInt(sha256Match[2]) : undefined;
+            let sha256Hash: string;
+
+            if (hashType === "image") {
+                // Handle image content hash
+                sha256Hash = await this.generateFileContentSHA256(file);
+            } else {
+                // Handle other hash types (filename, path, etc.)
+                let textToHash = "";
+                switch (hashType) {
+                    case "filename":
+                        textToHash = file.name.substring(0, file.name.lastIndexOf("."));
+                        break;
+                    case "imagepath":
+                    case "fullpath": {
+                        const relativeImagePath = file.name;
+                        textToHash = relativeImagePath;
+                        break;
+                    }
+                    case "parentfolder":
+                        textToHash = activeFile.parent?.name || "";
+                        break;
+                    case "rootfolder":
+                        textToHash = this.app.vault.getRoot().path;
+                        break;
+                    case "extension":
+                        textToHash = file.name.substring(file.name.lastIndexOf(".") + 1);
+                        break;
+                    case "notename":
+                        textToHash = activeFile.basename;
+                        break;
+                    case "notefolder":
+                        textToHash = activeFile.parent?.name || "";
+                        break;
+                    case "notepath":
+                        textToHash = activeFile.path;
+                        break;
+                    default:
+                        textToHash = hashType;
+                }
+                sha256Hash = await this.generateSHA256(textToHash);
+            }
+
+            if (length) {
+                sha256Hash = sha256Hash.substring(0, length);
+            }
+            variables[`{sha256:${hashType}${(length ? ":" + length : "")}}`] = sha256Hash;
+        }
+
         return variables;
     }
 
@@ -790,7 +859,7 @@ export class VariableProcessor {
             // For HEIC and TIFF, return empty metadata initially, as metadata should be extracted after decoding
             return metadata;
         }
-    
+
         if (file instanceof TFile) {
             // Handle TFile (files already in the vault)
             try {
@@ -798,7 +867,7 @@ export class VariableProcessor {
                 const blob = new Blob([fileContent], { type: `image/${file.extension}` });
                 const img = new Image();
                 img.src = URL.createObjectURL(blob);
-    
+
                 // Wait for the image to load
                 await new Promise((resolve, reject) => {
                     img.onload = () => resolve(img);
@@ -807,9 +876,9 @@ export class VariableProcessor {
                         reject(event);
                     };
                 });
-    
+
                 const { width, height } = img;
-    
+
                 metadata["{width}"] = width.toString();
                 metadata["{height}"] = height.toString();
                 metadata["{aspectratio}"] = (width / height).toFixed(2);
@@ -819,12 +888,12 @@ export class VariableProcessor {
                         : width < height
                             ? "portrait"
                             : "square";
-    
+
                 // Calculate more properties
                 const aspectRatio = width / height;
                 const isSquare = Math.abs(aspectRatio - 1) < 0.01;
                 const pixelCount = width * height;
-    
+
                 // Get file stats using app.vault.adapter.stat for TFile
                 let fileSizeInBytes = 0;
                 try {
@@ -837,7 +906,7 @@ export class VariableProcessor {
                 } catch (error) {
                     console.error("Error getting file stats:", error);
                 }
-    
+
                 // Add properties to metadata object
                 Object.assign(metadata, {
                     // Existing properties
@@ -845,7 +914,7 @@ export class VariableProcessor {
                     '{quality}': this.settings.quality.toString(),
                     '{resolution}': `${img.width}x${img.height}`,
                     '{megapixels}': (pixelCount / 1000000).toFixed(2),
-    
+
                     // New properties
                     '{issquare}': isSquare.toString(),
                     '{pixelcount}': pixelCount.toString(),
@@ -894,10 +963,10 @@ export class VariableProcessor {
                         return 'above-4k';
                     })(),
                 });
-    
+
                 // Clean up the Blob URL
                 URL.revokeObjectURL(img.src);
-    
+
             } catch (error) {
                 console.error("Error extracting image metadata for TFile:", error);
             }
@@ -906,7 +975,7 @@ export class VariableProcessor {
             try {
                 const img = new Image();
                 img.src = URL.createObjectURL(file);
-    
+
                 // Wait for the image to load
                 await new Promise((resolve, reject) => {
                     img.onload = () => resolve(img);
@@ -915,9 +984,9 @@ export class VariableProcessor {
                         reject(event);
                     };
                 });
-    
+
                 const { width, height } = img;
-    
+
                 metadata["{width}"] = width.toString();
                 metadata["{height}"] = height.toString();
                 metadata["{aspectratio}"] = (width / height).toFixed(2);
@@ -927,15 +996,15 @@ export class VariableProcessor {
                         : width < height
                             ? "portrait"
                             : "square";
-    
+
                 // Calculate more properties
                 const aspectRatio = width / height;
                 const isSquare = Math.abs(aspectRatio - 1) < 0.01;
                 const pixelCount = width * height;
-    
+
                 // Get file size directly from the File object
                 const fileSizeInBytes = file.size;
-    
+
                 // Add properties to metadata object
                 Object.assign(metadata, {
                     // Existing properties
@@ -943,7 +1012,7 @@ export class VariableProcessor {
                     '{quality}': this.settings.quality.toString(),
                     '{resolution}': `${img.width}x${img.height}`,
                     '{megapixels}': (pixelCount / 1000000).toFixed(2),
-    
+
                     // New properties
                     '{issquare}': isSquare.toString(),
                     '{pixelcount}': pixelCount.toString(),
@@ -992,15 +1061,15 @@ export class VariableProcessor {
                         return 'above-4k';
                     })(),
                 });
-    
+
                 // Clean up the Blob URL
                 URL.revokeObjectURL(img.src);
-    
+
             } catch (error) {
                 console.error("Error extracting image metadata for File:", error);
             }
         }
-    
+
         return metadata;
     }
 
@@ -1251,5 +1320,36 @@ export class VariableProcessor {
 
     private escapeRegExp(string: string): string {
         return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    private async generateSHA256(text: string): Promise<string> {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(text);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        return hashHex;
+    }
+    
+    private async generateFileContentSHA256(file: TFile | File): Promise<string> {
+        try {
+            let arrayBuffer: ArrayBuffer;
+            
+            if (file instanceof TFile) {
+                // Handle TFile (files in the vault)
+                arrayBuffer = await this.app.vault.readBinary(file);
+            } else {
+                // Handle File (dragged/pasted files)
+                arrayBuffer = await file.arrayBuffer();
+            }
+            
+            const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            return hashHex;
+        } catch (error) {
+            console.error('Error generating SHA-256 hash of file content:', error);
+            return 'error';
+        }
     }
 }

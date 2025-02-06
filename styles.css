@@ -8,13 +8,10 @@
 
 
 /* Preserve image dimensions - with consideration for Image Gallery plugin*/
-.markdown-reading-view img[style*="width"]:not(.grid-item img),
+/* .markdown-reading-view img[style*="width"]:not(.grid-item img),
 .markdown-source-view img[style*="width"]:not(.grid-item img) {
-    /* height: auto !important; */
-}
-
-
-
+    height: auto !important;
+} */
 
 
 
@@ -416,8 +413,10 @@ html[data-theme='dark'] {
 
 
 /* --- HIDE CHEVRON WHEN IMAGE ALIGNMENT IS DISABLED --- */
-.image-converter-settings-tab .image-alignment-settings-section:not(.image-alignment-enabled) .settings-section-chevron-icon { /* Refined selector */
-    display: none; /* Hide chevron when image alignment section is disabled */
+.image-converter-settings-tab .image-alignment-settings-section:not(.image-alignment-enabled) .settings-section-chevron-icon {
+    /* Refined selector */
+    display: none;
+    /* Hide chevron when image alignment section is disabled */
 }
 
 
@@ -430,7 +429,7 @@ html[data-theme='dark'] {
 }
 
 /* --- Hide Settings when Section is Collapsed --- */
-.image-converter-settings-tab .image-alignment-settings-section.settings-section-collapsed > *:not(.settings-section-header) {
+.image-converter-settings-tab .image-alignment-settings-section.settings-section-collapsed>*:not(.settings-section-header) {
     display: none;
 }
 
@@ -490,8 +489,10 @@ html[data-theme='dark'] {
 }
 
 /* --- HIDE CHEVRON WHEN IMAGE ALIGNMENT IS DISABLED --- */
-.image-converter-settings-tab .image-drag-resize-settings-section:not(.image-drag-resize-enabled) .settings-section-chevron-icon { /* Refined selector */
-    display: none; /* Hide chevron when image alignment section is disabled */
+.image-converter-settings-tab .image-drag-resize-settings-section:not(.image-drag-resize-enabled) .settings-section-chevron-icon {
+    /* Refined selector */
+    display: none;
+    /* Hide chevron when image alignment section is disabled */
 }
 
 /* --- Indentation for Settings within Section --- */
@@ -503,28 +504,12 @@ html[data-theme='dark'] {
 }
 
 /* --- Hide Settings when Section is Collapsed --- */
-.image-converter-settings-tab .image-drag-resize-settings-section.settings-section-collapsed > *:not(.settings-section-header) {
+.image-converter-settings-tab .image-drag-resize-settings-section.settings-section-collapsed>*:not(.settings-section-header) {
     display: none;
 }
 
 /* ----------------------------------------------------------------------- */
 /* ----------------------------------------------------------------------- */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1154,12 +1139,14 @@ html[data-theme='dark'] {
 
 /* Toolbar styling */
 .image-converter-annotation-tool-image-annotation-modal .image-converter-annotation-tool-annotation-toolbar {
-    position: relative; /* Changed from absolute */
+    position: relative;
+    /* Changed from absolute */
     top: auto;
     left: auto;
     transform: none;
     display: flex;
-    flex-wrap: wrap; /* Allow wrapping on smaller screens */
+    flex-wrap: wrap;
+    /* Allow wrapping on smaller screens */
     justify-content: center;
     gap: 8px;
     padding: 8px;
@@ -1293,7 +1280,7 @@ html[data-theme='dark'] {
 .image-converter-annotation-tool-image-annotation-modal .opacity-buttons-container .control-label,
 .image-converter-annotation-tool-image-annotation-modal .blend-modes-container .control-label,
 .image-converter-annotation-tool-image-annotation-modal .layer-controls .control-label {
-    margin-top:auto;
+    margin-top: auto;
     margin-bottom: auto;
 }
 
@@ -1363,15 +1350,6 @@ html[data-theme='dark'] {
 
 
 
-
-
-
-
-
-
-
-
-
 .image-converter-annotation-tool-image-annotation-modal .background-dropdown {
     position: fixed;
     z-index: 1000;
@@ -1389,7 +1367,7 @@ html[data-theme='dark'] {
         cursor: pointer;
         border-radius: 3px;
         margin-left: 2px;
-        
+
         &:hover {
             background-color: var(--background-modifier-hover);
         }
@@ -1398,22 +1376,24 @@ html[data-theme='dark'] {
             background-color: var(--background-modifier-active);
         }
 
-        .option-icon, .color-preview {
+        .option-icon,
+        .color-preview {
             width: 20px;
             height: 20px;
             margin-right: 8px;
             border-radius: 3px;
             border: 1px solid var(--background-modifier-border);
-            
+
             svg {
                 width: 100%;
                 height: 100%;
-                
-                path, circle {
+
+                path,
+                circle {
                     stroke: var(--text-muted);
                     fill: none;
                 }
-                
+
                 circle {
                     fill: var(--text-muted);
                 }
@@ -1425,12 +1405,6 @@ html[data-theme='dark'] {
         }
     }
 }
-
-
-
-
-
-
 
 
 
@@ -1515,7 +1489,8 @@ html[data-theme='dark'] {
     flex-wrap: wrap;
     gap: 4px;
     padding: 4px;
-    min-width: auto; /* Remove fixed width */
+    min-width: auto;
+    /* Remove fixed width */
 }
 
 .image-converter-annotation-tool-image-annotation-modal .image-converter-annotation-tool-annotation-toolbar input[type="color"] {
@@ -1567,6 +1542,7 @@ html[data-theme='dark'] {
     display: flex;
     align-items: center;
 }
+
 /* 
 .image-converter-annotation-tool-image-annotation-modal .background-alpha-slider {
     width: 60px;
@@ -1661,6 +1637,7 @@ html[data-theme='dark'] {
 .image-converter-annotation-tool-image-annotation-modal .image-converter-annotation-tool-annotation-toolbar button.mod-cta:hover {
     background-color: var(--interactive-accent-hover);
 }
+
 /* Mobile-specific adjustments */
 @media (max-width: 768px) {
     .image-converter-annotation-tool-image-annotation-modal .image-converter-annotation-tool-annotation-toolbar {
@@ -1807,14 +1784,57 @@ html[data-theme='dark'] {
 }
 
 /* Position handles */
-.crop-tool-modal .nw-resize { top: -5px; left: -5px; cursor: nw-resize; }
-.crop-tool-modal .n-resize { top: -5px; left: 50%; transform: translateX(-50%); cursor: n-resize; }
-.crop-tool-modal .ne-resize { top: -5px; right: -5px; cursor: ne-resize; }
-.crop-tool-modal .w-resize { top: 50%; left: -5px; transform: translateY(-50%); cursor: w-resize; }
-.crop-tool-modal .e-resize { top: 50%; right: -5px; transform: translateY(-50%); cursor: e-resize; }
-.crop-tool-modal .sw-resize { bottom: -5px; left: -5px; cursor: sw-resize; }
-.crop-tool-modal .s-resize { bottom: -5px; left: 50%; transform: translateX(-50%); cursor: s-resize; }
-.crop-tool-modal .se-resize { bottom: -5px; right: -5px; cursor: se-resize; }
+.crop-tool-modal .nw-resize {
+    top: -5px;
+    left: -5px;
+    cursor: nw-resize;
+}
+
+.crop-tool-modal .n-resize {
+    top: -5px;
+    left: 50%;
+    transform: translateX(-50%);
+    cursor: n-resize;
+}
+
+.crop-tool-modal .ne-resize {
+    top: -5px;
+    right: -5px;
+    cursor: ne-resize;
+}
+
+.crop-tool-modal .w-resize {
+    top: 50%;
+    left: -5px;
+    transform: translateY(-50%);
+    cursor: w-resize;
+}
+
+.crop-tool-modal .e-resize {
+    top: 50%;
+    right: -5px;
+    transform: translateY(-50%);
+    cursor: e-resize;
+}
+
+.crop-tool-modal .sw-resize {
+    bottom: -5px;
+    left: -5px;
+    cursor: sw-resize;
+}
+
+.crop-tool-modal .s-resize {
+    bottom: -5px;
+    left: 50%;
+    transform: translateX(-50%);
+    cursor: s-resize;
+}
+
+.crop-tool-modal .se-resize {
+    bottom: -5px;
+    right: -5px;
+    cursor: se-resize;
+}
 
 .crop-tool-modal .crop-modal-buttons {
     padding: var(--size-4-2);
@@ -2054,8 +2074,6 @@ html[data-theme='dark'] {
 
 
 
-
-
 /* ------------------------------DRAG-resize----------------------- */
 
 /* Apply vertical-align only when image is aligned */
@@ -2063,17 +2081,18 @@ html[data-theme='dark'] {
 
 /* THIS IS NEEDED to PREVENT CONTENT SHIFT WHEN HOVERING OVER IMAGE */
 .internal-embed.image-embed img {
-    vertical-align: bottom; 
+    vertical-align: bottom;
 }
 
 
 .image-resize-container {
-    position: relative; /*  Needed for absolute positioning of the pseudo-element */
+    position: relative;
+    /*  Needed for absolute positioning of the pseudo-element */
     display: inline-block;
     font-size: 0;
     line-height: 0;
     margin: 0px;
-    vertical-align: bottom; 
+    vertical-align: bottom;
 }
 
 .image-resize-container::before {
@@ -2083,14 +2102,18 @@ html[data-theme='dark'] {
     left: 0;
     right: 0;
     bottom: 0;
-    border: 1px solid var(--background-modifier-hover); /* Use Obsidian's hover border color */
-    transition: opacity 0.2s ease; /* Smooth transition for visibility */
-    pointer-events: none; /* Ensures the pseudo-element doesn't interfere with interactions */
+    border: 1px solid var(--background-modifier-hover);
+    /* Use Obsidian's hover border color */
+    transition: opacity 0.2s ease;
+    /* Smooth transition for visibility */
+    pointer-events: none;
+    /* Ensures the pseudo-element doesn't interfere with interactions */
     margin: 0;
 }
 
 .image-resize-container:hover::before {
-    opacity: 0.5; /* Show border on hover */
+    opacity: 0.5;
+    /* Show border on hover */
 }
 
 /* .image-resize-container {
@@ -2109,9 +2132,12 @@ html[data-theme='dark'] {
     resize: both;
     overflow: hidden;
 }
+
 .image-resize-border:hover {
-    cursor: default; /* This will be overriden when near edge */
+    cursor: default;
+    /* This will be overriden when near edge */
 }
+
 .image-resize-border:hover:has(.resizing) {
     cursor: grabbing !important;
 }
@@ -2135,7 +2161,8 @@ html[data-theme='dark'] {
 /* Style for external images when resizing is active */
 .image-resize-border.resizing {
     cursor: grabbing !important;
-    user-select: none; /* Prevent accidental text selection */
+    user-select: none;
+    /* Prevent accidental text selection */
 }
 
 /* Style for internal image container when resizing is active */
@@ -2159,6 +2186,7 @@ html[data-theme='dark'] {
 .image-resize-border:hover .image-resize-border:nth-child(4) {
     cursor: ew-resize !important;
 }
+
 /* --------- */
 
 
@@ -2167,16 +2195,20 @@ html[data-theme='dark'] {
     width: 8px !important;
     height: 8px !important;
     /* padding: 1px;    Create larger invisible hit area */
-    background-color: var(--background-secondary); 
-    border: 1px solid var(--interactive-accent); /* Obsidian's UI element border color */
+    background-color: var(--background-secondary);
+    border: 1px solid var(--interactive-accent);
+    /* Obsidian's UI element border color */
     border-radius: 2px;
     cursor: grab;
     opacity: 0;
-    pointer-events: none; /* Make handles non-clickable by default */
+    pointer-events: none;
+    /* Make handles non-clickable by default */
     /* box-shadow: 0 0 0 1.5px var(--background-modifier-border-hover); */
     transform: translateZ(0);
-    transition: opacity 0.2s ease, transform 0.1s ease; /* Smooth transitions */
-    z-index: 2; /* Ensure handles are visible above the image */
+    transition: opacity 0.2s ease, transform 0.1s ease;
+    /* Smooth transitions */
+    z-index: 2;
+    /* Ensure handles are visible above the image */
 }
 
 .image-resize-handle-nw {
@@ -2206,28 +2238,32 @@ html[data-theme='dark'] {
 .image-resize-handle-n {
     top: 0px;
     left: 50%;
-    margin-left: -6px; /* Half of handle width to center */
+    margin-left: -6px;
+    /* Half of handle width to center */
     cursor: ns-resize;
 }
 
 .image-resize-handle-s {
     bottom: 0px;
     left: 50%;
-    margin-left: -6px; /* Half of handle width to center */
+    margin-left: -6px;
+    /* Half of handle width to center */
     cursor: ns-resize;
 }
 
 .image-resize-handle-e {
     right: 0px;
     top: 50%;
-    margin-top: -6px; /* Half of handle height to center */
+    margin-top: -6px;
+    /* Half of handle height to center */
     cursor: ew-resize;
 }
 
 .image-resize-handle-w {
     left: 0px;
     top: 50%;
-    margin-top: -6px; /* Half of handle height to center */
+    margin-top: -6px;
+    /* Half of handle height to center */
     cursor: ew-resize;
 }
 
@@ -2237,14 +2273,15 @@ html[data-theme='dark'] {
 .image-resize-container:hover .image-resize-handle,
 .image-resize-border:hover .image-resize-handle {
     opacity: 1;
-    pointer-events: auto; /* Clickable on hover */
+    pointer-events: auto;
+    /* Clickable on hover */
 }
 
 /* Enhance handle hover effects */
 .image-resize-handle:hover {
     background-color: var(--interactive-hover);
-    transform: scale(1.1); /* Subtle scale increase on hover */
-
+    transform: scale(1.1);
+    /* Subtle scale increase on hover */
 }
 
 
@@ -2264,31 +2301,31 @@ html[data-theme='dark'] {
 /* ------------------------------------------------------------------- */
 
 
+/* --- Map View Compatibility --- */
+.map-view-main .image-resize-container {
+    display: none !important;
+}
+
+.map-view-main .image-resize-border {
+    outline: none !important;
+}
 
 
-
-
-
-
-
-
-
-
-
-
-
-
+/* ------------------------------------------------------------------- */
+/* ------------------------------------------------------------------- */
 
 
 
 
 /* ---------------------- IMAGE ALIGNMENT --------------------------- */
 /* ------------------------------------------------------------------ */
+/* We could add a border or other visual indicator here?? For now it is just
+    generally class to keep for identification purposes.*/
+/*.image-converter-aligned {
+    border: 1px solid red; 
+} */
 
-.image-converter-aligned {
-    /* margin-bottom: 10px;  */
-}
-
+/* General styles for image positioning (using flexbox) - apply to containers */
 .image-position-left {
     justify-content: flex-start; /* Align to the left */
 }
@@ -2301,16 +2338,19 @@ html[data-theme='dark'] {
     justify-content: flex-end; /* Align to the right */
 }
 
+/* General styles for wrapping - apply to containers */
 .image-wrap {
-    float: left; /* Allow text to wrap around */
-    margin-right: 10px; /* Add spacing to the right of the image */
+    float: left; /* Allow text to wrap.  Apply to the image itself. */
+    margin-right: 10px; /* Add spacing. Apply to the image. */
+    clear: left; /* Ensure it clears previous floats.  Apply to the image. */
 }
 
 .image-no-wrap {
-    float: none; /* Prevent text wrapping */
+    float: none; /* Prevent text wrapping. Apply to the image itself. */
+    clear: both; /* Clear any previous floats */
 }
 
-/* Style for the image-embed element to handle alignment without affecting image size */
+/* Styles for internal embeds to control alignment without affecting image size */
 .internal-embed.image-embed.image-position-left {
     text-align: left;
 }
@@ -2323,127 +2363,114 @@ html[data-theme='dark'] {
     text-align: right;
 }
 
-
 /* ===== Live Preview Specific Styles ===== */
-/* Live Preview positioning WITH wrap */
-.markdown-source-view.mod-cm6 .image-wrap.image-position-left,
-.markdown-source-view.mod-cm6 .image-wrap.internal-embed.image-embed.image-position-left {
-    float: left !important;
-    margin: 0 1em 0.5em 0;
-    clear: left !important;
+.markdown-source-view.mod-cm6 {
+
+    /* Left alignment WITH wrapping */
+    .image-wrap.image-position-left {
+        float: left !important;
+        /* !important to override Obsidian */
+        margin: 0 1em 0.5em 0 !important;
+        /* Consistent margins */
+        clear: left !important;
+    }
+
+    /* Right alignment WITH wrapping */
+    .image-wrap.image-position-right {
+        float: right !important;
+        margin: 0em 0 0.5em 1em !important;
+        clear: right !important;
+    }
+
+    /* Left alignment WITHOUT wrapping */
+    .image-no-wrap.image-position-left {
+        display: block !important;
+        margin: auto !important;
+        margin-left: 0 !important;
+        clear: both !important;
+        float: none !important;
+    }
+
+    /* Right alignment WITHOUT wrapping */
+    .image-no-wrap.image-position-right {
+        display: block !important;
+        margin: auto !important;
+        margin-right: 0 !important;
+        clear: both !important;
+        float: none !important;
+    }
+
+    /* Center alignment (always no wrap) */
+    .image-position-center {
+        display: block !important;
+        margin: auto !important;
+        clear: both !important;
+        float: none !important;
+        text-align: center !important;
+        /* For the image itself */
+    }
+
+    /* Center alignment for internal embeds */
+    .internal-embed.image-embed.image-position-center {
+        text-align: center !important;
+    }
 }
-
-.markdown-source-view.mod-cm6 .image-wrap.image-position-right,
-.markdown-source-view.mod-cm6 .image-wrap.internal-embed.image-embed.image-position-right {
-    float: right !important;
-    margin: 0em 0 0.5em 1em;
-    clear: right !important;
-}
-
-/* Image Container for Live Preview */
-.image-container[class*="image-position-"],
-.image-container[class*="image-wrap"],
-.image-container[class*="image-no-wrap"] {
-    display: contents;
-    line-height: 0;
-}
-
-.markdown-source-view.mod-cm6 .cm-line:has(img[width][style*="position"]) { 
-    text-indent: 0;
-    padding-inline-start: 0;
-}
-
-/* Live Preview positioning WITHOUT wrap */
-.markdown-source-view.mod-cm6 .image-no-wrap.image-position-left,
-.markdown-source-view.mod-cm6 .image-no-wrap.internal-embed.image-embed.image-position-left {
-    display: block !important;
-    margin: auto !important;
-    margin-left: 0 !important;
-    clear: both !important;
-    float: none !important;
-}
-
-.markdown-source-view.mod-cm6 .image-no-wrap.image-position-right,
-.markdown-source-view.mod-cm6 .image-no-wrap.internal-embed.image-embed.image-position-right {
-    display: block !important;
-    margin: auto !important;
-    margin-right: 0 !important;
-    clear: both !important;
-    float: none !important;
-}
-
-/* Live Preview center positioning (always no wrap) */
-.markdown-source-view.mod-cm6 .image-position-center,
-.markdown-source-view.mod-cm6 .internal-embed.image-embed.image-position-center {
-    display: block !important;
-    margin: auto !important;
-    clear: both !important;
-    float: none !important;
-    text-align: center !important;
-}
-
-
-
 
 /* ------------------------ Reading Mode Styles --------------------------------------*/
-.markdown-reading-view .image-wrap.image-position-left,
-.markdown-reading-view .image-wrap.internal-embed.image-embed.image-position-left {
-    float: left !important;
-    margin: 0 1em 0.5em 0;
-    clear: left !important;
-}
+.markdown-reading-view {
 
-.markdown-reading-view .image-wrap.image-position-right,
-.markdown-reading-view .image-wrap.internal-embed.image-embed.image-position-right {
-    float: right !important;
-    margin: 0em 0 0.5em 1em;
-    clear: right !important;
-}
+    /* Left alignment WITH wrapping */
+    .image-wrap.image-position-left {
+        float: left !important;
+        margin: 0 1em 0.5em 0 !important;
+        clear: left !important;
+    }
 
-.markdown-reading-view .image-no-wrap.image-position-left,
-.markdown-reading-view .image-no-wrap.internal-embed.image-embed.image-position-left {
-    display: block !important;
-    margin: auto !important;
-    margin-left: 0 !important;
-    clear: both !important;
-    float: none !important;
-}
+    /* Right alignment WITH wrapping */
+    .image-wrap.image-position-right {
+        float: right !important;
+        margin: 0em 0 0.5em 1em !important;
+        clear: right !important;
+    }
 
-.markdown-reading-view .image-no-wrap.image-position-right,
-.markdown-reading-view .image-no-wrap.internal-embed.image-embed.image-position-right {
-    display: block !important;
-    margin: auto !important;
-    margin-right: 0 !important;
-    clear: both !important;
-    float: none !important;
-}
+    /* Left alignment WITHOUT wrapping */
+    .image-no-wrap.image-position-left {
+        display: block !important;
+        margin: auto !important;
+        margin-left: 0 !important;
+        clear: both !important;
+        float: none !important;
+    }
 
-.markdown-reading-view .image-position-center,
-.markdown-reading-view .internal-embed.image-embed.image-position-center {
-    display: block !important;
-    margin: auto !important;
-    clear: both !important;
-    float: none !important;
-    text-align: center !important;
-}
+    /* Right alignment WITHOUT wrapping */
+    .image-no-wrap.image-position-right {
+        display: block !important;
+        margin: auto !important;
+        margin-right: 0 !important;
+        clear: both !important;
+        float: none !important;
+    }
 
+    /* Center alignment (always no wrap) */
+    .image-position-center {
+        display: block !important;
+        margin: auto !important;
+        clear: both !important;
+        float: none !important;
+        text-align: center !important;
+    }
 
-/* --- Map View Compatibility --- */
-/* These styles are for compatibility with the Map View plugin */
-
-.map-view-main .image-resize-container {
-    display: none !important;
-}
-
-.map-view-main .image-resize-border {
-    outline: none !important;
+    /* Center alignment for internal embeds */
+    .internal-embed.image-embed.image-position-center {
+        text-align: center !important;
+    }
 }
 
 /* --- List Handle Position --- */
-/* Adjust handle position when inside lists (Live Preview) */
-.cm-line .image-resize-container li {
-    line-height: normal; /* Reset line-height for list items */
-}
+/* Reset line-height - probably not needed anymore */
+/* .cm-line .image-resize-container li {
+    line-height: normal;
+} */
 
 /* ------------------------------------------------------------------ */
 /* ------------------------------------------------------------------ */
@@ -2460,23 +2487,20 @@ html[data-theme='dark'] {
 
 .image-convert-modal .image-counts-display-container {
     margin-top: 20px;
-    /* Add some space above the counts */
     text-align: center;
-    /* Center-align the counts (optional) */
+    /* Center-align the counts */
 }
 
 .image-counts-display {
-    width: fit-content;      /* Adjust width to fit the content */
-    margin-left: auto;      /* Automatic left margin */
-    margin-right: auto;     /* Automatic right margin */
+    width: fit-content;
+    margin-left: auto;
+    margin-right: auto;
     text-align: center;
 }
 
 .image-convert-modal .modal-subtitle {
     font-size: 0.9em;
-    /* Make the subtitle slightly smaller */
     color: #666;
-    /* Use a lighter color for the subtitle (optional) */
 }
 
 .image-convert-modal .modal-header {

@@ -70,6 +70,8 @@ export default class ImageConverterPlugin extends Plugin {
     // ProcessAllVault
     processAllVaultModal: ProcessAllVaultModal
 
+    private processedImage: ArrayBuffer | null = null;
+    private temporaryBuffers: (ArrayBuffer | Blob | null)[] = [];
 
     async onload() {
         await this.loadSettings();
@@ -254,6 +256,8 @@ export default class ImageConverterPlugin extends Plugin {
             name: 'Open Image Converter Settings',
             callback: () => this.command_openSettingsTab()
         });
+
+        this.addReloadCommand();
     }
 
     async onunload() {
@@ -315,6 +319,48 @@ export default class ImageConverterPlugin extends Plugin {
         } else {
             new Notice('Unable to open settings. Please check if the settings plugin is enabled.');
         }
+    }
+
+    addReloadCommand() {
+        this.addCommand({
+            id: 'reload-plugin',
+            name: 'Reload plugin',
+            callback: async () => {
+                new Notice('Reloading Image Converter plugin...');
+
+                try {
+                    // Use the workaround to access the internal plugins API
+                    const plugins = (this.app as any).plugins;
+
+                    // 1. Disable the plugin
+                    if (plugins && plugins.disablePlugin) {
+                        await plugins.disablePlugin(this.manifest.id);
+                    } else {
+						console.error("Plugins API is not accessible.");
+                        new Notice('Failed to reload plugin: Plugins API unavailable.');
+                        return;
+                    }
+
+					// add some delay as disabling takes some time.
+					await new Promise(resolve => setTimeout(resolve, 500)); // even 100ms would be enough.
+
+                    // 2. Re-enable the plugin
+                    if (plugins && plugins.enablePlugin) {
+                        await plugins.enablePlugin(this.manifest.id);
+                    } else {
+                        console.error("Plugins API is not accessible.");
+                        new Notice('Failed to reload plugin: Plugins API unavailable.');
+                        return;
+                    }
+
+
+                    new Notice('Image Converter plugin reloaded!');
+                } catch (error) {
+                    console.error("Error reloading plugin:", error);
+                    new Notice('Failed to reload plugin. See console for details.');
+                }
+            },
+        });
     }
 
     private dropPaste_registerEvents() {
@@ -607,7 +653,7 @@ export default class ImageConverterPlugin extends Plugin {
                         // - Call the `processImage` function to perform image conversion based on the selected preset or default settings.
                         try {
                             const originalSize = file.size;  // Store original size
-                            const processedImage = await this.imageProcessor.processImage(
+                            this.processedImage = await this.imageProcessor.processImage(
                                 file,
                                 selectedConversionPreset
                                     ? selectedConversionPreset.outputFormat
@@ -645,17 +691,17 @@ export default class ImageConverterPlugin extends Plugin {
                             // - Create the new image file in the Obsidian vault using `createBinary`.
                             // Show space savings notification
                             // Check if processed image is larger than original
-                            if (this.settings.revertToOriginalIfLarger && processedImage.byteLength > originalSize) {
+                            if (this.settings.revertToOriginalIfLarger && this.processedImage.byteLength > originalSize) {
                                 // User wants to revert AND processed image is larger
-                                this.showSizeComparisonNotification(originalSize, processedImage.byteLength);
+                                this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
                                 new Notice(`Using original image for "${file.name}" as processed image is larger.`);
 
                                 const fileBuffer = await file.arrayBuffer();
                                 tfile = await this.app.vault.createBinary(newFullPath, fileBuffer) as TFile;
                             } else {
                                 // Processed image is smaller OR user doesn't want to revert
-                                this.showSizeComparisonNotification(originalSize, processedImage.byteLength);
-                                tfile = await this.app.vault.createBinary(newFullPath, processedImage) as TFile;
+                                this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
+                                tfile = await this.app.vault.createBinary(newFullPath, this.processedImage) as TFile;
                             }
 
                             // Step 3.5.5: Insert Link into Editor
@@ -677,6 +723,9 @@ export default class ImageConverterPlugin extends Plugin {
                                 new Notice(`Failed to process image "${file.name}". Check console for details.`);
                             }
                             return; // Resolve this promise
+                        } finally {
+                            // Clear memory after processing
+                            this.clearMemory();
                         }
                     }
                 } else {
@@ -911,7 +960,7 @@ export default class ImageConverterPlugin extends Plugin {
                         // - Process the image using the selected or default settings.
                         try {
                             const originalSize = file.size;
-                            const processedImage = await this.imageProcessor.processImage(
+                            this.processedImage = await this.imageProcessor.processImage(
                                 file,
                                 selectedConversionPreset
                                     ? selectedConversionPreset.outputFormat
@@ -947,17 +996,17 @@ export default class ImageConverterPlugin extends Plugin {
                             // - Create the new image file in the Obsidian vault using `createBinary`.
                             // - Show space savings notification
                             // Check if processed image is larger than original
-                            if (this.settings.revertToOriginalIfLarger && processedImage.byteLength > originalSize) {
+                            if (this.settings.revertToOriginalIfLarger && this.processedImage.byteLength > originalSize) {
                                 // User wants to revert AND processed image is larger
-                                this.showSizeComparisonNotification(originalSize, processedImage.byteLength);
+                                this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
                                 new Notice(`Using original image for "${file.name}" as processed image is larger.`);
 
                                 const fileBuffer = await file.arrayBuffer();
                                 tfile = await this.app.vault.createBinary(newFullPath, fileBuffer) as TFile;
                             } else {
                                 // Processed image is smaller OR user doesn't want to revert
-                                this.showSizeComparisonNotification(originalSize, processedImage.byteLength);
-                                tfile = await this.app.vault.createBinary(newFullPath, processedImage) as TFile;
+                                this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
+                                tfile = await this.app.vault.createBinary(newFullPath, this.processedImage) as TFile;
                             }
 
 
@@ -996,9 +1045,11 @@ export default class ImageConverterPlugin extends Plugin {
                 }
             } catch (error) {
                 // Step 3.7: Handle Unexpected Errors
-                // - Handle any other unexpected errors.
                 console.error("An unexpected error occurred:", error);
                 new Notice('An unexpected error occurred. Check console for details.');
+            } finally {
+                // Clear memory after processing
+                this.clearMemory();
             }
         });
 
@@ -1086,5 +1137,20 @@ export default class ImageConverterPlugin extends Plugin {
             return presetArray[0];
         }
         return preset;
+    }
+
+    private clearMemory() {
+        // Clear the processed image buffer
+        if (this.processedImage) {
+            this.processedImage = null;
+        }
+    
+        // Following might be pointless, but lets do it still  - clear any ArrayBuffers or Blobs in memory
+        if (this.temporaryBuffers) {
+            this.temporaryBuffers.forEach(buffer => {
+                buffer = null;
+            });
+            this.temporaryBuffers = [];
+        }
     }
 }

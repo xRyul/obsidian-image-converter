@@ -80,7 +80,7 @@ export class ContextMenu extends Component {
 		const target = event.target as HTMLElement;
 		const activeView = this.app.workspace.getActiveViewOfType(View);
 		const isCanvasView = activeView?.getViewType() === 'canvas';
-
+		
 		if (isCanvasView) {
 			return;
 		}

@@ -36,5 +36,41 @@
       "height": "351px",
       "wrap": false
     }
+  },
+  "Welcome.md": {
+    "e34d1d6386784c3be8abaf6db7429766": {
+      "position": "right",
+      "width": "",
+      "height": "",
+      "wrap": false
+    }
+  },
+  "Folder/Test lists.md": {
+    "df2866da349775d306d0e53ed0320ad8": {
+      "position": "right",
+      "width": "",
+      "height": "",
+      "wrap": false
+    },
+    "24b8416219eda6b3f4eceec3575c64a7": {
+      "position": "center",
+      "width": "167px",
+      "height": "167px",
+      "wrap": false
+    },
+    "731d81a61d7ce8a8fece1ea8224b4e0d": {
+      "position": "right",
+      "width": "171px",
+      "height": "133px",
+      "wrap": false
+    }
+  },
+  "Untitled.md": {
+    "476ea64affc0aa9df4c8d045ab91f9fb": {
+      "position": "left",
+      "width": "",
+      "height": "",
+      "wrap": false
+    }
   }
 }

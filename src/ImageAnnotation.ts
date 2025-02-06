@@ -24,7 +24,7 @@ import {
     TBrushEventData,
     ImageFormat,
 } from 'fabric';
-import ImageConverterPlugin from './main'; // Assuming this is your main plugin file
+import ImageConverterPlugin from './main';
 
 import mime from "./mime.min.js"
 
