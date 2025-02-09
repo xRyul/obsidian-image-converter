@@ -128,15 +128,8 @@ export class ImageResizer {
 
         this.editor = null;
         this.markdownView = null;
-    }
 
-    // onActiveLeafChange(markdownView: MarkdownView) {
-    //     this.cleanupHandles();
-    //     this.onload(markdownView);
-    //     if (this.lastMouseEvent) {
-    //         this.handleImageHover(this.lastMouseEvent);
-    //     }
-    // }
+    }
 
     onLayoutChange(markdownView: MarkdownView) {
         // Handle layout changes (e.g., reposition handles)
@@ -146,6 +139,14 @@ export class ImageResizer {
             this.handleImageHover(this.lastMouseEvent);
         }
     }
+
+    // onActiveLeafChange(markdownView: MarkdownView) {
+    //     this.cleanupHandles();
+    //     this.onload(markdownView);
+    //     if (this.lastMouseEvent) {
+    //         this.handleImageHover(this.lastMouseEvent);
+    //     }
+    // }
 
     // onEditorChange(editor: Editor, view: MarkdownView) {
     //     // Handle editor changes (e.g., clean up if an image is removed)
@@ -282,23 +283,39 @@ export class ImageResizer {
      */
     private cleanupHandles() {
         if (this.resizeState.isResizing || !this.activeImage) return;
-
-        // Remove handles if present for internal images
+    
         const handleContainer = this.activeImage.matchParent(
             ".image-resize-container"
         );
         if (handleContainer) {
+            // **OPTIONAL:** Re-apply alignment classes to the image
+            const alignmentClasses = [
+                "image-position-left",
+                "image-position-center",
+                "image-position-right",
+                "image-wrap",
+                "image-no-wrap",
+                "image-converter-aligned"
+            ];
+            for (const className of alignmentClasses) {
+                if (handleContainer.hasClass(className)) {
+                    this.activeImage.addClass(className);
+                    // Remove the class from the container
+                    handleContainer.removeClass(className);
+                }
+            }
+            
+    
             handleContainer.parentNode?.insertBefore(this.activeImage, handleContainer);
             handleContainer.detach();
             this.handles = [];
         }
-
-        // Remove border class and reset cursor if present for external images
+    
         if (this.activeImage.hasClass("image-resize-border")) {
             this.activeImage.removeClass("image-resize-border");
-            this.activeImage.style.cursor = 'default'; // Reset cursor
+            this.activeImage.style.cursor = 'default';
         }
-
+    
         this.activeImage = null;
         this.lastMouseEvent = null;
     }
@@ -311,15 +328,27 @@ export class ImageResizer {
     private createHandles(image: HTMLImageElement) {
         this.cleanupHandles();
         this.activeImage = image;
-
-        // Create a container for resize handles
+    
         const container = createEl("div", { cls: "image-resize-container" });
-
-        // Insert the container before the image and move the image inside
+    
+        // **NEW:** Check for and apply existing alignment classes
+        const alignmentClasses = [
+            "image-position-left",
+            "image-position-center",
+            "image-position-right",
+            "image-wrap",
+            "image-no-wrap",
+            "image-converter-aligned"
+        ];
+        for (const className of alignmentClasses) {
+            if (image.hasClass(className)) {
+                container.addClass(className);
+            }
+        }
+    
         image.parentNode?.insertBefore(container, image);
         container.appendChild(image);
-
-        // Create resize handles for each corner and side
+    
         const handleTypes = ["nw", "ne", "sw", "se", "n", "s", "e", "w"];
         this.handles = handleTypes.map((type) => {
             return container.createEl("div", {

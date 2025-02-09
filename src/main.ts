@@ -79,11 +79,6 @@ export default class ImageConverterPlugin extends Plugin {
 
         // Initialize core components immediately
         this.supportedImageFormats = new SupportedImageFormats(this.app);
-        // First create ImageResizer since ImageAlignment depends on it
-        if (this.settings.isImageResizeEnbaled) {
-            this.imageResizer = new ImageResizer(this);
-            // Don't attach events yet - that will happen in onLayoutReady
-        }
 
         // Initialize ImageAlignment early since it's time-sensitive
         if (this.settings.isImageAlignmentEnabled) {
@@ -91,79 +86,83 @@ export default class ImageConverterPlugin extends Plugin {
                 this.app,
                 this,
                 this.supportedImageFormats,
-                this.imageResizer!
             );
             await this.ImageAlignmentManager.initialize();
-
-            // Apply alignments immediately
-            const currentFile = this.app.workspace.getActiveFile();
-            if (currentFile) {
-                this.ImageAlignmentManager.applyAlignmentsToNote(currentFile.path);
-            }
+            
+            // This helps when opening into note with alignments set and fires less often than e.g. active-leaf-change
+            this.registerEvent(
+                this.app.workspace.on('file-open', (file) => {
+                    if (file) {
+                        this.ImageAlignmentManager?.applyAlignmentsToNote(file.path);
+                    }
+                })
+            );
         }
 
-        // Initialize DRAG/SCROLL rESIZING when swithing notes
-        this.registerEvent(
-            this.app.workspace.on('active-leaf-change', (leaf) => {
-                const markdownView = leaf?.view instanceof MarkdownView ? leaf.view : null;
-                if (markdownView && this.imageResizer && this.settings.isImageResizeEnbaled) {
-                    this.imageResizer.onload(markdownView);
-                }
-                // // Delay the execution slightly to ensure the new window's DOM is ready
-                // setTimeout(() => {
-                //     this.ImageAlignmentManager!.setupImageObserver();
-                // }, 500);
-                // const currentFile = this.app.workspace.getActiveFile();
-                // if (currentFile) {
-                //     // console.log("current file path:", currentFile.path)
-                //     void this.ImageAlignmentManager!.applyAlignmentsToNote(currentFile.path);
-                // }
-            })
-        );
-        
+        // // REDUNDANT - Below already initializes on layout change and for applying alignemnt "file-open" is much better option as it fires much less often
+        // // NOTE: For alignment to be set this must be outside `this.app.workspace.onLayoutReady(() => {`
+        // // Initialize DRAG/SCROLL rESIZING and apply alignments- when opening into the note or swithing notes 
+        // this.registerEvent(
+        //     this.app.workspace.on('active-leaf-change', (leaf) => {
+        //         console.count("active-leaf-change triggered")
+        //         // const markdownView = leaf?.view instanceof MarkdownView ? leaf.view : null;
+        //         // if (markdownView && this.imageResizer && this.settings.isImageResizeEnbaled) {
+        //         //     this.imageResizer.onload(markdownView);
+        //         // }
+        //         // // Delay the execution slightly to ensure the new window's DOM is ready
+        //         // setTimeout(() => {
+        //         //     this.ImageAlignmentManager!.setupImageObserver();
+        //         // }, 500);
+        //         const currentFile = this.app.workspace.getActiveFile();
+        //         if (currentFile) {
+        //             // console.log("current file path:", currentFile.path)
+        //             void this.ImageAlignmentManager!.applyAlignmentsToNote(currentFile.path);
+        //         }
+        //     })
+        // );
 
-        // Apply Image Alignment and Resizing when switching Live to Reading mode etc.
-        this.registerEvent(
-            this.app.workspace.on('layout-change', () => {
-                if (this.settings.isImageAlignmentEnabled) {
-                    const currentFile = this.app.workspace.getActiveFile();
-                    if (currentFile) {
-                        void this.ImageAlignmentManager?.applyAlignmentsToNote(currentFile.path);
-                    }
-                }
-    
-                if (this.settings.isImageResizeEnbaled) {
-                    const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-                    if (activeView && this.imageResizer) {
-                        this.imageResizer.onLayoutChange(activeView);
-                    }
-                }
-            })
-        );
 
         // Wait for layout to be ready before initializing view-dependent components
         this.app.workspace.onLayoutReady(() => {
-            // Now initialize the event handlers for ImageResizer
-            if (this.settings.isImageResizeEnbaled && this.imageResizer) {
-                const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-                if (activeView) {
-                    this.imageResizer.onload(activeView);
-                }
-            }
-
-            // Initialize remaining components
             this.initializeComponents();
+        
+            // Apply Image Alignment and Resizing when switching Live to Reading mode etc.
+            if (this.settings.isImageAlignmentEnabled || this.settings.isImageResizeEnbaled) {
+                this.registerEvent(
+                    this.app.workspace.on('layout-change', () => {
+                        if (this.settings.isImageAlignmentEnabled) {
+                            const currentFile = this.app.workspace.getActiveFile();
+                            if (currentFile) {
+                                void this.ImageAlignmentManager?.applyAlignmentsToNote(currentFile.path);
+                            }
+                        }
+                        
+                        if (this.settings.isImageResizeEnbaled) {
+                            const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+                            if (activeView) {
+                                this.imageResizer?.onLayoutChange(activeView);
+                            }
+                        }
+                    })
+                );
+            }
         });
-
     }
 
-    // extracted initialization logic into a separate async method
     async initializeComponents() {
 
         // Initialize base components first
         this.variableProcessor = new VariableProcessor(this.app, this.settings);
         this.linkFormatter = new LinkFormatter(this.app);
         this.imageProcessor = new ImageProcessor(this.supportedImageFormats);
+
+        if (this.settings.isImageResizeEnbaled) {
+            this.imageResizer = new ImageResizer(this);
+            const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+            if (activeView) {
+                this.imageResizer.onload(activeView);
+            }
+        }
 
         // Initialize components that depend on others
         this.folderAndFilenameManagement = new FolderAndFilenameManagement(
@@ -266,18 +265,18 @@ export default class ImageConverterPlugin extends Plugin {
             this.ImageAlignmentManager.onunload();
             this.ImageAlignmentManager = null;
         }
-    
+
         // Clean up resizer next since other components might depend on it
         if (this.imageResizer) {
             this.imageResizer.onunload();
             this.imageResizer = null;
         }
-    
+
         // Clean up UI components
         if (this.contextMenu) {
             this.contextMenu.onunload();
         }
-    
+
         // Clean up modals
         [
             this.processSingleImageModal,
@@ -287,7 +286,7 @@ export default class ImageConverterPlugin extends Plugin {
         ].forEach(modal => {
             if (modal?.close) modal.close();
         });
-    
+
         // Clean up any open modals
         [
             this.processSingleImageModal,
@@ -297,6 +296,7 @@ export default class ImageConverterPlugin extends Plugin {
         ].forEach(modal => {
             if (modal?.close) modal.close();
         });
+
     }
 
 
@@ -336,13 +336,13 @@ export default class ImageConverterPlugin extends Plugin {
                     if (plugins && plugins.disablePlugin) {
                         await plugins.disablePlugin(this.manifest.id);
                     } else {
-						console.error("Plugins API is not accessible.");
+                        console.error("Plugins API is not accessible.");
                         new Notice('Failed to reload plugin: Plugins API unavailable.');
                         return;
                     }
 
-					// add some delay as disabling takes some time.
-					await new Promise(resolve => setTimeout(resolve, 500)); // even 100ms would be enough.
+                    // add some delay as disabling takes some time.
+                    await new Promise(resolve => setTimeout(resolve, 500)); // even 100ms would be enough.
 
                     // 2. Re-enable the plugin
                     if (plugins && plugins.enablePlugin) {
@@ -501,8 +501,8 @@ export default class ImageConverterPlugin extends Plugin {
                         selectedResizePreset: NonDestructiveResizePreset;
                     }>((resolve) => {
                         new PresetSelectionModal(
-                            this.app, 
-                            this.settings, 
+                            this.app,
+                            this.settings,
                             (conversionPreset, filenamePreset, folderPreset, linkFormatPreset, resizePreset) => {
                                 resolve({
                                     selectedConversionPreset: conversionPreset,
@@ -511,7 +511,7 @@ export default class ImageConverterPlugin extends Plugin {
                                     selectedLinkFormatPreset: linkFormatPreset,
                                     selectedResizePreset: resizePreset,
                                 });
-                            }, 
+                            },
                             this,
                             this.variableProcessor
                         ).open();
@@ -808,8 +808,8 @@ export default class ImageConverterPlugin extends Plugin {
                     selectedResizePreset: NonDestructiveResizePreset;
                 }>((resolve) => {
                     new PresetSelectionModal(
-                        this.app, 
-                        this.settings, 
+                        this.app,
+                        this.settings,
                         (conversionPreset, filenamePreset, folderPreset, linkFormatPreset, resizePreset) => {
                             resolve({
                                 selectedConversionPreset: conversionPreset,
@@ -818,7 +818,7 @@ export default class ImageConverterPlugin extends Plugin {
                                 selectedLinkFormatPreset: linkFormatPreset,
                                 selectedResizePreset: resizePreset,
                             });
-                        }, 
+                        },
                         this,
                         this.variableProcessor
                     ).open();
@@ -1144,7 +1144,7 @@ export default class ImageConverterPlugin extends Plugin {
         if (this.processedImage) {
             this.processedImage = null;
         }
-    
+
         // Following might be pointless, but lets do it still  - clear any ArrayBuffers or Blobs in memory
         if (this.temporaryBuffers) {
             this.temporaryBuffers.forEach(buffer => {

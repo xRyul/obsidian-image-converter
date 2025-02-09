@@ -167,7 +167,8 @@ export class ImageAlignment extends Component {
                 'image-position-center',
                 'image-position-right',
                 'image-wrap',
-                'image-no-wrap'
+                'image-no-wrap',
+                'image-converter-aligned'
             );
             if (options.align !== 'none') {
                 parentEmbed.addClass(`image-position-${options.align}`);

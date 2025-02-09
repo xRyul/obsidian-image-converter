@@ -2084,7 +2084,6 @@ html[data-theme='dark'] {
     vertical-align: bottom;
 }
 
-
 .image-resize-container {
     position: relative;
     /*  Needed for absolute positioning of the pseudo-element */
@@ -2093,6 +2092,7 @@ html[data-theme='dark'] {
     line-height: 0;
     margin: 0px;
     vertical-align: bottom;
+    max-width: fit-content;
 }
 
 .image-resize-container::before {
@@ -2133,22 +2133,6 @@ html[data-theme='dark'] {
     overflow: hidden;
 }
 
-.image-resize-border:hover {
-    cursor: default;
-    /* This will be overriden when near edge */
-}
-
-.image-resize-border:hover:has(.resizing) {
-    cursor: grabbing !important;
-}
-
-.image-resize-border:hover {
-    cursor: default;
-}
-
-.image-resize-border:hover:has(.resizing) {
-    cursor: grabbing !important;
-}
 
 .image-resize-border:hover {
     cursor: default;
@@ -2161,30 +2145,13 @@ html[data-theme='dark'] {
 /* Style for external images when resizing is active */
 .image-resize-border.resizing {
     cursor: grabbing !important;
-    user-select: none;
-    /* Prevent accidental text selection */
+    user-select: none; /* Prevent accidental text selection */
 }
 
 /* Style for internal image container when resizing is active */
 .image-resize-container.resizing {
     cursor: grabbing !important;
     user-select: none;
-}
-
-.image-resize-border:hover .image-resize-border:nth-child(1) {
-    cursor: nwse-resize !important;
-}
-
-.image-resize-border:hover .image-resize-border:nth-child(2) {
-    cursor: nesw-resize !important;
-}
-
-.image-resize-border:hover .image-resize-border:nth-child(3) {
-    cursor: ns-resize !important;
-}
-
-.image-resize-border:hover .image-resize-border:nth-child(4) {
-    cursor: ew-resize !important;
 }
 
 /* --------- */

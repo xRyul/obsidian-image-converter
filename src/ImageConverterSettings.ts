@@ -812,8 +812,9 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         if (this.plugin.settings.isImageResizeEnbaled) { // Conditionally render cleanup options
             // --- Checkboxes for Drag and Scroll Resize ---
             new Setting(imageDragResizeSection)
-                .setName("Enable drag resize")
+                .setName("Enable drag resize 🛈")
                 .setDesc("Allow resizing images by dragging edges of the image.")
+                .setTooltip("This creates a new <DIV> under the image to show resizing HANDLES. But this might cause some incompatibility with certain themes and cause images to jump around.")
                 .addToggle((toggle) =>
                     toggle
                         .setValue(this.plugin.settings.isDragResizeEnabled)

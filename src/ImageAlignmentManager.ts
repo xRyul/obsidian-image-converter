@@ -3,7 +3,7 @@ import { ImageAlignment, ImageAlignmentOptions } from './ImageAlignment';
 import { AsyncLock } from './AsyncLock';
 import ImageConverterPlugin from './main';
 import { SupportedImageFormats } from './SupportedImageFormats';
-import { ImageResizer } from './ImageResizer';
+// import { ImageResizer } from './ImageResizer';
 
 export interface ImagePositionData {
     position: 'left' | 'center' | 'right' | 'none';
@@ -39,15 +39,13 @@ export class ImageAlignmentManager {
         private app: App,
         private plugin: ImageConverterPlugin,
         private supportedImageFormats: SupportedImageFormats,
-        private imageResizer: ImageResizer
+        // private imageResizer: ImageResizer
     ) {
         this.pluginDir = this.getPluginDir();
         this.updateCacheFilePath();
-
+        
         this.imageAlignment = new ImageAlignment(this.app, this.plugin, this);
-
-        this.debouncedValidateNoteCache = debounce(
-            this.validateNoteCache.bind(this),
+        this.debouncedValidateNoteCache = debounce(this.validateNoteCache.bind(this),
             300,
             true
         ) as Debouncer<[notePath: string, noteContent: string], Promise<void>>;
@@ -58,6 +56,13 @@ export class ImageAlignmentManager {
         this.registerEvents();
         // this.setupIsmageObserver(); // STILL needed for managing images inside callouts etc
         this.scheduleCacheCleanup();
+
+        // Apply alignments immediately
+        const currentFile = this.app.workspace.getActiveFile();
+        if (currentFile) {
+            console.log("applying")
+            this.applyAlignmentsToNote(currentFile.path);
+        }
     }
 
     // Simple method for imageAlignment instance
@@ -544,10 +549,10 @@ export class ImageAlignmentManager {
 
         await this.lock.acquire('validateCache', async () => {
 
-            // if simply resizing the image no need to validate, this place is only to remove from cache
-            if (this.imageResizer.resizeState.isDragging || this.imageResizer.resizeState.isResizing || this.imageResizer.resizeState.isScrolling) {
-                return;
-            }
+            // // if simply resizing the image no need to validate, this place is only to remove from cache
+            // if (this.imageResizer.resizeState.isDragging || this.imageResizer.resizeState.isResizing || this.imageResizer.resizeState.isScrolling) {
+            //     return;
+            // }
 
             // **Early exit if no cache for the note**
             if (!this.cache[notePath]) {
