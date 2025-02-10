@@ -482,7 +482,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName("Show window")
-            .setDesc("Choose wether to show processing options on each image drop/paste")
+            .setDesc("Choose whether to show processing options on each image drop/paste")
             .addDropdown((dropdown) => {
                 dropdown
                     .addOption("always", "Always show")
