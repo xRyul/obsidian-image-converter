@@ -681,7 +681,9 @@ export default class ImageConverterPlugin extends Plugin {
                                     : this.settings.enlargeOrReduce,
                                 selectedConversionPreset
                                     ? selectedConversionPreset.allowLargerFiles
-                                    : this.settings.allowLargerFiles
+                                    : this.settings.allowLargerFiles,
+                                selectedConversionPreset, // Pass preset to ImageProcessor
+                                this.settings
                             );
 
 
@@ -988,7 +990,9 @@ export default class ImageConverterPlugin extends Plugin {
                                     : this.settings.enlargeOrReduce,
                                 selectedConversionPreset
                                     ? selectedConversionPreset.allowLargerFiles
-                                    : this.settings.allowLargerFiles
+                                    : this.settings.allowLargerFiles,
+                                selectedConversionPreset, // Pass preset to ImageProcessor
+                                this.settings
                             );
 
                             let tfile: TFile;

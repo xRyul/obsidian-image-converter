@@ -60,7 +60,6 @@ export class ImageAlignmentManager {
         // Apply alignments immediately
         const currentFile = this.app.workspace.getActiveFile();
         if (currentFile) {
-            console.log("applying")
             this.applyAlignmentsToNote(currentFile.path);
         }
     }

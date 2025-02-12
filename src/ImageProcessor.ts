@@ -1,7 +1,8 @@
 // ImageProcessor.ts
-import { Notice } from "obsidian";
+import { Notice, Platform } from "obsidian";
 import { SupportedImageFormats } from "./SupportedImageFormats";
-
+import { ChildProcess, spawn } from 'child_process';
+import { ConversionPreset, ImageConverterSettings, DEFAULT_SETTINGS } from "./ImageConverterSettings";
 // Import types
 export type ResizeMode = 'None' | 'Fit' | 'Fill' | 'LongestEdge' | 'ShortestEdge' | 'Width' | 'Height';
 export type EnlargeReduce = 'Auto' | 'Reduce' | 'Enlarge';
@@ -15,6 +16,8 @@ interface Dimensions {
 export class ImageProcessor {
 
     supportedImageFormats: SupportedImageFormats
+    private preset: ConversionPreset | undefined;
+    private settings: ImageConverterSettings;
 
     constructor(supportedImageFormats: SupportedImageFormats) {
         this.supportedImageFormats = supportedImageFormats;
@@ -38,7 +41,7 @@ export class ImageProcessor {
      */
     async processImage(
         file: Blob,
-        format: 'WEBP' | 'JPEG' | 'PNG' | 'ORIGINAL' | 'NONE',
+        format: 'WEBP' | 'JPEG' | 'PNG' | 'ORIGINAL' | 'NONE' | 'PNGQUANT',
         quality: number,
         colorDepth: number,
         resizeMode: ResizeMode,
@@ -46,8 +49,14 @@ export class ImageProcessor {
         desiredHeight: number,
         desiredLongestEdge: number,
         enlargeOrReduce: EnlargeReduce,
-        allowLargerFiles: boolean
+        allowLargerFiles: boolean,
+        preset?: ConversionPreset, // Add preset parameter
+        settings?: ImageConverterSettings
     ): Promise<ArrayBuffer> {
+
+        this.preset = preset; // Store the preset
+        this.settings = settings ? settings : DEFAULT_SETTINGS;
+
         try {
             // --- Handle NONE format ---
             if (format === 'NONE' && resizeMode !== 'None') {
@@ -247,7 +256,7 @@ export class ImageProcessor {
      */
     private async convertAndCompress(
         file: Blob,
-        format: 'WEBP' | 'JPEG' | 'PNG',
+        format: 'WEBP' | 'JPEG' | 'PNG' | 'PNGQUANT', // Include PNGQUANT here
         quality: number,
         colorDepth: number,
         resizeMode: ResizeMode,
@@ -291,6 +300,27 @@ export class ImageProcessor {
                     enlargeOrReduce,
                     allowLargerFiles
                 );
+            case 'PNGQUANT': {// Add case for PNGQUANT
+                // Retrieve PNGQUANT settings from preset if available, otherwise from global settings.
+                const pngquantExecutablePath = this.preset?.pngquantExecutablePath || this.settings.pngquantExecutablePath;
+                const pngquantQuality = this.preset?.pngquantQuality || this.settings.pngquantQuality;
+                // Check if executable path is set
+                if (!pngquantExecutablePath) {
+                    new Notice("PNGQUANT executable path is not set. Please configure it in the plugin settings.");
+                    return file.arrayBuffer(); // Return original
+                }
+
+                return this.processWithPngquant(
+                    file,
+                    pngquantExecutablePath,
+                    pngquantQuality,
+                    resizeMode,
+                    desiredWidth,
+                    desiredHeight,
+                    desiredLongestEdge,
+                    enlargeOrReduce
+                );
+            }
             default:
                 return file.arrayBuffer(); // No conversion needed
         }
@@ -816,6 +846,119 @@ export class ImageProcessor {
             // Fallback to original file
             return file.arrayBuffer();
         }
+    }
+
+    /**
+     * Processes an image using PNGQUANT.
+     * @param file The image file as a Blob.
+     * @param executablePath The path to the PNGQUANT executable.
+     * @param quality The quality setting for PNGQUANT (e.g., "65-80").
+     * @param resizeMode The resizing mode (same as your existing enum).
+     * @param desiredWidth Desired width for resizing.
+     * @param desiredHeight Desired height for resizing.
+     * @param desiredLongestEdge Desired longest edge for resizing.
+     * @param enlargeOrReduce Whether to enlarge or reduce the image during resizing.
+     * @returns A Promise that resolves to the processed image as an ArrayBuffer.
+     */
+    // Inside ImageProcessor.ts
+
+    private async processWithPngquant(
+        file: Blob,
+        executablePath: string,
+        quality: string,
+        resizeMode: ResizeMode,
+        desiredWidth: number,
+        desiredHeight: number,
+        desiredLongestEdge: number,
+        enlargeOrReduce: EnlargeReduce
+    ): Promise<ArrayBuffer> {
+
+        // 1. Resize if necessary *before* passing to pngquant.
+        let resizedBlob: Blob = file;
+        if (resizeMode !== 'None') {
+            const resizedBuffer = await this.resizeImage(file, resizeMode, desiredWidth, desiredHeight, desiredLongestEdge, enlargeOrReduce);
+            resizedBlob = new Blob([resizedBuffer], { type: file.type });
+        }
+
+        // 2. Get image data as ArrayBuffer
+        const imageData = await resizedBlob.arrayBuffer();
+
+        return new Promise((resolve, reject) => {
+            // 3. Construct the command.  Crucially, we use `-` for both input
+            //    and output to work with stdin and stdout.
+            const args = ['--quality', quality, '-'];
+            let pngquant: ChildProcess | null = null; // Initialize to null
+
+            try {
+                if (Platform.isWin) { // Corrected: Use isWin
+                    pngquant = spawn(executablePath, args, { windowsHide: true });
+                } else {
+                    pngquant = spawn(executablePath, args);
+                }
+            } catch (spawnError) {
+                // Handle spawn errors *immediately*.  This is crucial.
+                const errorMessage = `Failed to spawn pngquant: ${spawnError.message}`;
+                console.error(errorMessage);
+                reject(new Error(errorMessage));
+                return; // Exit early.
+            }
+
+
+            // --- Null Check and Early Return ---
+            if (!pngquant) {
+                reject(new Error("Failed to spawn pngquant process."));
+                return; // *Crucially* return to prevent further execution
+            }
+
+            // 4. Data Handling: We use let for outputData because we might
+            //    reassign it in case of an error.
+            const outputData: Buffer[] = [];
+            let errorData = "";
+
+            // 5. Handle stdout.  pngquant writes the *processed image data* to stdout.
+            // Use nullish coalescing operator to handle potential null
+            pngquant.stdout?.on('data', (data: Buffer) => {
+                outputData.push(data);
+            });
+
+            // 6. Handle stderr.  pngquant writes *errors* to stderr.
+            // Use nullish coalescing operator to handle potential null
+            pngquant.stderr?.on('data', (data: Buffer) => {
+                errorData += data.toString();
+            });
+
+            // 7. Handle Process Exit
+            pngquant.on('close', (code: number) => {
+                if (code !== 0) {
+                    // 8. Error:  If pngquant exits with a non-zero code, it's an error.
+                    const errorMessage = `pngquant failed with code ${code}: ${errorData}`;
+                    console.error(errorMessage);
+                    reject(new Error(errorMessage));
+                    return;
+                }
+
+                // 9. Success: If we get here, pngquant succeeded.  Concatenate the
+                //    Buffer chunks and resolve the promise.
+                const resultBuffer = Buffer.concat(outputData);
+                resolve(resultBuffer);
+            });
+
+            // 10. Handle Errors on the process itself (e.g., couldn't start).
+            // Use nullish coalescing operator to handle potential null
+            pngquant.on('error', (err: Error) => {
+                const errorMessage = `Error with pngquant process: ${err.message}`;
+                console.error(errorMessage);
+                reject(new Error(errorMessage));
+            });
+
+
+            // 11. Write the image data to pngquant's stdin.  This is how we
+            //     pass the image to be processed.
+            // Use nullish coalescing operator to handle potential null
+            pngquant.stdin?.write(Buffer.from(imageData));
+            pngquant.stdin?.end(); // Close stdin - *important*!
+
+        });
     }
 
     /**

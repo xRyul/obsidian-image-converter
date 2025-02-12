@@ -30,7 +30,7 @@ export type FilenamePresetType =
     | "ORIGINAL"
     | "NOTENAME_TIMESTAMP"
     | "CUSTOM";
-export type OutputFormat = "WEBP" | "JPEG" | "PNG" | "ORIGINAL" | "NONE";
+export type OutputFormat = "WEBP" | "JPEG" | "PNG" | "ORIGINAL" | "NONE" | "PNGQUANT";
 export type ResizeMode =
     | "None"
     | "Fit"
@@ -76,6 +76,8 @@ export interface ConversionPreset {
     enlargeOrReduce: EnlargeReduce;
     allowLargerFiles: boolean;
     skipConversionPatterns: string;
+    pngquantExecutablePath?: string;
+    pngquantQuality?: string;
 }
 
 // Interface for UI state management (more structured)
@@ -117,6 +119,10 @@ export interface ImageConverterSettings {
     outputFormat: OutputFormat;
     quality: number;
     colorDepth: number;
+
+    pngquantExecutablePath: string;
+    pngquantQuality: string;
+
     resizeMode: ResizeMode;
     desiredWidth: number;
     desiredHeight: number;
@@ -201,6 +207,10 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
     outputFormat: "NONE",
     quality: 100,
     colorDepth: 1,
+
+    pngquantExecutablePath: "",
+    pngquantQuality: "65-80",
+
     resizeMode: "None",
     desiredWidth: 800,
     desiredHeight: 600,
@@ -225,6 +235,8 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
             enlargeOrReduce: "Auto",
             allowLargerFiles: false,
             skipConversionPatterns: "",
+            pngquantExecutablePath: "",
+            pngquantQuality: "65-80",
         },
         {
             name: "WEBP (75, no resizing)",
@@ -238,6 +250,23 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
             enlargeOrReduce: "Auto",
             allowLargerFiles: false,
             skipConversionPatterns: "",
+            pngquantExecutablePath: "",
+            pngquantQuality: "65-80",
+        },
+        {
+            name: "PNGQUANT (65-80, no resizing)",
+            outputFormat: "PNGQUANT",
+            quality: 75, //Not really used, but can be used for unified settings,
+            colorDepth: 1,
+            resizeMode: "None",
+            desiredWidth: 800,
+            desiredHeight: 600,
+            desiredLongestEdge: 1000,
+            enlargeOrReduce: "Auto",
+            allowLargerFiles: false,
+            skipConversionPatterns: "",
+            pngquantExecutablePath: "",
+            pngquantQuality: "65-80",
         },
     ],
     selectedConversionPreset: "None",
@@ -1718,6 +1747,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         PNG: "PNG",
                         ORIGINAL: "Original (Compress)",
                         NONE: "None (No Conversion/Compression)",
+                        PNGQUANT: "pngquant (Compression for PNG only))", 
                     })
                     .setValue(preset.outputFormat)
                     .onChange((value: OutputFormat) => {
@@ -1766,7 +1796,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         const revertToOriginalSetting = containerEl.querySelector(
             ".image-converter-revert-to-original"
         );
-
+        const pngquantExecutablePathSetting = containerEl.querySelector(".image-converter-pngquant-executable-path");
+        const pngquantQualitySetting = containerEl.querySelector(".image-converter-pngquant-quality");
 
         qualitySetting?.remove();
         colorDepthSetting?.remove();
@@ -1776,6 +1807,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         desiredLongestEdgeSetting?.remove();
         enlargeOrReduceSetting?.remove();
         revertToOriginalSetting?.remove();
+        pngquantExecutablePathSetting?.remove();
+        pngquantQualitySetting?.remove();
 
         // Insert Quality setting after Output Format
         if (["WEBP", "JPEG", "ORIGINAL"].includes(preset.outputFormat)) {
@@ -1826,6 +1859,41 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                     newSetting.settingEl
                 );
             }
+        }
+
+        // Insert PNGQUANT settings after Output Format
+        if (preset.outputFormat === "PNGQUANT") {
+            const executablePathSetting = new Setting(containerEl)
+                .setName("pngquant executable path")
+                .setDesc("The full path to the pngquant executable.")
+                .setClass("image-converter-pngquant-executable-path") // Add class for easy selection
+                .addText((text) => {
+                    text.setValue(preset.pngquantExecutablePath || "")
+                        .onChange((value) => {
+                            preset.pngquantExecutablePath = value;
+                        });
+                    text.inputEl.setAttr('spellcheck', 'false'); // Disable spellcheck
+                });
+            outputFormatSetting.settingEl.insertAdjacentElement(
+                "afterend",
+                executablePathSetting.settingEl
+            );
+
+            const qualitySetting = new Setting(containerEl)
+                .setName("pngquant quality")
+                .setDesc("Quality setting for pngquant (e.g., 65-80). Both min-max values must be provided.")
+                .setClass("image-converter-pngquant-quality") // Add class for easy selection
+                .addText((text) => {
+                    text.setValue(preset.pngquantQuality || "")
+                        .onChange((value) => {
+                            preset.pngquantQuality = value;
+                        });
+                    text.inputEl.setAttr('spellcheck', 'false'); // Disable spellcheck
+                });
+            executablePathSetting.settingEl.insertAdjacentElement( // Insert after executable path
+                "afterend",
+                qualitySetting.settingEl
+            );
         }
 
         // Find the last setting added so far
