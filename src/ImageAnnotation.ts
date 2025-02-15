@@ -24,6 +24,9 @@ import {
     TBrushEventData,
     ImageFormat,
 } from 'fabric';
+import {
+	ConfirmDialog
+} from "./ImageConverterSettings"
 import ImageConverterPlugin from './main';
 
 import mime from "./mime.min.js"
@@ -2569,15 +2572,17 @@ export class ImageAnnotationModal extends Modal {
 
 	private clearAll() {
 		if (!this.canvas) return;
-		
-		// Show confirmation dialog
-		const confirm = window.confirm('Are you sure you want to clear all annotations?');
-		if (!confirm) return;
 	
-		const objects = this.canvas.getObjects();
-		// Remove all objects except the background image (first object)
-		objects.slice(1).forEach(obj => this.canvas.remove(obj));
-		this.canvas.requestRenderAll();
+		const message = 'Are you sure you want to clear all annotations?';
+		const confirmText = 'Clear';
+	
+		new ConfirmDialog(this.app, 'Clear Annotations', message, confirmText, () => {
+			const objects = this.canvas.getObjects();
+			// Remove all objects except the background image (first object)
+			objects.slice(1).forEach(obj => this.canvas.remove(obj));
+			this.canvas.requestRenderAll();
+			this.saveState(); // IMPORTANT: Save the cleared state
+		}).open();
 	}
 
 	private selectAll() {

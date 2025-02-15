@@ -13,7 +13,7 @@ import { VariableProcessor } from "./VariableProcessor";
 import ImageConverterPlugin from "./main";
 
 export class PresetSelectionModal extends Modal {
-    private variableProcessor: VariableProcessor; 
+    private variableProcessor: VariableProcessor;
 
     private selectedConversionPreset: ConversionPreset;
     private selectedFilenamePreset: FilenamePreset;
@@ -55,32 +55,32 @@ export class PresetSelectionModal extends Modal {
     ) {
         super(app);
         this.variableProcessor = variableProcessor;
-    
+
         // Initialize selected presets with current settings or defaults
         this.selectedConversionPreset = this.plugin.getPresetByName(
             this.settings.selectedConversionPreset,
             this.settings.conversionPresets,
             'Conversion'
         );
-        
+
         this.selectedFilenamePreset = this.plugin.getPresetByName(
             this.settings.selectedFilenamePreset,
             this.settings.filenamePresets,
             'Filename'
         );
-        
+
         this.selectedFolderPreset = this.plugin.getPresetByName(
             this.settings.selectedFolderPreset,
             this.settings.folderPresets,
             'Folder'
         );
-        
+
         this.selectedLinkFormatPreset = this.plugin.getPresetByName(
             this.settings.linkFormatSettings.selectedLinkFormatPreset,
             this.settings.linkFormatSettings.linkFormatPresets,
             'LinkFormat'
         );
-        
+
         this.selectedResizePreset = this.plugin.getPresetByName(
             this.settings.nonDestructiveResizeSettings.selectedResizePreset,
             this.settings.nonDestructiveResizeSettings.resizePresets,
@@ -92,10 +92,10 @@ export class PresetSelectionModal extends Modal {
         const { contentEl } = this;
         contentEl.empty();
         contentEl.addClass("image-converter-preset-selection-modal");
-    
+
         // Create main layout container
         const mainContainer = contentEl.createDiv("image-converter-main-container");
-        
+
         // Create two columns
         const settingsColumn = mainContainer.createDiv("image-converter-settings-column");
 
@@ -104,12 +104,12 @@ export class PresetSelectionModal extends Modal {
         settingsColumn.createEl("h2", {
             text: "Image Processing",
         });
-    
+
         // 1. Global Preset Section
         const globalSection = settingsColumn.createDiv("image-converter-preset-section");
         globalSection.createEl("h3", { text: "" });
         this.createGlobalPresetDropdown(globalSection);
-    
+
         // 2. File Organization Section with integrated help button
         const fileSection = settingsColumn.createDiv("image-converter-preset-section");
 
@@ -122,13 +122,13 @@ export class PresetSelectionModal extends Modal {
             .setTooltip("Show available variables")
             .setClass("image-converter-help-button")
             .onClick(() => this.showAvailableVariables());
-        
+
         // Add description
         fileSection.createEl("p", {
             cls: "image-converter-section-description",
-            text: "Add your own custom folder/filename in the input field or select one of the one of the option defined in the preset."
+            text: "Some default presets are already pre-defined. You can create more presets in the main plugin settings window. After selecting custom made preset a new input field will show pre-filled with template from the preset which you can always manually overwrite."
         });
-    
+
         // Inputs container
         const inputsContainer = fileSection.createDiv("image-converter-inputs-container");
 
@@ -144,10 +144,11 @@ export class PresetSelectionModal extends Modal {
                     (p) => p.name === value
                 ) || this.settings.folderPresets[0];
                 this.updatePreviews();
+                this.updateFolderInputFieldVisibility(); // Add this line
             }
         );
-    
-        new Setting(folderGroup)
+
+        this.customFolderSetting = new Setting(folderGroup)
             .addText((text) => {
                 this.customFolderText = text;
                 text.setPlaceholder("e.g., {YYYY}/{MM}/{notename}")
@@ -156,7 +157,8 @@ export class PresetSelectionModal extends Modal {
                 text.inputEl.setAttr("spellcheck", "false");
                 return text;
             });
-    
+        this.updateFolderInputFieldVisibility(); // Initial visibility check
+
         // Filename Organization
         const filenameGroup = inputsContainer.createDiv("image-converter-input-group");
         this.filenamePresetDropdown = this.createPresetDropdown(
@@ -174,10 +176,11 @@ export class PresetSelectionModal extends Modal {
                     );
                 }
                 this.updatePreviews();
+                this.updateFilenameInputFieldVisibility(); // Add this line
             }
         );
-    
-        new Setting(filenameGroup)
+
+        this.customFilenameSetting = new Setting(filenameGroup)
             .addText((text) => {
                 this.customFilenameText = text;
                 text.setPlaceholder("e.g., {imagename}-{timestamp}")
@@ -186,17 +189,18 @@ export class PresetSelectionModal extends Modal {
                 text.inputEl.setAttr("spellcheck", "false");
                 return text;
             });
-    
+        this.updateFilenameInputFieldVisibility(); // Initial visibility check
+
         // Preview section
         const previewSection = fileSection.createDiv("image-converter-preview-section");
         const previewHeader = previewSection.createDiv("image-converter-preview-header");
-        previewHeader.createEl("span", { 
+        previewHeader.createEl("span", {
             cls: "image-converter-preview-icon",
             text: "" // Or use any other icon system you prefer
         });
-        previewHeader.createEl("span", { 
+        previewHeader.createEl("span", {
             text: "Path preview",
-            cls: "image-converter-preview-title" 
+            cls: "image-converter-preview-title"
         });
         this.previewContainer = previewSection.createDiv("image-converter-modal-preview-container");
 
@@ -204,9 +208,9 @@ export class PresetSelectionModal extends Modal {
         // 3. Conversion Section
         const conversionSection = settingsColumn.createDiv("image-converter-preset-section");
         conversionSection.createEl("h3", { text: "Image conversion" });
-        
+
         const conversionContainer = conversionSection.createDiv("image-converter-conversion-container");
-        
+
         this.conversionPresetDropdown = this.createPresetDropdown(
             conversionContainer,
             "Format",
@@ -220,11 +224,11 @@ export class PresetSelectionModal extends Modal {
             }
         );
         this.updateConversionSettings(conversionContainer);
-    
+
         // 4. Additional Settings Section
         const additionalSection = settingsColumn.createDiv("image-converter-preset-section");
         additionalSection.createEl("h3", { text: "Additional settings" });
-    
+
         this.linkFormatPresetDropdown = this.createPresetDropdown(
             additionalSection,
             "Link format",
@@ -236,7 +240,7 @@ export class PresetSelectionModal extends Modal {
                 ) || this.settings.linkFormatSettings.linkFormatPresets[0];
             }
         );
-    
+
         this.resizePresetDropdown = this.createPresetDropdown(
             additionalSection,
             "Resize (non-destructive)",
@@ -248,10 +252,10 @@ export class PresetSelectionModal extends Modal {
                 ) || this.settings.nonDestructiveResizeSettings.resizePresets[0];
             }
         );
-        
+
         // 5. Action Buttons Section (at the bottom of settings column)
         const actionSection = settingsColumn.createDiv("image-converter-action-section");
-        
+
         new Setting(actionSection)
             .addButton((button: ButtonComponent) => {
                 button
@@ -267,7 +271,7 @@ export class PresetSelectionModal extends Modal {
                         }
                     });
             });
-    
+
         new Setting(actionSection)
             .addButton((button) => {
                 button
@@ -491,6 +495,8 @@ export class PresetSelectionModal extends Modal {
 
                     this.updateFilenameSettings(contentEl);
                     this.updateFolderPreview();
+                    this.updateFolderInputFieldVisibility();    // Add this
+                    this.updateFilenameInputFieldVisibility();  // Add this
                 });
             });
     }
@@ -655,13 +661,44 @@ export class PresetSelectionModal extends Modal {
         new AvailableVariablesModal(this.app, this.variableProcessor).open();
     }
 
+
+    // NEW method
+    private updateFolderInputFieldVisibility() {
+        if (this.customFolderSetting) {
+            // Assuming 'DEFAULT' is a type where you want to hide the input
+            if (this.selectedFolderPreset.type === 'DEFAULT'
+                || this.selectedFolderPreset.type === 'ROOT'
+                || this.selectedFolderPreset.type === 'CURRENT'
+                || this.selectedFolderPreset.type === 'SUBFOLDER') {
+                this.customFolderSetting.settingEl.hide();
+            } else {
+                this.customFolderSetting.settingEl.show();
+            }
+        }
+    }
+
+    // NEW method
+    private updateFilenameInputFieldVisibility() {
+        if (this.customFilenameSetting) {
+            // Check if a default preset (besides 'Default (No change)') is selected
+            const isDefaultPreset = this.selectedFilenamePreset.name === "Keep original name" ||
+                this.selectedFilenamePreset.name === "NoteName-Timestamp";
+
+            if (isDefaultPreset) {
+                this.customFilenameSetting.settingEl.hide();
+            } else {
+                this.customFilenameSetting.settingEl.show();
+            }
+        }
+    }
+
     onClose() {
         // Clear any pending update timeout
         if (this.updateTimeout) {
             window.clearTimeout(this.updateTimeout);
             this.updateTimeout = null;
         }
-    
+
         // Clear nullable settings and components
         this.conversionQualitySetting = null;
         this.conversionColorDepthSetting = null;
@@ -670,7 +707,7 @@ export class PresetSelectionModal extends Modal {
         this.customFolderSetting = null;
         this.customFolderText = null;
         this.previewContainer = null;
-    
+
         // Empty the modal content
         const { contentEl } = this;
         contentEl.empty();

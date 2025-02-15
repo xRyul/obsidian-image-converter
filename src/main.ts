@@ -1117,7 +1117,7 @@ export default class ImageConverterPlugin extends Plugin {
         }
     }
 
-    private showSizeComparisonNotification(originalSize: number, newSize: number) {
+    showSizeComparisonNotification(originalSize: number, newSize: number) {
         if (!this.settings.showSpaceSavedNotification) return;
 
         const originalSizeFormatted = this.formatFileSize(originalSize);

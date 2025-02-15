@@ -2335,11 +2335,11 @@ html[data-theme='dark'] {
 
     /* Left alignment WITH wrapping */
     .image-wrap.image-position-left {
-        float: left !important;
-        /* !important to override Obsidian */
+        float: left !important; /* !important to override Obsidian */
         margin: 0 1em 0.5em 0 !important;
-        /* Consistent margins */
         clear: left !important;
+        /* position: relative !important;  to allow right-click and allow it to be above any other content
+        z-index: 10 !important */
     }
 
     /* Right alignment WITH wrapping */
@@ -2347,6 +2347,8 @@ html[data-theme='dark'] {
         float: right !important;
         margin: 0em 0 0.5em 1em !important;
         clear: right !important;
+        /* position: relative; THIS WORKS BUT BREAKS HANDLES to allow right-click and allow it to be above any other content */
+        /* z-index: 10; */
     }
 
     /* Left alignment WITHOUT wrapping */
@@ -2516,3 +2518,4 @@ html[data-theme='dark'] {
     border: 1px solid var(--background-modifier-border);
     border-radius: 5px;
 }
+

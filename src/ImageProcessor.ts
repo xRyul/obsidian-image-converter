@@ -3,6 +3,12 @@ import { Notice, Platform } from "obsidian";
 import { SupportedImageFormats } from "./SupportedImageFormats";
 import { ChildProcess, spawn } from 'child_process';
 import { ConversionPreset, ImageConverterSettings, DEFAULT_SETTINGS } from "./ImageConverterSettings";
+
+
+import * as fs from 'fs/promises'; // Import Node.js file system functions (promises version)
+import * as os from 'os';          // Import Node.js os module
+import * as path from 'path';    // Import Node.js path module
+
 // Import types
 export type ResizeMode = 'None' | 'Fit' | 'Fill' | 'LongestEdge' | 'ShortestEdge' | 'Width' | 'Height';
 export type EnlargeReduce = 'Auto' | 'Reduce' | 'Enlarge';
@@ -41,7 +47,7 @@ export class ImageProcessor {
      */
     async processImage(
         file: Blob,
-        format: 'WEBP' | 'JPEG' | 'PNG' | 'ORIGINAL' | 'NONE' | 'PNGQUANT',
+        format: 'WEBP' | 'JPEG' | 'PNG' | 'ORIGINAL' | 'NONE' | 'PNGQUANT' | 'AVIF',
         quality: number,
         colorDepth: number,
         resizeMode: ResizeMode,
@@ -256,7 +262,7 @@ export class ImageProcessor {
      */
     private async convertAndCompress(
         file: Blob,
-        format: 'WEBP' | 'JPEG' | 'PNG' | 'PNGQUANT', // Include PNGQUANT here
+        format: 'WEBP' | 'JPEG' | 'PNG' | 'PNGQUANT' | 'AVIF', // Include AVIF
         quality: number,
         colorDepth: number,
         resizeMode: ResizeMode,
@@ -302,7 +308,7 @@ export class ImageProcessor {
                 );
             case 'PNGQUANT': {// Add case for PNGQUANT
                 // Retrieve PNGQUANT settings from preset if available, otherwise from global settings.
-                const pngquantExecutablePath = this.preset?.pngquantExecutablePath || this.settings.pngquantExecutablePath;
+                const pngquantExecutablePath = this.preset?.pngquantExecutablePath || this.settings.singleImageModalSettings?.pngquantExecutablePath;
                 const pngquantQuality = this.preset?.pngquantQuality || this.settings.pngquantQuality;
                 // Check if executable path is set
                 if (!pngquantExecutablePath) {
@@ -321,9 +327,331 @@ export class ImageProcessor {
                     enlargeOrReduce
                 );
             }
+            case 'AVIF': {
+                // Retrieve AVIF settings from preset if available, or from SingleImageModal
+                const ffmpegExecutablePath = this.preset?.ffmpegExecutablePath || this.settings.singleImageModalSettings?.ffmpegExecutablePath;
+                const ffmpegCrf = this.preset?.ffmpegCrf || this.settings.ffmpegCrf;
+                const ffmpegPreset = this.preset?.ffmpegPreset || this.settings.ffmpegPreset;
+
+                // Check if executable path is set
+                if (!ffmpegExecutablePath) {
+                    new Notice("FFmpeg executable path is not set. Please configure it in the plugin settings.");
+                    return file.arrayBuffer();  // Return original
+                }
+
+                return this.processWithFFmpeg(
+                    file,
+                    ffmpegExecutablePath,
+                    ffmpegCrf,
+                    ffmpegPreset,
+                    resizeMode,
+                    desiredWidth,
+                    desiredHeight,
+                    desiredLongestEdge,
+                    enlargeOrReduce
+                );
+            }
             default:
                 return file.arrayBuffer(); // No conversion needed
         }
+    }
+
+    /**
+     * Processes an image using FFmpeg for AVIF conversion.
+     * @param file The image file as a Blob.
+     * @param executablePath The path to the FFmpeg executable.
+     * @param crf The Constant Rate Factor for AVIF encoding (lower is better quality, 0-63).
+     * @param preset  The encoding preset (e.g., 'veryslow', 'slow', 'medium', 'fast').
+     * @param resizeMode The resizing mode (same as your existing enum).
+     * @param desiredWidth Desired width for resizing.
+     * @param desiredHeight Desired height for resizing.
+     * @param desiredLongestEdge Desired longest edge for resizing.
+     * @param enlargeOrReduce Whether to enlarge or reduce the image during resizing.
+     * @returns A Promise that resolves to the processed image as an ArrayBuffer.
+     */
+    private async processWithFFmpeg(
+        file: Blob,
+        executablePath: string,
+        crf: number,
+        preset: string,
+        resizeMode: ResizeMode,
+        desiredWidth: number,
+        desiredHeight: number,
+        desiredLongestEdge: number,
+        enlargeOrReduce: EnlargeReduce
+    ): Promise<ArrayBuffer> {
+
+        let resizedBlob: Blob = file;
+        if (resizeMode !== 'None') {
+            const resizedBuffer = await this.resizeImage(file, resizeMode, desiredWidth, desiredHeight, desiredLongestEdge, enlargeOrReduce);
+            resizedBlob = new Blob([resizedBuffer], { type: file.type });
+        }
+
+        const dimensions = await this.getImageDimensions(resizedBlob);
+        const imageData = await resizedBlob.arrayBuffer();
+
+        // Check if the image has transparency
+        const hasTransparency = await this.checkForTransparency(resizedBlob);
+
+        // Create a temporary file path
+        const tempDir = os.tmpdir(); // Get the system's temporary directory
+        const tempFileName = `obsidian_image_converter_${Date.now()}.avif`; // Unique filename
+        const tempFilePath = path.join(tempDir, tempFileName);
+
+
+        return new Promise((resolve, reject) => {
+            const scaleFilter = this.buildScaleFilter(resizeMode, dimensions, desiredWidth, desiredHeight, desiredLongestEdge);
+
+            let args: string[];
+
+            if (hasTransparency) {
+                // For images with transparency
+                let filterChain = 'format=rgba';
+                if (scaleFilter) {
+                    filterChain += ',' + scaleFilter;
+                }
+
+                args = [
+                    '-i', 'pipe:0',
+                    '-map', '0',
+                    '-map', '0',
+                    '-filter:v:0', filterChain,
+                    '-filter:v:1', 'alphaextract',
+                    '-c:v', 'libaom-av1',
+                    '-crf', crf.toString(),
+                    '-preset', preset,
+                    '-still-picture', '1',
+                    '-y',
+                    '-f', 'avif',
+                    tempFilePath
+                ];
+            } else {
+                // For images without transparency
+                let filterChain = 'format=yuv420p';
+                if (scaleFilter) {
+                    filterChain += ',' + scaleFilter;
+                }
+
+                args = [
+                    '-i', 'pipe:0',
+                    '-filter:v', filterChain,
+                    '-c:v', 'libaom-av1',
+                    '-crf', crf.toString(),
+                    '-preset', preset,
+                    '-still-picture', '1',
+                    '-y',
+                    '-f', 'avif',
+                    tempFilePath
+                ];
+            }
+
+            let ffmpeg: ChildProcess | null = null;
+
+            try {
+                if (Platform.isWin) {
+                    ffmpeg = spawn(executablePath, args, { windowsHide: true });
+                } else {
+                    ffmpeg = spawn(executablePath, args);
+                }
+            } catch (spawnError) {
+                const errorMessage = `Failed to spawn FFmpeg: ${spawnError.message}`;
+                console.error(errorMessage);
+                reject(new Error(errorMessage));
+                return;
+            }
+
+            if (!ffmpeg) {
+                reject(new Error("Failed to spawn FFmpeg process."));
+                return;
+            }
+
+            // No need for outputData array now, we're writing to a file.
+            let errorData = "";
+
+            // We don't need stdout listener when writing to a file.
+            // ffmpeg.stdout?.on('data', (data: Buffer) => {
+            //     outputData.push(data);
+            // });
+
+            ffmpeg.stderr?.on('data', (data: Buffer) => {
+                errorData += data.toString();
+            });
+
+            ffmpeg.on('close', async (code: number) => { // Make this callback async
+                if (code !== 0) {
+                    const errorMessage = `FFmpeg failed with code ${code}: ${errorData}`;
+                    console.error(errorMessage);
+                    // Clean up temp file on error
+                    try { await fs.unlink(tempFilePath); } catch (e) { /* ignore errors during cleanup */ }
+                    reject(new Error(errorMessage));
+                    return;
+                }
+
+                try {
+                    // Read the temporary file as an ArrayBuffer
+                    const fileBuffer = await fs.readFile(tempFilePath);
+                    resolve(fileBuffer);
+                } catch (readError) {
+                    console.error("Error reading temporary file:", readError);
+                    reject(new Error(`Failed to read the processed image from the temporary file: ${readError}`));
+                } finally {
+                    //  Clean up the temporary file.  VERY IMPORTANT.
+                    try {
+                        await fs.unlink(tempFilePath);
+                    } catch (unlinkError) {
+                        console.error("Error deleting temporary file:", unlinkError);
+                        //  Don't reject here; we already resolved/rejected.
+                    }
+                }
+            });
+
+            ffmpeg.on('error', (err: Error) => {
+                const errorMessage = `Error with FFmpeg process: ${err.message}`;
+                console.error(errorMessage);
+                // Clean up temp file on error (if it exists)
+                fs.unlink(tempFilePath).catch(e => { /* ignore errors during cleanup */ });
+                reject(new Error(errorMessage));
+            });
+
+            ffmpeg.stdin?.write(Buffer.from(imageData));
+            ffmpeg.stdin?.end();
+        });
+    }
+
+    // Add this helper method to check for transparency
+    private async checkForTransparency(blob: Blob): Promise<boolean> {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    resolve(false);
+                    return;
+                }
+
+                ctx.drawImage(img, 0, 0);
+
+                // Get image data and check for non-255 alpha values
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const data = imageData.data;
+
+                for (let i = 3; i < data.length; i += 4) {
+                    if (data[i] < 255) {
+                        resolve(true);
+                        return;
+                    }
+                }
+
+                resolve(false);
+            };
+
+            img.onerror = () => resolve(false);
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                img.src = e.target?.result as string;
+            };
+            reader.onerror = () => resolve(false);
+            reader.readAsDataURL(blob);
+        });
+    }
+
+    /**
+     * Helper function to get the dimensions of an image Blob.
+     */
+    private async getImageDimensions(blob: Blob): Promise<{ width: number, height: number }> {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                resolve({ width: img.naturalWidth, height: img.naturalHeight });
+            };
+            img.onerror = () => {
+                reject(new Error("Failed to load image to get dimensions."));
+            }
+            img.src = URL.createObjectURL(blob);
+        });
+    }
+
+
+    /**
+     * Builds the FFmpeg scale filter string based on resize mode and desired dimensions.
+     * Returns null if no scaling is needed.
+     */
+    private buildScaleFilter(
+        resizeMode: ResizeMode,
+        dimensions: { width: number, height: number },
+        desiredWidth: number,
+        desiredHeight: number,
+        desiredLongestEdge: number
+    ): string | null {
+
+        const { width, height } = dimensions;
+        const aspectRatio = width / height;
+
+        let targetWidth: number;
+        let targetHeight: number;
+
+        switch (resizeMode) {
+            case 'None':
+                return null;  // No scaling
+
+            case 'Fit':
+                if (aspectRatio > desiredWidth / desiredHeight) {
+                    targetWidth = desiredWidth;
+                    targetHeight = Math.round(desiredWidth / aspectRatio);
+                } else {
+                    targetHeight = desiredHeight;
+                    targetWidth = Math.round(desiredHeight * aspectRatio);
+                }
+                break;
+
+            case 'Fill':
+                if (aspectRatio > desiredWidth / desiredHeight) {
+                    targetHeight = desiredHeight;
+                    targetWidth = Math.round(desiredHeight * aspectRatio);
+                } else {
+                    targetWidth = desiredWidth;
+                    targetHeight = Math.round(desiredWidth / aspectRatio);
+                }
+                break;
+
+            case 'LongestEdge':
+                if (width > height) {
+                    targetWidth = desiredLongestEdge;
+                    targetHeight = Math.round(desiredLongestEdge / aspectRatio);
+                } else {
+                    targetHeight = desiredLongestEdge;
+                    targetWidth = Math.round(desiredLongestEdge * aspectRatio);
+                }
+                break;
+
+            case 'ShortestEdge':  // Corrected case
+                if (width < height) {  // Corrected condition
+                    targetWidth = desiredLongestEdge;
+                    targetHeight = Math.round(desiredLongestEdge / aspectRatio);
+                } else {
+                    targetHeight = desiredLongestEdge;
+                    targetWidth = Math.round(desiredLongestEdge * aspectRatio);
+                }
+                break;
+
+            case 'Width':
+                targetWidth = desiredWidth;
+                targetHeight = Math.round(desiredWidth / aspectRatio);
+                break;
+
+            case 'Height':
+                targetHeight = desiredHeight;
+                targetWidth = Math.round(desiredHeight * aspectRatio);
+                break;
+
+            default:
+                return null; // Should not happen, but good for completeness
+        }
+        return `scale=${targetWidth}:${targetHeight}`;
     }
 
     /**
@@ -476,14 +804,14 @@ export class ImageProcessor {
             results.sort((a, b) => a.size - b.size);
 
             // If we don't allow larger files, filter out results larger than original
-            if (!allowLargerFiles) {
-                const validResults = results.filter(result => result.size <= file.size);
-                if (validResults.length > 0) {
-                    return validResults[0].data;
-                }
-                // If no valid results, return original file
-                return file.arrayBuffer();
-            }
+            // if (!allowLargerFiles) {
+            //     const validResults = results.filter(result => result.size <= file.size);
+            //     if (validResults.length > 0) {
+            //         return validResults[0].data;
+            //     }
+            //     // If no valid results, return original file
+            //     return file.arrayBuffer();
+            // }
 
             // Return the smallest result
             return results[0].data;
@@ -648,14 +976,14 @@ export class ImageProcessor {
             results.sort((a, b) => a.size - b.size);
 
             // If we don't allow larger files, filter out results larger than original
-            if (!allowLargerFiles) {
-                const validResults = results.filter(result => result.size <= file.size);
-                if (validResults.length > 0) {
-                    return validResults[0].data;
-                }
-                // If no valid results, return original file
-                return file.arrayBuffer();
-            }
+            // if (!allowLargerFiles) {
+            //     const validResults = results.filter(result => result.size <= file.size);
+            //     if (validResults.length > 0) {
+            //         return validResults[0].data;
+            //     }
+            //     // If no valid results, return original file
+            //     return file.arrayBuffer();
+            // }
 
             // Return the smallest result
             return results[0].data;
@@ -829,14 +1157,14 @@ export class ImageProcessor {
                 .sort((a, b) => a.size - b.size);
 
             // If we don't allow larger files, filter out results larger than original
-            if (!allowLargerFiles) {
-                const smallerResults = validResults.filter(result => result.size <= file.size);
-                if (smallerResults.length > 0) {
-                    return smallerResults[0].data;
-                }
-                // If no valid results, return original file
-                return file.arrayBuffer();
-            }
+            // if (!allowLargerFiles) {
+            //     const smallerResults = validResults.filter(result => result.size <= file.size);
+            //     if (smallerResults.length > 0) {
+            //         return smallerResults[0].data;
+            //     }
+            //     // If no valid results, return original file
+            //     return file.arrayBuffer();
+            // }
 
             // Return the smallest result
             return validResults[0].data;
@@ -972,7 +1300,7 @@ export class ImageProcessor {
      * @param enlargeOrReduce - Whether to enlarge or reduce the image.
      * @returns A Promise that resolves to the compressed image as an ArrayBuffer.
      */
-    private async compressOriginalImage(
+    async compressOriginalImage(
         file: Blob,
         quality: number,
         resizeMode: ResizeMode,
@@ -1062,7 +1390,7 @@ export class ImageProcessor {
      * @param enlargeOrReduce - Whether to enlarge or reduce the image.
      * @returns A Promise that resolves to the resized image as an ArrayBuffer.
      */
-    private async resizeImage(
+    async resizeImage(
         file: Blob,
         resizeMode: ResizeMode,
         desiredWidth: number,

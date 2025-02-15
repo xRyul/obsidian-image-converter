@@ -13,6 +13,7 @@ import { VariableProcessor } from "./VariableProcessor";
 import { LinkFormat, PathFormat, LinkFormatSettings, LinkFormatPreset } from "./LinkFormatSettings";
 import { NonDestructiveResizeSettings, NonDestructiveResizePreset, ResizeDimension, ResizeScaleMode, ResizeUnits } from "./NonDestructiveResizeSettings";
 import { ToolPreset } from "./ImageAnnotation";
+import { SingleImageModalSettings } from './ProcessSingleImageModal';
 
 import Sortable from "sortablejs";
 
@@ -30,7 +31,7 @@ export type FilenamePresetType =
     | "ORIGINAL"
     | "NOTENAME_TIMESTAMP"
     | "CUSTOM";
-export type OutputFormat = "WEBP" | "JPEG" | "PNG" | "ORIGINAL" | "NONE" | "PNGQUANT";
+export type OutputFormat = "WEBP" | "JPEG" | "PNG" | "ORIGINAL" | "NONE" | "PNGQUANT" | "AVIF";
 export type ResizeMode =
     | "None"
     | "Fit"
@@ -78,6 +79,9 @@ export interface ConversionPreset {
     skipConversionPatterns: string;
     pngquantExecutablePath?: string;
     pngquantQuality?: string;
+    ffmpegExecutablePath?: string;
+    ffmpegCrf?: number;
+    ffmpegPreset?: string;
 }
 
 // Interface for UI state management (more structured)
@@ -120,8 +124,11 @@ export interface ImageConverterSettings {
     quality: number;
     colorDepth: number;
 
-    pngquantExecutablePath: string;
     pngquantQuality: string;
+
+    ffmpegExecutablePath: string;  // For AVIF
+    ffmpegCrf: number;             // For AVIF
+    ffmpegPreset: string;          // For AVIF
 
     resizeMode: ResizeMode;
     desiredWidth: number;
@@ -142,6 +149,8 @@ export interface ImageConverterSettings {
 
     neverProcessFilenames: string;
     modalBehavior: ModalBehavior;
+
+    singleImageModalSettings?: SingleImageModalSettings;
 
     ProcessCurrentNoteconvertTo: string;
     ProcessCurrentNotequality: number;
@@ -208,8 +217,11 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
     quality: 100,
     colorDepth: 1,
 
-    pngquantExecutablePath: "",
     pngquantQuality: "65-80",
+
+    ffmpegExecutablePath: "",  // Default for AVIF
+    ffmpegCrf: 23,             // Default for AVIF
+    ffmpegPreset: "medium",          // Default for AVIF
 
     resizeMode: "None",
     desiredWidth: 800,
@@ -237,6 +249,9 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
             skipConversionPatterns: "",
             pngquantExecutablePath: "",
             pngquantQuality: "65-80",
+            ffmpegExecutablePath: "",
+            ffmpegCrf: 23,
+            ffmpegPreset: "medium",
         },
         {
             name: "WEBP (75, no resizing)",
@@ -252,6 +267,9 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
             skipConversionPatterns: "",
             pngquantExecutablePath: "",
             pngquantQuality: "65-80",
+            ffmpegExecutablePath: "",
+            ffmpegCrf: 23,
+            ffmpegPreset: "medium",
         },
         {
             name: "PNGQUANT (65-80, no resizing)",
@@ -267,6 +285,9 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
             skipConversionPatterns: "",
             pngquantExecutablePath: "",
             pngquantQuality: "65-80",
+            ffmpegExecutablePath: "",
+            ffmpegCrf: 23,
+            ffmpegPreset: "medium",
         },
     ],
     selectedConversionPreset: "None",
@@ -287,6 +308,8 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
     dropPasteCursorLocation: "back",
     neverProcessFilenames: "",
     modalBehavior: "never",
+
+    singleImageModalSettings: undefined,
 
     ProcessCurrentNoteconvertTo: 'webp',
     ProcessCurrentNotequality: 0.75,
@@ -1747,7 +1770,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         PNG: "PNG",
                         ORIGINAL: "Original (Compress)",
                         NONE: "None (No Conversion/Compression)",
-                        PNGQUANT: "pngquant (Compression for PNG only))", 
+                        PNGQUANT: "pngquant (Compression for PNG only))",
+                        AVIF: "AVIF (via ffmpeg)",
                     })
                     .setValue(preset.outputFormat)
                     .onChange((value: OutputFormat) => {
@@ -1799,6 +1823,12 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         const pngquantExecutablePathSetting = containerEl.querySelector(".image-converter-pngquant-executable-path");
         const pngquantQualitySetting = containerEl.querySelector(".image-converter-pngquant-quality");
 
+        // AVIF settings
+        const ffmpegExecutablePathSetting = containerEl.querySelector(".image-converter-ffmpeg-executable-path");
+        const ffmpegCrfSetting = containerEl.querySelector(".image-converter-ffmpeg-crf");
+        const ffmpegPresetSetting = containerEl.querySelector(".image-converter-ffmpeg-preset");
+
+
         qualitySetting?.remove();
         colorDepthSetting?.remove();
         resizeModeSetting?.remove();
@@ -1809,6 +1839,11 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         revertToOriginalSetting?.remove();
         pngquantExecutablePathSetting?.remove();
         pngquantQualitySetting?.remove();
+
+        //Remove AVIF settings
+        ffmpegExecutablePathSetting?.remove();
+        ffmpegCrfSetting?.remove();
+        ffmpegPresetSetting?.remove();
 
         // Insert Quality setting after Output Format
         if (["WEBP", "JPEG", "ORIGINAL"].includes(preset.outputFormat)) {
@@ -1864,13 +1899,14 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         // Insert PNGQUANT settings after Output Format
         if (preset.outputFormat === "PNGQUANT") {
             const executablePathSetting = new Setting(containerEl)
-                .setName("pngquant executable path")
-                .setDesc("The full path to the pngquant executable.")
+                .setName("pngquant executable path 🛈")
+                .setTooltip("Provide full-path to the binary file. It can be inside vault or anywhere in your file system.")
                 .setClass("image-converter-pngquant-executable-path") // Add class for easy selection
                 .addText((text) => {
                     text.setValue(preset.pngquantExecutablePath || "")
                         .onChange((value) => {
                             preset.pngquantExecutablePath = value;
+                            this.plugin.saveSettings();
                         });
                     text.inputEl.setAttr('spellcheck', 'false'); // Disable spellcheck
                 });
@@ -1880,13 +1916,14 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             );
 
             const qualitySetting = new Setting(containerEl)
-                .setName("pngquant quality")
+                .setName("pngquant quality range")
                 .setDesc("Quality setting for pngquant (e.g., 65-80). Both min-max values must be provided.")
                 .setClass("image-converter-pngquant-quality") // Add class for easy selection
                 .addText((text) => {
                     text.setValue(preset.pngquantQuality || "")
                         .onChange((value) => {
                             preset.pngquantQuality = value;
+                            this.plugin.saveSettings();
                         });
                     text.inputEl.setAttr('spellcheck', 'false'); // Disable spellcheck
                 });
@@ -1894,6 +1931,66 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 "afterend",
                 qualitySetting.settingEl
             );
+        }
+
+        // Insert AVIF settings after Output Format
+        if (preset.outputFormat === "AVIF") {
+            const executablePathSetting = new Setting(containerEl)
+                .setName("FFmpeg executable path 🛈")
+                .setTooltip("Provide full-path to the binary file. It can be inside vault or anywhere in your file system.")
+                .setClass("image-converter-ffmpeg-executable-path")
+                .addText(text => {
+                    text.setValue(preset.ffmpegExecutablePath || "")
+                        .onChange(value => {
+                            preset.ffmpegExecutablePath = value;
+                            this.plugin.saveSettings();
+                        });
+                    text.inputEl.setAttr('spellcheck', 'false');
+                });
+            outputFormatSetting.settingEl.insertAdjacentElement("afterend", executablePathSetting.settingEl);
+
+            const crfSetting = new Setting(containerEl)
+                .setName("FFmpeg CRF")
+                .setDesc("Constant Rate Factor for AVIF (0-63, lower is better quality).")
+                .setClass("image-converter-ffmpeg-crf")
+                .addText((text) => { // Keep as TextComponent for numeric input
+                    text.setValue(preset.ffmpegCrf?.toString() || "")
+                        .onChange(value => {
+                            const parsedValue = parseInt(value, 10);
+                            preset.ffmpegCrf = isNaN(parsedValue) ? undefined : parsedValue;
+                            this.plugin.saveSettings();
+                        });
+                    text.inputEl.setAttr('spellcheck', 'false');
+                });
+            executablePathSetting.settingEl.insertAdjacentElement("afterend", crfSetting.settingEl);
+
+
+            const presetSetting = new Setting(containerEl)
+                .setName("FFmpeg Preset")
+                .setDesc("Encoding preset (speed vs. compression)")
+                .setClass("image-converter-ffmpeg-preset")
+                // Change this to a dropdown:
+                .addDropdown(dropdown => {
+                    dropdown
+                        .addOptions({
+                            ultrafast: "ultrafast",
+                            superfast: "superfast",
+                            veryfast: "veryfast",
+                            faster: "faster",
+                            fast: "fast",
+                            medium: "medium",
+                            slow: "slow",
+                            slower: "slower",
+                            veryslow: "veryslow",
+                            placebo: "placebo",
+                        })
+                        .setValue(preset.ffmpegPreset || "medium") // default
+                        .onChange(value => {
+                            preset.ffmpegPreset = value;
+                            this.plugin.saveSettings();
+                        });
+                });
+            crfSetting.settingEl.insertAdjacentElement("afterend", presetSetting.settingEl);
         }
 
         // Find the last setting added so far
@@ -2277,6 +2374,9 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                     enlargeOrReduce: "Auto",
                     allowLargerFiles: false,
                     skipConversionPatterns: "",
+                    ffmpegExecutablePath: "",
+                    ffmpegCrf: 23,           
+                    ffmpegPreset: "medium", 
                 } as T;
             } else if (activePresetSetting === "selectedResizePreset") {
                 // Add this case
@@ -2424,6 +2524,10 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             addLine(`Quality: ${preset.quality}`);
             if (preset.outputFormat === "PNG") {
                 addLine(`Color Depth: ${preset.colorDepth}`);
+            }
+            if (preset.outputFormat === "AVIF") {
+                addLine(`FFmpeg CRF: ${preset.ffmpegCrf}`);
+                addLine(`FFmpeg Preset: ${preset.ffmpegPreset}`);
             }
 
             addLine(`Resize: ${preset.resizeMode}`);

@@ -257,21 +257,21 @@ export class FolderAndFilenameManagement {
         return finalFilename;
     }
 
-    private async generateNewFilename(
+    async generateNewFilename(
         selectedFilenamePreset: FilenamePreset,
         file: File,
         activeFile: TFile,
         selectedConversionPreset?: ConversionPreset
     ): Promise<string> {
         let newFilename = file.name;
-    
+
         if (selectedFilenamePreset && selectedFilenamePreset.customTemplate) {
             newFilename = await this.processSubfolderVariables(
                 selectedFilenamePreset.customTemplate,
                 file,
                 activeFile
             );
-    
+
             // Validate and remove extension if necessary
             newFilename = await this.validateAndRemoveExtension(newFilename, file);
         } else {
@@ -281,20 +281,20 @@ export class FolderAndFilenameManagement {
 
         return newFilename;
     }
-    
+
     private async validateAndRemoveExtension(filename: string, file: File): Promise<string> {
         const lastDotIndex = filename.lastIndexOf(".");
         if (lastDotIndex === -1) {
             return filename; // No extension found
         }
-    
+
         const potentialExtension = filename.substring(lastDotIndex + 1).toLowerCase();
 
         // Check if the potential extension is supported
         if (this.supportedImageFormats.supportedExtensions.has(potentialExtension)) {
             // Get the mime type of the file
             const mimeType = await this.supportedImageFormats.getMimeTypeFromFile(file);
-    
+
             // If mime type is known, validate the extension against it
             if (mimeType !== "unknown") {
                 const mimeExtensions = this.supportedImageFormats.getExtensionsFromMimeType(mimeType);
@@ -312,7 +312,7 @@ export class FolderAndFilenameManagement {
                 return filename.substring(0, lastDotIndex);
             }
         }
-    
+
         // Potential extension is not supported, keep the original filename
         return filename;
     }
@@ -339,9 +339,11 @@ export class FolderAndFilenameManagement {
             case "WEBP":
                 return filename + ".webp";
             case "JPEG":
-                return filename + ".jpeg";
+                return filename + ".jpeg";  // Corrected to .jpeg
             case "PNG":
                 return filename + ".png";
+            case "AVIF": // Correctly handle AVIF
+                return filename + ".avif";
             case "ORIGINAL":
             case "NONE":
             default:
@@ -404,19 +406,19 @@ export class FolderAndFilenameManagement {
     sanitizeFilename(filename: string): string {
         // Leading and trailing spaces are removed using trim() in the beginning of the function.
         filename = filename.trim();
-        
+
         // Handle the case where there's no extension
         const lastDotIndex = filename.lastIndexOf(".");
         const extension = lastDotIndex !== -1 ? filename.substring(lastDotIndex) : "";
         const baseFilename = lastDotIndex !== -1 ? filename.substring(0, lastDotIndex) : filename;
-    
+
         // 1. Remove/replace invalid characters
         // \ / : * ? " < > | [ ] ( ) - will be replaced with underscore
         let sanitizedBase = baseFilename
             .replace(/[\\/:"*?<>|]/g, "_")  // Replace with underscores
             .replace(/[()[\]]/g, '_')     // Remove special regex characters
             .replace(/^\s+|\s+$/g, '');     // Removes leading and trailing spaces
-    
+
         // 2. Handle reserved names (Windows)
         // If the filename (after removing invalid characters) matches one of these reserved names (case-insensitively), an underscore (_) is appended to the end.
         const reservedNames = [
@@ -424,7 +426,7 @@ export class FolderAndFilenameManagement {
             "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
             "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
         ];
-    
+
         if (reservedNames.includes(sanitizedBase.toUpperCase())) {
             sanitizedBase += "_";
         }
@@ -432,7 +434,7 @@ export class FolderAndFilenameManagement {
         // 3. Remove leading/trailing dots
         // - Leading dots are often used for hidden files on Unix - like systems, but they can cause issues on Windows.
         // - Trailing dots are generally problematic on Windows.
-            sanitizedBase = sanitizedBase.replace(/^\.+|\.+$/g, "");
+        sanitizedBase = sanitizedBase.replace(/^\.+|\.+$/g, "");
 
         // @@@@@ NOT SAFE for FOLDER creation thus removed!! 
         // 4. Ensure we have a valid filename after all sanitization
@@ -659,5 +661,5 @@ export class FolderAndFilenameManagement {
     }
 
 
-    
+
 }
