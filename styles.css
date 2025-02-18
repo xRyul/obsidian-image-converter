@@ -864,6 +864,115 @@ html[data-theme='dark'] {
 }
 
 
+
+
+
+
+
+
+
+
+/* --------------- CAPTIONS SETTINGS ------------------------------ */
+/* ----------------------------------------------------------------------- */
+
+/* --- Section Container --- */
+.image-converter-settings-tab .image-caption-settings-section {
+    display: flex;
+    /* align-items: center; */
+    gap: 10px;
+    /* margin-bottom: 10px; */
+    cursor: pointer;
+    flex-direction: column;
+}
+
+
+/* --- Section Header (Clickable Toggle Area) --- */
+.image-converter-settings-tab .image-caption-settings-section .settings-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 8px 0;
+}
+
+
+.image-converter-settings-tab .image-caption-settings-section .settings-section-title {
+    /* flex-grow: 1; */
+    margin-left: 0.5em;
+    font-weight: 600;
+    margin-bottom: 5px;
+}
+
+.image-converter-settings-tab .image-caption-settings-section .settings-section-toggle-button {
+    margin-left: auto;
+    margin-right: 0;
+}
+
+
+/* --- Chevron Icon --- */
+.image-converter-settings-tab .image-caption-settings-section .settings-section-chevron-icon {
+    margin-right: 5px;
+    transition: transform 0.2s ease;
+}
+
+
+/* --- HIDE CHEVRON WHEN IMAGE ALIGNMENT IS DISABLED --- */
+.image-converter-settings-tab .image-caption-settings-section:not(.image-caption-enabled) .settings-section-chevron-icon {
+    /* Refined selector */
+    display: none;
+    /* Hide chevron when image alignment section is disabled */
+}
+
+
+/* --- Indentation for Settings within Section --- */
+.image-converter-settings-tab .image-caption-settings-section .setting-item {
+    padding-left: 1.5em;
+    border-top: none;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+}
+
+/* --- Hide Settings when Section is Collapsed --- */
+.image-converter-settings-tab .image-caption-settings-section.settings-section-collapsed>*:not(.settings-section-header) {
+    display: none;
+}
+
+.settings-section-clarification-text {
+    margin-left: 19px;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    padding-top: var(--size-4-1);
+    line-height: var(--line-height-tight);
+}
+
+/* ----------------------------------------------------------------------- */
+/* ----------------------------------------------------------------------- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 /* MODAL WINDOW - each drop */
 /* FILENAME--------------------------------------------------------------------------- */
 .image-converter-preset-selection-modal {
@@ -2334,6 +2443,7 @@ html[data-theme='dark'] {
 .markdown-source-view.mod-cm6 {
 
     /* Left alignment WITH wrapping */
+    .image-wrap.image-position-left
     .image-wrap.image-position-left {
         float: left !important; /* !important to override Obsidian */
         margin: 0 1em 0.5em 0 !important;
@@ -2379,11 +2489,21 @@ html[data-theme='dark'] {
         /* For the image itself */
     }
 
+    .image-captions-figure {
+        margin: 0;
+        padding: 2px;
+        display: inline-table;
+        border-radius: 2px;
+    }
+
+
+
     /* Center alignment for internal embeds */
     .internal-embed.image-embed.image-position-center {
         text-align: center !important;
     }
 }
+
 
 /* ------------------------ Reading Mode Styles --------------------------------------*/
 .markdown-reading-view {
@@ -2518,4 +2638,3 @@ html[data-theme='dark'] {
     border: 1px solid var(--background-modifier-border);
     border-radius: 5px;
 }
-

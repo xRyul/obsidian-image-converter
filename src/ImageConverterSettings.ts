@@ -94,6 +94,7 @@ interface PresetUIState {
     resize: PresetCategoryUIState<NonDestructiveResizePreset>;
     imageAlignmentSectionCollapsed: boolean;
     imageDragResizeSectionCollapsed: boolean;
+    imageCaptionSectionCollapsed: boolean; // ADDED: Track caption section collapse state
 }
 
 interface PresetCategoryUIState<T> {
@@ -195,6 +196,22 @@ export interface ImageConverterSettings {
 
     showSpaceSavedNotification: boolean;
     revertToOriginalIfLarger: boolean;
+
+    enableImageCaptions: boolean;
+    skipCaptionExtensions: string;
+    captionFontSize: string;
+    captionColor: string;
+    captionFontStyle: string;
+    captionBackgroundColor: string;
+    captionPadding: string;
+    captionBorderRadius: string;
+    captionOpacity: string;
+    captionFontWeight: string;
+    captionTextTransform: string;
+    captionLetterSpacing: string;
+    captionBorder: string;
+    captionMarginTop: string;
+    captionAlignment: string;
 }
 
 // --- Default Settings ---
@@ -371,6 +388,22 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
 
     showSpaceSavedNotification: true,
     revertToOriginalIfLarger: false,
+
+    enableImageCaptions: true,
+    skipCaptionExtensions: "icns",
+    captionFontSize: "var(--font-smaller)",
+    captionColor: "var(--text-gray)",
+    captionFontStyle: "italic",
+    captionBackgroundColor: 'transparent',
+    captionPadding: '2px 4px',
+    captionBorderRadius: '0',
+    captionOpacity: '1',
+    captionFontWeight: 'normal',
+    captionTextTransform: 'none',
+    captionLetterSpacing: 'normal',
+    captionBorder: 'none',
+    captionMarginTop: '4px',
+    captionAlignment: 'center'
 };
 
 // --- Settings Tab Class ---
@@ -392,7 +425,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             globalPresetVisible: true,
             resize: { editingPreset: null, newPreset: null },
             imageAlignmentSectionCollapsed: true,
-            imageDragResizeSectionCollapsed: true
+            imageDragResizeSectionCollapsed: true,
+            imageCaptionSectionCollapsed: true // ADDED: Initialize caption section collapse state
         };
     }
 
@@ -473,7 +507,10 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
 
         // --- Image Drag and scroll resize Section--- 
-        this.renderImageDragResizeSettingsSection(containerEl)
+        this.renderImageDragResizeSettingsSection(containerEl);
+
+        // --- Image Captions Settings Section ---  // ADDED: Call renderImageCaptionSettingsSection here
+        this.renderImageCaptionSettingsSection(containerEl);
 
         new Setting(containerEl)
             .setName("Right-click menu 🛈")
@@ -505,6 +542,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         await this.plugin.saveSettings();
                     });
             });
+
 
         new Setting(containerEl)
             .setName("Never process these filenames 🛈")
@@ -952,6 +990,243 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
         }
     }
+
+    renderImageCaptionSettingsSection(containerEl: HTMLElement): void {
+        // --- Image Caption Settings Section ---
+        const imageCaptionSection = containerEl.createDiv("image-converter-settings-section");
+        imageCaptionSection.addClass("image-caption-settings-section");
+
+        // Conditionally add 'image-caption-enabled' class
+        if (this.plugin.settings.enableImageCaptions) {
+            imageCaptionSection.addClass("image-caption-enabled");
+        } else {
+            imageCaptionSection.removeClass("image-caption-enabled");
+        }
+
+        // --- Clickable Header with Toggle ---
+        const toggleCaptionVisibilityEl = imageCaptionSection.createDiv("settings-section-header");
+
+        // Chevron Icon (for collapsing/expanding)
+        const captionChevronIcon = toggleCaptionVisibilityEl.createEl("i");
+        setIcon(captionChevronIcon, "chevron-down");
+        captionChevronIcon.addClass("settings-section-chevron-icon");
+
+        // Section Title
+        toggleCaptionVisibilityEl.createEl("span", { text: "Captions", cls: "settings-section-title" });
+        // // Clarification Text
+        // toggleCaptionVisibilityEl.createEl("span", {
+        //     text: "For changes to take effect, please reload the app",
+        //     cls: "settings-section-clarification-text"
+        // });
+
+        // Toggle Switch (integrated into header)
+        const imageCaptionToggle = new Setting(toggleCaptionVisibilityEl)
+            .addToggle((toggle) =>
+                toggle
+                    .setValue(this.plugin.settings.enableImageCaptions)
+                    .onChange(async (value) => {
+                        this.plugin.settings.enableImageCaptions = value;
+                        await this.plugin.saveSettings();
+                        if (!value) {
+                            new Notice("Image captions disabled. Reload Obsidian to see changes.", 5000);
+                        } else {
+                            new Notice("Image captions enabled. Reload Obsidian to see changes.", 5000);
+                        }
+                        this.display();
+                    })
+            );
+        imageCaptionToggle.settingEl.addClass("settings-section-toggle-button");
+
+        // --- APPLY COLLAPSED STATE FROM UI STATE ---
+        if (this.presetUIState.imageCaptionSectionCollapsed) {
+            imageCaptionSection.addClass("settings-section-collapsed");
+            setIcon(captionChevronIcon, "chevron-right");
+        }
+
+        toggleCaptionVisibilityEl.onClickEvent((event: MouseEvent) => {
+            event.stopPropagation();
+            // TOGGLE UI STATE AND CLASS INDEPENDENTLY
+            this.presetUIState.imageCaptionSectionCollapsed = !this.presetUIState.imageCaptionSectionCollapsed;
+            imageCaptionSection.toggleClass("settings-section-collapsed", this.presetUIState.imageCaptionSectionCollapsed);
+
+            if (this.presetUIState.imageCaptionSectionCollapsed) {
+                setIcon(captionChevronIcon, "chevron-right");
+            } else {
+                setIcon(captionChevronIcon, "chevron-down");
+            }
+        });
+
+        // --- Image Captions Settings (Moved from display() function) ---
+        if (this.plugin.settings.enableImageCaptions) {
+            new Setting(imageCaptionSection)
+                .setName("Text alignment within caption")
+                .addDropdown(dropdown =>
+                    dropdown.addOptions({
+                        "left": "Left",
+                        "center": "Center",
+                        "right": "Right"
+                    })
+                        .setValue(this.plugin.settings.captionAlignment)
+                        .onChange(async (value) => {
+                            this.plugin.settings.captionAlignment = value;
+                            await this.plugin.saveSettings();
+                            this.plugin.captionManager.applyCaptionStyles();
+                        })
+                );
+
+            new Setting(imageCaptionSection)
+                .setName("Text transform")
+                .setDesc("Set text transformation")
+                .addDropdown(dropdown =>
+                    dropdown.addOptions({
+                        "none": "None",
+                        "uppercase": "UPPERCASE",
+                        "lowercase": "lowercase",
+                        "capitalize": "Capitalize"
+                    })
+                        .setValue(this.plugin.settings.captionTextTransform)
+                        .onChange(async (value) => {
+                            this.plugin.settings.captionTextTransform = value;
+                            await this.plugin.saveSettings();
+                            this.plugin.captionManager.applyCaptionStyles();
+                        })
+                );
+
+            new Setting(imageCaptionSection) // Font Size Setting is now FIRST setting in the section
+                .setName("Font size")
+                .setDesc("Set the font size for image captions (e.g., 12px, 1.2em).")
+                .addText(text =>
+                    text.setValue(this.plugin.settings.captionFontSize)
+                        .onChange(async (value) => {
+                            this.plugin.settings.captionFontSize = value;
+                            await this.plugin.saveSettings();
+                            this.plugin.captionManager.applyCaptionStyles();
+                        })
+                );
+
+            new Setting(imageCaptionSection)
+                .setName("Weight")
+                .setDesc("Set font weight (e.g., normal, bold, 600)")
+                .addDropdown(dropdown =>
+                    dropdown.addOptions({
+                        "normal": "Normal",
+                        "bold": "Bold",
+                        "300": "Light",
+                        "400": "Regular",
+                        "500": "Medium",
+                        "600": "Semi-bold",
+                        "700": "Bold"
+                    })
+                        .setValue(this.plugin.settings.captionFontWeight)
+                        .onChange(async (value) => {
+                            this.plugin.settings.captionFontWeight = value;
+                            await this.plugin.saveSettings();
+                            this.plugin.captionManager.applyCaptionStyles();
+                        })
+                );
+
+            new Setting(imageCaptionSection)
+                .setName("Color")
+                .setDesc("Choose a color for image captions e.g.: red, grey, white, black, hsl(50, 50%, 50%), rgb(50%, 75%, 100%) ")
+                .addText(text =>
+                    text.setValue(this.plugin.settings.captionColor)
+                        .onChange(async (value) => {
+                            this.plugin.settings.captionColor = value;
+                            await this.plugin.saveSettings();
+                            this.plugin.captionManager.applyCaptionStyles();
+                        })
+                );
+
+            new Setting(imageCaptionSection)
+                .setName("Font style")
+                .setDesc("Set the font style (e.g., italic, normal).")
+                .addDropdown(dropdown =>
+                    dropdown.addOptions({
+                        "italic": "Italic", "normal": "Normal"
+                    })
+                        .setValue(this.plugin.settings.captionFontStyle)
+                        .onChange(async (value) => {
+                            this.plugin.settings.captionFontStyle = value;
+                            await this.plugin.saveSettings();
+                            this.plugin.captionManager.applyCaptionStyles();
+                        })
+                );
+
+            new Setting(imageCaptionSection)
+                .setName("Background color")
+                .setDesc("Choose a background color for image captions (e.g.: transparent, #f5f5f5, rgba(255,255,255,0.8))")
+                .addText(text =>
+                    text.setValue(this.plugin.settings.captionBackgroundColor)
+                        .onChange(async (value) => {
+                            this.plugin.settings.captionBackgroundColor = value;
+                            await this.plugin.saveSettings();
+                            this.plugin.captionManager.applyCaptionStyles();
+                        })
+                );
+
+            // In renderImageCaptionSettingsSection
+            new Setting(imageCaptionSection)
+                .setName("Border")
+                .setDesc("Set border style (e.g., 1px solid gray)")
+                .addText(text =>
+                    text.setValue(this.plugin.settings.captionBorder)
+                        .onChange(async (value) => {
+                            this.plugin.settings.captionBorder = value;
+                            await this.plugin.saveSettings();
+                            this.plugin.captionManager.applyCaptionStyles();
+                        })
+                );
+            new Setting(imageCaptionSection)
+                .setName("Border corner radius")
+                .setDesc("Set border radius for caption (e.g., make it slightly rounded: 4px)")
+                .addText(text =>
+                    text.setValue(this.plugin.settings.captionBorderRadius)
+                        .onChange(async (value) => {
+                            this.plugin.settings.captionBorderRadius = value;
+                            await this.plugin.saveSettings();
+                            this.plugin.captionManager.applyCaptionStyles();
+                        })
+                );
+
+            new Setting(imageCaptionSection)
+                .setName("Space at the top")
+                .setDesc("Set space between image and caption (e.g., 4px, 8px)")
+                .addText(text =>
+                    text.setValue(this.plugin.settings.captionMarginTop)
+                        .onChange(async (value) => {
+                            this.plugin.settings.captionMarginTop = value;
+                            await this.plugin.saveSettings();
+                            this.plugin.captionManager.applyCaptionStyles();
+                        })
+                );
+
+            new Setting(imageCaptionSection)
+                .setName("Padding")
+                .setDesc("Set padding around caption (e.g., 4px 8px)")
+                .addText(text =>
+                    text.setValue(this.plugin.settings.captionPadding)
+                        .onChange(async (value) => {
+                            this.plugin.settings.captionPadding = value;
+                            await this.plugin.saveSettings();
+                            this.plugin.captionManager.applyCaptionStyles();
+                        })
+                );
+
+            // Skip Caption Extensions
+            new Setting(imageCaptionSection)
+                .setName("Skip caption extensions")
+                .setDesc("Comma-separated list of image extensions to exclude from captions (e.g., png,jpg).")
+                .addText((text) => {
+                    text.setValue(this.plugin.settings.skipCaptionExtensions)
+                        .onChange(async (value) => {
+                            this.plugin.settings.skipCaptionExtensions = value;
+                            await this.plugin.saveSettings();
+                        });
+                    text.inputEl.setAttr('spellcheck', 'false');
+                });
+        }
+    }
+
 
     renderTabs(): void {
         const { containerEl } = this;
@@ -2375,8 +2650,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                     allowLargerFiles: false,
                     skipConversionPatterns: "",
                     ffmpegExecutablePath: "",
-                    ffmpegCrf: 23,           
-                    ffmpegPreset: "medium", 
+                    ffmpegCrf: 23,
+                    ffmpegPreset: "medium",
                 } as T;
             } else if (activePresetSetting === "selectedResizePreset") {
                 // Add this case
@@ -3169,7 +3444,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             resize: { editingPreset: null, newPreset: null },
             globalPresetVisible: true,
             imageAlignmentSectionCollapsed: false,
-            imageDragResizeSectionCollapsed: false
+            imageDragResizeSectionCollapsed: false,
+            imageCaptionSectionCollapsed: false // ADDED: Reset caption section collapse state
         };
     }
 }

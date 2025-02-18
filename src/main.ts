@@ -24,6 +24,7 @@ import { ProcessSingleImageModal } from "./ProcessSingleImageModal";
 import { ProcessFolderModal } from "./ProcessFolderModal";
 import { ProcessCurrentNote } from "./ProcessCurrentNote";
 import { ProcessAllVaultModal } from "./ProcessAllVaultModal"
+import { ImageCaptionManager } from "./ImageCaptionManager"
 
 // Settings tab and all DEFAULTS
 import {
@@ -69,7 +70,9 @@ export default class ImageConverterPlugin extends Plugin {
     processCurrentNote: ProcessCurrentNote;
     // ProcessAllVault
     processAllVaultModal: ProcessAllVaultModal
-
+    // captions
+    captionManager: ImageCaptionManager;
+    
     private processedImage: ArrayBuffer | null = null;
     private temporaryBuffers: (ArrayBuffer | Blob | null)[] = [];
 
@@ -80,6 +83,12 @@ export default class ImageConverterPlugin extends Plugin {
         // Initialize core components immediately
         this.supportedImageFormats = new SupportedImageFormats(this.app);
 
+        if (this.settings.enableImageCaptions) {
+            this.captionManager = new ImageCaptionManager(this);
+            this.register(() => this.captionManager.cleanup());
+        }
+        // this.captionManager.refresh();
+
         // Initialize ImageAlignment early since it's time-sensitive
         if (this.settings.isImageAlignmentEnabled) {
             this.ImageAlignmentManager = new ImageAlignmentManager(
@@ -88,12 +97,16 @@ export default class ImageConverterPlugin extends Plugin {
                 this.supportedImageFormats,
             );
             await this.ImageAlignmentManager.initialize();
-            
+
             // This helps when opening into note with alignments set and fires less often than e.g. active-leaf-change
             this.registerEvent(
                 this.app.workspace.on('file-open', (file) => {
                     if (file) {
                         this.ImageAlignmentManager?.applyAlignmentsToNote(file.path);
+
+                        if (this.settings.enableImageCaptions) {
+                            this.captionManager.refresh();
+                        }
                     }
                 })
             );
@@ -125,7 +138,7 @@ export default class ImageConverterPlugin extends Plugin {
         // Wait for layout to be ready before initializing view-dependent components
         this.app.workspace.onLayoutReady(() => {
             this.initializeComponents();
-        
+
             // Apply Image Alignment and Resizing when switching Live to Reading mode etc.
             if (this.settings.isImageAlignmentEnabled || this.settings.isImageResizeEnbaled) {
                 this.registerEvent(
@@ -136,16 +149,22 @@ export default class ImageConverterPlugin extends Plugin {
                                 void this.ImageAlignmentManager?.applyAlignmentsToNote(currentFile.path);
                             }
                         }
-                        
+
                         if (this.settings.isImageResizeEnbaled) {
                             const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
                             if (activeView) {
                                 this.imageResizer?.onLayoutChange(activeView);
                             }
                         }
+
+                        if (this.settings.enableImageCaptions) {
+                            this.captionManager.refresh();
+                        }
+                        
                     })
                 );
             }
+            
         });
     }
 
@@ -259,6 +278,7 @@ export default class ImageConverterPlugin extends Plugin {
         this.addReloadCommand();
     }
 
+
     async onunload() {
         // Clean up alignment related components first
         if (this.ImageAlignmentManager) {
@@ -297,6 +317,7 @@ export default class ImageConverterPlugin extends Plugin {
             if (modal?.close) modal.close();
         });
 
+        document.body.classList.remove('image-captions-enabled');
     }
 
 
@@ -748,6 +769,10 @@ export default class ImageConverterPlugin extends Plugin {
         // Step 4: Wait for All Promises to Complete
         // - Use `Promise.all` to wait for all the file processing promises to settle (either fulfilled or rejected).
         await Promise.all(filePromises);
+        
+        if (this.settings.enableImageCaptions) {
+            this.captionManager.refresh();
+        }
     }
 
     private async handlePaste(itemData: { kind: string; type: string; file: File | null }[], editor: Editor, cursor: EditorPosition) {
@@ -1060,6 +1085,10 @@ export default class ImageConverterPlugin extends Plugin {
         // Step 4: Wait for All Promises to Complete
         // - Wait for all file processing promises to settle.
         await Promise.all(filePromises);
+
+        if (this.settings.enableImageCaptions) {
+            this.captionManager.refresh();
+        }
     }
 
     // Helper function to insert link at the specified cursor position
@@ -1105,6 +1134,7 @@ export default class ImageConverterPlugin extends Plugin {
                 ch: cursor.ch + formattedLink.length,
             });
         }
+        
     }
 
     private formatFileSize(bytes: number): string {

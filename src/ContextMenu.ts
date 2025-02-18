@@ -524,20 +524,19 @@ export class ContextMenu extends Component {
 	 * @returns The extracted filename, or null if not found.
 	 */
 	private extractFilenameFromLink(link: string): string | null {
-		// Check for wiki link format
-		const wikiMatch = link.match(/!\[\[([^|\]]+)(?:\|[^\]]+)?\]\]/);
+		const wikiMatch = link.match(/!\[\[\s*([^|\]]+?)\s*(?:\|[^\]]+)?\]\]/);
 		if (wikiMatch) {
-			return wikiMatch[1];
+			return wikiMatch[1].trim();  // Trim spaces
 		}
-
-		// Check for markdown link format
-		const markdownMatch = link.match(/!\[.*?\]\((.*?)\)/);
+	
+		const markdownMatch = link.match(/!\[.*?\]\(\s*(.*?)\s*\)/);
 		if (markdownMatch) {
-			return markdownMatch[1];
+			return markdownMatch[1].trim();  // Trim spaces
 		}
-
+	
 		return null;
 	}
+	
 
 	/**
 	 * Finds image links in the editor's content based on the provided criteria.
@@ -575,7 +574,8 @@ export class ContextMenu extends Component {
 			// Check wiki-style links (![[path/to/image.png]])
 			const wikiMatches = [...line.matchAll(/!\[\[([^\]]+?)(?:\|[^\]]+?)?\]\]/g)];
 			for (const match of wikiMatches) {
-				const fullMatch = match[0];
+				const fullMatch = match[0].trim();
+
 				const filename = this.extractFilenameFromLink(fullMatch);
 				if (filename && !isExternal) {
 					const resolvedPath = resolveRelativePath(filename, activeFile.path);

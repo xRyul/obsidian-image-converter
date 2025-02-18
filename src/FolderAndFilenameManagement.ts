@@ -563,31 +563,30 @@ export class FolderAndFilenameManagement {
             if (srcAttribute.startsWith('app://')) {
                 const parts = srcAttribute.substring('app://'.length).split('/');
                 if (parts.length > 1) {
-                    const potentialOsPathWithQuery = parts.slice(1).join('/');
+                    // Handle the forward slash addition right at path construction
+                    let potentialOsPathWithQuery = parts.slice(1).join('/');
+                    if (process.platform !== 'win32' && !potentialOsPathWithQuery.startsWith('/')) {
+                        potentialOsPathWithQuery = '/' + potentialOsPathWithQuery;
+                    }
+            
                     const potentialOsPath = potentialOsPathWithQuery.split('?')[0]; // Remove query parameters
                     let decodedOsPath = decodeURIComponent(potentialOsPath);
-
                     // Standardize path separators to forward slashes
                     decodedOsPath = decodedOsPath.replace(/\\/g, '/');
-
-                    // Get the vault's base path safely
+            
                     let basePath: string | null = null;
                     if (this.app.vault.adapter instanceof FileSystemAdapter) {
                         basePath = this.app.vault.adapter.getBasePath();
-                        // Ensure basePath also uses forward slashes for consistency
                         basePath = basePath.replace(/\\/g, '/');
                     }
-
+            
                     if (basePath && decodedOsPath.startsWith(basePath)) {
-                        // Extract the vault-relative path
                         const vaultRelativePath = decodedOsPath.substring(basePath.length);
-                        // Normalize the path to ensure consistency
                         const normalizedVaultRelativePath = normalizePath(vaultRelativePath);
                         // console.log(`Detected OS path within vault: ${normalizedVaultRelativePath}`);
-                        return normalizedVaultRelativePath; // Return the relative vault path
+                        return normalizedVaultRelativePath;
                     } else {
-                        // console.log(`Detected and cleaned OS path (outside vault): ${decodedOsPath}`);
-                        return decodedOsPath; // Return the cleaned OS path if not in vault
+                        return decodedOsPath;
                     }
                 }
             }
@@ -603,6 +602,7 @@ export class FolderAndFilenameManagement {
 
             // 4. If direct resolution fails, consider it as a relative path from the current file
             const activeFile = this.app.workspace.getActiveFile();
+            console.log("activeFile:", activeFile)
             if (activeFile) {
                 const parentFolder = activeFile.parent?.path || '';
                 const resolvedPath = normalizePath(path.join(parentFolder, srcAttribute));

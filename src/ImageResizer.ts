@@ -283,7 +283,7 @@ export class ImageResizer {
      */
     private cleanupHandles() {
         if (this.resizeState.isResizing || !this.activeImage) return;
-    
+
         const handleContainer = this.activeImage.matchParent(
             ".image-resize-container"
         );
@@ -304,18 +304,18 @@ export class ImageResizer {
                     handleContainer.removeClass(className);
                 }
             }
-            
-    
+
+
             handleContainer.parentNode?.insertBefore(this.activeImage, handleContainer);
             handleContainer.detach();
             this.handles = [];
         }
-    
+
         if (this.activeImage.hasClass("image-resize-border")) {
             this.activeImage.removeClass("image-resize-border");
             this.activeImage.style.cursor = 'default';
         }
-    
+
         this.activeImage = null;
         this.lastMouseEvent = null;
     }
@@ -328,9 +328,9 @@ export class ImageResizer {
     private createHandles(image: HTMLImageElement) {
         this.cleanupHandles();
         this.activeImage = image;
-    
+
         const container = createEl("div", { cls: "image-resize-container" });
-    
+
         // **NEW:** Check for and apply existing alignment classes
         const alignmentClasses = [
             "image-position-left",
@@ -345,10 +345,10 @@ export class ImageResizer {
                 container.addClass(className);
             }
         }
-    
+
         image.parentNode?.insertBefore(container, image);
         container.appendChild(image);
-    
+
         const handleTypes = ["nw", "ne", "sw", "se", "n", "s", "e", "w"];
         this.handles = handleTypes.map((type) => {
             return container.createEl("div", {
@@ -856,12 +856,9 @@ export class ImageResizer {
 
                     const cachedWidth = cachedAlignment?.width || undefined; // Default to undefined if not found which we later filter out
                     const cachedHeight = cachedAlignment?.height || undefined; // Default to undefined if not found which we later filter out
+                    const dimensionPart = `${Math.round(newWidth)}x${Math.round(newHeight)}`;
 
                     if (match.type === "md") {
-                        let cleanAltText = match.altText;
-                        if (match.altText && match.altText.includes("|")) {
-                            cleanAltText = match.altText.split("|")[0];
-                        }
 
                         if (this.currentHandle === "border") {
                             widthParam = `${Math.round(newWidth)}x`;
@@ -878,7 +875,15 @@ export class ImageResizer {
                             widthParam = `${Math.round(newWidth)}x`;
                             heightParam = `${Math.round(newHeight)}`;
                         }
-                        updatedContent = `![${cleanAltText}|${widthParam}${heightParam}](${match.path})`;
+
+                        if (match.caption) {
+                            updatedContent = `![${match.altText || ""}${match.spacing.beforeFirstPipe}|${match.caption}${match.spacing.beforeSecondPipe}|${dimensionPart}](${match.path})`;
+                        } else {
+                            updatedContent = `![${match.altText || ""}${match.spacing.beforeFirstPipe}|${dimensionPart}](${match.path})`;
+                        }
+
+
+
                     } else {
                         if (this.currentHandle === "border") {
                             widthParam = `${Math.round(newWidth)}x`;
@@ -895,7 +900,15 @@ export class ImageResizer {
                             widthParam = `${Math.round(newWidth)}x`;
                             heightParam = `${Math.round(newHeight)}`;
                         }
-                        updatedContent = `![[${match.path}|${widthParam}${heightParam}]]`;
+
+                        const dimensionPart = `${Math.round(newWidth)}x${Math.round(newHeight)}`; // Single 'x'
+
+                        if (match.caption) {
+                            updatedContent = `![[${match.path}${match.spacing.beforeFirstPipe}|${match.caption}${match.spacing.beforeSecondPipe}|${dimensionPart}]]`;
+                        } else {
+                            updatedContent = `![[${match.path}${match.spacing.beforeFirstPipe}|${dimensionPart}]]`;
+                        }
+
                     }
 
                     if (updatedContent) {
@@ -1050,8 +1063,13 @@ export class ImageResizer {
         index: number;
         path: string;
         altText?: string;
+        caption?: string;
         existingWidth?: number;
         existingHeight?: number;
+        spacing: {
+            beforeFirstPipe: string;
+            beforeSecondPipe: string;
+        };
     }> {
         const matches: Array<{
             type: "md" | "wiki";
@@ -1059,36 +1077,105 @@ export class ImageResizer {
             index: number;
             path: string;
             altText?: string;
+            caption?: string;
             existingWidth?: number;
             existingHeight?: number;
+            spacing: {
+                beforeFirstPipe: string;
+                beforeSecondPipe: string;
+            };
         }> = [];
 
-        // Find Markdown-style links with size parameters
-        const mdRegex = /!\[([^\]]*?)(?:\|(\d+)(?:\|(\d+))?)?\]\(([^)]+)\)/g; // Capture width and height
-        let mdMatch;
-        while ((mdMatch = mdRegex.exec(content)) !== null) {
-            matches.push({
-                type: "md",
-                fullMatch: mdMatch[0],
-                index: mdMatch.index,
-                path: mdMatch[4],
-                altText: mdMatch[1],
-                existingWidth: mdMatch[2] ? parseInt(mdMatch[2], 10) : undefined,
-                existingHeight: mdMatch[3] ? parseInt(mdMatch[3], 10) : undefined,
-            });
-        }
+        // Helper function to check if a string represents dimensions
+        const isDimensions = (str: string): boolean => {
+            return /^\d+x\d+$/.test(str.trim());
+        };
 
-        // Find Wiki-style links with size parameters
-        const wikiRegex = /!\[\[([^\]]+?)(?:\|(\d+)(?:x(\d+))?)?\]\]/g; // Capture width and height
+        // Find Wiki-style links
+        const wikiRegex = /!\[\[([^|\]]+?)(?:\s*\|([^|\]]*?))?(?:\s*\|([^|\]]*))?\]\]/g;
         let wikiMatch;
         while ((wikiMatch = wikiRegex.exec(content)) !== null) {
+            const path = wikiMatch[1].trim();
+            let caption: string | undefined = wikiMatch[2]?.trim();
+            let dimensionPart = wikiMatch[3]?.trim();
+
+            // If we only have one pipe part, check if it's dimensions
+            if (caption && !dimensionPart) {
+                if (isDimensions(caption)) {
+                    dimensionPart = caption;
+                    caption = undefined;
+                }
+            }
+
+            // Parse dimensions if they exist
+            let existingWidth: number | undefined;
+            let existingHeight: number | undefined;
+
+            if (dimensionPart) {
+                const dimensionMatch = dimensionPart.match(/^(\d+)x(\d+)$/);
+                if (dimensionMatch) {
+                    existingWidth = parseInt(dimensionMatch[1], 10);
+                    existingHeight = parseInt(dimensionMatch[2], 10);
+                }
+            }
+
             matches.push({
                 type: "wiki",
                 fullMatch: wikiMatch[0],
                 index: wikiMatch.index,
-                path: wikiMatch[1].split("|")[0],
-                existingWidth: wikiMatch[2] ? parseInt(wikiMatch[2], 10) : undefined,
-                existingHeight: wikiMatch[3] ? parseInt(wikiMatch[3], 10) : undefined,
+                path,
+                caption,
+                existingWidth,
+                existingHeight,
+                spacing: {
+                    beforeFirstPipe: wikiMatch[0].match(/\[\[[^|]+?(\s*)\|/)?.[1] || '',
+                    beforeSecondPipe: wikiMatch[0].match(/\|[^|]*?(\s*)\|/)?.[1] || ''
+                }
+            });
+        }
+
+        // Find Markdown-style links
+        const mdRegex = /!\[([^\]]*?)(?:\s*\|([^\]|]*?))?(?:\s*\|([^\]|]*))?\]\(([^)]+)\)/g;
+        let mdMatch;
+        while ((mdMatch = mdRegex.exec(content)) !== null) {
+            const altText = mdMatch[1]?.trim();
+            let caption: string | undefined = mdMatch[2]?.trim();
+            let dimensionPart = mdMatch[3]?.trim();
+            const path = mdMatch[4].trim();
+
+            // If we only have one pipe part, check if it's dimensions
+            if (caption && !dimensionPart) {
+                if (isDimensions(caption)) {
+                    dimensionPart = caption;
+                    caption = undefined;
+                }
+            }
+
+            // Parse dimensions if they exist
+            let existingWidth: number | undefined;
+            let existingHeight: number | undefined;
+
+            if (dimensionPart) {
+                const dimensionMatch = dimensionPart.match(/^(\d+)x(\d+)$/);
+                if (dimensionMatch) {
+                    existingWidth = parseInt(dimensionMatch[1], 10);
+                    existingHeight = parseInt(dimensionMatch[2], 10);
+                }
+            }
+
+            matches.push({
+                type: "md",
+                fullMatch: mdMatch[0],
+                index: mdMatch.index,
+                path,
+                altText,
+                caption,
+                existingWidth,
+                existingHeight,
+                spacing: {
+                    beforeFirstPipe: mdMatch[0].match(/\[([^\]]*?)(\s*)\|/)?.[2] || '',
+                    beforeSecondPipe: mdMatch[0].match(/\|[^|]*?(\s*)\|/)?.[1] || ''
+                }
             });
         }
 

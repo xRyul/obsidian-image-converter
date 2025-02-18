@@ -467,6 +467,11 @@ export class VariableProcessor {
             description: "The first X characters of the SHA-256 hash of the specified type. Supports the same types as {sha256:type}.",
             example: "{sha256:fullpath:10} -> e3b0c44298",
         },
+        {
+            name: "{uuid}",
+            description: "A universally unique identifier (UUID).",
+            example: "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+        },
     ];
 
     async processTemplate(
@@ -609,9 +614,10 @@ export class VariableProcessor {
         variables["{HH}"] = moment().format("HH");
         variables["{mm}"] = moment().format("mm");
         variables["{ss}"] = moment().format("ss");
-        variables["{weekday}"] = moment().format("dddd"); // **Added weekday**
-        variables["{month}"] = moment().format("MMMM"); // **Added month**
-        variables["{calendar}"] = moment().calendar(); // **Added calendar**
+        variables["{date}"] = moment().format("YYYY-MM-DD");
+        variables["{weekday}"] = moment().format("dddd"); 
+        variables["{month}"] = moment().format("MMMM");
+        variables["{calendar}"] = moment().calendar();
         variables["{today}"] = moment().format('YYYY-MM-DD');
         variables["{YYYY-MM-DD}"] = moment().format('YYYY-MM-DD');
         variables["{tomorrow}"] = moment().add(1, 'day').format('YYYY-MM-DD');

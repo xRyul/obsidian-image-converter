@@ -6,7 +6,7 @@ import { NonDestructiveResizePreset, ResizeScaleMode, ResizeUnits } from "./NonD
 
 export class LinkFormatter {
 
-    constructor( private app: App) { }
+    constructor(private app: App) { }
 
     async formatLink(
         linkPath: string,
@@ -47,7 +47,7 @@ export class LinkFormatter {
 
             return linkFormat === "wikilink"
                 ? `![[${formattedPath}${resizeParams}]]`
-                : `![${resizeParams}](${encodeURI(formattedPath)})`;
+                : `![${resizeParams}](${this.encodeMarkdownPath(formattedPath)})`; // : `![${resizeParams}](${encodeURI(formattedPath)})`;
         } catch (error) {
             if (error instanceof Error) {
                 new Notice(`Error formatting link: ${error.message}`);
@@ -59,6 +59,10 @@ export class LinkFormatter {
             console.error("Error in LinkFormatter:", error);
             return "";
         }
+    }
+
+    private encodeMarkdownPath(path: string): string {
+        return path.replace(/\s/g, '%20');
     }
 
     private formatPath(
@@ -430,34 +434,34 @@ export class LinkFormatter {
         return currentDimension;
     }
 
-/**
-     * `getEditorMaxWidth`
-     *
-     * Calculates the maximum width (in pixels) available for content within the editor.
-     * This function specifically targets the width of a single line element (`cm-line`)
-     * in the CodeMirror 6 editor, providing a good approximation of the usable
-     * horizontal space for text.
-     *
-     * **Why this approach?**
-     * - The Obsidian API does not directly expose the editor's line width.
-     * - We need to measure the width of a `cm-line` element, which is an internal
-     *   implementation detail of CodeMirror.
-     * - `clientWidth` is used because it gives the inner width of the element
-     *   (including padding), which closely reflects the actual space available
-     *   for text content.
-     *
-     * **Important Considerations:**
-     * - This method relies on the `cm-line` class, which is part of CodeMirror 6's
-     *   internal structure. Future CodeMirror updates *could* potentially change this,
-     *   although it's less likely than changes to higher-level CSS classes.
-     * - If the editor is empty, there might be no `cm-line` element. The function
-     *   handles this with a fallback.
-     * - This is still an approximation. Minor variations in line width might occur
-     *   due to font size differences or other styling applied to specific lines.
-     *
-     * @returns {number} The maximum width available for content in the editor (width of a `cm-line`),
-     *                   or 800 as a default if the width cannot be determined.
-     */
+    /**
+         * `getEditorMaxWidth`
+         *
+         * Calculates the maximum width (in pixels) available for content within the editor.
+         * This function specifically targets the width of a single line element (`cm-line`)
+         * in the CodeMirror 6 editor, providing a good approximation of the usable
+         * horizontal space for text.
+         *
+         * **Why this approach?**
+         * - The Obsidian API does not directly expose the editor's line width.
+         * - We need to measure the width of a `cm-line` element, which is an internal
+         *   implementation detail of CodeMirror.
+         * - `clientWidth` is used because it gives the inner width of the element
+         *   (including padding), which closely reflects the actual space available
+         *   for text content.
+         *
+         * **Important Considerations:**
+         * - This method relies on the `cm-line` class, which is part of CodeMirror 6's
+         *   internal structure. Future CodeMirror updates *could* potentially change this,
+         *   although it's less likely than changes to higher-level CSS classes.
+         * - If the editor is empty, there might be no `cm-line` element. The function
+         *   handles this with a fallback.
+         * - This is still an approximation. Minor variations in line width might occur
+         *   due to font size differences or other styling applied to specific lines.
+         *
+         * @returns {number} The maximum width available for content in the editor (width of a `cm-line`),
+         *                   or 800 as a default if the width cannot be determined.
+         */
     private getEditorMaxWidth(): number {
 
         // -------------------- OPTION 1. ------------------------- 
@@ -544,18 +548,18 @@ export class LinkFormatter {
     ): Promise<{ width: number; height: number } | null> {
         return new Promise((resolve) => {
             const img = new Image();
-            
+
             img.onload = () => {
                 // console.log(`Loaded dimensions for ${file.name}:`, { width: img.width, height: img.height });
                 resolve({ width: img.width, height: img.height });
             };
-            
+
             img.onerror = (error) => {
                 // console.error(`Failed to load image ${file.name}:`, error);
                 new Notice(`Failed to load image dimensions for ${file.name}`);
                 resolve(null);
             };
-            
+
             const resourcePath = this.app.vault.getResourcePath(file);
             // console.log(`Loading image from path: ${resourcePath}`);
             img.src = resourcePath;
