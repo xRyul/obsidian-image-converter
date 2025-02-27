@@ -145,7 +145,7 @@ export interface ImageConverterSettings {
     linkFormatSettings: LinkFormatSettings;
     nonDestructiveResizeSettings: NonDestructiveResizeSettings;
 
-    resizeCursorLocation: "front" | "back" | "none";
+    resizeCursorLocation: "front" | "back" | "below" |"none";
     dropPasteCursorLocation: "front" | "back";
 
     neverProcessFilenames: string;
@@ -968,9 +968,10 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                     dropdown
                         .addOption("front", "At the front of the link")
                         .addOption("back", "At the back of the link")
+                        .addOption("below", "1 line below the image")
                         .addOption("none", "Don't move cursor")
                         .setValue(this.plugin.settings.resizeCursorLocation)
-                        .onChange(async (value: "front" | "back" | "none") => {
+                        .onChange(async (value: "front" | "back" | "below" | "none") => {
                             this.plugin.settings.resizeCursorLocation = value;
                             await this.plugin.saveSettings();
                         });

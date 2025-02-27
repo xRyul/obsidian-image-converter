@@ -83,11 +83,12 @@ export default class ImageConverterPlugin extends Plugin {
         // Initialize core components immediately
         this.supportedImageFormats = new SupportedImageFormats(this.app);
 
+        // Captions are time-sensitive
         if (this.settings.enableImageCaptions) {
             this.captionManager = new ImageCaptionManager(this);
             this.register(() => this.captionManager.cleanup());
         }
-        // this.captionManager.refresh();
+
 
         // Initialize ImageAlignment early since it's time-sensitive
         if (this.settings.isImageAlignmentEnabled) {
@@ -165,6 +166,18 @@ export default class ImageConverterPlugin extends Plugin {
                 );
             }
             
+            // // Prevent link from showing up
+            // const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+            // if (!activeView) return;
+
+            // this.registerDomEvent(activeView.contentEl, 'click', (evt: MouseEvent) => {
+            //     const target = evt.target as HTMLElement;
+            //     if (target.tagName === 'IMG') {
+            //         evt.preventDefault();
+            //         evt.stopPropagation();
+            //     }
+            // }, true);
+
         });
     }
 

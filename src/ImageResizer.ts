@@ -765,6 +765,60 @@ export class ImageResizer {
     }
 
     /**
+     * Calculates the ending line number of a potentially multiline link.
+     *
+     * @param editor The editor instance.
+     * @param startLine The starting line number of the link.
+     * @param startCh The starting character position of the link.
+     * @param endCh The ending character position of the link on the starting line.
+     * @returns The line number where the link actually ends.
+     */
+    private getEndLineOfLink(editor: Editor, startLine: number, startCh: number, endCh: number): number {
+        let lineContent = editor.getLine(startLine).substring(startCh, endCh);
+        let currentLine = startLine;
+
+        // Check if the link is multiline by searching for closing brackets.
+        while (!lineContent.match(/\]\]|\)/) && currentLine < editor.lastLine()) {  //Added editor.lastLine() to avoid infinite loops
+            currentLine++;
+            lineContent = editor.getLine(currentLine); //no substring needed, as it always starts from 0
+        }
+        return currentLine;
+    }
+    
+        /**
+     * Finds the end line of a callout block, starting from a given line.
+     *
+     * @param editor The editor instance.
+     * @param startLine The line number to start searching from.
+     * @returns The line number of the end of the callout, or the startLine if not in a callout.
+     */
+        private getEndOfCallout(editor: Editor, startLine: number): number {
+            let currentLine = startLine;
+            let lineContent = editor.getLine(currentLine);
+    
+            // Check if we're *actually* in a callout
+            if (!lineContent.trimStart().startsWith(">")) {
+                return startLine; // Not in a callout, return the starting line
+            }
+            //If not trimmed there will be added extra line
+            const firstNonWhitespaceChar = lineContent.trimStart()[0];
+            // Iterate downwards, checking for the end of the callout
+            while (currentLine < editor.lastLine()) {
+                currentLine++;
+                lineContent = editor.getLine(currentLine);
+                //If not trimmed there will be added extra line
+                const currentLineNonWhitespaceChar = lineContent.trimStart()[0];
+                // A callout ends when a line doesn't start with ">"
+                if (currentLineNonWhitespaceChar != firstNonWhitespaceChar) {
+                    return currentLine - 1; // Return the *previous* line (end of callout)
+                }
+            }
+    
+            // If we reach the end of the file and it's all callout, return the last line
+            return editor.lastLine();
+        }
+
+    /**
      * Updates Markdown links within the current editor that match the resized image.
      *
      * This function identifies lines containing Markdown or Wikilinks that point to the
@@ -835,6 +889,7 @@ export class ImageResizer {
         const changes: EditorChange[] = [];
         let cursorPosition: EditorPosition | null = null; // Initialize cursor position
         const cursorLocation = this.plugin.settings.resizeCursorLocation;
+
 
         editor.getValue()
             .split('\n')
@@ -917,10 +972,16 @@ export class ImageResizer {
                         changes.push({ from: { line, ch: startCh }, to: { line, ch: endCh }, text: updatedContent });
 
                         // Determine cursor position based on settings
+                        let endLine = line; // Initialize endLine with the current line
                         if (cursorLocation === "front") {
                             cursorPosition = { line, ch: startCh };
-                        } else {
+                        } else if (cursorLocation === "back") {
                             cursorPosition = { line, ch: startCh + updatedContent.length };
+                        } else if (cursorLocation === "below") {
+                            endLine = this.getEndLineOfLink(editor, line, startCh, endCh);
+                            // NEW: Check for callout and adjust endLine
+                            endLine = this.getEndOfCallout(editor, endLine);
+                            cursorPosition = { line: endLine + 1, ch: 0 };
                         }
                     }
                 });
@@ -980,6 +1041,12 @@ export class ImageResizer {
                 };
             } else {
                 return;
+            }
+        } else if (this.plugin.settings.resizeCursorLocation === "below") {
+            // Calculate the end line of the image link
+            if (linkEnd !== -1) {
+                const endLine = this.getEndLineOfLink(editor, cursorPos.line, internalLinkStart !== -1 ? internalLinkStart : externalLinkStart, linkEnd);
+                newCursorPos = { line: endLine + 1, ch: 0 };
             }
         }
 
