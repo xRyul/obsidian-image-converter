@@ -20,6 +20,7 @@ This document provides a detailed explanation of all available variables for the
 - `{noteName}` - Current note name e.g.: If editing "Travel Log.md" → "Travel Log"
 - `{fileType}` - File extension e.g.: "jpg", "png", "pdf"
 - `{parentFolder}` - Parent folder name e.g.: In "Documents/Photos/Vacation" → "Photos"
+- `{parentparentfolder}` - Grandparent folder name e.g.: "Documents/Photos/Vacation" → "Documents"
 - `{directory}` - Full directory path e.g.: "Documents/Photos/Vacation"
 - `{folderName}` - Current folder name e.g.: In "Documents/Photos/Vacation" → "Vacation"
 - `{depth}` - Number of subfolder levels e.g.: "Documents/Photos/Vacation" → "3"
