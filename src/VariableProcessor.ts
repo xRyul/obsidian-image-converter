@@ -57,6 +57,11 @@ export class VariableProcessor {
             description: "The name of the current note.",
             example: "MeetingNotes",
         },
+        {
+            name: "{notename_nospaces}",
+            description: "The name of the current note with spaces replaced by underscores.",
+            example: "Meeting_Notes",
+        },
 
         // Date & Time
         {
@@ -520,7 +525,7 @@ export class VariableProcessor {
                 categorized["Date & Time"].push(variable);
             } else if (["{vaultname}", "{vaultpath}", "{parentfolder}", "{parentparentfolder}" ,"{notefolder}", "{notepath}"].includes(variable.name)) {
                 categorized["File & Vault"].push(variable);
-            } else if (["{imagename}", "{filetype}", "{sizeb}", "{sizekb}", "{sizemb}", "{notename}"].includes(variable.name)) {
+            } else if (["{imagename}", "{filetype}", "{sizeb}", "{sizekb}", "{sizemb}", "{notename}", "{notename_nospaces}"].includes(variable.name)) {
                 categorized["Basic"].push(variable);
             } else if (["{width}", "{height}", "{aspectratio}", "{orientation}", "{resolution}"].includes(variable.name)) {
                 categorized["Image Metadata"].push(variable);
@@ -602,6 +607,7 @@ export class VariableProcessor {
         }
 
         variables["{notename}"] = activeFile.basename;
+        variables["{notename_nospaces}"] = activeFile.basename.replace(/\s+/g, "_");
         variables["{notepath}"] = activeFile.path;
         variables["{parentfolder}"] = activeFile.parent?.name || "";
         variables["{parentparentfolder}"] = (activeFile.parent?.parent?.path == "/" ? activeFile.parent?.name : activeFile.parent?.parent?.name) || "";
@@ -789,6 +795,9 @@ export class VariableProcessor {
                 case "notename":
                     textToHash = activeFile.basename;
                     break;
+                case "notename_nospaces":
+                    textToHash = activeFile.basename.replace(/\s+/g, "_");
+                    break;
                 case "notefolder":
                     textToHash = activeFile.parent?.name || "";
                     break;
@@ -844,6 +853,9 @@ export class VariableProcessor {
                         break;
                     case "notename":
                         textToHash = activeFile.basename;
+                        break;
+                    case "notename_nospaces":
+                        textToHash = activeFile.basename.replace(/\s+/g, "_");
                         break;
                     case "notefolder":
                         textToHash = activeFile.parent?.name || "";

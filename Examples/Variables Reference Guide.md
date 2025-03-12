@@ -18,6 +18,7 @@ This document provides a detailed explanation of all available variables for the
 
 - `{imageName}` - Original image filename without extension e.g.: For "vacation-photo.jpg" → "vacation-photo"
 - `{noteName}` - Current note name e.g.: If editing "Travel Log.md" → "Travel Log"
+- `{notename_nospaces}` - Current note name with underscores replacing spaces eg.: "Travel Log" → "Travel_Log" 
 - `{fileType}` - File extension e.g.: "jpg", "png", "pdf"
 - `{parentFolder}` - Parent folder name e.g.: In "Documents/Photos/Vacation" → "Photos"
 - `{parentparentfolder}` - Grandparent folder name e.g.: "Documents/Photos/Vacation" → "Documents"
