@@ -39,15 +39,15 @@ export class ContextMenu extends Component {
 		}
 	};
 
-    constructor(
+	constructor(
 		private app: App,
-        private plugin: ImageConverterPlugin,
-        private folderAndFilenameManagement: FolderAndFilenameManagement,
-        private variableProcessor: VariableProcessor,
-    ) {
-        super();
-        this.registerContextMenuListener();
-    }
+		private plugin: ImageConverterPlugin,
+		private folderAndFilenameManagement: FolderAndFilenameManagement,
+		private variableProcessor: VariableProcessor,
+	) {
+		super();
+		this.registerContextMenuListener();
+	}
 
 	/*-----------------------------------------------------------------*/
 	/*                       CONTEXT MENU SETUP                        */
@@ -80,7 +80,7 @@ export class ContextMenu extends Component {
 		const target = event.target as HTMLElement;
 		const activeView = this.app.workspace.getActiveViewOfType(View);
 		const isCanvasView = activeView?.getViewType() === 'canvas';
-		
+
 		if (isCanvasView) {
 			return;
 		}
@@ -135,7 +135,9 @@ export class ContextMenu extends Component {
 	) {
 		this.currentMenu = menu;
 
+
 		this.addRenameAndMoveInputs(menu, img, activeFile);
+
 		menu.addSeparator();
 
 		if (!Platform.isMobile) {
@@ -177,6 +179,223 @@ export class ContextMenu extends Component {
 		return true;
 	}
 
+
+	/*-----------------------------------------------------------------*/
+	/*                        CAPTION INPUT                            */
+	/*-----------------------------------------------------------------*/
+
+	private async loadCurrentCaption(img: HTMLImageElement, activeFile: TFile): Promise<string> {
+		try {
+			const imagePath = this.folderAndFilenameManagement.getImagePath(img);
+			if (!imagePath) return "";
+
+			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!activeView) return "";
+
+			const editor = activeView.editor;
+			const isExternal = !imagePath;
+			const matches = await this.findImageMatches(editor, imagePath, isExternal);
+
+			if (matches && matches.length > 0) {
+				const firstMatch = matches[0];
+
+				// Handle wiki-style links
+				const wikiMatch = firstMatch.fullMatch.match(/!\[\[([^\]]+?)(?:\|([^|\]]+?))?\s*(?:\|([^|\]]+?))?\]\]/);
+				if (wikiMatch) {
+					const secondPart = wikiMatch[2] || "";
+					const thirdPart = wikiMatch[3] || "";
+
+					const isDimensions = (part: string) => /^\s*\d+x\d+\s*$/.test(part);
+
+					if (thirdPart && !isDimensions(secondPart)) {
+						return secondPart.trim();
+					}
+					else if (secondPart && !isDimensions(secondPart)) {
+						return secondPart.trim();
+					}
+					return "";
+				}
+
+				// Handle markdown-style links
+				const markdownMatch = firstMatch.fullMatch.match(/!\[([^|\]]*?)(?:\|(\d+x\d+))?\]\(([^)]+)\)/);
+				if (markdownMatch) {
+					const caption = markdownMatch[1] || "";
+					return caption.trim();
+				}
+			}
+			return "";
+		} catch (error) {
+			console.error('Error loading caption:', error);
+			return "";
+		}
+	}
+
+	private async loadCurrentDimensions(img: HTMLImageElement, activeFile: TFile): Promise<{ width: string, height: string }> {
+		try {
+			const imagePath = this.folderAndFilenameManagement.getImagePath(img);
+			if (!imagePath) return { width: '', height: '' };
+	
+			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!activeView) return { width: '', height: '' };
+	
+			const editor = activeView.editor;
+			const isExternal = !imagePath;
+			const matches = await this.findImageMatches(editor, imagePath, isExternal);
+			
+			if (matches && matches.length > 0) {
+				const firstMatch = matches[0];
+				
+				// Handle wiki-style links
+				const wikiMatch = firstMatch.fullMatch.match(/!\[\[([^\]]+?)(?:\|([^|\]]+?))?\s*(?:\|([^|\]]+?))?\]\]/);
+				if (wikiMatch) {
+					const secondPart = wikiMatch[2] || "";
+					const thirdPart = wikiMatch[3] || "";
+					
+					const isDimensions = (part: string) => /^\s*\d+(?:x\d+)?\s*$/.test(part);
+					
+					// Check third part first, then second part for dimensions
+					let dimensionPart = '';
+					if (isDimensions(thirdPart)) {
+						dimensionPart = thirdPart.trim();
+					} else if (isDimensions(secondPart)) {
+						dimensionPart = secondPart.trim();
+					}
+	
+					if (dimensionPart) {
+						const parts = dimensionPart.split('x');
+						return {
+							width: parts[0],
+							height: parts.length > 1 ? parts[1] : ''
+						};
+					}
+				}
+	
+				// Handle markdown-style links
+				const markdownMatch = firstMatch.fullMatch.match(/!\[([^|\]]*?)(?:\|(\d+(?:x\d+)?))?\]\(([^)]+)\)/);
+				if (markdownMatch && markdownMatch[2]) {
+					const parts = markdownMatch[2].split('x');
+					return {
+						width: parts[0],
+						height: parts.length > 1 ? parts[1] : ''
+					};
+				}
+			}
+			return { width: '', height: '' };
+		} catch (error) {
+			console.error('Error loading dimensions:', error);
+			return { width: '', height: '' };
+		}
+	}
+
+	private async updateImageLinkWithDimensions(
+		editor: Editor, 
+		match: { lineNumber: number, line: string }, 
+		newCaption: string,
+		width: string,
+		height: string
+	): Promise<string> {
+		// Format dimensions based on what's provided
+		const dimensionsPart = width ? (height ? `${width}x${height}` : width) : '';
+		
+		const line = match.line;
+		
+		// Handle Wiki-style links
+		if (line.includes("![[")) {
+			return line.replace(
+				/!\[\[([^\]]+?)(?:\|([^|\]]+?))?\s*(?:\|([^|\]]+?))?\]\]/g,
+				(fullMatch, path) => {
+					if (newCaption && dimensionsPart) {
+						return `![[${path}|${newCaption}|${dimensionsPart}]]`;
+					} else if (newCaption) {
+						return `![[${path}|${newCaption}]]`;
+					} else if (dimensionsPart) {
+						return `![[${path}|${dimensionsPart}]]`;
+					}
+					return `![[${path}]]`;
+				}
+			);
+		}
+		
+		// Handle Markdown-style links
+		return line.replace(
+			/!\[([^|\]]*?)(?:\|(\d+(?:x\d+)?))?\]\(([^)]+)\)/g,
+			(fullMatch, caption, dimensions, path) => {
+				if (newCaption && dimensionsPart) {
+					return `![${newCaption}|${dimensionsPart}](${path})`;
+				} else if (newCaption) {
+					return `![${newCaption}](${path})`;
+				} else if (dimensionsPart) {
+					return `![|${dimensionsPart}](${path})`;
+				}
+				return `![](${path})`;
+			}
+		);
+	}
+
+	private async handleDimensionsAndCaptionUpdate(
+		menu: Menu,
+		captionInput: HTMLInputElement,
+		widthInput: HTMLInputElement,
+		heightInput: HTMLInputElement,
+		img: HTMLImageElement,
+		activeFile: TFile,
+		isImageResolvable: boolean
+	) {
+		if (!isImageResolvable) return;
+	
+		const newCaption = captionInput.value.trim();
+		const width = widthInput.value.trim();
+		const height = heightInput.value.trim();
+		
+		// Validate dimensions
+		if ((width && !(/^\d+$/.test(width))) || (height && !(/^\d+$/.test(height)))) {
+			new Notice('Dimensions must be positive numbers');
+			return;
+		}
+	
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!activeView) return;
+	
+		const editor = activeView.editor;
+		const imagePath = this.folderAndFilenameManagement.getImagePath(img);
+		const isExternal = !imagePath;
+		const matches = await this.findImageMatches(editor, imagePath, isExternal);
+	
+		if (matches.length === 0) {
+			new Notice('Failed to find image link in the current note.');
+			return;
+		}
+	
+		const handleConfirmation = async () => {
+			for (const match of matches) {
+				const updatedLine = await this.updateImageLinkWithDimensions(
+					editor,
+					match,
+					newCaption,
+					width,
+					height
+				);
+				editor.setLine(match.lineNumber, updatedLine);
+			}
+			new Notice('Image caption and dimensions updated successfully.');
+			this.plugin.captionManager?.refresh();
+		};
+	
+		if (matches.length > 1) {
+			new ConfirmDialog(
+				this.app,
+				"Confirm Updates",
+				`Found ${matches.length} matching image links. Update all?`,
+				"Update",
+				handleConfirmation
+			).open();
+		} else {
+			await handleConfirmation();
+		}
+	
+		menu.hide();
+	}
+
 	/*-----------------------------------------------------------------*/
 	/*                      RENAME AND MOVE IMAGE                      */
 	/*-----------------------------------------------------------------*/
@@ -199,12 +418,13 @@ export class ContextMenu extends Component {
 
 		if (!isNativeMenus && !Platform.isMobile) {
 			const imagePath = this.folderAndFilenameManagement.getImagePath(img);
+			const isImageResolvable = imagePath !== null;
+
 			let fileNameWithoutExt = '';
 			let directoryPath = '';
 			let fileExtension = '';
 			let obsidianVaultPathForRename: string | undefined;
 			let file: TFile | File;
-			const isImageResolvable = imagePath !== null;
 
 			if (isImageResolvable) {
 				const parsedPath = path.parse(imagePath);
@@ -222,100 +442,192 @@ export class ContextMenu extends Component {
 
 			menu.addItem((item) => {
 				const menuItem = item as any;
-				const inputContainer = this.app.workspace.containerEl.createEl('div', {
-					cls: 'image-converter-contextmenu-info-container'
-				});
 
-				// --- Name Input Group ---
-				const nameGroup = inputContainer.createEl('div', {
-					cls: 'image-converter-contextmenu-input-group'
-				});
+				// Create main container
+				const inputContainer = document.createElement('div');
+				inputContainer.className = 'image-converter-contextmenu-info-container';
 
-				// Add icon and label for Name input
-				const nameIcon = nameGroup.createEl('div', {
-					cls: 'image-converter-contextmenu-icon-container'
-				});
+				// Create name input group
+				const nameGroup = document.createElement('div');
+				nameGroup.className = 'image-converter-contextmenu-input-group';
 
+				const nameIcon = document.createElement('div');
+				nameIcon.className = 'image-converter-contextmenu-icon-container';
 				setIcon(nameIcon, 'file-text');
-				nameGroup.createEl('label', {
-					text: 'Name:',
-					attr: { for: 'image-converter-name-input' }
-				});
+				nameGroup.appendChild(nameIcon);
 
-				const nameInput = nameGroup.createEl('input', {
-					type: 'text',
-					value: fileNameWithoutExt,
-					placeholder: 'Enter a new image name',
-					cls: 'image-converter-contextmenu-name-input',
-					attr: { id: 'image-converter-name-input' }
-				});
+				const nameLabel = document.createElement('label');
+				nameLabel.textContent = 'Name:';
+				nameLabel.setAttribute('for', 'image-converter-name-input');
+				nameGroup.appendChild(nameLabel);
 
+				const nameInput = document.createElement('input');
+				nameInput.type = 'text';
+				nameInput.value = fileNameWithoutExt;
+				nameInput.placeholder = 'Enter a new image name';
+				nameInput.className = 'image-converter-contextmenu-name-input';
+				nameInput.id = 'image-converter-name-input';
 				if (!isImageResolvable) {
-					nameInput.addClass('image-converter-contextmenu-disabled');
+					nameInput.classList.add('image-converter-contextmenu-disabled');
 				}
+				nameGroup.appendChild(nameInput);
 
-				// --- Path Input Group ---
-				const pathGroup = inputContainer.createEl('div', {
-					cls: 'image-converter-contextmenu-input-group'
-				});
+				// Create path input group
+				const pathGroup = document.createElement('div');
+				pathGroup.className = 'image-converter-contextmenu-input-group';
 
-				// Add icon and label for Path input
-				const pathIcon = pathGroup.createEl('div', {
-					cls: 'image-converter-contextmenu-icon-container'
-				});
+				const pathIcon = document.createElement('div');
+				pathIcon.className = 'image-converter-contextmenu-icon-container';
 				setIcon(pathIcon, 'folder');
+				pathGroup.appendChild(pathIcon);
 
-				pathGroup.createEl('label', {
-					text: 'Folder:',
-					attr: { for: 'image-converter-path-input' }
-				});
+				const pathLabel = document.createElement('label');
+				pathLabel.textContent = 'Folder:';
+				pathLabel.setAttribute('for', 'image-converter-path-input');
+				pathGroup.appendChild(pathLabel);
 
-				const pathInput = pathGroup.createEl('input', {
-					type: 'text',
-					value: directoryPath,
-					placeholder: 'Enter a new path for the image',
-					cls: 'image-converter-contextmenu-path-input',
-					attr: { id: 'image-converter-path-input' }
-				});
-
+				const pathInput = document.createElement('input');
+				pathInput.type = 'text';
+				pathInput.value = directoryPath;
+				pathInput.placeholder = 'Enter a new path for the image';
+				pathInput.className = 'image-converter-contextmenu-path-input';
+				pathInput.id = 'image-converter-path-input';
 				if (!isImageResolvable) {
-					pathInput.addClass('image-converter-contextmenu-disabled');
+					pathInput.classList.add('image-converter-contextmenu-disabled');
 				}
+				pathGroup.appendChild(pathInput);
 
-				const confirmButton = inputContainer.createEl('div', {
-					cls: ['image-converter-contextmenu-button', 'image-converter-contextmenu-confirm']
+				// Create caption input group
+				const captionGroup = document.createElement('div');
+				captionGroup.className = 'image-converter-contextmenu-input-group';
+
+				const captionIcon = document.createElement('div');
+				captionIcon.className = 'image-converter-contextmenu-icon-container';
+				setIcon(captionIcon, 'subtitles');
+				captionGroup.appendChild(captionIcon);
+
+				const captionLabel = document.createElement('label');
+				captionLabel.textContent = 'Caption:';
+				captionLabel.setAttribute('for', 'image-converter-caption-input');
+				captionGroup.appendChild(captionLabel);
+
+				const captionInput = document.createElement('input');
+				captionInput.type = 'text';
+				captionInput.placeholder = 'Loading caption...';
+				captionInput.className = 'image-converter-contextmenu-caption-input';
+				captionInput.id = 'image-converter-caption-input';
+				captionGroup.appendChild(captionInput);
+
+				// Create dimensions input group
+				const dimensionsGroup = document.createElement('div');
+				dimensionsGroup.className = 'image-converter-contextmenu-input-group';
+
+				const dimensionsIcon = document.createElement('div');
+				dimensionsIcon.className = 'image-converter-contextmenu-icon-container';
+				setIcon(dimensionsIcon, 'aspect-ratio');
+				dimensionsGroup.appendChild(dimensionsIcon);
+
+				const dimensionsLabel = document.createElement('label');
+				dimensionsLabel.textContent = 'Size:';
+				dimensionsLabel.setAttribute('for', 'image-converter-width-input');
+				dimensionsGroup.appendChild(dimensionsLabel);
+
+				// Create width input
+				const widthInput = document.createElement('input');
+				widthInput.type = 'number';
+				widthInput.min = '1';
+				widthInput.placeholder = 'W';
+				widthInput.className = 'image-converter-contextmenu-dimension-input';
+				widthInput.id = 'image-converter-width-input';
+
+				// Create height input
+				const heightInput = document.createElement('input');
+				heightInput.type = 'number';
+				heightInput.min = '1';
+				heightInput.placeholder = 'H';
+				heightInput.className = 'image-converter-contextmenu-dimension-input';
+				heightInput.id = 'image-converter-height-input';
+
+				// Create dimension inputs container
+				const dimensionInputsContainer = document.createElement('div');
+				dimensionInputsContainer.className = 'image-converter-contextmenu-dimension-inputs';
+				dimensionInputsContainer.appendChild(widthInput);
+				dimensionInputsContainer.appendChild(document.createTextNode('×')); // multiplication symbol
+				dimensionInputsContainer.appendChild(heightInput);
+
+				dimensionsGroup.appendChild(dimensionInputsContainer);
+
+				// Load current dimensions
+				this.loadCurrentDimensions(img, activeFile).then(({ width, height }) => {
+					widthInput.value = width;
+					heightInput.value = height;
 				});
+
+
+
+				// Add all groups to container
+				inputContainer.appendChild(nameGroup);
+				inputContainer.appendChild(pathGroup);
+				inputContainer.appendChild(captionGroup);
+				inputContainer.appendChild(dimensionsGroup);
+
+
+				// Add single confirm button
+				const confirmButton = document.createElement('div');
+				confirmButton.className = 'image-converter-contextmenu-button image-converter-contextmenu-confirm';
 				setIcon(confirmButton, 'check');
+				inputContainer.appendChild(confirmButton);
 
-				// --- Event Handlers and Logic ---
-				this.registerDomEvent(nameInput, 'mousedown', this.stopPropagationHandler);
-				this.registerDomEvent(nameInput, 'click', this.stopPropagationHandler);
-				this.registerDomEvent(pathInput, 'mousedown', this.stopPropagationHandler);
-				this.registerDomEvent(pathInput, 'click', this.stopPropagationHandler);
-				this.registerDomEvent(nameInput, 'keydown', this.stopPropagationHandler);
-				this.registerDomEvent(pathInput, 'keydown', this.stopPropagationHandler);
+				// Register event listeners for all inputs
+				[nameInput, pathInput, captionInput, widthInput, heightInput].forEach(input => {
+					this.registerDomEvent(input, 'mousedown', this.stopPropagationHandler);
+					this.registerDomEvent(input, 'click', this.stopPropagationHandler);
+					this.registerDomEvent(input, 'keydown', this.stopPropagationHandler);
+				});
+				
+
 				this.registerDomEvent(document, 'click', this.documentClickHandler);
-				this.registerDomEvent(
-					confirmButton,
-					'click',
-					() => this.handleRenameAndMove(
-						menu,
-						nameInput,
-						pathInput,
-						img,
-						isImageResolvable,
-						fileNameWithoutExt,
-						fileExtension,
-						obsidianVaultPathForRename,
-						file,
-						activeFile
-					)
-				);
 
+				// Load the current caption asynchronously
+				this.loadCurrentCaption(img, activeFile).then(currentCaption => {
+					captionInput.value = currentCaption;
+					captionInput.placeholder = 'Enter a custom caption';
+				});
+
+				// Single confirm button handler
+				this.registerDomEvent(confirmButton, 'click', async () => {
+					if (isImageResolvable) {
+						// First handle rename and move
+						await this.handleRenameAndMove(
+							menu,
+							nameInput,
+							pathInput,
+							img,
+							isImageResolvable,
+							fileNameWithoutExt,
+							fileExtension,
+							obsidianVaultPathForRename,
+							file,
+							activeFile
+						);
+
+						// Then handle caption and dimensions update together
+						await this.handleDimensionsAndCaptionUpdate(
+							menu,
+							captionInput,
+							widthInput,
+							heightInput,
+							img,
+							activeFile,
+							isImageResolvable
+						);
+					}
+				});
+
+				// Clear and set the menu item content
 				menuItem.dom.empty();
 				menuItem.dom.appendChild(inputContainer);
 			});
-
 		}
 	}
 
@@ -528,15 +840,15 @@ export class ContextMenu extends Component {
 		if (wikiMatch) {
 			return wikiMatch[1].trim();  // Trim spaces
 		}
-	
+
 		const markdownMatch = link.match(/!\[.*?\]\(\s*(.*?)\s*\)/);
 		if (markdownMatch) {
 			return markdownMatch[1].trim();  // Trim spaces
 		}
-	
+
 		return null;
 	}
-	
+
 
 	/**
 	 * Finds image links in the editor's content based on the provided criteria.
@@ -571,8 +883,8 @@ export class ContextMenu extends Component {
 		for (let i = frontmatterEnd + 1; i < lineCount; i++) {
 			const line = editor.getLine(i);
 
-			// Check wiki-style links (![[path/to/image.png]])
-			const wikiMatches = [...line.matchAll(/!\[\[([^\]]+?)(?:\|[^\]]+?)?\]\]/g)];
+			// Check wiki-style links (![[path/to/image.png]])  Added ? after last ] to be non-greedy
+			const wikiMatches = [...line.matchAll(/!\[\[([^\]]+?)(?:\|[^\]]+?)??\]\]/g)];
 			for (const match of wikiMatches) {
 				const fullMatch = match[0].trim();
 
