@@ -297,7 +297,7 @@ export class VariableProcessor {
             example: "Project",
         },
 		{
-			name: "{parentparentfolder}",
+			name: "{grandparentfolder}",
 			description: "Parent of the parent folder of the note, but not the vault root",
 			example: "ParentOfProject"
 		},
@@ -523,7 +523,7 @@ export class VariableProcessor {
         for (const variable of variables) {
             if (variable.name.startsWith("{date") || ["{YYYY}", "{MM}", "{DD}", "{HH}", "{mm}", "{ss}", "{weekday}", "{month}", "{calendar}", "{today}", "{YYYY-MM-DD}", "{tomorrow}", "{yesterday}", "{startofweek}", "{endofweek}", "{startofmonth}", "{endofmonth}", "{nextweek}", "{lastweek}", "{nextmonth}", "{lastmonth}", "{daysinmonth}", "{weekofyear}", "{quarterofyear}", "{week}", "{w}", "{quarter}", "{Q}", "{dayofyear}", "{DDD}", "{monthname}", "{MMMM}", "{dayname}", "{dddd}", "{dateordinal}", "{Do}", "{relativetime}", "{currentdate}", "{yyyy}", "{time}", "{timestamp}"].includes(variable.name)) {
                 categorized["Date & Time"].push(variable);
-            } else if (["{vaultname}", "{vaultpath}", "{parentfolder}", "{parentparentfolder}" ,"{notefolder}", "{notepath}"].includes(variable.name)) {
+            } else if (["{vaultname}", "{vaultpath}", "{parentfolder}", "{grandparentfolder}" ,"{notefolder}", "{notepath}"].includes(variable.name)) {
                 categorized["File & Vault"].push(variable);
             } else if (["{imagename}", "{filetype}", "{sizeb}", "{sizekb}", "{sizemb}", "{notename}", "{notename_nospaces}"].includes(variable.name)) {
                 categorized["Basic"].push(variable);
@@ -610,7 +610,7 @@ export class VariableProcessor {
         variables["{notename_nospaces}"] = activeFile.basename.replace(/\s+/g, "_");
         variables["{notepath}"] = activeFile.path;
         variables["{parentfolder}"] = activeFile.parent?.name || "";
-        variables["{parentparentfolder}"] = (activeFile.parent?.parent?.path == "/" ? activeFile.parent?.name : activeFile.parent?.parent?.name) || "";
+        variables["{grandparentfolder}"] = (activeFile.parent?.parent?.path == "/" ? activeFile.parent?.name : activeFile.parent?.parent?.name) || "";
         variables["{notefolder}"] = activeFile.parent?.name || "";
         variables["{vaultname}"] = this.app.vault.getName();
         variables["{vaultpath}"] = this.app.vault.getRoot().path;
@@ -783,7 +783,7 @@ export class VariableProcessor {
                 case "parentfolder":
                     textToHash = activeFile.parent?.name || "";
                     break;
-                case "parentparentfolder":
+                case "grandparentfolder":
                     textToHash = (activeFile.parent?.parent?.path == "/" ? activeFile.parent?.name : activeFile.parent?.parent?.name) || "";
                     break;
                 case "rootfolder":
@@ -842,7 +842,7 @@ export class VariableProcessor {
                     case "parentfolder":
                         textToHash = activeFile.parent?.name || "";
                         break;
-                    case "parentparentfolder":
+                    case "grandparentfolder":
                         textToHash = (activeFile.parent?.parent?.path == "/" ? activeFile.parent?.name : activeFile.parent?.parent?.name) || "";
                         break;
                     case "rootfolder":

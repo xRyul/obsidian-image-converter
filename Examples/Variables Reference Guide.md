@@ -21,7 +21,7 @@ This document provides a detailed explanation of all available variables for the
 - `{notename_nospaces}` - Current note name with underscores replacing spaces eg.: "Travel Log" → "Travel_Log" 
 - `{fileType}` - File extension e.g.: "jpg", "png", "pdf"
 - `{parentFolder}` - Parent folder name e.g.: In "Documents/Photos/Vacation" → "Photos"
-- `{parentparentfolder}` - Grandparent folder name e.g.: "Documents/Photos/Vacation" → "Documents"
+- `{grandparentfolder}` - Grandparent folder name e.g.: "Documents/Photos/Vacation" → "Documents"
 - `{directory}` - Full directory path e.g.: "Documents/Photos/Vacation"
 - `{folderName}` - Current folder name e.g.: In "Documents/Photos/Vacation" → "Vacation"
 - `{depth}` - Number of subfolder levels e.g.: "Documents/Photos/Vacation" → "3"
