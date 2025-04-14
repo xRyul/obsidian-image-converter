@@ -483,7 +483,7 @@ export class VariableProcessor {
         let result = template;
 
         for (const [key, value] of Object.entries(variables)) {
-            const regex = new RegExp(this.escapeRegExp(key), "gi");
+            const regex = new RegExp(this.escapeRegExp(key), "g");
             result = result.replace(regex, value);
         }
 
