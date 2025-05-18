@@ -3,6 +3,7 @@ import { Notice, Platform } from "obsidian";
 import { SupportedImageFormats } from "./SupportedImageFormats";
 import { ChildProcess, spawn } from 'child_process';
 import { ConversionPreset, ImageConverterSettings, DEFAULT_SETTINGS } from "./ImageConverterSettings";
+import * as piexif from "piexifjs"; // Import piexif library
 
 
 import * as fs from 'fs/promises'; // Import Node.js file system functions (promises version)
@@ -59,7 +60,58 @@ export class ImageProcessor {
         preset?: ConversionPreset, // Add preset parameter
         settings?: ImageConverterSettings
     ): Promise<ArrayBuffer> {
+        // Extract metadata from the original file
+        const metadata = await this.extractMetadata(file);
 
+        // Process the image using the helper function
+        const processedImage = await this.processImageHelper(
+            file,
+            format,
+            quality,
+            colorDepth,
+            resizeMode,
+            desiredWidth,
+            desiredHeight,
+            desiredLongestEdge,
+            enlargeOrReduce,
+            allowLargerFiles,
+            preset,
+            settings
+        );
+
+        // Re-apply the metadata to the processed image
+        return await this.applyMetadata(processedImage, metadata);
+    }    
+
+    /**
+     * Helper method to process an image file.
+     * 
+     * @param file - The image file as a Blob.
+     * @param format - The desired output format ('WEBP', 'JPEG', 'PNG').
+     * @param quality - The quality setting for lossy formats (0.0 - 1.0).
+     * @param colorDepth - The color depth for PNG (0.0 - 1.0, where 1 is full color).
+     * @param resizeMode - The resizing mode.
+     * @param desiredWidth - The desired width for resizing.
+     * @param desiredHeight - The desired height for resizing.
+     * @param desiredLongestEdge - The desired longest edge for resizing.
+     * @param enlargeOrReduce - Whether to enlarge or reduce the image during resizing.
+     * @param allowLargerFiles - Whether to allow output files larger than the original.
+     * @returns A Promise that resolves to the processed image as an ArrayBuffer.
+     */
+    private async processImageHelper(
+        file: Blob,
+        format: 'WEBP' | 'JPEG' | 'PNG' | 'ORIGINAL' | 'NONE' | 'PNGQUANT' | 'AVIF',
+        quality: number,
+        colorDepth: number,
+        resizeMode: ResizeMode,
+        desiredWidth: number,
+        desiredHeight: number,
+        desiredLongestEdge: number,
+        enlargeOrReduce: EnlargeReduce,
+        allowLargerFiles: boolean,
+        preset?: ConversionPreset, // Add preset parameter
+        settings?: ImageConverterSettings
+    ): Promise<ArrayBuffer> {
         this.preset = preset; // Store the preset
         this.settings = settings ? settings : DEFAULT_SETTINGS;
 
@@ -1603,5 +1655,61 @@ export class ImageProcessor {
         }
 
         return buffer;
+    }
+
+    /**
+     * Extracts metadata from an image file.
+     * @param file - The image file as a Blob.
+     * @returns A Promise that resolves to the extracted metadata.
+     */
+    private async extractMetadata(file: Blob): Promise<string> {
+        const reader = new FileReader();
+        const fileDataUrl = await new Promise<string>((resolve, reject) => {
+            reader.onload = (e) => resolve(e.target?.result as string);
+            reader.onerror = () => reject(new Error("Failed to read file for metadata"));
+            reader.readAsDataURL(file);
+        });
+
+        try {
+            const exifData = piexif.load(fileDataUrl);
+            return exifData && Object.keys(exifData).length > 0 ? piexif.dump(exifData) : "";
+        } catch {
+            return "";
+        }
+    }
+
+    private async applyMetadata(
+        buffer: ArrayBuffer,
+        metadata: string
+    ): Promise<ArrayBuffer> {
+        try {
+            // Convert ArrayBuffer to Base64 string in chunks
+            const uint8Array = new Uint8Array(buffer);
+            let binaryString = '';
+            const chunkSize = 8192; // Process in chunks to avoid stack overflow
+            for (let i = 0; i < uint8Array.length; i += chunkSize) {
+                binaryString += String.fromCharCode.apply(
+                    null,
+                    uint8Array.subarray(i, i + chunkSize)
+                );
+            }
+            const base64Data = `data:image/jpeg;base64,${btoa(binaryString)}`;
+    
+            // Insert EXIF metadata using piexif
+            const updatedBase64 = piexif.insert(metadata, base64Data);
+    
+            // Convert the updated Base64 string back to an ArrayBuffer
+            const updatedBinaryString = atob(updatedBase64.split(',')[1]);
+            const updatedBuffer = new ArrayBuffer(updatedBinaryString.length);
+            const updatedUint8Array = new Uint8Array(updatedBuffer);
+            for (let i = 0; i < updatedBinaryString.length; i++) {
+                updatedUint8Array[i] = updatedBinaryString.charCodeAt(i);
+            }
+    
+            return updatedBuffer;
+        } catch (error) {
+            console.error("Error applying metadata:", error);
+            return buffer; // Return original if metadata application fails
+        }
     }
 }
