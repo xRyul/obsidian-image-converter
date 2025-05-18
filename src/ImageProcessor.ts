@@ -78,9 +78,17 @@ export class ImageProcessor {
 
         if (format === "JPEG") {
             // Extract metadata from the original file
-            const metadata = await this.extractMetadata(file);
+            const metadata: piexif.ExifDict | undefined = await this.extractMetadata(file);
+
+            // Remove rotation property (Orientation tag in 0th IFD, tag 274)
+            if (metadata && metadata["0th"] && metadata["0th"][piexif.ImageIFD.Orientation]) {
+                delete metadata["0th"][piexif.ImageIFD.Orientation];
+            }
+
+            const stringifiedMetadata = metadata && Object.keys(metadata).length > 0 ? piexif.dump(metadata) : "";
+
             // Re-apply the metadata to the processed image
-            return await this.applyMetadata(processedImage, metadata);
+            return await this.applyMetadata(processedImage, stringifiedMetadata);
         }
 
         return processedImage
@@ -1665,7 +1673,7 @@ export class ImageProcessor {
      * @param file - The image file as a Blob.
      * @returns A Promise that resolves to the extracted metadata.
      */
-    private async extractMetadata(file: Blob): Promise<string> {
+    private async extractMetadata(file: Blob): Promise<piexif.ExifDict | undefined> {
         const reader = new FileReader();
         const fileDataUrl = await new Promise<string>((resolve, reject) => {
             reader.onload = (e) => resolve(e.target?.result as string);
@@ -1674,10 +1682,9 @@ export class ImageProcessor {
         });
 
         try {
-            const exifData = piexif.load(fileDataUrl);
-            return exifData && Object.keys(exifData).length > 0 ? piexif.dump(exifData) : "";
+            return piexif.load(fileDataUrl);
         } catch {
-            return "";
+            return;
         }
     }
 
