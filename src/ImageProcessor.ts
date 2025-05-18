@@ -60,9 +60,6 @@ export class ImageProcessor {
         preset?: ConversionPreset, // Add preset parameter
         settings?: ImageConverterSettings
     ): Promise<ArrayBuffer> {
-        // Extract metadata from the original file
-        const metadata = await this.extractMetadata(file);
-
         // Process the image using the helper function
         const processedImage = await this.processImageHelper(
             file,
@@ -79,8 +76,14 @@ export class ImageProcessor {
             settings
         );
 
-        // Re-apply the metadata to the processed image
-        return await this.applyMetadata(processedImage, metadata);
+        if (format === "JPEG") {
+            // Extract metadata from the original file
+            const metadata = await this.extractMetadata(file);
+            // Re-apply the metadata to the processed image
+            return await this.applyMetadata(processedImage, metadata);
+        }
+
+        return processedImage
     }    
 
     /**
