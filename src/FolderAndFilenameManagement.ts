@@ -18,6 +18,50 @@ export class FolderAndFilenameManagement {
         private variableProcessor: VariableProcessor
     ) { }
 
+    /**
+     * Validates templates to ensure variables won't resolve to empty strings that would cause issues
+     * @param file The file being processed
+     * @param activeFile The current active file
+     * @param selectedFilenamePreset The filename preset to validate
+     * @param selectedFolderPreset The folder preset to validate
+     * @throws Error if validation fails with descriptive message
+     */
+    private validateTemplates(
+        file: File,
+        activeFile: TFile,
+        selectedFilenamePreset: FilenamePreset,
+        selectedFolderPreset: FolderPreset
+    ): void {
+        const context = { file, activeFile };
+        
+        // Validate folder template if it's a custom template
+        if (selectedFolderPreset?.type === "CUSTOM" && selectedFolderPreset.customTemplate) {
+            const folderValidation = this.variableProcessor.validateTemplate(selectedFolderPreset.customTemplate, context);
+            if (!folderValidation.valid) {
+                new Notice(`Folder template validation failed: ${folderValidation.errors.join(', ')}`);
+                throw new Error(`Folder template validation failed: ${folderValidation.errors.join(', ')}`);
+            }
+        }
+
+        // Validate subfolder template if using SUBFOLDER type
+        if (selectedFolderPreset?.type === "SUBFOLDER" && this.settings.subfolderTemplate) {
+            const subfolderValidation = this.variableProcessor.validateTemplate(this.settings.subfolderTemplate, context);
+            if (!subfolderValidation.valid) {
+                new Notice(`Subfolder template validation failed: ${subfolderValidation.errors.join(', ')}`);
+                throw new Error(`Subfolder template validation failed: ${subfolderValidation.errors.join(', ')}`);
+            }
+        }
+
+        // Validate filename template if it's a custom template
+        if (selectedFilenamePreset?.customTemplate) {
+            const filenameValidation = this.variableProcessor.validateTemplate(selectedFilenamePreset.customTemplate, context);
+            if (!filenameValidation.valid) {
+                new Notice(`Filename template validation failed: ${filenameValidation.errors.join(', ')}`);
+                throw new Error(`Filename template validation failed: ${filenameValidation.errors.join(', ')}`);
+            }
+        }
+    }
+
     async determineDestination(
         file: File,
         activeFile: TFile,
@@ -25,6 +69,9 @@ export class FolderAndFilenameManagement {
         selectedFilenamePreset: FilenamePreset,
         selectedFolderPreset: FolderPreset
     ): Promise<{ destinationPath: string; newFilename: string }> {
+        // Step 0: Validate templates before processing
+        this.validateTemplates(file, activeFile, selectedFilenamePreset, selectedFolderPreset);
+
         // Step 1: Determine the target directory based on folder preset
         const destinationDir = await this.getDestinationDirectory(
             selectedFolderPreset,
