@@ -500,6 +500,43 @@ export class VariableProcessor {
         return result;
     }
 
+    /**
+     * Validates a template to ensure variables won't resolve to empty strings that would cause issues
+     * @param template The template string to validate
+     * @param context The variable context containing file and activeFile
+     * @returns Object with validation results and any error messages
+     */
+    validateTemplate(template: string, context: VariableContext): { valid: boolean; errors: string[] } {
+        const { activeFile } = context;
+        const errors: string[] = [];
+
+        // Check for {grandparentfolder} usage
+        if (template.includes("{grandparentfolder}")) {
+            const parentFolder = activeFile.parent;
+            const grandparentFolder = parentFolder?.parent;
+            
+            // If there's no grandparent or the grandparent is the vault root
+            if (!grandparentFolder || grandparentFolder.path === "/") {
+                errors.push("Cannot use {grandparentfolder} - the current note has no grandparent folder. Please modify your template.");
+            }
+        }
+
+        // Check for {parentfolder} usage when note is in vault root
+        if (template.includes("{parentfolder}")) {
+            const parentFolder = activeFile.parent;
+            
+            // If there's no parent or the parent is the vault root
+            if (!parentFolder || parentFolder.path === "/") {
+                errors.push("Cannot use {parentfolder} - the current note is in the vault root. Please modify your template.");
+            }
+        }
+
+        return {
+            valid: errors.length === 0,
+            errors: errors
+        };
+    }
+
     // Expose allVariables publicly
     public getAllVariables(): VariableInfo[] {
         return this.allVariables;
