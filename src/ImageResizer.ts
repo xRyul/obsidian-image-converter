@@ -492,18 +492,40 @@ export class ImageResizer {
                 newHeight = Math.max(minSize, this.initialHeight * scaleFactor);
             } else {
                 // Handle-based resizing (internal images)
+                const isAspectFixed = this.plugin.settings.isDragAspectRatioLocked;
+ 
                 switch (this.currentHandle) {
                     case 'n': // Top handle: adjust height from the top
-                        newHeight = Math.max(minSize, this.initialHeight - deltaY);
+                        if (isAspectFixed) {
+                            newHeight = Math.max(minSize, this.initialHeight - deltaY);
+                            newWidth = newHeight * this.initialAspectRatio;
+                        } else {
+                            newHeight = Math.max(minSize, this.initialHeight - deltaY);
+                        }
                         break;
                     case 's': // Bottom handle: adjust height from the bottom
-                        newHeight = Math.max(minSize, this.initialHeight + deltaY);
+                        if (isAspectFixed) {
+                            newHeight = Math.max(minSize, this.initialHeight + deltaY);
+                            newWidth = newHeight * this.initialAspectRatio;
+                        } else {
+                            newHeight = Math.max(minSize, this.initialHeight + deltaY);
+                        }
                         break;
                     case 'e': // Right handle: adjust width from the right
-                        newWidth = Math.max(minSize, this.initialWidth + deltaX);
+                        if (isAspectFixed) {
+                            newWidth = Math.max(minSize, this.initialWidth + deltaX);
+                            newHeight = newWidth / this.initialAspectRatio;
+                        } else {
+                            newWidth = Math.max(minSize, this.initialWidth + deltaX);
+                        }
                         break;
                     case 'w': // Left handle: adjust width from the left
-                        newWidth = Math.max(minSize, this.initialWidth - deltaX);
+                        if (isAspectFixed) {
+                            newWidth = Math.max(minSize, this.initialWidth - deltaX);
+                            newHeight = newWidth / this.initialAspectRatio;
+                        } else {
+                            newWidth = Math.max(minSize, this.initialWidth - deltaX);
+                        }
                         break;
                     case 'nw': // Top-left handle: adjust width and maintain aspect ratio
                     case 'sw': // Bottom-left handle: adjust width and maintain aspect ratio
@@ -1391,4 +1413,3 @@ export class ImageResizer {
         };
     }
 }
-

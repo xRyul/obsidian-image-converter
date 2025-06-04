@@ -184,6 +184,7 @@ export interface ImageConverterSettings {
     imageAlignment_cacheLocation: ".obsidian" | "plugin";
 
     isDragResizeEnabled: boolean;
+    isDragAspectRatioLocked: boolean;
     isScrollResizeEnabled: boolean;
     isResizeInReadingModeEnabled: boolean;
 
@@ -377,6 +378,7 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
 
     isDragResizeEnabled: true,
     isScrollResizeEnabled: true,
+    isDragAspectRatioLocked: false,
     isResizeInReadingModeEnabled: false,
 
     resizeSensitivity: 0.1,
@@ -911,8 +913,27 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         .onChange(async (value) => {
                             this.plugin.settings.isDragResizeEnabled = value;
                             await this.plugin.saveSettings();
+                            // Force refresh to update visible options
+                            this.display();                            
                         })
                 );
+
+            // Drag-resize specific settings - only show when drag resize is enabled
+            if (this.plugin.settings.isDragResizeEnabled) {
+                const apectRatioSettingsContainer = imageDragResizeSection.createDiv('fix-aspect-ratio-settings');
+
+                new Setting(apectRatioSettingsContainer)
+                    .setName('Lock the aspect ratio when dragging')
+                    .setDesc('Prevent accidental distortions of image aspect ratio when dragging to resize')
+                    .addToggle(toggle => toggle
+                        .setValue(this.plugin.settings.isDragAspectRatioLocked)
+                        .onChange(async (value) => {
+                            this.plugin.settings.isDragAspectRatioLocked = value;
+                            await this.plugin.saveSettings();
+
+                        }));
+            }
+
 
             new Setting(imageDragResizeSection)
                 .setName('Enable scroll-wheel resize')
