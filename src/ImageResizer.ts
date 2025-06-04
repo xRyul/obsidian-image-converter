@@ -499,23 +499,23 @@ export class ImageResizer {
                         if (isAspectFixed) {
                             newHeight = Math.max(minSize, this.initialHeight - deltaY);
                             newWidth = newHeight * this.initialAspectRatio;
-                        } else{
+                        } else {
                             newHeight = Math.max(minSize, this.initialHeight - deltaY);
-                        } 
+                        }
                         break;
                     case 's': // Bottom handle: adjust height from the bottom
                         if (isAspectFixed) {
                             newHeight = Math.max(minSize, this.initialHeight + deltaY);
                             newWidth = newHeight * this.initialAspectRatio;
-                        } else{                    
+                        } else {
                             newHeight = Math.max(minSize, this.initialHeight + deltaY);
                         }
                         break;
                     case 'e': // Right handle: adjust width from the right
-                        if (isAspectFixed) {      
+                        if (isAspectFixed) {
                             newWidth = Math.max(minSize, this.initialWidth + deltaX);
                             newHeight = newWidth / this.initialAspectRatio;
-                        } else{                    
+                        } else {
                             newWidth = Math.max(minSize, this.initialWidth + deltaX);
                         }
                         break;
@@ -523,7 +523,7 @@ export class ImageResizer {
                         if (isAspectFixed) {
                             newWidth = Math.max(minSize, this.initialWidth - deltaX);
                             newHeight = newWidth / this.initialAspectRatio;
-                        } else{                    
+                        } else {
                             newWidth = Math.max(minSize, this.initialWidth - deltaX);
                         }
                         break;
@@ -1413,4 +1413,3 @@ export class ImageResizer {
         };
     }
 }
-
