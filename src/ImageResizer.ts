@@ -492,7 +492,7 @@ export class ImageResizer {
                 newHeight = Math.max(minSize, this.initialHeight * scaleFactor);
             } else {
                 // Handle-based resizing (internal images)
-                const isAspectFixed = this.plugin.settings.isDragAspectRatioFixed;
+                const isAspectFixed = this.plugin.settings.isDragAspectRatioLocked;
  
                 switch (this.currentHandle) {
                     case 'n': // Top handle: adjust height from the top

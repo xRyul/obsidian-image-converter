@@ -184,7 +184,7 @@ export interface ImageConverterSettings {
     imageAlignment_cacheLocation: ".obsidian" | "plugin";
 
     isDragResizeEnabled: boolean;
-    isDragAspectRatioFixed: boolean;
+    isDragAspectRatioLocked: boolean;
     isScrollResizeEnabled: boolean;
     isResizeInReadingModeEnabled: boolean;
 
@@ -378,7 +378,7 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
 
     isDragResizeEnabled: true,
     isScrollResizeEnabled: true,
-    isDragAspectRatioFixed: false,
+    isDragAspectRatioLocked: false,
     isResizeInReadingModeEnabled: false,
 
     resizeSensitivity: 0.1,
@@ -924,11 +924,11 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
                 new Setting(apectRatioSettingsContainer)
                     .setName('Lock the aspect ratio when dragging')
-                    .setDesc('Prevent acccidental distortions of image aspect ratio when dragging to resize')
+                    .setDesc('Prevent accidental distortions of image aspect ratio when dragging to resize')
                     .addToggle(toggle => toggle
-                        .setValue(this.plugin.settings.isDragAspectRatioFixed)
+                        .setValue(this.plugin.settings.isDragAspectRatioLocked)
                         .onChange(async (value) => {
-                            this.plugin.settings.isDragAspectRatioFixed = value;
+                            this.plugin.settings.isDragAspectRatioLocked = value;
                             await this.plugin.saveSettings();
 
                         }));
