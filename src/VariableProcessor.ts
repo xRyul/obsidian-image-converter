@@ -650,7 +650,7 @@ export class VariableProcessor {
         variables["{grandparentfolder}"] = (activeFile.parent?.parent?.path == "/" ? activeFile.parent?.name : activeFile.parent?.parent?.name) || "";
         variables["{notefolder}"] = activeFile.parent?.name || "";
         variables["{vaultname}"] = this.app.vault.getName();
-        variables["{vaultpath}"] = this.app.vault.getRoot().path;
+        variables["{vaultpath}"] = (this.app.vault.adapter as any).basePath || this.app.vault.getRoot().path;
         variables["{timezone}"] = Intl.DateTimeFormat().resolvedOptions().timeZone;
         variables["{locale}"] = navigator.language;
         variables["{platform}"] = navigator.platform;
