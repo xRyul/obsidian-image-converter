@@ -1,0 +1,3 @@
+# Obsidian Plugin Compliance
+# Exclude main.js from merges into master branch
+main.js merge=ours
