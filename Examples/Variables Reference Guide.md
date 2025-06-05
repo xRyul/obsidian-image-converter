@@ -16,17 +16,16 @@ This document provides a detailed explanation of all available variables for the
 
 ### File and Note Variables
 
-- `{imageName}` - Original image filename without extension e.g.: For "vacation-photo.jpg" → "vacation-photo"
-- `{noteName}` - Current note name e.g.: If editing "Travel Log.md" → "Travel Log"
-- `{notename_nospaces}` - Current note name with underscores replacing spaces eg.: "Travel Log" → "Travel_Log" 
-- `{fileType}` - File extension e.g.: "jpg", "png", "pdf"
-- `{parentFolder}` - Parent folder name e.g.: In "Documents/Photos/Vacation" → "Photos"
+- `{imagename}` - Original image filename without extension e.g.: For "vacation-photo.jpg" → "vacation-photo"
+- `{notename}` - Current note name e.g.: If editing "Travel Log.md" → "Travel Log"
+- `{notename_nospaces}` - Current note name with underscores replacing spaces e.g.: "Travel Log" → "Travel_Log" 
+- `{filetype}` - File extension e.g.: "jpg", "png", "pdf"
+- `{parentfolder}` - Parent folder name e.g.: In "Documents/Photos/Vacation" → "Photos"
 - `{grandparentfolder}` - Grandparent folder name e.g.: "Documents/Photos/Vacation" → "Documents"
-- `{directory}` - Full directory path e.g.: "Documents/Photos/Vacation"
-- `{folderName}` - Current folder name e.g.: In "Documents/Photos/Vacation" → "Vacation"
-- `{depth}` - Number of subfolder levels e.g.: "Documents/Photos/Vacation" → "3"
-- `{vaultName}` - Obsidian vault name e.g.: "My Knowledge Base"
-- `{vaultPath}` - Full vault path e.g.: "C:/Users/username/Documents/Obsidian/My Knowledge Base"
+- `{notepath}` - Full path of the current note e.g.: "Documents/Photos/Vacation/MyNote"
+- `{notefolder}` - Current note's folder name e.g.: In "Documents/Photos/Vacation" → "Vacation"
+- `{vaultname}` - Obsidian vault name e.g.: "My Knowledge Base"
+- `{vaultpath}` - Full vault path e.g.: "C:/Users/username/Documents/Obsidian/My Knowledge Base"
 
 ## Date and Time Variables
 
@@ -45,38 +44,44 @@ This document provides a detailed explanation of all available variables for the
 - `{tomorrow}` - Tomorrow's date
 - `{yesterday}` - Yesterday's date
 - `{YYYY-MM-DD}` - Alternative current date format
-- `{yyyy}` - Current year
-- `{mm}` - Current month (01-12)
-- `{dd}` - Current day (01-31)
-- `{time}` - Current time in HH-mm-ss
+- `{YYYY}` - Current year (4 digits)
+- `{yyyy}` - Current year (4 digits, alias)
+- `{MM}` - Current month (01-12)
+- `{mm}` - Current minute (00-59)
+- `{DD}` - Current day (01-31)
 - `{HH}` - Current hour (00-23)
+- `{ss}` - Current second (00-59)
+- `{time}` - Current time in HH-mm-ss
 - `{timestamp}` - Unix timestamp
 
 ### Natural Language Dates
 
-- `{monthName}` or `{MMMM}` - Full month name e.: "October"
-- `{dayName}` or `{dddd}` - Full day name e.g.: "Thursday"
-- `{dateOrdinal}` or `{Do}` - Day with ordinal e.g.: "31st"
-- `{relativeTime}` - Human-readable relative time. Examples:
-	- "2 hours ago"
-	- "in 3 days"
-	- "a few seconds ago"
+- `{monthname}` or `{MMMM}` - Full month name e.g.: "October"
+- `{month}` - Full month name (alias)
+- `{dayname}` or `{dddd}` - Full day name e.g.: "Thursday"
+- `{weekday}` - Full day name (alias)
+- `{dateordinal}` or `{Do}` - Day with ordinal e.g.: "31st"
+- `{relativetime}` - Human-readable relative time. Examples:
+- "2 hours ago"
+- "in 3 days"
+- "a few seconds ago"
 - `{calendar}` - moment.js calendar e.g.: "Today at 2:30 PM"
+- `{currentdate}` - Current date (YYYY-MM-DD)
 
 ### Time Periods and Units
 
-- `{startOfWeek}` - First day of current week
-- `{endOfWeek}` - Last day of current week
-- `{startOfMonth}` - First day of current month
-- `{endOfMonth}` - Last day of current month
-- `{nextWeek}` - Date next week
-- `{lastWeek}` - Date last week
-- `{nextMonth}` - Date next month
-- `{lastMonth}` - Date last month
-- `{daysInMonth}` - Number of days in current month
-- `{weekOfYear}` or `{w}` - Week number (1-52)
-- `{quarter}` or `{Q}` - Quarter (1-4)
-- `{dayOfYear}` or `{DDD}` - Day of year (1-365)
+- `{startofweek}` - First day of current week
+- `{endofweek}` - Last day of current week
+- `{startofmonth}` - First day of current month
+- `{endofmonth}` - Last day of current month
+- `{nextweek}` - Date next week
+- `{lastweek}` - Date last week
+- `{nextmonth}` - Date next month
+- `{lastmonth}` - Date last month
+- `{daysinmonth}` - Number of days in current month
+- `{weekofyear}` or `{week}` or `{w}` - Week number (1-52)
+- `{quarterofyear}` or `{quarter}` or `{Q}` - Quarter (1-4)
+- `{dayofyear}` or `{DDD}` - Day of year (1-365)
 
 ## Image Properties
 
@@ -84,46 +89,47 @@ This document provides a detailed explanation of all available variables for the
 
 - `{width}` - Image width in pixels
 - `{height}` - Image height in pixels
-- `{ratio}` - Width/height ratio (2 decimals) e.g.: "1.78" for 16:9 ratio
-- `{aspectRatio}` - More precise ratio (3 decimals)
+- `{aspectratio}` - Width/height ratio (2 decimals) e.g.: "1.78" for 16:9 ratio
+- `{ratio}` - Width/height ratio (alias for aspectratio)
 - `{resolution}` - Full resolution string e.g.: "1920x1080"
 
 ### Size and Quality Indicators
 
 - `{megapixels}` - Image megapixels e.g.: "2.07" for 1920x1080
 - `{quality}` - Current conversion quality setting
-- `{bytesPerPixel}` - Average bytes per pixel
-- `{compressionRatio}` - Image compression ratio
+- `{bytesperpixel}` - Average bytes per pixel
+- `{compressionratio}` - Image compression ratio
 
 ### Image Analysis
 
 - `{orientation}` - Image orientation: "landscape", "portrait", "square"
-- `{isSquare}` - Square image indicator: "true", "false"
-- `{aspectRatioType}` - Common aspect ratio name: "16:9", "4:3", "1:1", "16:10", "custom"
-- `{sizeCategory}` - Image size category:
-	- "tiny" (< 100K pixels)
-	- "small" (< 500K pixels)
-	- "medium" (< 2M pixels)
-	- "large" (< 8M pixels)
-	- "very-large" (≥ 8M pixels)
-- `fileSizeCategory` - returns 1 of the 6 file size categories:
-	- 0-50KB
-	- 51-200KB
-	- 201-1024KB
-	- 1025KB-5MB
-	- 5MB-10MB
-	- 10MB+
-- `{dominantDimension}` - Larger dimension: "width", "height", "equal"
-- `{dimensionDifference}` - Pixel difference
-- `{maxDimension}` - Larger dimension value
-- `{minDimension}` - Smaller dimension value
-- `{diagonalPixels}` - Diagonal resolution
-- `{aspectRatioSimplified}` - Simplified ratio: "16:9" from 1920x1080
-- `{screenFitCategory}` - Screen resolution category:
-	- "fits-1080p" (≤ 1920x1080)
-	- "fits-1440p" (≤ 2560x1440)
-	- "fits-4k" (≤ 3840x2160)
-	- "above-4k"
+- `{issquare}` - Square image indicator: "true", "false"
+- `{aspectratiotype}` - Common aspect ratio name: "16:9", "4:3", "1:1", "16:10", "custom"
+- `{resolutioncategory}` - Image size category:
+- "tiny" (< 100K pixels)
+- "small" (< 500K pixels)
+- "medium" (< 2M pixels)
+- "large" (< 8M pixels)
+- "very-large" (≥ 8M pixels)
+- `{filesizecategory}` - returns 1 of the 6 file size categories:
+- 0-50KB
+- 51-200KB
+- 201-1024KB
+- 1025KB-5MB
+- 5MB-10MB
+- 10MB+
+- `{dominantdimension}` - Larger dimension: "width", "height", "equal"
+- `{dimensiondifference}` - Pixel difference
+- `{maxdimension}` - Larger dimension value
+- `{mindimension}` - Smaller dimension value
+- `{diagonalpixels}` - Diagonal resolution
+- `{aspectratiosimplified}` - Simplified ratio: "16:9" from 1920x1080
+- `{screenfitcategory}` - Screen resolution category:
+- "fits-1080p" (≤ 1920x1080)
+- "fits-1440p" (≤ 2560x1440)
+- "fits-4k" (≤ 3840x2160)
+- "above-4k"
+- `{pixelcount}` - Total number of pixels in the image
 
 ## Size Variables
 
@@ -135,9 +141,9 @@ This document provides a detailed explanation of all available variables for the
 
 ### Quick Size Variables
 
-- `{sizeMB}` - Size in MB
-- `{sizeKB}` - Size in KB
-- `{sizeB}` - Size in bytes
+- `{sizemb}` - Size in MB
+- `{sizekb}` - Size in KB
+- `{sizeb}` - Size in bytes
 
 ## Hashing and Unique Identifiers
 
@@ -181,13 +187,13 @@ This allows us to create various organizational structures, and categorise vario
 ### Example 1 - Let Obsidian handle the folder creation
 
 **Folder**: `Default`
-**File naming**: `{noteName}-{date:YYYYMMDDHHmmSSsss}`
+**File naming**: `{notename}-{date:YYYYMMDDHHmmSSsss}`
 
 ### Example 2 - 50/50 - Let Image Converter handle the images, and Obsidian all other attachments
 
 In Image Converter:
-- **Folder**: `/attachments/all-vault-images/{YYYY-MM-DD}/{noteName}/`
-- **File naming**: `Inserted {imageName} at {YYYY-MM-DD} {time}`
+- **Folder**: `/attachments/all-vault-images/{YYYY-MM-DD}/{notename}/`
+- **File naming**: `Inserted {imagename} at {YYYY-MM-DD} {time}`
 
 In Obsidian: *Settings* -> *Files and links* -> *Default location for new attachments* -> *In the folder specified below:*
 - Attachment folder path: : `/attachments`
@@ -209,8 +215,8 @@ Inside  `/all-vault-images`, a new subfolder is automatically created for each d
 
 ### Example 3 - Natural Language Date Organization - Journaling, Daily Logs etc.
 
-- **Folder**: `/{yyyy}/{monthName}/Week {weekOfYear} ({startOfWeek} to {endOfWeek})/{dayName} {dateOrdinal}/`
-- **File naming**: `{time}-{imageName}`
+- **Folder**: `/{yyyy}/{monthname}/Week {weekofyear} ({startofweek} to {endofweek})/{dayname} {dateordinal}/`
+- **File naming**: `{time}-{imagename}`
 
 Example output is a path reads like natural language:
 
@@ -221,8 +227,8 @@ Example output is a path reads like natural language:
 
 ### Example 4 - keeping vault size small
 
-- **Folder**: `/attachments/all-vault-images/{fileSizeCategory}/
-- **File naming**: `{noteName}-{imageName}-{size:MB:2}MB_{date:YYYYMMDD}`
+- **Folder**: `/attachments/all-vault-images/{filesizecategory}/
+- **File naming**: `{notename}-{imagename}-{size:MB:2}MB_{date:YYYYMMDD}`
 
 This would allow you to keep all images in 1 place categorised into subfolders based on converted image file size:
 
@@ -247,5 +253,5 @@ This would allow you to keep all images in 1 place categorised into subfolders b
 
 For example, if I would see any images inside **1025KB-5MB**, **5MB-10MB**, **10MB+** folders, it would signify to me that those images require further optimization (or if I would like to keep my vault size small - I would even consider deleting them).
 
-- `{noteName}` - if link is ever broken, embedding note name into actual image gives me enough context to track it down later, similarly with `{imageName}` and the `{date:YYYYMMDD}`
+- `{notename}` - if link is ever broken, embedding note name into actual image gives me enough context to track it down later, similarly with `{imagename}` and the `{date:YYYYMMDD}`
 - `{size:MB:2}MB` - by adding size to the note, I can be proactive a see the size of the converted file, if it is too big I would re-process further with maybe higher compression level or maybe even a small resize
