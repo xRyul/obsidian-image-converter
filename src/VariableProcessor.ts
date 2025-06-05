@@ -645,7 +645,7 @@ export class VariableProcessor {
 
         variables["{notename}"] = activeFile.basename;
         variables["{notename_nospaces}"] = activeFile.basename.replace(/\s+/g, "_");
-        variables["{notepath}"] = activeFile.path;
+        variables["{notepath}"] = activeFile.parent ? `${activeFile.parent.path}/${activeFile.basename}` : activeFile.basename;
         variables["{parentfolder}"] = activeFile.parent?.name || "";
         variables["{grandparentfolder}"] = (activeFile.parent?.parent?.path == "/" ? activeFile.parent?.name : activeFile.parent?.parent?.name) || "";
         variables["{notefolder}"] = activeFile.parent?.name || "";
