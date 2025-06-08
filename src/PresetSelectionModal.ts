@@ -172,6 +172,14 @@ export class PresetSelectionModal extends Modal {
 
         // Initialize preview
         this.updatePreviews();
+
+        // Focus the filename input field after a short delay to ensure DOM is ready
+        setTimeout(() => {
+            if (this.customFilenameText && this.customFilenameText.inputEl) {
+                this.customFilenameText.inputEl.focus();
+                this.customFilenameText.inputEl.select(); // Optional: select all text for easy replacement
+            }
+        }, 50);
     }
 
     private createCompactHeader(container: HTMLElement) {
