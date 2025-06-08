@@ -2721,7 +2721,7 @@ html[data-theme='dark'] {
 
 /* Main compact container */
 .image-converter-compact-container {
-    max-width: 500px;
+    max-width: -webkit-fill-available;
     margin: 0 auto;
     padding: 0;
     display: flex;
@@ -2745,7 +2745,7 @@ html[data-theme='dark'] {
     margin: 0;
     font-size: 1.4em;
     font-weight: 600;
-    flex: 1 1 auto;
+    /* flex: 1 1 auto; */
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2796,8 +2796,8 @@ html[data-theme='dark'] {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    min-width: 247px;
-    max-width: 247px;
+    min-width: 260px;
+    max-width: 260px;
     overflow: hidden;
 }
 
