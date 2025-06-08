@@ -124,13 +124,24 @@ export class PresetSelectionModal extends Modal {
     private createCompactHeader(container: HTMLElement) {
         const header = container.createDiv("image-converter-compact-header");
         
-        const titleSection = header.createDiv("image-converter-title-flex");
-        titleSection.createEl("h2", { 
+        // Title on the left
+        header.createEl("h2", { 
             text: "Image Converter",
             cls: "image-converter-compact-title"
         });
         
-        // Mini global preset in header
+        // Variables button in the middle
+        const variablesButton = header.createDiv("image-converter-variables-header");
+        new Setting(variablesButton)
+            .addButton((button) => {
+                button
+                    .setButtonText("{Variables}")
+                    .setTooltip("Show available variables")
+                    .onClick(() => this.showAvailableVariables());
+                button.buttonEl.addClass("image-converter-variables-header-btn");
+            });
+        
+        // Global preset dropdown on the right
         const globalMini = header.createDiv("image-converter-global-mini");
         this.createGlobalPresetDropdown(globalMini);
     }
@@ -176,16 +187,6 @@ export class PresetSelectionModal extends Modal {
             (setting) => { this.filenamePresetDropdown = setting; }
         );
 
-        // Variables help button (compact)
-        const helpDiv = inputSection.createDiv("image-converter-help-compact");
-        new Setting(helpDiv)
-            .addButton((button) => {
-                button
-                    .setButtonText("📋 Variables")
-                    .setTooltip("Show available variables")
-                    .onClick(() => this.showAvailableVariables());
-                button.buttonEl.addClass("image-converter-help-compact-btn");
-            });
     }
 
     private createCompactInputWithPreset<T extends { name: string, customTemplate?: string }>(
@@ -229,8 +230,7 @@ export class PresetSelectionModal extends Modal {
         
         // Remove default setting styling
         setting.settingEl.addClass("image-converter-preset-dropdown-setting-item");
-        setting.nameEl.style.display = "none";
-        setting.descEl.style.display = "none";
+        setting.settingEl.addClass("image-converter-hide-name-desc");
         
         // Row 2: Full-width input field
         const inputRow = group.createDiv("image-converter-input-row");
@@ -248,8 +248,7 @@ export class PresetSelectionModal extends Modal {
         
         // Remove default setting styling
         textSetting.settingEl.addClass("image-converter-text-setting-item");
-        textSetting.nameEl.style.display = "none";
-        textSetting.descEl.style.display = "none";
+        textSetting.settingEl.addClass("image-converter-hide-name-desc");
         
         onSettingCreated(setting);
     }
@@ -261,26 +260,25 @@ export class PresetSelectionModal extends Modal {
         // Persistent clickable header (always visible)
         const cardHeader = card.createDiv("image-converter-processing-card-header");
         cardHeader.addClass("image-converter-processing-card-header-clickable");
-        cardHeader.style.cursor = "pointer";
         
         // Header content container
         const headerContent = cardHeader.createDiv("image-converter-processing-card-header-content");
         
-        // Chevron icon
+        // Preview text (will be updated by updateProcessingPreview)
+        this.processingCardPreview = headerContent.createDiv("image-converter-processing-preview-text");
+        
+        // Chevron icon (moved to the right)
         this.processingCardChevron = headerContent.createEl("span", {
             text: "▶",
             cls: "image-converter-processing-card-chevron"
         });
-        
-        // Preview text (will be updated by updateProcessingPreview)
-        this.processingCardPreview = headerContent.createDiv("image-converter-processing-preview-text");
         
         // Initialize preview content
         this.updateProcessingPreview();
 
         // Full content (shown when expanded)
         this.processingCardContent = card.createDiv("image-converter-processing-card-content");
-        this.processingCardContent.style.display = "none"; // Start collapsed
+        this.processingCardContent.addClass("image-converter-collapsed"); // Start collapsed
         
         // Column Header Row 1: Format and Link
         const headerRow1 = this.processingCardContent.createDiv("image-converter-grid-header-row");
@@ -308,8 +306,6 @@ export class PresetSelectionModal extends Modal {
             });
         // Remove default setting styling
         this.conversionPresetDropdown.settingEl.addClass("image-converter-grid-dropdown-setting");
-        this.conversionPresetDropdown.nameEl.style.display = "none";
-        this.conversionPresetDropdown.descEl.style.display = "none";
 
         // Link dropdown
         const linkDiv = componentRow1.createDiv("image-converter-grid-component");
@@ -328,8 +324,6 @@ export class PresetSelectionModal extends Modal {
             });
         // Remove default setting styling
         this.linkFormatPresetDropdown.settingEl.addClass("image-converter-grid-dropdown-setting");
-        this.linkFormatPresetDropdown.nameEl.style.display = "none";
-        this.linkFormatPresetDropdown.descEl.style.display = "none";
 
         // Column Header Row 2: Resize and Quality
         const headerRow2 = this.processingCardContent.createDiv("image-converter-grid-header-row");
@@ -359,8 +353,6 @@ export class PresetSelectionModal extends Modal {
             });
         // Remove default setting styling
         this.resizePresetDropdown.settingEl.addClass("image-converter-grid-dropdown-setting");
-        this.resizePresetDropdown.nameEl.style.display = "none";
-        this.resizePresetDropdown.descEl.style.display = "none";
 
         // Quality slider
         const qualityDiv = componentRow2.createDiv("image-converter-grid-component");
@@ -380,13 +372,11 @@ export class PresetSelectionModal extends Modal {
             });
         // Remove default setting styling
         this.conversionQualitySetting.settingEl.addClass("image-converter-grid-slider-setting");
-        this.conversionQualitySetting.nameEl.style.display = "none";
-        this.conversionQualitySetting.descEl.style.display = "none";
 
-        // Add click handler to toggle
-        cardHeader.addEventListener("click", () => {
+        // Add click handler to toggle using DOM onclick (Obsidian-safe pattern)
+        cardHeader.onclick = () => {
             this.toggleProcessingCard();
-        });
+        };
     }
 
     private createCompactPreview(container: HTMLElement) {
@@ -442,8 +432,8 @@ export class PresetSelectionModal extends Modal {
     }
 
     private createGlobalPresetDropdown(contentEl: HTMLElement): void {
+        // Global preset dropdown only (Variables button is now in the header)
         const miniSetting = new Setting(contentEl)
-            .setName("⚡")
             .addDropdown((dropdown: DropdownComponent) => {
                 dropdown.addOption("none", "None");
                 this.settings.globalPresets.forEach((preset) => {
@@ -632,11 +622,11 @@ export class PresetSelectionModal extends Modal {
 
         if (this.isProcessingCardExpanded) {
             // Show full content
-            this.processingCardContent.style.display = "block";
+            this.processingCardContent.removeClass("image-converter-collapsed");
             this.processingCardChevron.textContent = "▼";
         } else {
             // Hide full content
-            this.processingCardContent.style.display = "none";
+            this.processingCardContent.addClass("image-converter-collapsed");
             this.processingCardChevron.textContent = "▶";
         }
     }

@@ -2708,7 +2708,7 @@ html[data-theme='dark'] {
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 9px;
 }
 
 /* Compact header */
@@ -2718,29 +2718,66 @@ html[data-theme='dark'] {
     justify-content: space-between;
     padding-bottom: 16px;
     border-bottom: 1px solid var(--background-modifier-border);
+    gap: 12px;
+    max-width: 100%;
+    overflow: hidden;
 }
 
 .image-converter-compact-title {
     margin: 0;
     font-size: 1.4em;
     font-weight: 600;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Variables button in header */
+.image-converter-variables-header {
+    flex: 0 0 auto;
+    order: 2;
+}
+
+.image-converter-variables-header .setting-item {
+    padding: 0 !important;
+    border: none !important;
+    margin: 0 !important;
+    min-height: auto !important;
+}
+
+.image-converter-variables-header-btn {
+    font-size: 0.85em !important;
+    padding: 4px 10px !important;
+    height: auto !important;
+    min-height: 26px !important;
+    white-space: nowrap !important;
+}
+
+/* Global preset dropdown in header */
+.image-converter-global-mini {
+    flex: 0 0 auto;
+    min-width: 110px;
+    /* max-width: 140px; */
+    order: 3;
 }
 
 .image-converter-compact-inputs {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 5px;
 }
 
 /* NEW LAYOUT: Two-row structure for folder/filename groups */
 .image-converter-compact-input-group {
-    padding: 16px;
+    padding: 4px;
     background: var(--background-secondary);
     border-radius: 8px;
     border: 1px solid var(--background-modifier-border);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 4px;
     min-width: 0;
     overflow: hidden;
 }
@@ -2757,7 +2794,8 @@ html[data-theme='dark'] {
 
 .image-converter-group-label {
     font-weight: 500;
-    color: var(--text-normal);
+    font-size: 0.735em;
+    color: var(--text-faint);
     flex-shrink: 0;
     max-width: 100px;
     overflow: hidden;
@@ -3040,6 +3078,48 @@ html[data-theme='dark'] {
 
 .image-converter-global-mini-setting .setting-item-control {
     margin-left: 0 !important;
+    max-width: 120px;
+    overflow: visible;
+}
+
+.image-converter-global-mini-setting .dropdown {
+    max-width: 120px !important;
+    width: 120px !important;
+    box-sizing: border-box !important;
+    position: relative !important;
+    z-index: 1000 !important;
+    
+    /* When closed, truncate text with ellipsis */
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+}
+
+/* When dropdown is opened, the dropdown list should expand */
+.image-converter-global-mini-setting .dropdown[size]:not([size="1"]),
+.image-converter-global-mini-setting .dropdown:not([size]) {
+    width: auto !important;
+    min-width: 120px !important;
+    max-width: 250px !important;
+    z-index: 1001 !important;
+}
+
+/* Style the dropdown options to handle long text better */
+.image-converter-global-mini-setting .dropdown option {
+    white-space: nowrap !important;
+    padding: 4px 8px !important;
+    min-width: 120px !important;
+    width: auto !important;
+}
+
+/* For browsers that support it, expand the dropdown list container */
+.image-converter-global-mini-setting select:focus,
+.image-converter-global-mini-setting select:active {
+    width: auto !important;
+    min-width: 120px !important;
+    max-width: 250px !important;
+    position: relative !important;
+    z-index: 1001 !important;
 }
 
 .image-converter-global-mini-setting .setting-item-name {
@@ -3078,8 +3158,8 @@ html[data-theme='dark'] {
 }
 
 .image-converter-processing-card-header {
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--background-modifier-border);
+    padding: 4px 4px;
+    /* border-bottom: 1px solid var(--background-modifier-border); */
     background: var(--background-primary);
     transition: background-color 0.2s ease;
 }
@@ -3096,16 +3176,19 @@ html[data-theme='dark'] {
 .image-converter-processing-card-header-content {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 8px;
+    padding: 4px;
 }
 
 .image-converter-processing-card-chevron {
-    font-size: 12px;
-    transition: transform 0.2s ease;
-    color: var(--text-muted);
+    font-size: 0.535em;
+    transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+    color: var(--text-faint);
     font-weight: 600;
     min-width: 16px;
     text-align: center;
+    flex-shrink: 0;
 }
 
 .image-converter-processing-card-title {
@@ -3116,8 +3199,13 @@ html[data-theme='dark'] {
 }
 
 .image-converter-processing-card-content {
-    padding: 20px;
-    transition: all 0.3s ease;
+    padding: 10px;
+    overflow: hidden;
+    transition: max-height 0.3s cubic-bezier(0.4, 0.0, 0.2, 1), 
+                opacity 0.3s cubic-bezier(0.4, 0.0, 0.2, 1),
+                padding 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+    max-height: 500px; /* Large enough to accommodate content */
+    opacity: 1;
 }
 
 .image-converter-processing-card-preview {
@@ -3134,13 +3222,13 @@ html[data-theme='dark'] {
 }
 
 .image-converter-processing-preview-text {
-    font-size: 0.9em;
-    color: var(--text-muted);
-    font-family: var(--font-monospace);
+    font-size: 0.735em;
+    color: var(--text-faint);
+    /* font-family: var(--font-monospace); */
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    padding: 4px 0;
+    /* padding: 4px 0; */
     flex: 1;
 }
 
@@ -3154,8 +3242,8 @@ html[data-theme='dark'] {
 
 .image-converter-grid-header {
     font-weight: 600;
-    color: var(--text-normal);
-    font-size: 0.9em;
+    color: var(--text-faint);
+    font-size: 0.735em;
     text-align: left;
 }
 
@@ -3163,7 +3251,7 @@ html[data-theme='dark'] {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 16px;
-    margin-bottom: 20px;
+    /* margin-bottom: 20px; */
 }
 
 .image-converter-grid-component {
@@ -3222,8 +3310,9 @@ html[data-theme='dark'] {
 
 /* Quality header that shows percentage */
 .image-converter-quality-header {
-    font-weight: 600 !important;
-    color: var(--text-normal) !important;
+    font-weight: 600;
+    font-size: 0.735em;
+    color: var(--text-faint);
 }
 
 /* Make quality slider appear slightly lower for better visual alignment */
@@ -3268,10 +3357,8 @@ html[data-theme='dark'] {
 }
 
 .image-converter-compact-preview {
-    background: var(--background-secondary);
-    border-radius: 8px;
-    padding: 20px;
-    border: 1px solid var(--background-modifier-border);
+    /* border-radius: 8px;
+    padding: 20px; */
 }
 
 .image-converter-preview-title-compact {
@@ -3332,6 +3419,51 @@ html[data-theme='dark'] {
 }
 
 /* ============================================ */
+/* PRESET SELECTION MODAL - ELEMENT HIDING */
+/* ============================================ */
+
+/* Hide setting name and description elements in preset selection modal */
+.image-converter-preset-selection-modal .image-converter-hide-name-desc .setting-item-name,
+.image-converter-preset-selection-modal .image-converter-hide-name-desc .setting-item-description {
+    display: none !important;
+}
+
+/* Alternative approach using specific classes for different setting types */
+.image-converter-preset-dropdown-setting .setting-item-name,
+.image-converter-preset-dropdown-setting .setting-item-description,
+.image-converter-text-setting .setting-item-name,
+.image-converter-text-setting .setting-item-description,
+.image-converter-grid-dropdown-setting .setting-item-name,
+.image-converter-grid-dropdown-setting .setting-item-description,
+.image-converter-grid-slider-setting .setting-item-name,
+.image-converter-grid-slider-setting .setting-item-description {
+    display: none !important;
+}
+
+/* Processing card header cursor pointer */
+.image-converter-processing-card-header-clickable {
+    cursor: pointer !important;
+}
+
+/* Processing card content visibility states */
+.image-converter-processing-card-content.image-converter-collapsed {
+    max-height: 0;
+    opacity: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    overflow: hidden;
+}
+
+.image-converter-processing-card-content.image-converter-expanded {
+    max-height: 500px;
+    opacity: 1;
+    padding: 10px;
+}
+
+.image-converter-preview-header-compact {
+    margin-top: 10px;
+}
+/* ============================================ */
 /* RESPONSIVE DESIGN FOR SMALL SCREENS */
 /* ============================================ */
 
@@ -3361,7 +3493,7 @@ html[data-theme='dark'] {
 
     .image-converter-compact-container {
         padding: 0 8px;
-        gap: 12px;
+        gap: 9px;
     }
 }
 
