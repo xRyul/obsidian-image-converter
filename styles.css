@@ -654,6 +654,12 @@ html[data-theme='dark'] {
     font-weight: 600;
     color: var(--text-accent);
     white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.image-converter-available-variables-modal td:first-child:hover {
+    background-color: var(--background-modifier-hover);
 }
 
 .image-converter-available-variables-modal td:nth-child(2) {
@@ -664,6 +670,18 @@ html[data-theme='dark'] {
 .image-converter-available-variables-modal td:last-child {
     font-family: monospace;
     color: var(--text-muted);
+}
+
+/* Variable copy feedback animations */
+.variable-name-copied {
+    background-color: var(--interactive-accent) !important;
+    color: var(--text-on-accent) !important;
+    transform: scale(1.05) !important;
+}
+
+.variable-name-copy-error {
+    background-color: var(--background-modifier-error) !important;
+    color: var(--text-error) !important;
 }
 
 /* -------------- Link FORMATS --------------------- */
