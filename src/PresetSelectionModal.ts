@@ -419,6 +419,19 @@ export class PresetSelectionModal extends Modal {
                     .setButtonText("Apply")
                     .setCta()
                     .onClick(() => {
+                        // Update the presets with the current custom text values
+                        if (this.customFilenameText) {
+                            this.selectedFilenamePreset.customTemplate = this.customFilenameText.getValue();
+                        }
+                        if (this.customFolderText) {
+                            const customFolderValue = this.customFolderText.getValue();
+                            this.selectedFolderPreset.customTemplate = customFolderValue;
+                            // Set the folder preset type to "CUSTOM" when custom text is provided
+                            if (customFolderValue && customFolderValue.trim() !== '') {
+                                this.selectedFolderPreset.type = "CUSTOM";
+                            }
+                        }
+
                         this.onApply(
                             this.selectedConversionPreset,
                             this.selectedFilenamePreset,
