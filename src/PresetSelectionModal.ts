@@ -46,6 +46,12 @@ export class PresetSelectionModal extends Modal {
     private processingCardPreview: HTMLElement | null = null;
     private processingCardChevron: HTMLElement | null = null;
 
+    // Session-only custom template overrides (NOT saved to presets)
+    // These store user-entered custom text that temporarily overrides preset templates
+    // without modifying the original preset objects stored in settings
+    private temporaryCustomFolderOverride = "";      // Custom folder path typed by user this session
+    private temporaryCustomFilenameOverride = "";    // Custom filename template typed by user this session
+
     constructor(
         app: App,
         private settings: ImageConverterSettings,
@@ -92,6 +98,53 @@ export class PresetSelectionModal extends Modal {
             this.settings.nonDestructiveResizeSettings.resizePresets,
             'Resize'
         );
+
+        // Initialize session state from saved state (if available) or from current preset templates
+        this.initializeSessionState();
+    }
+
+    /**
+     * Initializes session state for custom overrides without modifying original presets.
+     * This restores any previously saved custom text from the modalSessionState or uses preset defaults.
+     */
+    private initializeSessionState(): void {
+        // Load from saved session state if available, otherwise use current preset templates
+        const sessionState = this.settings.modalSessionState;
+        
+        // Initialize folder override
+        if (sessionState?.customFolderOverride !== undefined) {
+            this.temporaryCustomFolderOverride = sessionState.customFolderOverride;
+        } else if (this.selectedFolderPreset.customTemplate) {
+            this.temporaryCustomFolderOverride = this.selectedFolderPreset.customTemplate;
+        }
+
+        // Initialize filename override  
+        if (sessionState?.customFilenameOverride !== undefined) {
+            this.temporaryCustomFilenameOverride = sessionState.customFilenameOverride;
+        } else if (this.selectedFilenamePreset.customTemplate) {
+            this.temporaryCustomFilenameOverride = this.selectedFilenamePreset.customTemplate;
+        }
+    }
+
+    /**
+     * Saves current session state to settings for persistence across modal sessions.
+     * This allows custom text to be preserved when reopening the modal.
+     */
+    private saveSessionState(): void {
+        // Ensure modalSessionState object exists
+        if (!this.settings.modalSessionState) {
+            this.settings.modalSessionState = {
+                customFolderOverride: "",
+                customFilenameOverride: ""
+            };
+        }
+
+        // Save current session overrides to settings
+        this.settings.modalSessionState.customFolderOverride = this.temporaryCustomFolderOverride;
+        this.settings.modalSessionState.customFilenameOverride = this.temporaryCustomFilenameOverride;
+
+        // Save settings to persist the state
+        this.plugin.saveSettings();
     }
 
     onOpen() {
@@ -153,15 +206,18 @@ export class PresetSelectionModal extends Modal {
         this.createCompactInputWithPreset(
             inputSection,
             "📂 Folder",
-            "e.g., assets/{YYYY}/{MM}",
+            "Temporarily overwrite path defined in selected preset e.g.: assets/{YYYY}/{MM}",
             "Where to save the image",
             this.selectedFolderPreset,
             this.settings.folderPresets,
             (text) => { this.customFolderText = text; },
             (value) => {
                 this.selectedFolderPreset = this.settings.folderPresets.find(p => p.name === value) || this.settings.folderPresets[0];
-                if (this.customFolderText && this.selectedFolderPreset.customTemplate) {
-                    this.customFolderText.setValue(this.selectedFolderPreset.customTemplate);
+                
+                // Update session override and UI when preset changes
+                this.temporaryCustomFolderOverride = this.selectedFolderPreset.customTemplate || "";
+                if (this.customFolderText) {
+                    this.customFolderText.setValue(this.temporaryCustomFolderOverride);
                 }
                 this.updatePreviews();
             },
@@ -179,8 +235,11 @@ export class PresetSelectionModal extends Modal {
             (text) => { this.customFilenameText = text; },
             (value) => {
                 this.selectedFilenamePreset = this.settings.filenamePresets.find(p => p.name === value) || this.settings.filenamePresets[0];
-                if (this.customFilenameText && this.selectedFilenamePreset.customTemplate) {
-                    this.customFilenameText.setValue(this.selectedFilenamePreset.customTemplate);
+                
+                // Update session override and UI when preset changes
+                this.temporaryCustomFilenameOverride = this.selectedFilenamePreset.customTemplate || "";
+                if (this.customFilenameText) {
+                    this.customFilenameText.setValue(this.temporaryCustomFilenameOverride);
                 }
                 this.updatePreviews();
             },
@@ -238,9 +297,31 @@ export class PresetSelectionModal extends Modal {
             .setClass("image-converter-text-setting")
             .addText((text) => {
                 onTextCreated(text);
+                
+                // Use session override value instead of directly modifying preset
+                let initialValue = "";
+                if (label.includes("📂")) {
+                    // Folder field - use session override
+                    initialValue = this.temporaryCustomFolderOverride;
+                } else if (label.includes("📄")) {
+                    // Filename field - use session override
+                    initialValue = this.temporaryCustomFilenameOverride;
+                } else {
+                    // Fallback to preset template
+                    initialValue = selectedPreset.customTemplate || "";
+                }
+                
                 text.setPlaceholder(placeholder)
-                    .setValue(selectedPreset.customTemplate || "")
-                    .onChange(() => this.updatePreviews());
+                    .setValue(initialValue)
+                    .onChange((value) => {
+                        // Update session override instead of modifying preset
+                        if (label.includes("📂")) {
+                            this.temporaryCustomFolderOverride = value;
+                        } else if (label.includes("📄")) {
+                            this.temporaryCustomFilenameOverride = value;
+                        }
+                        this.updatePreviews();
+                    });
                 text.inputEl.setAttr("spellcheck", "false");
                 text.inputEl.addClass("image-converter-full-width-input");
                 return text;
@@ -419,23 +500,27 @@ export class PresetSelectionModal extends Modal {
                     .setButtonText("Apply")
                     .setCta()
                     .onClick(() => {
-                        // Update the presets with the current custom text values
-                        if (this.customFilenameText) {
-                            this.selectedFilenamePreset.customTemplate = this.customFilenameText.getValue();
-                        }
-                        if (this.customFolderText) {
-                            const customFolderValue = this.customFolderText.getValue();
-                            this.selectedFolderPreset.customTemplate = customFolderValue;
-                            // Set the folder preset type to "CUSTOM" when custom text is provided
-                            if (customFolderValue && customFolderValue.trim() !== '') {
-                                this.selectedFolderPreset.type = "CUSTOM";
-                            }
+                        // Save current session state to settings for persistence
+                        this.saveSessionState();
+
+                        // Create copies of presets with session override values applied
+                        // This way we don't modify the original preset objects
+                        const filenamePresetCopy = { ...this.selectedFilenamePreset };
+                        const folderPresetCopy = { ...this.selectedFolderPreset };
+
+                        // Apply session overrides to the copies
+                        filenamePresetCopy.customTemplate = this.temporaryCustomFilenameOverride;
+                        folderPresetCopy.customTemplate = this.temporaryCustomFolderOverride;
+                        
+                        // Set folder preset type to "CUSTOM" when custom text is provided
+                        if (this.temporaryCustomFolderOverride && this.temporaryCustomFolderOverride.trim() !== '') {
+                            folderPresetCopy.type = "CUSTOM";
                         }
 
                         this.onApply(
                             this.selectedConversionPreset,
-                            this.selectedFilenamePreset,
-                            this.selectedFolderPreset,
+                            filenamePresetCopy,
+                            folderPresetCopy,
                             this.selectedLinkFormatPreset,
                             this.selectedResizePreset
                         );
@@ -516,12 +601,15 @@ export class PresetSelectionModal extends Modal {
                     (this.linkFormatPresetDropdown.components[0] as DropdownComponent).setValue(this.selectedLinkFormatPreset.name);
                     (this.resizePresetDropdown.components[0] as DropdownComponent).setValue(this.selectedResizePreset.name);
 
-                    // Update input fields
-                    if (this.customFolderText && this.selectedFolderPreset.customTemplate) {
-                        this.customFolderText.setValue(this.selectedFolderPreset.customTemplate);
+                    // Update session overrides and input fields
+                    this.temporaryCustomFolderOverride = this.selectedFolderPreset.customTemplate || "";
+                    this.temporaryCustomFilenameOverride = this.selectedFilenamePreset.customTemplate || "";
+                    
+                    if (this.customFolderText) {
+                        this.customFolderText.setValue(this.temporaryCustomFolderOverride);
                     }
-                    if (this.customFilenameText && this.selectedFilenamePreset.customTemplate) {
-                        this.customFilenameText.setValue(this.selectedFilenamePreset.customTemplate);
+                    if (this.customFilenameText) {
+                        this.customFilenameText.setValue(this.temporaryCustomFilenameOverride);
                     }
 
                     // Update conversion settings
@@ -555,8 +643,9 @@ export class PresetSelectionModal extends Modal {
 
                 const fileToUse = activeFile?.extension.match(/^(jpg|jpeg|png|gif|webp)$/i) ? activeFile : firstImage;
 
-                const folderTemplate = this.customFolderText?.getValue() || "";
-                const filenameTemplate = this.customFilenameText?.getValue() || "";
+                // Use session overrides instead of text component values for preview
+                const folderTemplate = this.temporaryCustomFolderOverride || "";
+                const filenameTemplate = this.temporaryCustomFilenameOverride || "";
 
                 const newContent = createEl('div');
 

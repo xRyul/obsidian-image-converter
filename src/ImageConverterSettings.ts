@@ -121,6 +121,12 @@ export interface ImageConverterSettings {
     selectedConversionPreset: string;
     globalPresets: GlobalPreset[];
     selectedGlobalPreset: string; // Currently selected global preset (if any)
+    modalSessionState?: {
+        customFolderOverride?: string;
+        customFilenameOverride?: string;
+        lastUsedFolderPreset?: string;
+        lastUsedFilenamePreset?: string;
+    };
     outputFormat: OutputFormat;
     quality: number;
     colorDepth: number;

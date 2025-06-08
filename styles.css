@@ -2735,8 +2735,8 @@ html[data-theme='dark'] {
     align-items: center;
     justify-content: space-between;
     padding-bottom: 16px;
-    border-bottom: 1px solid var(--background-modifier-border);
-    gap: 12px;
+    /* border-bottom: 1px solid var(--background-modifier-border); */
+    /* gap: 12px; */
     max-width: 100%;
     overflow: hidden;
 }
@@ -2783,8 +2783,8 @@ html[data-theme='dark'] {
 
 .image-converter-compact-inputs {
     display: flex;
-    flex-direction: column;
-    gap: 5px;
+    /* flex-direction: column; */
+    gap: 6px;
 }
 
 /* NEW LAYOUT: Two-row structure for folder/filename groups */
@@ -2796,7 +2796,8 @@ html[data-theme='dark'] {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    min-width: 0;
+    min-width: 247px;
+    max-width: 247px;
     overflow: hidden;
 }
 
@@ -3377,6 +3378,12 @@ html[data-theme='dark'] {
 .image-converter-compact-preview {
     /* border-radius: 8px;
     padding: 20px; */
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    margin-top: 20px;
+    gap: 16px;
 }
 
 .image-converter-preview-title-compact {
@@ -3386,12 +3393,12 @@ html[data-theme='dark'] {
 }
 
 .image-converter-preview-content-compact {
-    font-family: var(--font-monospace);
+    /* font-family: var(--font-monospace); */
     font-size: 0.9em;
-    padding: 12px;
-    background: var(--background-primary);
-    border-radius: 6px;
-    border: 1px solid var(--background-modifier-border);
+    /* padding: 12px; */
+    /* background: var(--background-primary); */
+    /* border-radius: 6px; */
+    /* border: 1px solid var(--background-modifier-border); */
     color: var(--text-muted);
 }
 
@@ -3400,7 +3407,7 @@ html[data-theme='dark'] {
     justify-content: flex-end;
     gap: 12px;
     padding-top: 20px;
-    border-top: 1px solid var(--background-modifier-border);
+    /* border-top: 1px solid var(--background-modifier-border); */
 }
 
 .image-converter-help-compact {
@@ -3479,7 +3486,7 @@ html[data-theme='dark'] {
 }
 
 .image-converter-preview-header-compact {
-    margin-top: 10px;
+    /* margin-top: 10px; */
 }
 /* ============================================ */
 /* RESPONSIVE DESIGN FOR SMALL SCREENS */
