@@ -1,6 +1,7 @@
 import { Editor, MarkdownView, EditorPosition, EditorChange, Debouncer, debounce } from "obsidian";
 import ImageConverterPlugin from "./main";
 import { ImagePositionData } from './ImageAlignmentManager';
+import { LinkFormatter } from './LinkFormatter';
 
 export interface ResizeState {
     isResizing: boolean;
@@ -57,7 +58,12 @@ export class ImageResizer {
 
     throttledUpdateImageLink: (image: HTMLImageElement, newWidth: number, newHeight: number, currentHandle: string | null) => void;     // Throttled version of updateImageLink
 
+    // Editor width constraint caching
+    private cachedEditorMaxWidth: number | null = null;
+    private linkFormatter: LinkFormatter;
+
     constructor(private plugin: ImageConverterPlugin) {
+        this.linkFormatter = new LinkFormatter(this.plugin.app);
         this.throttledUpdateImageLink = this.throttle(
             (
                 image: HTMLImageElement,
@@ -118,6 +124,9 @@ export class ImageResizer {
             isScrolling: false
         };
 
+        // Clear cached editor width
+        this.cachedEditorMaxWidth = null;
+
         // Clear references
         this.activeImage = null;
         this.lastMouseEvent = null;
@@ -132,12 +141,28 @@ export class ImageResizer {
     }
 
     onLayoutChange(markdownView: MarkdownView) {
+        // Clear cached editor width when layout changes
+        this.cachedEditorMaxWidth = null;
+        
         // Handle layout changes (e.g., reposition handles)
         this.cleanupHandles();
         this.onload(markdownView);
         if (this.lastMouseEvent) {
             this.handleImageHover(this.lastMouseEvent);
         }
+    }
+
+    /**
+     * Gets the cached editor maximum width, using LinkFormatter's getEditorMaxWidth method.
+     * Caches the result for performance until layout changes.
+     * @returns The editor max width in pixels.
+     */
+    private getCachedEditorMaxWidth(): number {
+        if (this.cachedEditorMaxWidth === null) {
+            // Use LinkFormatter's getEditorMaxWidth method
+            this.cachedEditorMaxWidth = (this.linkFormatter as any).getEditorMaxWidth();
+        }
+        return this.cachedEditorMaxWidth!; // Non-null assertion since we just set it above
     }
 
     // onActiveLeafChange(markdownView: MarkdownView) {
@@ -540,6 +565,25 @@ export class ImageResizer {
                 }
             }
 
+            // Apply editor width constraint
+            const maxEditorWidth = this.getCachedEditorMaxWidth();
+
+            if (newWidth > maxEditorWidth) {
+                const aspectRatio = this.initialAspectRatio;
+                newWidth = maxEditorWidth;
+                
+                // Recalculate height to maintain aspect ratio
+                if (this.currentHandle === "border" || 
+                    ["nw", "ne", "sw", "se"].includes(this.currentHandle || "")) {
+                    // For proportional handles, always maintain aspect ratio
+                    newHeight = newWidth / aspectRatio;
+                } else if (this.plugin.settings.isDragAspectRatioLocked) {
+                    // For edge handles, only maintain ratio if aspect ratio lock is enabled
+                    newHeight = newWidth / aspectRatio;
+                }
+                // For non-locked edge handles, don't adjust height automatically
+            }
+
             // Set the new width and height of the image, rounded to the nearest pixel
             this.activeImage.style.width = `${Math.round(newWidth)}px`;
             this.activeImage.style.height = `${Math.round(newHeight)}px`;
@@ -648,7 +692,16 @@ export class ImageResizer {
         this.initialAspectRatio = this.initialWidth / this.initialHeight;
 
         // Calculate new dimensions
-        const { newWidth, newHeight } = this.resizeImageScrollWheel(event, image);
+        let { newWidth, newHeight } = this.resizeImageScrollWheel(event, image);
+
+        // Apply editor width constraint
+        const maxEditorWidth = this.getCachedEditorMaxWidth();
+
+        if (newWidth > maxEditorWidth) {
+            const aspectRatio = this.initialAspectRatio;
+            newWidth = maxEditorWidth;
+            newHeight = newWidth / aspectRatio; // Always maintain aspect ratio for scroll resize
+        }
 
         // Update visual dimensions immediately
         const computedWidth = getComputedStyle(image).width;
