@@ -408,7 +408,8 @@ export class FolderAndFilenameManagement {
      * **Character Restrictions and Replacements:**
      *
      * - **Invalid Characters:** The following characters are considered invalid and are replaced with underscores (`_`):
-     *   - `\ / : * ? " < > | [ ] ( )`
+     *   - `\ / : * ? " < > |`
+     * - **Allowed Characters:** Square brackets `[]` and parentheses `()` are now allowed in filenames.
      *
      * - **Reserved Names (Windows):** If the filename matches one of the following reserved names (case-insensitive),
      *   an underscore (`_`) is appended to the end:
@@ -460,10 +461,10 @@ export class FolderAndFilenameManagement {
         const baseFilename = lastDotIndex !== -1 ? filename.substring(0, lastDotIndex) : filename;
 
         // 1. Remove/replace invalid characters
-        // \ / : * ? " < > | [ ] ( ) - will be replaced with underscore
+        // \ / : * ? " < > | - will be replaced with underscore
+        // [ ] ( ) - now allowed per user request
         let sanitizedBase = baseFilename
             .replace(/[\\/:"*?<>|]/g, "_")  // Replace with underscores
-            .replace(/[()[\]]/g, '_')     // Remove special regex characters
             .replace(/^\s+|\s+$/g, '');     // Removes leading and trailing spaces
 
         // 2. Handle reserved names (Windows)
