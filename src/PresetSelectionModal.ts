@@ -7,7 +7,7 @@ import {
     GlobalPreset,
     AvailableVariablesModal
 } from "./ImageConverterSettings";
-import { LinkFormatPreset } from "./LinkFormatSettings"
+import { LinkFormatPreset } from "./LinkFormatSettings";
 import { NonDestructiveResizePreset } from "./NonDestructiveResizeSettings";
 import { VariableProcessor } from "./VariableProcessor";
 import ImageConverterPlugin from "./main";
@@ -34,11 +34,23 @@ export class PresetSelectionModal extends Modal {
 
     private customFilenameSetting: Setting | null = null;
     private customFilenameText: TextComponent | null = null;
-    private customFolderSetting: Setting | null = null; // Add custom folder setting
-    private customFolderText: TextComponent | null = null; // Add custom folder text component
+    private customFolderSetting: Setting | null = null;
+    private customFolderText: TextComponent | null = null;
 
     private previewContainer: HTMLDivElement | null = null;
     private updateTimeout: number | null = null;
+
+    // Processing card toggle state
+    private isProcessingCardExpanded = false;
+    private processingCardContent: HTMLElement | null = null;
+    private processingCardPreview: HTMLElement | null = null;
+    private processingCardChevron: HTMLElement | null = null;
+
+    // Session-only custom template overrides (NOT saved to presets)
+    // These store user-entered custom text that temporarily overrides preset templates
+    // without modifying the original preset objects stored in settings
+    private temporaryCustomFolderOverride = "";      // Custom folder path typed by user this session
+    private temporaryCustomFilenameOverride = "";    // Custom filename template typed by user this session
 
     constructor(
         app: App,
@@ -86,6 +98,53 @@ export class PresetSelectionModal extends Modal {
             this.settings.nonDestructiveResizeSettings.resizePresets,
             'Resize'
         );
+
+        // Initialize session state from saved state (if available) or from current preset templates
+        this.initializeSessionState();
+    }
+
+    /**
+     * Initializes session state for custom overrides without modifying original presets.
+     * This restores any previously saved custom text from the modalSessionState or uses preset defaults.
+     */
+    private initializeSessionState(): void {
+        // Load from saved session state if available, otherwise use current preset templates
+        const sessionState = this.settings.modalSessionState;
+        
+        // Initialize folder override
+        if (sessionState?.customFolderOverride !== undefined) {
+            this.temporaryCustomFolderOverride = sessionState.customFolderOverride;
+        } else if (this.selectedFolderPreset.customTemplate) {
+            this.temporaryCustomFolderOverride = this.selectedFolderPreset.customTemplate;
+        }
+
+        // Initialize filename override  
+        if (sessionState?.customFilenameOverride !== undefined) {
+            this.temporaryCustomFilenameOverride = sessionState.customFilenameOverride;
+        } else if (this.selectedFilenamePreset.customTemplate) {
+            this.temporaryCustomFilenameOverride = this.selectedFilenamePreset.customTemplate;
+        }
+    }
+
+    /**
+     * Saves current session state to settings for persistence across modal sessions.
+     * This allows custom text to be preserved when reopening the modal.
+     */
+    private saveSessionState(): void {
+        // Ensure modalSessionState object exists
+        if (!this.settings.modalSessionState) {
+            this.settings.modalSessionState = {
+                customFolderOverride: "",
+                customFilenameOverride: ""
+            };
+        }
+
+        // Save current session overrides to settings
+        this.settings.modalSessionState.customFolderOverride = this.temporaryCustomFolderOverride;
+        this.settings.modalSessionState.customFilenameOverride = this.temporaryCustomFilenameOverride;
+
+        // Save settings to persist the state
+        this.plugin.saveSettings();
     }
 
     onOpen() {
@@ -93,168 +152,341 @@ export class PresetSelectionModal extends Modal {
         contentEl.empty();
         contentEl.addClass("image-converter-preset-selection-modal");
 
-        // Create main layout container
-        const mainContainer = contentEl.createDiv("image-converter-main-container");
+        // Compact single-column layout
+        const mainContainer = contentEl.createDiv("image-converter-compact-container");
+        
+        // Compact header with title and mini global preset
+        this.createCompactHeader(mainContainer);
+        
+        // Input section with inline presets
+        this.createCompactInputSection(mainContainer);
+        
+        // Processing options in compact grid
+        this.createCompactProcessingSection(mainContainer);
+        
+        // Compact preview
+        this.createCompactPreview(mainContainer);
+        
+        // Action buttons
+        this.createActionButtons(mainContainer);
 
-        // Create two columns
-        const settingsColumn = mainContainer.createDiv("image-converter-settings-column");
+        // Initialize preview
+        this.updatePreviews();
 
-        // SETTINGS COLUMN
-        // Main heading
-        settingsColumn.createEl("h2", {
-            text: "Image Processing",
-        });
-
-        // 1. Global Preset Section
-        const globalSection = settingsColumn.createDiv("image-converter-preset-section");
-        globalSection.createEl("h3", { text: "" });
-        this.createGlobalPresetDropdown(globalSection);
-
-        // 2. File Organization Section with integrated help button
-        const fileSection = settingsColumn.createDiv("image-converter-preset-section");
-
-        // Header with title and variables help
-        const fileSectionHeader = fileSection.createDiv("image-converter-section-header");
-        const titleGroup = fileSectionHeader.createDiv("image-converter-title-group");
-        titleGroup.createEl("h3", { text: "File organization" });
-        new ButtonComponent(titleGroup)
-            .setIcon("help-circle")
-            .setTooltip("Show available variables")
-            .setClass("image-converter-help-button")
-            .onClick(() => this.showAvailableVariables());
-
-        // Add description
-        fileSection.createEl("p", {
-            cls: "image-converter-section-description",
-            text: "Some default presets are already pre-defined. You can create more presets in the main plugin settings window. After selecting custom made preset a new input field will show pre-filled with template from the preset which you can always manually overwrite."
-        });
-
-        // Inputs container
-        const inputsContainer = fileSection.createDiv("image-converter-inputs-container");
-
-        // Folder Organization
-        const folderGroup = inputsContainer.createDiv("image-converter-input-group");
-        this.folderPresetDropdown = this.createPresetDropdown(
-            folderGroup,
-            "Folder",
-            this.settings.folderPresets,
-            this.selectedFolderPreset,
-            (value) => {
-                this.selectedFolderPreset = this.settings.folderPresets.find(
-                    (p) => p.name === value
-                ) || this.settings.folderPresets[0];
-                this.updatePreviews();
-                this.updateFolderInputFieldVisibility(); // Add this line
+        // Focus the filename input field after a short delay to ensure DOM is ready
+        setTimeout(() => {
+            if (this.customFilenameText && this.customFilenameText.inputEl) {
+                this.customFilenameText.inputEl.focus();
+                this.customFilenameText.inputEl.select(); // Optional: select all text for easy replacement
             }
-        );
+        }, 50);
+    }
 
-        this.customFolderSetting = new Setting(folderGroup)
-            .addText((text) => {
-                this.customFolderText = text;
-                text.setPlaceholder("e.g., {YYYY}/{MM}/{notename}")
-                    .setValue(this.selectedFolderPreset.customTemplate || "")
-                    .onChange(() => this.updatePreviews());
-                text.inputEl.setAttr("spellcheck", "false");
-                return text;
+    private createCompactHeader(container: HTMLElement) {
+        const header = container.createDiv("image-converter-compact-header");
+        
+        // Title on the left
+        header.createEl("h2", { 
+            text: "Image Converter",
+            cls: "image-converter-compact-title"
+        });
+        
+        // Variables button in the middle
+        const variablesButton = header.createDiv("image-converter-variables-header");
+        new Setting(variablesButton)
+            .addButton((button) => {
+                button
+                    .setButtonText("{Variables}")
+                    .setTooltip("Show available variables")
+                    .onClick(() => this.showAvailableVariables());
+                button.buttonEl.addClass("image-converter-variables-header-btn");
             });
-        this.updateFolderInputFieldVisibility(); // Initial visibility check
+        
+        // Global preset dropdown on the right
+        const globalMini = header.createDiv("image-converter-global-mini");
+        this.createGlobalPresetDropdown(globalMini);
+    }
 
-        // Filename Organization
-        const filenameGroup = inputsContainer.createDiv("image-converter-input-group");
-        this.filenamePresetDropdown = this.createPresetDropdown(
-            filenameGroup,
-            "Filename",
-            this.settings.filenamePresets,
-            this.selectedFilenamePreset,
+    private createCompactInputSection(container: HTMLElement) {
+        const inputSection = container.createDiv("image-converter-compact-inputs");
+        
+        // Folder input with inline preset
+        this.createCompactInputWithPreset(
+            inputSection,
+            "📂 Folder",
+            "Temporarily overwrite path defined in selected preset e.g.: assets/{YYYY}/{MM}",
+            "Where to save the image",
+            this.selectedFolderPreset,
+            this.settings.folderPresets,
+            (text) => { this.customFolderText = text; },
             (value) => {
-                this.selectedFilenamePreset = this.settings.filenamePresets.find(
-                    (p) => p.name === value
-                ) || this.settings.filenamePresets[0];
-                if (this.customFilenameText) {
-                    this.customFilenameText.setValue(
-                        this.selectedFilenamePreset.customTemplate || ""
-                    );
+                this.selectedFolderPreset = this.settings.folderPresets.find(p => p.name === value) || this.settings.folderPresets[0];
+                
+                // Update session override and UI when preset changes
+                this.temporaryCustomFolderOverride = this.selectedFolderPreset.customTemplate || "";
+                if (this.customFolderText) {
+                    this.customFolderText.setValue(this.temporaryCustomFolderOverride);
                 }
                 this.updatePreviews();
-                this.updateFilenameInputFieldVisibility(); // Add this line
-            }
+            },
+            (setting) => { this.folderPresetDropdown = setting; }
         );
 
-        this.customFilenameSetting = new Setting(filenameGroup)
+        // Filename input with inline preset
+        this.createCompactInputWithPreset(
+            inputSection,
+            "📄 Filename", 
+            "e.g., {imagename}-{timestamp}",
+            "What to name the file",
+            this.selectedFilenamePreset,
+            this.settings.filenamePresets,
+            (text) => { this.customFilenameText = text; },
+            (value) => {
+                this.selectedFilenamePreset = this.settings.filenamePresets.find(p => p.name === value) || this.settings.filenamePresets[0];
+                
+                // Update session override and UI when preset changes
+                this.temporaryCustomFilenameOverride = this.selectedFilenamePreset.customTemplate || "";
+                if (this.customFilenameText) {
+                    this.customFilenameText.setValue(this.temporaryCustomFilenameOverride);
+                }
+                this.updatePreviews();
+            },
+            (setting) => { this.filenamePresetDropdown = setting; }
+        );
+
+    }
+
+    private createCompactInputWithPreset<T extends { name: string, customTemplate?: string }>(
+        container: HTMLElement,
+        label: string,
+        placeholder: string,
+        description: string,
+        selectedPreset: T,
+        presets: T[],
+        onTextCreated: (text: TextComponent) => void,
+        onPresetChange: (value: string) => void,
+        onSettingCreated: (setting: Setting) => void
+    ) {
+        const group = container.createDiv("image-converter-compact-input-group");
+        
+        // Row 1: Label and Dropdown
+        const labelRow = group.createDiv("image-converter-label-dropdown-row");
+        
+        // Label on the left
+        labelRow.createEl("div", {
+            text: label,
+            cls: "image-converter-group-label"
+        });
+          // Preset dropdown on the right
+        const presetContainer = labelRow.createDiv("image-converter-preset-dropdown-container");
+        const setting = new Setting(presetContainer)
+            .setClass("image-converter-preset-dropdown-setting")
+            .addDropdown((dropdown) => {
+                presets.forEach((preset) => {
+                    dropdown.addOption(preset.name, preset.name);
+                });                dropdown.setValue(selectedPreset.name);
+                dropdown.onChange(onPresetChange);
+                
+                // Apply compact styling to the dropdown using CSS classes
+                dropdown.selectEl.addClass("image-converter-compact-dropdown");
+                
+                // Extract the preset type from the label for data attribute
+                const presetType = label.replace("📂 ", "").replace("📄 ", "");
+                dropdown.selectEl.setAttribute('data-preset-type', presetType.toLowerCase());
+            });
+        
+        // Remove default setting styling
+        setting.settingEl.addClass("image-converter-preset-dropdown-setting-item");
+        setting.settingEl.addClass("image-converter-hide-name-desc");
+        
+        // Row 2: Full-width input field
+        const inputRow = group.createDiv("image-converter-input-row");
+        const textSetting = new Setting(inputRow)
+            .setClass("image-converter-text-setting")
             .addText((text) => {
-                this.customFilenameText = text;
-                text.setPlaceholder("e.g., {imagename}-{timestamp}")
-                    .setValue(this.selectedFilenamePreset.customTemplate || "")
-                    .onChange(() => this.updatePreviews());
+                onTextCreated(text);
+                
+                // Use session override value instead of directly modifying preset
+                let initialValue = "";
+                if (label.includes("📂")) {
+                    // Folder field - use session override
+                    initialValue = this.temporaryCustomFolderOverride;
+                } else if (label.includes("📄")) {
+                    // Filename field - use session override
+                    initialValue = this.temporaryCustomFilenameOverride;
+                } else {
+                    // Fallback to preset template
+                    initialValue = selectedPreset.customTemplate || "";
+                }
+                
+                text.setPlaceholder(placeholder)
+                    .setValue(initialValue)
+                    .onChange((value) => {
+                        // Update session override instead of modifying preset
+                        if (label.includes("📂")) {
+                            this.temporaryCustomFolderOverride = value;
+                        } else if (label.includes("📄")) {
+                            this.temporaryCustomFilenameOverride = value;
+                        }
+                        this.updatePreviews();
+                    });
                 text.inputEl.setAttr("spellcheck", "false");
+                text.inputEl.addClass("image-converter-full-width-input");
                 return text;
             });
-        this.updateFilenameInputFieldVisibility(); // Initial visibility check
+        
+        // Remove default setting styling
+        textSetting.settingEl.addClass("image-converter-text-setting-item");
+        textSetting.settingEl.addClass("image-converter-hide-name-desc");
+        
+        onSettingCreated(setting);
+    }
 
-        // Preview section
-        const previewSection = fileSection.createDiv("image-converter-preview-section");
-        const previewHeader = previewSection.createDiv("image-converter-preview-header");
-        previewHeader.createEl("span", {
-            cls: "image-converter-preview-icon",
-            text: "" // Or use any other icon system you prefer
+    private createCompactProcessingSection(container: HTMLElement) {
+        // Bordered card container
+        const card = container.createDiv("image-converter-processing-card");
+        
+        // Persistent clickable header (always visible)
+        const cardHeader = card.createDiv("image-converter-processing-card-header");
+        cardHeader.addClass("image-converter-processing-card-header-clickable");
+        
+        // Header content container
+        const headerContent = cardHeader.createDiv("image-converter-processing-card-header-content");
+        
+        // Preview text (will be updated by updateProcessingPreview)
+        this.processingCardPreview = headerContent.createDiv("image-converter-processing-preview-text");
+        
+        // Chevron icon (moved to the right)
+        this.processingCardChevron = headerContent.createEl("span", {
+            text: "▶",
+            cls: "image-converter-processing-card-chevron"
         });
-        previewHeader.createEl("span", {
-            text: "Path preview",
-            cls: "image-converter-preview-title"
+        
+        // Initialize preview content
+        this.updateProcessingPreview();
+
+        // Full content (shown when expanded)
+        this.processingCardContent = card.createDiv("image-converter-processing-card-content");
+        this.processingCardContent.addClass("image-converter-collapsed"); // Start collapsed
+        
+        // Column Header Row 1: Format and Link
+        const headerRow1 = this.processingCardContent.createDiv("image-converter-grid-header-row");
+        headerRow1.createEl("div", { text: "Format", cls: "image-converter-grid-header" });
+        headerRow1.createEl("div", { text: "Link", cls: "image-converter-grid-header" });
+        
+        // Component Row 1: Format dropdown and Link dropdown
+        const componentRow1 = this.processingCardContent.createDiv("image-converter-grid-component-row");
+
+        // Format dropdown
+        const formatDiv = componentRow1.createDiv("image-converter-grid-component");
+        this.conversionPresetDropdown = new Setting(formatDiv)
+            .addDropdown((dropdown) => {
+                this.settings.conversionPresets.forEach((preset) => {
+                    dropdown.addOption(preset.name, preset.name);
+                });
+                dropdown.setValue(this.selectedConversionPreset.name);
+                dropdown.onChange((value) => {
+                    this.selectedConversionPreset = this.settings.conversionPresets.find(p => p.name === value) || this.settings.conversionPresets[0];
+                    this.updateConversionSettings(card);
+                    this.updateProcessingPreview();
+                });
+                // Pre-fill with "jpeg 1000 ▼" appearance
+                dropdown.selectEl.addClass("image-converter-format-dropdown");
+            });
+        // Remove default setting styling
+        this.conversionPresetDropdown.settingEl.addClass("image-converter-grid-dropdown-setting");
+
+        // Link dropdown
+        const linkDiv = componentRow1.createDiv("image-converter-grid-component");
+        this.linkFormatPresetDropdown = new Setting(linkDiv)
+            .addDropdown((dropdown) => {
+                this.settings.linkFormatSettings.linkFormatPresets.forEach((preset) => {
+                    dropdown.addOption(preset.name, preset.name);
+                });
+                dropdown.setValue(this.selectedLinkFormatPreset.name);
+                dropdown.onChange((value) => {
+                    this.selectedLinkFormatPreset = this.settings.linkFormatSettings.linkFormatPresets.find(p => p.name === value) || this.settings.linkFormatSettings.linkFormatPresets[0];
+                    this.updateProcessingPreview();
+                });
+                // Pre-fill with "Wiki/Md ▼" appearance
+                dropdown.selectEl.addClass("image-converter-link-dropdown");
+            });
+        // Remove default setting styling
+        this.linkFormatPresetDropdown.settingEl.addClass("image-converter-grid-dropdown-setting");
+
+        // Column Header Row 2: Resize and Quality
+        const headerRow2 = this.processingCardContent.createDiv("image-converter-grid-header-row");
+        headerRow2.createEl("div", { text: "Resize", cls: "image-converter-grid-header" });
+        const qualityHeader = headerRow2.createEl("div", { 
+            text: `Quality ${this.selectedConversionPreset.quality}%`, 
+            cls: "image-converter-grid-header image-converter-quality-header" 
         });
-        this.previewContainer = previewSection.createDiv("image-converter-modal-preview-container");
+        
+        // Component Row 2: Resize dropdown and Quality slider
+        const componentRow2 = this.processingCardContent.createDiv("image-converter-grid-component-row");
+        
+        // Resize dropdown
+        const resizeDiv = componentRow2.createDiv("image-converter-grid-component");
+        this.resizePresetDropdown = new Setting(resizeDiv)
+            .addDropdown((dropdown) => {
+                this.settings.nonDestructiveResizeSettings.resizePresets.forEach((preset) => {
+                    dropdown.addOption(preset.name, preset.name);
+                });
+                dropdown.setValue(this.selectedResizePreset.name);
+                dropdown.onChange((value) => {
+                    this.selectedResizePreset = this.settings.nonDestructiveResizeSettings.resizePresets.find(p => p.name === value) || this.settings.nonDestructiveResizeSettings.resizePresets[0];
+                    this.updateProcessingPreview();
+                });
+                // Pre-fill with "Default ▼" appearance
+                dropdown.selectEl.addClass("image-converter-resize-dropdown");
+            });
+        // Remove default setting styling
+        this.resizePresetDropdown.settingEl.addClass("image-converter-grid-dropdown-setting");
 
+        // Quality slider
+        const qualityDiv = componentRow2.createDiv("image-converter-grid-component");
+        this.conversionQualitySetting = new Setting(qualityDiv)
+            .addSlider((slider) => {
+                slider
+                    .setLimits(0, 100, 1)
+                    .setValue(this.selectedConversionPreset.quality)
+                    .setDynamicTooltip()
+                    .onChange((value) => {
+                        this.selectedConversionPreset.quality = value;
+                        // Update the quality header text
+                        qualityHeader.textContent = `Quality ${value}%`;
+                        this.updateProcessingPreview();
+                    });
+                slider.sliderEl.addClass("image-converter-quality-slider");
+            });
+        // Remove default setting styling
+        this.conversionQualitySetting.settingEl.addClass("image-converter-grid-slider-setting");
 
-        // 3. Conversion Section
-        const conversionSection = settingsColumn.createDiv("image-converter-preset-section");
-        conversionSection.createEl("h3", { text: "Image conversion" });
+        // Add click handler to toggle using DOM onclick (Obsidian-safe pattern)
+        cardHeader.onclick = () => {
+            this.toggleProcessingCard();
+        };
+    }
 
-        const conversionContainer = conversionSection.createDiv("image-converter-conversion-container");
+    private createCompactPreview(container: HTMLElement) {
+        const previewSection = container.createDiv("image-converter-compact-preview");
+        
+        const previewHeader = previewSection.createDiv("image-converter-preview-header-compact");
+        previewHeader.createEl("span", { text: "Preview", cls: "image-converter-preview-title-compact" });
+        
+        this.previewContainer = previewSection.createDiv("image-converter-preview-content-compact");
+    }
 
-        this.conversionPresetDropdown = this.createPresetDropdown(
-            conversionContainer,
-            "Format",
-            this.settings.conversionPresets,
-            this.selectedConversionPreset,
-            (value) => {
-                this.selectedConversionPreset = this.settings.conversionPresets.find(
-                    (p) => p.name === value
-                ) || this.settings.conversionPresets[0];
-                this.updateConversionSettings(conversionContainer);
-            }
-        );
-        this.updateConversionSettings(conversionContainer);
+    private updateConversionSettings(container: HTMLElement): void {
+        // This method is now simplified since we don't need to recreate the quality slider
+        // The quality slider is already properly positioned in the 2x2 grid
+        
+        // Only handle color depth for PNG if needed in future updates
+        // For now, we keep the 2x2 grid layout clean and simple
+    }
 
-        // 4. Additional Settings Section
-        const additionalSection = settingsColumn.createDiv("image-converter-preset-section");
-        additionalSection.createEl("h3", { text: "Additional settings" });
-
-        this.linkFormatPresetDropdown = this.createPresetDropdown(
-            additionalSection,
-            "Link format",
-            this.settings.linkFormatSettings.linkFormatPresets,
-            this.selectedLinkFormatPreset,
-            (value) => {
-                this.selectedLinkFormatPreset = this.settings.linkFormatSettings.linkFormatPresets.find(
-                    (p) => p.name === value
-                ) || this.settings.linkFormatSettings.linkFormatPresets[0];
-            }
-        );
-
-        this.resizePresetDropdown = this.createPresetDropdown(
-            additionalSection,
-            "Resize (non-destructive)",
-            this.settings.nonDestructiveResizeSettings.resizePresets,
-            this.selectedResizePreset,
-            (value) => {
-                this.selectedResizePreset = this.settings.nonDestructiveResizeSettings.resizePresets.find(
-                    (p) => p.name === value
-                ) || this.settings.nonDestructiveResizeSettings.resizePresets[0];
-            }
-        );
-
-        // 5. Action Buttons Section (at the bottom of settings column)
-        const actionSection = settingsColumn.createDiv("image-converter-action-section");
+    private createActionButtons(container: HTMLElement) {
+        const actionSection = container.createDiv("image-converter-compact-actions");
 
         new Setting(actionSection)
             .addButton((button: ButtonComponent) => {
@@ -262,26 +494,41 @@ export class PresetSelectionModal extends Modal {
                     .setButtonText("Edit presets")
                     .onClick(() => {
                         this.close();
-                        const settingsTab = (this.app as any).setting;
-                        if (settingsTab) {
-                            settingsTab.open();
-                            settingsTab.openTabById(this.plugin.manifest.id);
+                        const appWithSettings = this.app as { setting?: { open(): void; openTabById(id: string): void } };
+                        if (appWithSettings.setting) {
+                            appWithSettings.setting.open();
+                            appWithSettings.setting.openTabById(this.plugin.manifest.id);
                         } else {
                             new Notice("Unable to open settings.");
                         }
                     });
-            });
-
-        new Setting(actionSection)
+            })
             .addButton((button) => {
                 button
                     .setButtonText("Apply")
                     .setCta()
                     .onClick(() => {
+                        // Save current session state to settings for persistence
+                        this.saveSessionState();
+
+                        // Create copies of presets with session override values applied
+                        // This way we don't modify the original preset objects
+                        const filenamePresetCopy = { ...this.selectedFilenamePreset };
+                        const folderPresetCopy = { ...this.selectedFolderPreset };
+
+                        // Apply session overrides to the copies
+                        filenamePresetCopy.customTemplate = this.temporaryCustomFilenameOverride;
+                        folderPresetCopy.customTemplate = this.temporaryCustomFolderOverride;
+                        
+                        // Set folder preset type to "CUSTOM" when custom text is provided
+                        if (this.temporaryCustomFolderOverride && this.temporaryCustomFolderOverride.trim() !== '') {
+                            folderPresetCopy.type = "CUSTOM";
+                        }
+
                         this.onApply(
                             this.selectedConversionPreset,
-                            this.selectedFilenamePreset,
-                            this.selectedFolderPreset,
+                            filenamePresetCopy,
+                            folderPresetCopy,
                             this.selectedLinkFormatPreset,
                             this.selectedResizePreset
                         );
@@ -290,87 +537,9 @@ export class PresetSelectionModal extends Modal {
             });
     }
 
-
-    private createPresetDropdown<T extends { name: string }>(
-        contentEl: HTMLElement,
-        name: string,
-        presets: T[],
-        selectedPreset: T,
-        onChange: (value: string) => void
-    ): Setting {
-        const dropdownSetting = new Setting(contentEl)
-            .setName(name)
-            .addDropdown((dropdown) => {
-                presets.forEach((preset) => {
-                    dropdown.addOption(preset.name, preset.name);
-                });
-                dropdown.setValue(selectedPreset.name);
-                dropdown.onChange(onChange);
-            });
-
-        return dropdownSetting;
-    }
-
-    private updateConversionSettings(container: HTMLElement): void {
-        // First remove any existing quality container
-        const existingContainer = document.querySelector('.image-converter-conversion-quality-container');
-        if (existingContainer) {
-            existingContainer.remove();
-        }
-
-        // Remove existing settings if they exist
-        if (this.conversionQualitySetting) {
-            this.conversionQualitySetting.settingEl.remove();
-            this.conversionQualitySetting = null;
-        }
-        if (this.conversionColorDepthSetting) {
-            this.conversionColorDepthSetting.settingEl.remove();
-            this.conversionColorDepthSetting = null;
-        }
-
-        // Create new quality container
-        const qualityContainer = container.createDiv("image-converter-conversion-quality-container");
-
-        // Add quality slider
-        this.conversionQualitySetting = new Setting(qualityContainer)
-            .setName("Quality")
-            .setDesc(`Current: ${this.selectedConversionPreset.quality}%`)
-            .addSlider((slider) => {
-                slider
-                    .setLimits(0, 100, 1)
-                    .setValue(this.selectedConversionPreset.quality)
-                    .setDynamicTooltip()
-                    .onChange((value) => {
-                        this.selectedConversionPreset.quality = value;
-                        this.conversionQualitySetting?.setDesc(`Current: ${value}%`);
-                    });
-            });
-
-        // Add color depth slider for PNG
-        if (this.selectedConversionPreset.outputFormat === "PNG") {
-            this.conversionColorDepthSetting = new Setting(qualityContainer)
-                .setName("Color depth")
-                .setDesc(`Current: ${this.selectedConversionPreset.colorDepth * 100}%`)
-                .addSlider((slider) => {
-                    slider
-                        .setLimits(0, 1, 0.1)
-                        .setValue(this.selectedConversionPreset.colorDepth)
-                        .setDynamicTooltip()
-                        .onChange((value) => {
-                            this.selectedConversionPreset.colorDepth = value;
-                            this.conversionColorDepthSetting?.setDesc(`Current: ${value * 100}%`);
-                        });
-                });
-        }
-    }
-
-    // New method to create the global preset dropdown
     private createGlobalPresetDropdown(contentEl: HTMLElement): void {
-        new Setting(contentEl)
-            .setName("Global preset")
-            .setDesc(
-                "Select a global preset to apply multiple settings at once"
-            )
+        // Global preset dropdown only (Variables button is now in the header)
+        const miniSetting = new Setting(contentEl)
             .addDropdown((dropdown: DropdownComponent) => {
                 dropdown.addOption("none", "None");
                 this.settings.globalPresets.forEach((preset) => {
@@ -384,144 +553,95 @@ export class PresetSelectionModal extends Modal {
                 dropdown.onChange((value) => {
                     if (value === "none") {
                         this.selectedGlobalPreset = null;
-                        // Reset individual selections to current settings or defaults
+                        // Reset to current settings
                         this.selectedConversionPreset =
                             this.settings.conversionPresets.find(
-                                (p) =>
-                                    p.name ===
-                                    this.settings.selectedConversionPreset
+                                (p) => p.name === this.settings.selectedConversionPreset
                             ) || this.settings.conversionPresets[0];
                         this.selectedFilenamePreset =
                             this.settings.filenamePresets.find(
-                                (p) =>
-                                    p.name ===
-                                    this.settings.selectedFilenamePreset
+                                (p) => p.name === this.settings.selectedFilenamePreset
                             ) || this.settings.filenamePresets[0];
                         this.selectedFolderPreset =
                             this.settings.folderPresets.find(
-                                (p) =>
-                                    p.name === this.settings.selectedFolderPreset
+                                (p) => p.name === this.settings.selectedFolderPreset
                             ) || this.settings.folderPresets[0];
                         this.selectedLinkFormatPreset =
                             this.settings.linkFormatSettings.linkFormatPresets.find(
-                                (p) =>
-                                    p.name ===
-                                    this.settings.linkFormatSettings
-                                        .selectedLinkFormatPreset
-                            ) ||
-                            this.settings.linkFormatSettings
-                                .linkFormatPresets[0];
+                                (p) => p.name === this.settings.linkFormatSettings.selectedLinkFormatPreset
+                            ) || this.settings.linkFormatSettings.linkFormatPresets[0];
                         this.selectedResizePreset =
                             this.settings.nonDestructiveResizeSettings.resizePresets.find(
-                                (p) =>
-                                    p.name ===
-                                    this.settings.nonDestructiveResizeSettings
-                                        .selectedResizePreset
-                            ) ||
-                            this.settings.nonDestructiveResizeSettings
-                                .resizePresets[0];
+                                (p) => p.name === this.settings.nonDestructiveResizeSettings.selectedResizePreset
+                            ) || this.settings.nonDestructiveResizeSettings.resizePresets[0];
                     } else {
                         this.selectedGlobalPreset =
-                            this.settings.globalPresets.find(
-                                (p) => p.name === value
-                            ) || null;
+                            this.settings.globalPresets.find((p) => p.name === value) || null;
                         if (this.selectedGlobalPreset) {
-                            // Apply settings from the selected global preset
+                            // Apply global preset
                             this.selectedConversionPreset =
                                 this.settings.conversionPresets.find(
-                                    (p) =>
-                                        p.name ===
-                                        this.selectedGlobalPreset!
-                                            .conversionPreset
+                                    (p) => p.name === (this.selectedGlobalPreset?.conversionPreset || '')
                                 ) || this.settings.conversionPresets[0];
                             this.selectedFilenamePreset =
                                 this.settings.filenamePresets.find(
-                                    (p) =>
-                                        p.name ===
-                                        this.selectedGlobalPreset!.filenamePreset
+                                    (p) => p.name === (this.selectedGlobalPreset?.filenamePreset || '')
                                 ) || this.settings.filenamePresets[0];
                             this.selectedFolderPreset =
                                 this.settings.folderPresets.find(
-                                    (p) =>
-                                        p.name ===
-                                        this.selectedGlobalPreset!.folderPreset
+                                    (p) => p.name === (this.selectedGlobalPreset?.folderPreset || '')
                                 ) || this.settings.folderPresets[0];
                             this.selectedLinkFormatPreset =
                                 this.settings.linkFormatSettings.linkFormatPresets.find(
-                                    (p) =>
-                                        p.name ===
-                                        this.selectedGlobalPreset!
-                                            .linkFormatPreset
-                                ) ||
-                                this.settings.linkFormatSettings
-                                    .linkFormatPresets[0];
+                                    (p) => p.name === (this.selectedGlobalPreset?.linkFormatPreset || '')
+                                ) || this.settings.linkFormatSettings.linkFormatPresets[0];
                             this.selectedResizePreset =
                                 this.settings.nonDestructiveResizeSettings.resizePresets.find(
-                                    (p) =>
-                                        p.name ===
-                                        this.selectedGlobalPreset!.resizePreset
-                                ) ||
-                                this.settings.nonDestructiveResizeSettings
-                                    .resizePresets[0];
+                                    (p) => p.name === (this.selectedGlobalPreset?.resizePreset || '')
+                                ) || this.settings.nonDestructiveResizeSettings.resizePresets[0];
                         }
                     }
 
-                    // Update all dropdowns to reflect the selected preset
-                    (
-                        this.folderPresetDropdown.components[0] as DropdownComponent
-                    ).setValue(this.selectedFolderPreset.name);
-                    (
-                        this.filenamePresetDropdown
-                            .components[0] as DropdownComponent
-                    ).setValue(this.selectedFilenamePreset.name);
-                    (
-                        this.conversionPresetDropdown
-                            .components[0] as DropdownComponent
-                    ).setValue(this.selectedConversionPreset.name);
-                    (
-                        this.linkFormatPresetDropdown
-                            .components[0] as DropdownComponent
-                    ).setValue(this.selectedLinkFormatPreset.name);
-                    (
-                        this.resizePresetDropdown
-                            .components[0] as DropdownComponent
-                    ).setValue(this.selectedResizePreset.name);
+                    // Update all dropdowns
+                    (this.folderPresetDropdown.components[0] as DropdownComponent).setValue(this.selectedFolderPreset.name);
+                    (this.filenamePresetDropdown.components[0] as DropdownComponent).setValue(this.selectedFilenamePreset.name);
+                    (this.conversionPresetDropdown.components[0] as DropdownComponent).setValue(this.selectedConversionPreset.name);
+                    (this.linkFormatPresetDropdown.components[0] as DropdownComponent).setValue(this.selectedLinkFormatPreset.name);
+                    (this.resizePresetDropdown.components[0] as DropdownComponent).setValue(this.selectedResizePreset.name);
 
-                    // Find the quality container and update it
-                    const qualityContainer = this.conversionPresetDropdown.settingEl.parentElement?.querySelector('.image-converter-conversion-quality-container');
-                    if (qualityContainer) {
-                        this.updateConversionSettings(qualityContainer as HTMLElement);
+                    // Update session overrides and input fields
+                    this.temporaryCustomFolderOverride = this.selectedFolderPreset.customTemplate || "";
+                    this.temporaryCustomFilenameOverride = this.selectedFilenamePreset.customTemplate || "";
+                    
+                    if (this.customFolderText) {
+                        this.customFolderText.setValue(this.temporaryCustomFolderOverride);
+                    }
+                    if (this.customFilenameText) {
+                        this.customFilenameText.setValue(this.temporaryCustomFilenameOverride);
                     }
 
-                    this.updateFilenameSettings(contentEl);
-                    this.updateFolderPreview();
-                    this.updateFolderInputFieldVisibility();    // Add this
-                    this.updateFilenameInputFieldVisibility();  // Add this
+                    // Update conversion settings
+                    const processingSections = contentEl.closest('.image-converter-compact-container')?.querySelectorAll('.image-converter-compact-processing');
+                    if (processingSections && processingSections.length > 0) {
+                        this.updateConversionSettings(processingSections[0] as HTMLElement);
+                    }
+
+                    this.updatePreviews();
                 });
             });
-    }
 
-
-
-    private updateFilenameSettings(contentEl: HTMLElement): void {
-        // Update the custom filename text component's value if user is changing global preset
-        if (this.customFilenameText) {
-            this.customFilenameText.setValue(
-                this.selectedFilenamePreset.customTemplate || ""
-            );
-        }
+        miniSetting.settingEl.addClass("image-converter-global-mini-setting");
     }
 
     private updatePreviews = async () => {
         if (!this.previewContainer || !this.customFolderText || !this.customFilenameText) return;
 
-        // Debounce the update to prevent flashing
         if (this.updateTimeout) {
             window.clearTimeout(this.updateTimeout);
         }
 
         this.updateTimeout = window.setTimeout(async () => {
-            if (!this.previewContainer) return; // Additional null check after timeout
+            if (!this.previewContainer) return;
 
             try {
                 const activeFile = this.app.workspace.getActiveFile();
@@ -529,77 +649,42 @@ export class PresetSelectionModal extends Modal {
                     .getFiles()
                     .find((file) => file.extension.match(/^(jpg|jpeg|png|gif|webp)$/i));
 
-                const fileToUse = activeFile?.extension.match(/^(jpg|jpeg|png|gif|webp)$/i)
-                    ? activeFile
-                    : firstImage;
+                const fileToUse = activeFile?.extension.match(/^(jpg|jpeg|png|gif|webp)$/i) ? activeFile : firstImage;
 
-                const folderTemplate = this.customFolderText?.getValue() || "";
-                const filenameTemplate = this.customFilenameText?.getValue() || "";
+                // Use session overrides instead of text component values for preview
+                const folderTemplate = this.temporaryCustomFolderOverride || "";
+                const filenameTemplate = this.temporaryCustomFilenameOverride || "";
 
-                // Prepare new content before updating DOM
                 const newContent = createEl('div');
 
                 if (folderTemplate || filenameTemplate) {
                     const folderPath = folderTemplate
                         ? await this.variableProcessor.processTemplate(
                             folderTemplate,
-                            { file: fileToUse!, activeFile: activeFile! }
+                            { file: fileToUse || this.app.vault.getFiles()[0], activeFile: activeFile || this.app.vault.getFiles()[0] }
                         )
                         : "";
 
                     const filename = filenameTemplate
                         ? await this.variableProcessor.processTemplate(
                             filenameTemplate,
-                            { file: fileToUse!, activeFile: activeFile! }
+                            { file: fileToUse || this.app.vault.getFiles()[0], activeFile: activeFile || this.app.vault.getFiles()[0] }
                         )
                         : "";
 
-                    const previewPath = newContent.createDiv("image-converter-preview-path");
                     const fullPath = [folderPath, filename].filter(Boolean).join("/");
 
-                    previewPath.createEl("div", {
-                        text: "Full path: ",
-                        cls: "image-converter-preview-label"
-                    });
-
-                    previewPath.createEl("div", {
+                    newContent.createEl("div", {
                         text: fullPath || "No path specified",
-                        cls: "image-converter-preview-value"
+                        cls: "image-converter-preview-path-compact"
                     });
-
-                    if (folderTemplate && filenameTemplate) {
-                        const folderPreview = previewPath.createEl("div", {
-                            cls: "image-converter-preview-component"
-                        });
-                        folderPreview.createEl("span", {
-                            text: "Folder: ",
-                            cls: "image-converter-preview-label"
-                        });
-                        folderPreview.createEl("span", {
-                            text: folderPath,
-                            cls: "image-converter-preview-value"
-                        });
-
-                        const filenamePreview = previewPath.createEl("div", {
-                            cls: "image-converter-preview-component"
-                        });
-                        filenamePreview.createEl("span", {
-                            text: "Filename: ",
-                            cls: "image-converter-preview-label"
-                        });
-                        filenamePreview.createEl("span", {
-                            text: filename,
-                            cls: "image-converter-preview-value"
-                        });
-                    }
                 } else {
                     newContent.createEl("div", {
-                        text: "Enter a template to see preview",
-                        cls: "image-converter-preview-empty"
+                        text: "Enter templates to see preview",
+                        cls: "image-converter-preview-empty-compact"
                     });
                 }
 
-                // Additional null check before DOM updates
                 if (this.previewContainer) {
                     this.previewContainer.empty();
                     this.previewContainer.append(newContent);
@@ -607,99 +692,61 @@ export class PresetSelectionModal extends Modal {
 
             } catch (error) {
                 console.error("Preview generation error:", error);
-                // Additional null check before error handling
                 if (this.previewContainer) {
                     this.previewContainer.empty();
                     this.previewContainer.createEl("div", {
                         text: "Error generating preview",
-                        cls: "image-converter-preview-error"
+                        cls: "image-converter-preview-error-compact"
                     });
                 }
             }
-        }, 150); // Small delay to prevent rapid updates
+        }, 150);
     }
-
-    private updateFolderPreview = async () => {
-        if (!this.customFolderText) return;
-
-        const templateValue = this.customFolderText.getValue();
-        const previewEl = this.customFolderSetting?.controlEl.querySelector(
-            ".image-converter-image-converter-preview-path"
-        ) as HTMLElement;
-
-        if (!templateValue) {
-            previewEl.empty();
-            return;
-        }
-
-        try {
-            const activeFile = this.app.workspace.getActiveFile();
-            const firstImage = this.app.vault
-                .getFiles()
-                .find((file) =>
-                    file.extension.match(/^(jpg|jpeg|png|gif|webp)$/i)
-                );
-
-            const fileToUse =
-                activeFile &&
-                    activeFile.extension.match(/^(jpg|jpeg|png|gif|webp)$/i)
-                    ? activeFile
-                    : firstImage;
-
-            const processedPath = await this.variableProcessor.processTemplate(
-                templateValue,
-                { file: fileToUse!, activeFile: activeFile! }
-            );
-            previewEl.setText(processedPath);
-        } catch (error) {
-            console.error("Preview generation error:", error);
-            previewEl.setText("Error generating preview");
-        }
-    };
 
     private showAvailableVariables() {
         new AvailableVariablesModal(this.app, this.variableProcessor).open();
     }
 
+    private updateProcessingPreview() {
+        if (!this.processingCardPreview) return;
 
-    // NEW method
-    private updateFolderInputFieldVisibility() {
-        if (this.customFolderSetting) {
-            // Assuming 'DEFAULT' is a type where you want to hide the input
-            if (this.selectedFolderPreset.type === 'DEFAULT'
-                || this.selectedFolderPreset.type === 'ROOT'
-                || this.selectedFolderPreset.type === 'CURRENT'
-                || this.selectedFolderPreset.type === 'SUBFOLDER') {
-                this.customFolderSetting.settingEl.hide();
-            } else {
-                this.customFolderSetting.settingEl.show();
-            }
-        }
+        // Generate preview text with current settings
+        const formatText = this.selectedConversionPreset.name;
+        const qualityText = `${this.selectedConversionPreset.quality}%`;
+        const linkText = this.selectedLinkFormatPreset.name;
+        const resizeText = this.selectedResizePreset.name;
+
+        // Create compact preview display
+        const previewText = `${formatText} ${qualityText} • ${linkText} • ${resizeText}`;
+        
+        // Update the text content of the preview div
+        this.processingCardPreview.textContent = previewText;
     }
 
-    // NEW method
-    private updateFilenameInputFieldVisibility() {
-        if (this.customFilenameSetting) {
-            // Check if a default preset (besides 'Default (No change)') is selected
-            const isDefaultPreset = this.selectedFilenamePreset.name === "Keep original name" ||
-                this.selectedFilenamePreset.name === "NoteName-Timestamp";
+    private toggleProcessingCard() {
+        this.isProcessingCardExpanded = !this.isProcessingCardExpanded;
 
-            if (isDefaultPreset) {
-                this.customFilenameSetting.settingEl.hide();
-            } else {
-                this.customFilenameSetting.settingEl.show();
-            }
+        if (!this.processingCardContent || !this.processingCardChevron) {
+            return;
+        }
+
+        if (this.isProcessingCardExpanded) {
+            // Show full content
+            this.processingCardContent.removeClass("image-converter-collapsed");
+            this.processingCardChevron.textContent = "▼";
+        } else {
+            // Hide full content
+            this.processingCardContent.addClass("image-converter-collapsed");
+            this.processingCardChevron.textContent = "▶";
         }
     }
 
     onClose() {
-        // Clear any pending update timeout
         if (this.updateTimeout) {
             window.clearTimeout(this.updateTimeout);
             this.updateTimeout = null;
         }
 
-        // Clear nullable settings and components
         this.conversionQualitySetting = null;
         this.conversionColorDepthSetting = null;
         this.customFilenameSetting = null;
@@ -708,7 +755,6 @@ export class PresetSelectionModal extends Modal {
         this.customFolderText = null;
         this.previewContainer = null;
 
-        // Empty the modal content
         const { contentEl } = this;
         contentEl.empty();
     }
