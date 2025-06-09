@@ -225,6 +225,12 @@ export class ImageResizer {
             return;
         }
 
+        // Skip Excalidraw images
+        if (target.instanceOf(HTMLImageElement) && this.plugin.supportedImageFormats.isExcalidrawImage(target)) {
+            this.cleanupHandles();
+            return;
+        }
+
         // **Check for active MarkdownView**
         const activeView = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
         // Early exit: No active MarkdownView or target is not within the active view
@@ -674,6 +680,9 @@ export class ImageResizer {
 
         // If no image found, or it's not in the active MarkdownView, return
         if (!image || !this.markdownView?.containerEl.contains(image)) return;
+
+        // Skip Excalidraw images
+        if (this.plugin.supportedImageFormats.isExcalidrawImage(image)) return;
 
         // Prevent default scroll behavior
         event.preventDefault();

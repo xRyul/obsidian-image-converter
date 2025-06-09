@@ -53,6 +53,52 @@ export class SupportedImageFormats {
     constructor(private app: App) { }
 
     /**
+     * Checks if an HTMLImageElement is an Excalidraw image.
+     * Excalidraw images should be excluded from all plugin functionality.
+     *
+     * @param imgElement The HTMLImageElement to check.
+     * @returns True if it's an Excalidraw image, false otherwise.
+     */
+    isExcalidrawImage(imgElement: HTMLImageElement): boolean {
+        // Check if the image element has Excalidraw-specific classes
+        if (imgElement.classList.contains('excalidraw-svg') ||
+            imgElement.classList.contains('excalidraw-embedded-img') ||
+            imgElement.classList.contains('excalidraw-canvas-immersive')) {
+            return true;
+        }
+
+        // Check if the image is contained within an Excalidraw container
+        const excalidrawContainer = imgElement.closest('.excalidraw-svg');
+        if (excalidrawContainer) {
+            return true;
+        }
+
+        // Check if the image is within an internal-embed with Excalidraw source
+        const internalEmbed = imgElement.closest('.internal-embed');
+        if (internalEmbed) {
+            const srcAttr = internalEmbed.getAttribute('src');
+            if (srcAttr && srcAttr.includes('Excalidraw/')) {
+                return true;
+            }
+        }
+
+        // Check if the image has a filesource attribute pointing to an Excalidraw file
+        const filesource = imgElement.getAttribute('filesource');
+        if (filesource && (filesource.includes('Excalidraw/') || filesource.endsWith('.excalidraw.md'))) {
+            return true;
+        }
+
+        // Check if the image src is a blob URL and has Excalidraw context
+        const src = imgElement.getAttribute('src');
+        if (src && src.startsWith('blob:') && 
+            (imgElement.hasAttribute('filesource') || imgElement.closest('.excalidraw-svg'))) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * Checks if a file is a supported image format based on its mime type or extension.
      * This method does not perform any I/O and relies on the provided mime type or filename.
      *

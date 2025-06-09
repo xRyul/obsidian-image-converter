@@ -71,36 +71,41 @@ export class ContextMenu extends Component {
 		this.contextMenuRegistered = true;
 	}
 
-	/**
-	 * Handles the context menu event.
-	 * This function is called when the context menu is triggered on an image.
-	 * @param event - The MouseEvent object.
-	 */
-	handleContextMenuEvent = (event: MouseEvent) => {
-		const target = event.target as HTMLElement;
-		const activeView = this.app.workspace.getActiveViewOfType(View);
-		const isCanvasView = activeView?.getViewType() === 'canvas';
+    /**
+     * Handles the context menu event.
+     * This function is called when the context menu is triggered on an image.
+     * @param event - The MouseEvent object.
+     */
+    handleContextMenuEvent = (event: MouseEvent) => {
+        const target = event.target as HTMLElement;
+        const activeView = this.app.workspace.getActiveViewOfType(View);
+        const isCanvasView = activeView?.getViewType() === 'canvas';
 
-		if (isCanvasView) {
-			return;
-		}
+        if (isCanvasView) {
+            return;
+        }
 
-		const img = target instanceof HTMLImageElement ? target : target.closest('img');
-		if (!img) {
-			return;
-		}
+        const img = target instanceof HTMLImageElement ? target : target.closest('img');
+        if (!img) {
+            return;
+        }
 
-		const isImageInSupportedContainer = !!(
-			img.closest('.markdown-preview-view') ||
-			img.closest('.markdown-source-view')
-			// img.closest('.view-content > div') // uncomment this to enable it inside its individual window
-		);
-		if (!isImageInSupportedContainer) {
-			if (target.closest('.map-view-main')) {
-				return;
-			}
-			return;
-		}
+        // Skip Excalidraw images
+        if (this.plugin.supportedImageFormats.isExcalidrawImage(img)) {
+            return;
+        }
+
+        const isImageInSupportedContainer = !!(
+            img.closest('.markdown-preview-view') ||
+            img.closest('.markdown-source-view')
+            // img.closest('.view-content > div') // uncomment this to enable it inside its individual window
+        );
+        if (!isImageInSupportedContainer) {
+            if (target.closest('.map-view-main')) {
+                return;
+            }
+            return;
+        }
 
 		event.preventDefault(); // prevents the default context menu from appearing (if any)
 		event.stopPropagation(); // prevents the event from bubbling up to parent elements (like the callout)
