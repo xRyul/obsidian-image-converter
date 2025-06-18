@@ -121,6 +121,12 @@ export interface ImageConverterSettings {
     selectedConversionPreset: string;
     globalPresets: GlobalPreset[];
     selectedGlobalPreset: string; // Currently selected global preset (if any)
+    modalSessionState?: {
+        customFolderOverride?: string;
+        customFilenameOverride?: string;
+        lastUsedFolderPreset?: string;
+        lastUsedFilenamePreset?: string;
+    };
     outputFormat: OutputFormat;
     quality: number;
     colorDepth: number;
@@ -3751,6 +3757,9 @@ export class SaveGlobalPresetModal extends Modal {
 export class AvailableVariablesModal extends Modal {
     private variableProcessor: VariableProcessor;
     private modalClass = "image-converter-available-variables-modal";
+    private searchInput: HTMLInputElement;
+    private categorizedVariables: Record<string, any[]>;
+    private contentContainer: HTMLElement;
 
     constructor(app: App, variableProcessor: VariableProcessor) {
         super(app);
@@ -3760,22 +3769,133 @@ export class AvailableVariablesModal extends Modal {
     onOpen() {
         this.modalEl.addClass(this.modalClass); // Add class to modal container
         const { contentEl } = this;
-        // contentEl.empty(); // Removed because this was causing the issue
         contentEl.createEl("h2", { text: "Available variables" });
 
-        const categorizedVariables = this.variableProcessor.getCategorizedVariables();
+        // Create search container
+        const searchContainer = contentEl.createEl("div", { cls: "variable-search-container" });
+        
+        // Create search input
+        this.searchInput = searchContainer.createEl("input", {
+            type: "text",
+            placeholder: "Search variables...",
+            cls: "variable-search-input"
+        });
 
-        for (const [category, variables] of Object.entries(categorizedVariables)) {
-            contentEl.createEl("h4", { text: category });
-            const table = contentEl.createEl("table");
-            const tbody = table.createTBody();
-            for (const variable of variables) {
-                const row = tbody.createEl("tr");
-                row.createEl("td", { text: variable.name });
-                row.createEl("td", { text: variable.description });
-                row.createEl("td", { text: variable.example });
+        // Add search icon (optional visual enhancement)
+        searchContainer.createEl("span", { 
+            text: "🔍", 
+            cls: "variable-search-icon" 
+        });
+
+        // Create content container for the variables
+        this.contentContainer = contentEl.createEl("div", { cls: "variable-content-container" });
+
+        // Get categorized variables once
+        this.categorizedVariables = this.variableProcessor.getCategorizedVariables();
+
+        // Initial render
+        this.renderVariables();
+
+        // Add search functionality
+        this.searchInput.addEventListener("input", () => {
+            this.handleSearch();
+        });
+
+        // Focus on search input
+        this.searchInput.focus();
+    }
+
+    private renderVariables(searchTerm = "") {
+        this.contentContainer.empty();
+
+        for (const [category, variables] of Object.entries(this.categorizedVariables)) {
+            // Filter variables based on search term
+            const filteredVariables = variables.filter(variable => {
+                if (!searchTerm) return true;
+                
+                const searchLower = searchTerm.toLowerCase();
+                return (
+                    variable.name.toLowerCase().includes(searchLower) ||
+                    variable.description.toLowerCase().includes(searchLower) ||
+                    variable.example.toLowerCase().includes(searchLower)
+                );
+            });
+
+            // Only show category if it has matching variables
+            if (filteredVariables.length > 0) {
+                const categoryEl = this.contentContainer.createEl("div", { cls: "variable-category" });
+                categoryEl.createEl("h4", { text: category, cls: "variable-category-title" });
+                
+                const table = categoryEl.createEl("table", { cls: "variable-table" });
+                
+                // Add table header
+                const thead = table.createEl("thead");
+                const headerRow = thead.createEl("tr");
+                headerRow.createEl("th", { text: "Variable" });
+                headerRow.createEl("th", { text: "Description" });
+                headerRow.createEl("th", { text: "Example" });
+                
+                const tbody = table.createTBody();
+                
+                for (const variable of filteredVariables) {
+                    const row = tbody.createEl("tr", { cls: "variable-row" });
+                    
+                    // Highlight search term in the content
+                    const nameCell = row.createEl("td", { cls: "variable-name" });
+                    nameCell.innerHTML = this.highlightSearchTerm(variable.name, searchTerm);
+                    
+                    const descCell = row.createEl("td", { cls: "variable-description" });
+                    descCell.innerHTML = this.highlightSearchTerm(variable.description, searchTerm);
+                      const exampleCell = row.createEl("td", { cls: "variable-example" });
+                    exampleCell.innerHTML = this.highlightSearchTerm(variable.example, searchTerm);                    // Add click handler to copy variable name
+                    nameCell.addEventListener("click", async () => {
+                        try {
+                            await navigator.clipboard.writeText(variable.name);
+                            
+                            // Visual feedback - add CSS class for copy success
+                            nameCell.classList.add("variable-name-copied");
+                            
+                            // Show "Copied!" text temporarily
+                            const originalText = nameCell.textContent;
+                            nameCell.textContent = "Copied!";
+                            
+                            setTimeout(() => {
+                                nameCell.classList.remove("variable-name-copied");
+                                nameCell.textContent = originalText;
+                            }, 800);
+                        } catch (err) {
+                            console.error("Failed to copy to clipboard:", err);
+                            // Fallback visual indication for copy failure
+                            nameCell.classList.add("variable-name-copy-error");
+                            setTimeout(() => {
+                                nameCell.classList.remove("variable-name-copy-error");
+                            }, 500);
+                        }
+                    });
+                    nameCell.title = "Click to copy variable name";
+                }
             }
         }
+
+        // Show "no results" message if no variables match
+        if (searchTerm && this.contentContainer.children.length === 0) {
+            this.contentContainer.createEl("div", { 
+                cls: "variable-no-results",
+                text: `No variables found matching "${searchTerm}"`
+            });
+        }
+    }
+
+    private highlightSearchTerm(text: string, searchTerm: string): string {
+        if (!searchTerm) return text;
+        
+        const regex = new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+        return text.replace(regex, '<mark>$1</mark>');
+    }
+
+    private handleSearch() {
+        const searchTerm = this.searchInput.value.trim();
+        this.renderVariables(searchTerm);
     }
 
     onClose() {

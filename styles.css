@@ -654,6 +654,12 @@ html[data-theme='dark'] {
     font-weight: 600;
     color: var(--text-accent);
     white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.image-converter-available-variables-modal td:first-child:hover {
+    background-color: var(--background-modifier-hover);
 }
 
 .image-converter-available-variables-modal td:nth-child(2) {
@@ -664,6 +670,18 @@ html[data-theme='dark'] {
 .image-converter-available-variables-modal td:last-child {
     font-family: monospace;
     color: var(--text-muted);
+}
+
+/* Variable copy feedback animations */
+.variable-name-copied {
+    background-color: var(--interactive-accent) !important;
+    color: var(--text-on-accent) !important;
+    transform: scale(1.05) !important;
+}
+
+.variable-name-copy-error {
+    background-color: var(--background-modifier-error) !important;
+    color: var(--text-error) !important;
 }
 
 /* -------------- Link FORMATS --------------------- */
@@ -2251,9 +2269,6 @@ html[data-theme='dark'] {
 /* ------------------------------------------------------------------ */
 
 
-
-
-
 /* ------------------------------DRAG-resize----------------------- */
 
 /* Apply vertical-align only when image is aligned */
@@ -2636,7 +2651,6 @@ html[data-theme='dark'] {
 /* ------------------------------------------------------------------ */
 
 
-
 /* ---------------------- MODAL - BATCH PROCESSING ------------------- */
 
 /* Convert current note */
@@ -2700,12 +2714,822 @@ html[data-theme='dark'] {
     border-radius: 4px;
 }
 
-.image-convert-modal .image-source-setting-container,
-.image-convert-modal .format-quality-container,
-.image-convert-modal .resize-container,
-.image-convert-modal .skip-container {
-    margin-bottom: 20px;
-    padding: 10px;
+
+/* ============================================ */
+/* COMPACT SINGLE-COLUMN LAYOUT STYLES */
+/* ============================================ */
+
+/* Main compact container */
+.image-converter-compact-container {
+    max-width: -webkit-fill-available;
+    margin: 0 auto;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+}
+
+/* Compact header */
+.image-converter-compact-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 16px;
+    /* border-bottom: 1px solid var(--background-modifier-border); */
+    /* gap: 12px; */
+    max-width: 100%;
+    overflow: hidden;
+}
+
+.image-converter-compact-title {
+    margin: 0;
+    font-size: 1.4em;
+    font-weight: 600;
+    /* flex: 1 1 auto; */
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Variables button in header */
+.image-converter-variables-header {
+    flex: 0 0 auto;
+    order: 2;
+}
+
+.image-converter-variables-header .setting-item {
+    padding: 0 !important;
+    border: none !important;
+    margin: 0 !important;
+    min-height: auto !important;
+}
+
+.image-converter-variables-header-btn {
+    font-size: 0.85em !important;
+    padding: 4px 10px !important;
+    height: auto !important;
+    min-height: 26px !important;
+    white-space: nowrap !important;
+}
+
+/* Global preset dropdown in header */
+.image-converter-global-mini {
+    flex: 0 0 auto;
+    min-width: 110px;
+    /* max-width: 140px; */
+    order: 3;
+}
+
+.image-converter-compact-inputs {
+    display: flex;
+    /* flex-direction: column; */
+    gap: 6px;
+}
+
+/* NEW LAYOUT: Two-row structure for folder/filename groups */
+.image-converter-compact-input-group {
+    padding: 4px;
+    background: var(--background-secondary);
+    border-radius: 8px;
     border: 1px solid var(--background-modifier-border);
-    border-radius: 5px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 260px;
+    max-width: 260px;
+    overflow: hidden;
+}
+
+/* Row 1: Label and Dropdown on same line */
+.image-converter-label-dropdown-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.image-converter-group-label {
+    font-weight: 500;
+    font-size: 0.735em;
+    color: var(--text-faint);
+    flex-shrink: 0;
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.image-converter-preset-dropdown-container {
+    flex: 0 0 auto;
+    min-width: 140px;
+    max-width: 100%;
+    overflow: hidden;
+}
+
+.image-converter-preset-dropdown-setting {
+    padding: 0 !important;
+    border: none !important;
+    margin: 0 !important;
+}
+
+.image-converter-preset-dropdown-setting .setting-item {
+    padding: 0;
+    border: none;
+    margin: 0;
+    min-height: auto;
+}
+
+.image-converter-preset-dropdown-setting .setting-item-control {
+    margin-left: 0 !important;
+}
+
+.image-converter-preset-dropdown-setting-item {
+    padding: 0 !important;
+    border: none !important;
+    margin: 0 !important;
+    min-height: auto !important;
+}
+
+/* Style the dropdown - let Obsidian handle the native appearance and arrows */
+.image-converter-preset-dropdown {
+    width: 100% !important;
+    height: 16px !important;
+    font-size: var(--font-ui-smaller) !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+}
+
+/* Add preset type indicators to dropdown */
+.image-converter-preset-dropdown[data-preset-type="folder"]::before {
+    content: "Folder-presets ";
+}
+
+.image-converter-preset-dropdown[data-preset-type="filename"]::before {
+    content: "Filename-presets ";
+}
+
+/* Compact dropdown styling for folder and filename dropdowns */
+.image-converter-compact-dropdown {
+    height: 24px !important;
+    font-size: 12px !important;
+    padding: 2px 8px !important;
+    border-radius: var(--radius-s) !important;
+    border: 1px solid var(--background-modifier-border) !important;
+    background-color: var(--background-secondary) !important;
+    color: var(--text-normal) !important;
+    min-width: 120px !important;
+    max-width: 160px !important;
+    box-sizing: border-box !important;
+    line-height: 1.2 !important;
+    /* Remove the native dropdown arrow completely */
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    /* Add custom arrow that adapts to theme */
+    background-image: var(--icon-dropdown) !important;
+    background-repeat: no-repeat !important;
+    background-position: right 6px center !important;
+    background-size: 12px !important;
+    padding-right: 24px !important; /* Make room for our custom arrow */
+}
+
+/* Fallback for custom arrow if Obsidian doesn't provide the icon variable */
+.image-converter-compact-dropdown:not([style*="--icon-dropdown"]) {
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e") !important;
+}
+
+/* Light theme specific arrow */
+.theme-light .image-converter-compact-dropdown {
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e") !important;
+}
+
+/* Dark theme specific arrow */
+.theme-dark .image-converter-compact-dropdown {
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23aaaaaa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e") !important;
+}
+
+/* Hover state for compact dropdown */
+.image-converter-compact-dropdown:hover {
+    background-color: var(--background-modifier-hover) !important;
+    border-color: var(--interactive-accent) !important;
+}
+
+/* Focus state for compact dropdown */
+.image-converter-compact-dropdown:focus {
+    border-color: var(--interactive-accent) !important;
+    box-shadow: 0 0 0 2px var(--interactive-accent-alpha) !important;
+    outline: none !important;
+}
+
+/* Row 2: Full-width input field */
+.image-converter-input-row {
+    width: 100%;
+}
+
+.image-converter-input-row .setting-item {
+    padding: 0;
+    border: none;
+    margin: 0;
+    width: 100%;
+}
+
+.image-converter-input-row .setting-item-control {
+    margin-left: 0 !important;
+    width: 100%;
+}
+
+/* Override default Obsidian setting-item spacing */
+.image-converter-input-row .setting-item > *:first-child {
+    margin-inline-end: 0 !important;
+}
+
+.image-converter-full-width-input {
+    width: 100% !important;
+    height: 32px !important;
+    padding: 6px 12px !important;
+    border-radius: 4px !important;
+    border: 1px solid var(--background-modifier-border) !important;
+    background: var(--background-primary) !important;
+    font-size: var(--font-ui-small) !important;
+    box-sizing: border-box !important;
+}
+
+/* Legacy styles - keeping for backward compatibility */
+.image-converter-compact-input-row {
+    display: flex;
+    align-items: stretch;
+    gap: 16px;
+    padding: 16px;
+    background: var(--background-secondary);
+    border-radius: 8px;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.image-converter-compact-label {
+    min-width: 80px;
+    font-weight: 500;
+    color: var(--text-normal);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+}
+
+.image-converter-compact-input-container {
+    display: flex;
+    gap: 8px;
+    flex: 1;
+    align-items: stretch;
+}
+
+.image-converter-text-container {
+    flex: 1;
+    display: flex;
+    align-items: stretch;
+}
+
+.image-converter-text-container .setting-item {
+    padding: 0;
+    border: none;
+    margin: 0;
+    flex: 1;
+}
+
+.image-converter-text-container .setting-item-control {
+    flex: 1;
+}
+
+.image-converter-text-container input[type="text"] {
+    width: 100%;
+    height: 32px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+}
+
+.image-converter-preset-mini {
+    flex: 0 0 120px;
+    min-width: 120px;
+    display: flex;
+    align-items: stretch;
+}
+
+.image-converter-preset-mini .setting-item {
+    padding: 0;
+    border: none;
+    margin: 0;
+    flex: 1;
+}
+
+.image-converter-preset-mini .setting-item-control {
+    flex: 1;
+}
+
+.image-converter-preset-mini select,
+.image-converter-preset-mini .dropdown {
+    width: 100%;
+    height: 32px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+}
+
+.image-converter-preset-mini-setting {
+    padding: 0 !important;
+    border: none !important;
+    margin: 0 !important;
+}
+
+.image-converter-preset-mini-setting .setting-item-control {
+    margin-left: 0 !important;
+}
+
+/* Additional styling for the new text and preset setting items */
+.image-converter-text-setting-item {
+    padding: 0 !important;
+    border: none !important;
+    margin: 0 !important;
+    min-height: auto !important;
+}
+
+.image-converter-text-setting-item .setting-item-control {
+    margin-left: 0 !important;
+}
+
+.image-converter-preset-setting-item {
+    padding: 0 !important;
+    border: none !important;
+    margin: 0 !important;
+    min-height: auto !important;
+}
+
+.image-converter-preset-setting-item .setting-item-control {
+    margin-left: 0 !important;
+}
+
+.image-converter-text-input {
+    width: 100% !important;
+    height: 32px !important;
+    padding: 4px 8px !important;
+    border-radius: 4px !important;
+    border: 1px solid var(--background-modifier-border) !important;
+    background: var(--background-primary) !important;
+    font-size: var(--font-ui-small) !important;
+}
+
+.image-converter-preset-dropdown {
+    width: 100% !important;
+    height: 28px !important;
+    font-size: var(--font-ui-small) !important;
+}
+
+/* Fix global preset mini styling */
+.image-converter-global-mini-setting {
+    padding: 0 !important;
+    border: none !important;
+    margin: 0 !important;
+    min-height: auto !important;
+}
+
+.image-converter-global-mini-setting .setting-item-control {
+    margin-left: 0 !important;
+    max-width: 120px;
+    overflow: visible;
+}
+
+.image-converter-global-mini-setting .dropdown {
+    max-width: 120px !important;
+    width: 120px !important;
+    box-sizing: border-box !important;
+    position: relative !important;
+    z-index: 1000 !important;
+    
+    /* When closed, truncate text with ellipsis */
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+}
+
+/* When dropdown is opened, the dropdown list should expand */
+.image-converter-global-mini-setting .dropdown[size]:not([size="1"]),
+.image-converter-global-mini-setting .dropdown:not([size]) {
+    width: auto !important;
+    min-width: 120px !important;
+    max-width: 250px !important;
+    z-index: 1001 !important;
+}
+
+/* Style the dropdown options to handle long text better */
+.image-converter-global-mini-setting .dropdown option {
+    white-space: nowrap !important;
+    padding: 4px 8px !important;
+    min-width: 120px !important;
+    width: auto !important;
+}
+
+/* For browsers that support it, expand the dropdown list container */
+.image-converter-global-mini-setting select:focus,
+.image-converter-global-mini-setting select:active {
+    width: auto !important;
+    min-width: 120px !important;
+    max-width: 250px !important;
+    position: relative !important;
+    z-index: 1001 !important;
+}
+
+.image-converter-global-mini-setting .setting-item-name {
+    font-size: 1.1em !important;
+    font-weight: 600 !important;
+    min-width: 30px !important;
+}
+
+/* Quality grid styling */
+.image-converter-quality-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 16px;
+}
+
+/* Hide setting item borders in compact layout */
+.image-converter-compact-container .setting-item {
+    border-top: none !important;
+}
+
+/* Ensure consistent heights for all interactive elements */
+.image-converter-compact-input-row input,
+.image-converter-compact-input-row select,
+.image-converter-compact-input-row .dropdown {
+    height: 32px !important;
+    box-sizing: border-box !important;
+}
+
+/* Processing Card Layout */
+.image-converter-processing-card {
+    background: var(--background-secondary);
+    border-radius: 8px;
+    border: 1px solid var(--background-modifier-border);
+    overflow: hidden;
+}
+
+.image-converter-processing-card-header {
+    padding: 4px 4px;
+    /* border-bottom: 1px solid var(--background-modifier-border); */
+    background: var(--background-primary);
+    transition: background-color 0.2s ease;
+}
+
+.image-converter-processing-card-header-clickable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.image-converter-processing-card-header-clickable:hover {
+    background: var(--background-modifier-hover);
+}
+
+.image-converter-processing-card-header-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px;
+}
+
+.image-converter-processing-card-chevron {
+    font-size: 0.535em;
+    transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+    color: var(--text-faint);
+    font-weight: 600;
+    min-width: 16px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.image-converter-processing-card-title {
+    margin: 0;
+    font-size: 1.1em;
+    font-weight: 600;
+    color: var(--text-normal);
+}
+
+.image-converter-processing-card-content {
+    padding: 10px;
+    overflow: hidden;
+    transition: max-height 0.3s cubic-bezier(0.4, 0.0, 0.2, 1), 
+                opacity 0.3s cubic-bezier(0.4, 0.0, 0.2, 1),
+                padding 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+    max-height: 500px; /* Large enough to accommodate content */
+    opacity: 1;
+}
+
+.image-converter-processing-card-preview {
+    padding: 12px 20px;
+    background: var(--background-primary);
+    border-bottom: 1px solid var(--background-modifier-border);
+    display: block;
+}
+
+.image-converter-processing-card-preview-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.image-converter-processing-preview-text {
+    font-size: 0.735em;
+    color: var(--text-faint);
+    /* font-family: var(--font-monospace); */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /* padding: 4px 0; */
+    flex: 1;
+}
+
+/* Grid Layout for 2x2 structure */
+.image-converter-grid-header-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 8px;
+}
+
+.image-converter-grid-header {
+    font-weight: 600;
+    color: var(--text-faint);
+    font-size: 0.735em;
+    text-align: left;
+}
+
+.image-converter-grid-component-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    /* margin-bottom: 20px; */
+}
+
+.image-converter-grid-component {
+    min-height: 32px;
+}
+
+/* Dropdown and slider styling for grid components - ensure proper alignment */
+.image-converter-grid-dropdown-setting,
+.image-converter-grid-slider-setting {
+    padding: 0 !important;
+    border: none !important;
+    margin: 0 !important;
+    min-height: auto !important;
+}
+
+.image-converter-grid-dropdown-setting .setting-item,
+.image-converter-grid-slider-setting .setting-item {
+    padding: 0 !important;
+    border: none !important;
+    margin: 0 !important;
+    min-height: auto !important;
+    display: flex !important;
+    align-items: stretch !important;
+}
+
+.image-converter-grid-dropdown-setting .setting-item-control,
+.image-converter-grid-slider-setting .setting-item-control {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    width: 100% !important;
+    flex: 1 !important;
+}
+
+/* Ensure the dropdown and slider fill their containers and align properly */
+.image-converter-grid-dropdown-setting .dropdown,
+.image-converter-grid-slider-setting .slider {
+    width: 100% !important;
+    margin: 0 !important;
+}
+
+/* Remove any default setting item spacing that could cause misalignment */
+.image-converter-grid-dropdown-setting .setting-item-info,
+.image-converter-grid-slider-setting .setting-item-info {
+    display: none !important;
+}
+
+.image-converter-grid-dropdown-setting .setting-item-name,
+.image-converter-grid-slider-setting .setting-item-name {
+    display: none !important;
+}
+
+.image-converter-grid-dropdown-setting .setting-item-description,
+.image-converter-grid-slider-setting .setting-item-description {
+    display: none !important;
+}
+
+/* Quality header that shows percentage */
+.image-converter-quality-header {
+    font-weight: 600;
+    font-size: 0.735em;
+    color: var(--text-faint);
+}
+
+/* Make quality slider appear slightly lower for better visual alignment */
+.image-converter-grid-slider-setting {
+    padding-top: 6px !important;
+}
+
+/* Ensure the slider container has consistent spacing */
+.image-converter-grid-slider-setting .setting-item-control {
+    padding-top: 8px !important;
+}
+
+/* Legacy styles - keeping for backward compatibility */
+.image-converter-compact-processing {
+    background: var(--background-secondary);
+    border-radius: 8px;
+    padding: 20px;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.image-converter-compact-section-title {
+    margin: 0 0 16px 0;
+    font-size: 1.1em;
+    font-weight: 600;
+    color: var(--text-normal);
+}
+
+.image-converter-processing-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.image-converter-grid-item .setting-item {
+    padding: 0;
+    border: none;
+    background: var(--background-primary);
+    border-radius: 6px;
+    padding: 12px;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.image-converter-compact-preview {
+    /* border-radius: 8px;
+    padding: 20px; */
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    margin-top: 20px;
+    gap: 16px;
+}
+
+.image-converter-preview-title-compact {
+    font-weight: 600;
+    color: var(--text-normal);
+    margin-bottom: 12px;
+}
+
+.image-converter-preview-content-compact {
+    /* font-family: var(--font-monospace); */
+    font-size: 0.9em;
+    /* padding: 12px; */
+    /* background: var(--background-primary); */
+    /* border-radius: 6px; */
+    /* border: 1px solid var(--background-modifier-border); */
+    color: var(--text-muted);
+}
+
+.image-converter-compact-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    padding-top: 20px;
+    /* border-top: 1px solid var(--background-modifier-border); */
+}
+
+.image-converter-help-compact {
+    margin-top: 16px;
+}
+
+.image-converter-help-compact-btn {
+    font-size: 0.85em !important;
+    padding: 4px 8px !important;
+}
+
+/* Ensure dropdowns and inputs have proper sizing - made thinner for compact design */
+.image-converter-preset-selection-modal .dropdown,
+.image-converter-preset-selection-modal input[type="text"] {
+    min-height: 24px;
+    height: 24px;
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: var(--radius-s);
+    border: 1px solid var(--background-modifier-border);
+    line-height: 1.2;
+    box-sizing: border-box;
+}
+
+.image-converter-preset-selection-modal .dropdown:hover,
+.image-converter-preset-selection-modal input[type="text"]:hover {
+    border-color: var(--background-modifier-border-hover);
+}
+
+.image-converter-preset-selection-modal .dropdown:focus,
+.image-converter-preset-selection-modal input[type="text"]:focus {
+    border-color: var(--interactive-accent);
+    box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+
+/* ============================================ */
+/* PRESET SELECTION MODAL - ELEMENT HIDING */
+/* ============================================ */
+
+/* Hide setting name and description elements in preset selection modal */
+.image-converter-preset-selection-modal .image-converter-hide-name-desc .setting-item-name,
+.image-converter-preset-selection-modal .image-converter-hide-name-desc .setting-item-description {
+    display: none !important;
+}
+
+/* Alternative approach using specific classes for different setting types */
+.image-converter-preset-dropdown-setting .setting-item-name,
+.image-converter-preset-dropdown-setting .setting-item-description,
+.image-converter-text-setting .setting-item-name,
+.image-converter-text-setting .setting-item-description,
+.image-converter-grid-dropdown-setting .setting-item-name,
+.image-converter-grid-dropdown-setting .setting-item-description,
+.image-converter-grid-slider-setting .setting-item-name,
+.image-converter-grid-slider-setting .setting-item-description {
+    display: none !important;
+}
+
+/* Processing card header cursor pointer */
+.image-converter-processing-card-header-clickable {
+    cursor: pointer !important;
+}
+
+/* Processing card content visibility states */
+.image-converter-processing-card-content.image-converter-collapsed {
+    max-height: 0;
+    opacity: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    overflow: hidden;
+}
+
+.image-converter-processing-card-content.image-converter-expanded {
+    max-height: 500px;
+    opacity: 1;
+    padding: 10px;
+}
+
+.image-converter-preview-header-compact {
+    /* margin-top: 10px; */
+}
+/* ============================================ */
+/* RESPONSIVE DESIGN FOR SMALL SCREENS */
+/* ============================================ */
+
+/* Small screens - adjust dropdown layout */
+@media (max-width: 400px) {
+    /* Make the first row stack vertically on very small screens */
+    .image-converter-label-dropdown-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .image-converter-preset-dropdown-container {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .image-converter-group-label {
+        margin-bottom: 4px;
+    }
+
+    /* Reduce padding on very small screens */
+    .image-converter-compact-input-group {
+        padding: 12px;
+    }
+
+    .image-converter-compact-container {
+        padding: 0 8px;
+        gap: 9px;
+    }
+}
+
+/* Medium small screens - keep horizontal but adjust sizing */
+@media (max-width: 500px) and (min-width: 401px) {
+    .image-converter-preset-dropdown-container {
+        min-width: 100px;
+        flex: 1 1 auto;
+    }
+    
+    .image-converter-group-label {
+        font-size: 0.9em;
+    }
 }
