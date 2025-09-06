@@ -50,16 +50,15 @@ jobs:
         run: npm ci
         
       - name: Update manifest version for release
-        env:
-          TAG: ${{ github.ref_name }}
         run: |
           # Strip 'v' prefix if present (supports both 1.2.3 and v1.2.3)
+          TAG="${{ github.ref_name }}"
           VERSION="${TAG#v}"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           
           node -e "
           const fs = require('fs');
-          const version = process.env.VERSION;
+          const version = '${VERSION}';
           const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
           manifest.version = version;
           fs.writeFileSync('manifest.json', JSON.stringify(manifest, null, 2) + '\n');
