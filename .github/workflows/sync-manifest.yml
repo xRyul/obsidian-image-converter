@@ -1,0 +1,166 @@
+# sync-manifest.yml
+#
+# This workflow is triggered when a GitHub release is published (not draft).
+# It automatically updates the manifest.json, package.json, and versions.json
+# files in the repository to match the published release version.
+#
+# This ensures that the repository always reflects the latest published version
+# without requiring manual updates after each release.
+#
+# Flow:
+# 1. User publishes a draft release
+# 2. This workflow triggers
+# 3. Updates version files in the repository
+# 4. Commits and pushes the changes
+#
+# Improvements:
+# - Uses latest GitHub Actions versions (v4)
+# - Better error handling and validation
+# - Cleaner JSON formatting preservation
+# - Supports both 1.2.3 and v1.2.3 tag formats
+
+name: Sync Manifest After Release
+
+on:
+  release:
+    types: [published]  # Triggers when a release is published (not draft)
+
+permissions:
+  contents: write
+
+jobs:
+  sync-manifest:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: master  # Use master since that's your default branch
+          fetch-depth: 0  # Full history for better git operations
+          
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          
+      - name: Update manifest.json version
+        run: |
+          # Get the release tag/version (strip 'v' prefix if present)
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          echo "📝 Updating manifest.json to version $VERSION"
+          
+          # Update manifest.json (preserve original formatting)
+          node -e "
+          const fs = require('fs');
+          const version = '$VERSION';
+          const content = fs.readFileSync('manifest.json', 'utf8');
+          const manifest = JSON.parse(content);
+          const originalVersion = manifest.version;
+          manifest.version = version;
+          
+          // Try to preserve original formatting (tabs vs spaces)
+          const useTabs = content.includes('\\t');
+          const indent = useTabs ? '\\t' : '  ';
+          fs.writeFileSync('manifest.json', JSON.stringify(manifest, null, indent) + '\\n');
+          console.log('✅ Updated manifest.json from', originalVersion, 'to', version);
+          "
+          
+      - name: Update package.json version
+        run: |
+          # Get the release tag/version (strip 'v' prefix if present)
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          echo "📦 Updating package.json to version $VERSION"
+          
+          node -e "
+          const fs = require('fs');
+          const version = '$VERSION';
+          const content = fs.readFileSync('package.json', 'utf8');
+          const pkg = JSON.parse(content);
+          const originalVersion = pkg.version;
+          pkg.version = version;
+          
+          // Try to preserve original formatting (tabs vs spaces)
+          const useTabs = content.includes('\\t');
+          const indent = useTabs ? '\\t' : '  ';
+          fs.writeFileSync('package.json', JSON.stringify(pkg, null, indent) + '\\n');
+          console.log('✅ Updated package.json from', originalVersion, 'to', version);
+          "
+          
+      - name: Update or create versions.json
+        run: |
+          # Get the release tag/version (strip 'v' prefix if present)
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          echo "📋 Updating versions.json with version $VERSION"
+          
+          node -e "
+          const fs = require('fs');
+          const version = '$VERSION';
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          const minAppVersion = manifest.minAppVersion || '0.15.0';
+          
+          let versions = {};
+          let indent = '\\t';
+          
+          // Read existing versions.json if it exists
+          if (fs.existsSync('versions.json')) {
+            const content = fs.readFileSync('versions.json', 'utf8');
+            versions = JSON.parse(content);
+            // Preserve formatting
+            indent = content.includes('\\t') ? '\\t' : '  ';
+          }
+          
+          // Add new version
+          versions[version] = minAppVersion;
+          
+          // Sort versions in descending order (newest first)
+          const sortedVersions = {};
+          Object.keys(versions)
+            .sort((a, b) => {
+              const aParts = a.split('.').map(Number);
+              const bParts = b.split('.').map(Number);
+              for (let i = 0; i < 3; i++) {
+                if (aParts[i] !== bParts[i]) return bParts[i] - aParts[i];
+              }
+              return 0;
+            })
+            .forEach(key => sortedVersions[key] = versions[key]);
+          
+          fs.writeFileSync('versions.json', JSON.stringify(sortedVersions, null, indent) + '\\n');
+          console.log('✅ Updated versions.json with', version, '->', minAppVersion);
+          "
+          
+      - name: Commit and push changes
+        run: |
+          # Configure git
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # Get clean version number
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          
+          # Check for changes
+          if git diff --quiet HEAD -- manifest.json package.json versions.json; then
+            echo "ℹ️ No changes detected, skipping commit"
+            exit 0
+          fi
+          
+          # Stage and commit changes
+          git add manifest.json package.json versions.json
+          git commit -m "🔖 Release: Update to version $VERSION [skip ci]" \
+            -m "" \
+            -m "Automated version bump after publishing release $VERSION" \
+            -m "- manifest.json: version $VERSION" \
+            -m "- package.json: version $VERSION" \
+            -m "- versions.json: added/updated entry for $VERSION"
+          
+          # Push changes
+          echo "📤 Pushing changes to repository..."
+          git push
+          echo "✅ Successfully updated repository to version $VERSION"
