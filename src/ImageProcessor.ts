@@ -242,12 +242,10 @@ export class ImageProcessor {
             // Dynamically import UTIF only when needed
             const UTIF = await import('./UTIF.js').then(module => module.default);
 
-            // Convert ArrayBuffer to Uint8Array
-            const binaryUint8Array = new Uint8Array(binary);
-
-            // Decode TIFF image
-            const ifds = UTIF.decode(binaryUint8Array);
-            UTIF.decodeImage(binaryUint8Array, ifds[0]);
+            // UTIF expects ArrayBuffer or Buffer, not Uint8Array
+            // Pass the ArrayBuffer directly
+            const ifds = UTIF.decode(binary);
+            UTIF.decodeImage(binary, ifds[0]);
             const rgba = UTIF.toRGBA8(ifds[0]);
 
             // Create canvas and draw image
@@ -551,9 +549,11 @@ export class ImageProcessor {
                 }
 
                 try {
-                    // Read the temporary file as an ArrayBuffer
+                    // Read the temporary file and convert Buffer to ArrayBuffer
                     const fileBuffer = await fs.readFile(tempFilePath);
-                    resolve(fileBuffer);
+                    // Convert Node.js Buffer to ArrayBuffer (ensuring it's ArrayBuffer, not SharedArrayBuffer)
+                    const arrayBuffer: ArrayBuffer = fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength) as ArrayBuffer;
+                    resolve(arrayBuffer);
                 } catch (readError) {
                     console.error("Error reading temporary file:", readError);
                     reject(new Error(`Failed to read the processed image from the temporary file: ${readError}`));
@@ -1329,9 +1329,11 @@ export class ImageProcessor {
                 }
 
                 // 9. Success: If we get here, pngquant succeeded.  Concatenate the
-                //    Buffer chunks and resolve the promise.
+                //    Buffer chunks and convert to ArrayBuffer.
                 const resultBuffer = Buffer.concat(outputData);
-                resolve(resultBuffer);
+                // Convert Node.js Buffer to ArrayBuffer (ensuring it's ArrayBuffer, not SharedArrayBuffer)
+                const arrayBuffer: ArrayBuffer = resultBuffer.buffer.slice(resultBuffer.byteOffset, resultBuffer.byteOffset + resultBuffer.byteLength) as ArrayBuffer;
+                resolve(arrayBuffer);
             });
 
             // 10. Handle Errors on the process itself (e.g., couldn't start).
