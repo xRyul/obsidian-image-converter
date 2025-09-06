@@ -197,12 +197,12 @@ export class ContextMenu extends Component {
 			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (!activeView) return "";
 
-			const editor = activeView.editor;
+			const { editor } = activeView;
 			const isExternal = !imagePath;
 			const matches = await this.findImageMatches(editor, imagePath, isExternal);
 
 			if (matches && matches.length > 0) {
-				const firstMatch = matches[0];
+				const [firstMatch] = matches;
 
 				// Handle wiki-style links
 				const wikiMatch = firstMatch.fullMatch.match(/!\[\[([^\]]+?)(?:\|([^|\]]+?))?\s*(?:\|([^|\]]+?))?\]\]/);
@@ -215,7 +215,7 @@ export class ContextMenu extends Component {
 					if (thirdPart && !isDimensions(secondPart)) {
 						return secondPart.trim();
 					}
-					else if (secondPart && !isDimensions(secondPart)) {
+					if (secondPart && !isDimensions(secondPart)) {
 						return secondPart.trim();
 					}
 					return "";
@@ -243,12 +243,12 @@ export class ContextMenu extends Component {
 			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (!activeView) return { width: '', height: '' };
 	
-			const editor = activeView.editor;
+			const { editor } = activeView;
 			const isExternal = !imagePath;
 			const matches = await this.findImageMatches(editor, imagePath, isExternal);
 			
 			if (matches && matches.length > 0) {
-				const firstMatch = matches[0];
+				const [firstMatch] = matches;
 				
 				// Handle wiki-style links
 				const wikiMatch = firstMatch.fullMatch.match(/!\[\[([^\]]+?)(?:\|([^|\]]+?))?\s*(?:\|([^|\]]+?))?\]\]/);
@@ -302,7 +302,7 @@ export class ContextMenu extends Component {
 		// Format dimensions based on what's provided
 		const dimensionsPart = width ? (height ? `${width}x${height}` : width) : '';
 		
-		const line = match.line;
+		const { line } = match;
 		
 		// Handle Wiki-style links
 		if (line.includes("![[")) {
@@ -311,9 +311,11 @@ export class ContextMenu extends Component {
 				(fullMatch, path) => {
 					if (newCaption && dimensionsPart) {
 						return `![[${path}|${newCaption}|${dimensionsPart}]]`;
-					} else if (newCaption) {
+					}
+					if (newCaption) {
 						return `![[${path}|${newCaption}]]`;
-					} else if (dimensionsPart) {
+					}
+					if (dimensionsPart) {
 						return `![[${path}|${dimensionsPart}]]`;
 					}
 					return `![[${path}]]`;
@@ -327,9 +329,11 @@ export class ContextMenu extends Component {
 			(fullMatch, caption, dimensions, path) => {
 				if (newCaption && dimensionsPart) {
 					return `![${newCaption}|${dimensionsPart}](${path})`;
-				} else if (newCaption) {
+				}
+				if (newCaption) {
 					return `![${newCaption}](${path})`;
-				} else if (dimensionsPart) {
+				}
+				if (dimensionsPart) {
 					return `![|${dimensionsPart}](${path})`;
 				}
 				return `![](${path})`;
@@ -361,7 +365,7 @@ export class ContextMenu extends Component {
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!activeView) return;
 	
-		const editor = activeView.editor;
+		const { editor } = activeView;
 		const imagePath = this.folderAndFilenameManagement.getImagePath(img);
 		const isExternal = !imagePath;
 		const matches = await this.findImageMatches(editor, imagePath, isExternal);
@@ -792,7 +796,8 @@ export class ContextMenu extends Component {
 		let normalizedPath = decodeURIComponent(path);
 
 		// Remove any URL parameters
-		normalizedPath = normalizedPath.split('?')[0];
+		const [pathWithoutQuery] = normalizedPath.split('?');
+		normalizedPath = pathWithoutQuery;
 
 		// Convert backslashes to forward slashes
 		normalizedPath = normalizedPath.replace(/\\/g, '/');
@@ -802,7 +807,7 @@ export class ContextMenu extends Component {
 
 		// Ensure consistent leading slash
 		if (!normalizedPath.startsWith('/')) {
-			normalizedPath = '/' + normalizedPath;
+			normalizedPath = `/${normalizedPath}`;
 		}
 
 		// Normalize any '../' or './' sequences
@@ -918,8 +923,7 @@ export class ContextMenu extends Component {
 			// Check markdown-style links (![alt](path/to/image.png))
 			const mdMatches = [...line.matchAll(/!\[([^\]]*?)(?:\|\d+(?:\|\d+)?)?\]\(([^)]+)\)/g)];
 			for (const match of mdMatches) {
-				const fullMatch = match[0];
-				const linkPath = match[2];
+				const [fullMatch, , linkPath] = match;
 
 				if (!isExternal && linkPath) {
 					const resolvedPath = resolveRelativePath(linkPath, activeFile.path);
@@ -1089,7 +1093,7 @@ export class ContextMenu extends Component {
 		}
 
 		try {
-			const editor = activeView.editor;
+				const { editor } = activeView;
 
 			if (src.startsWith('data:image/')) {
 				const found = await this.processBase64Image(editor, src, async (editor, lineNumber, line, fullMatch) => {
@@ -1313,9 +1317,9 @@ export class ContextMenu extends Component {
 						const file =
 							matchingFiles.length === 1
 								? matchingFiles[0]
-								: matchingFiles.find((f) => {
+							: matchingFiles.find((fileItem) => {
 									const parentPath = currentFile.parent?.path;
-									return parentPath ? f.path.startsWith(parentPath) : false;
+									return parentPath ? fileItem.path.startsWith(parentPath) : false;
 								}) || matchingFiles[0];
 
 						// Process the found file
@@ -1386,11 +1390,11 @@ export class ContextMenu extends Component {
 					// If multiple matches, try to find the one in the same folder as the current note
 					const file = matchingFiles.length === 1
 						? matchingFiles[0]
-						: matchingFiles.find(f => {
+						: matchingFiles.find((fileItem) => {
 							// Get the parent folder of the current file
 							const parentPath = currentFile.parent?.path;
 							return parentPath
-								? f.path.startsWith(parentPath)
+								? fileItem.path.startsWith(parentPath)
 								: false;
 						}) || matchingFiles[0];
 
@@ -1454,11 +1458,11 @@ export class ContextMenu extends Component {
 						// If multiple matches, try to find the one in the same folder as the current note
 						const file = matchingFiles.length === 1
 							? matchingFiles[0]
-							: matchingFiles.find(f => {
+							: matchingFiles.find((fileItem) => {
 								// Get the parent folder of the current file
 								const parentPath = currentFile.parent?.path;
 								return parentPath
-									? f.path.startsWith(parentPath)
+									? fileItem.path.startsWith(parentPath)
 									: false;
 							}) || matchingFiles[0];
 
@@ -1507,7 +1511,7 @@ export class ContextMenu extends Component {
 				const file = this.app.vault.getAbstractFileByPath(imagePath);
 				if (file instanceof TFile) {
 					// First, try to get existing file explorer
-					let fileExplorerLeaf = this.app.workspace.getLeavesOfType('file-explorer')[0];
+					let [fileExplorerLeaf] = this.app.workspace.getLeavesOfType('file-explorer');
 
 					// If file explorer isn't open, create it
 					if (!fileExplorerLeaf) {
@@ -1614,7 +1618,7 @@ export class ContextMenu extends Component {
 		}
 
 		try {
-			const editor = activeView.editor;
+			const { editor } = activeView;
 
 			if (src.startsWith('data:image/')) {
 				const found = await this.processBase64Image(editor, src, async (editor, lineNumber, line, fullMatch) => {
@@ -1658,7 +1662,7 @@ export class ContextMenu extends Component {
 			const handleConfirmation = async () => {
 				// Sort matches by line number in descending order to handle deletions from bottom to top
 				// This prevents line number shifting from affecting subsequent deletions
-				const sortedMatches = uniqueMatches.sort((a, b) => b.lineNumber - a.lineNumber);
+				const sortedMatches = uniqueMatches.sort((matchA, matchB) => matchB.lineNumber - matchA.lineNumber);
 
 				for (const match of sortedMatches) {
 					await this.removeImageLinkFromEditor(editor, match.lineNumber, match.line, match.fullMatch, false);
