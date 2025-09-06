@@ -1,0 +1,39 @@
+# .github/release.yml
+# Configuration for GitHub's automatic release notes generation
+# https://docs.github.com/en/repositories/releasing-projects-on-github/automatically-generated-release-notes
+
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+      - skip-changelog
+    authors:
+      - dependabot
+      - github-actions
+  categories:
+    - title: 🎉 New Features
+      labels:
+        - feature
+        - enhancement
+        - feat
+    - title: 🐛 Bug Fixes
+      labels:
+        - bug
+        - fix
+        - bugfix
+    - title: 📚 Documentation
+      labels:
+        - documentation
+        - docs
+    - title: 🧰 Maintenance
+      labels:
+        - chore
+        - maintenance
+        - dependencies
+    - title: ⚡ Performance
+      labels:
+        - performance
+        - optimization
+    - title: 🔧 Other Changes
+      labels:
+        - "*"  # Catch all remaining PRs
