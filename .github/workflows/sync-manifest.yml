@@ -91,6 +91,38 @@ jobs:
           console.log('✅ Updated package.json from', originalVersion, 'to', version);
           "
           
+      - name: Update package-lock.json version
+        run: |
+          # Get the release tag/version (strip 'v' prefix if present)
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          echo "🔒 Updating package-lock.json to version $VERSION"
+          
+          # Update package-lock.json if it exists
+          if [ -f "package-lock.json" ]; then
+            node -e "
+            const fs = require('fs');
+            const version = '$VERSION';
+            const content = fs.readFileSync('package-lock.json', 'utf8');
+            const lockfile = JSON.parse(content);
+            const originalVersion = lockfile.version;
+            
+            // Update root version
+            lockfile.version = version;
+            
+            // Update packages[\"\"] version if it exists (npm v7+)
+            if (lockfile.packages && lockfile.packages['']) {
+              lockfile.packages[''].version = version;
+            }
+            
+            // Preserve formatting (2 spaces is standard for package-lock.json)
+            fs.writeFileSync('package-lock.json', JSON.stringify(lockfile, null, 2) + '\\n');
+            console.log('✅ Updated package-lock.json from', originalVersion, 'to', version);
+            "
+          else
+            echo "⚠️ No package-lock.json found, skipping"
+          fi
+          
       - name: Update or create versions.json
         run: |
           # Get the release tag/version (strip 'v' prefix if present)
@@ -146,18 +178,19 @@ jobs:
           VERSION="${TAG#v}"
           
           # Check for changes
-          if git diff --quiet HEAD -- manifest.json package.json versions.json; then
+          if git diff --quiet HEAD -- manifest.json package.json package-lock.json versions.json; then
             echo "ℹ️ No changes detected, skipping commit"
             exit 0
           fi
           
           # Stage and commit changes
-          git add manifest.json package.json versions.json
+          git add manifest.json package.json package-lock.json versions.json
           git commit -m "🔖 Release: Update to version $VERSION [skip ci]" \
             -m "" \
             -m "Automated version bump after publishing release $VERSION" \
             -m "- manifest.json: version $VERSION" \
             -m "- package.json: version $VERSION" \
+            -m "- package-lock.json: version $VERSION" \
             -m "- versions.json: added/updated entry for $VERSION"
           
           # Push changes
