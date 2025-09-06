@@ -611,7 +611,8 @@ export class Crop extends Modal {
 			this.componentContainer.registerDomEvent(handle as HTMLElement, 'mousedown', (e: MouseEvent) => {
 				e.stopPropagation(); // Prevent dragging from starting
 				isResizing = true;
-				currentHandle = handle.className.split(' ')[1].split('-')[0]; // Get position (nw, n, ne, etc.)
+				const [, handleClass] = handle.className.split(' ');
+				[currentHandle] = handleClass.split('-'); // Get position (nw, n, ne, etc.)
 				
 				startX = e.clientX;
 				startY = e.clientY;
@@ -779,18 +780,18 @@ export class Crop extends Modal {
 					{ x: cropLeftOriginal + cropWidthOriginal, y: cropTopOriginal + cropHeightOriginal },
 				];
 	
-				const rotatedCorners = corners.map(p => {
-					const relativeX = p.x - originalCanvas.width / 2;
-					const relativeY = p.y - originalCanvas.height / 2;
+				const rotatedCorners = corners.map(corner => {
+					const relativeX = corner.x - originalCanvas.width / 2;
+					const relativeY = corner.y - originalCanvas.height / 2;
 					const rotatedX = relativeX * Math.cos(angleRad) - relativeY * Math.sin(angleRad);
 					const rotatedY = relativeX * Math.sin(angleRad) + relativeY * Math.cos(angleRad);
 					return { x: rotatedX + rotatedCanvas.width / 2, y: rotatedY + rotatedCanvas.height / 2 };
 				});
 	
-				const minX = Math.min(...rotatedCorners.map(c => c.x));
-				const maxX = Math.max(...rotatedCorners.map(c => c.x));
-				const minY = Math.min(...rotatedCorners.map(c => c.y));
-				const maxY = Math.max(...rotatedCorners.map(c => c.y));
+				const minX = Math.min(...rotatedCorners.map(corner => corner.x));
+				const maxX = Math.max(...rotatedCorners.map(corner => corner.x));
+				const minY = Math.min(...rotatedCorners.map(corner => corner.y));
+				const maxY = Math.max(...rotatedCorners.map(corner => corner.y));
 	
 				const cropXRotated = minX;
 				const cropYRotated = minY;
