@@ -6,7 +6,6 @@
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"pre-release": "node scripts/prepare-release.js"
 	},
 	"keywords": [],
@@ -14,19 +13,22 @@
 	"license": "MIT",
 	"devDependencies": {
 		"@codemirror/language": "^6.10.6",
+		"@eslint/js": "^9.35.0",
 		"@types/fabric": "^5.3.9",
-		"@types/node": "^16.11.6",
+		"@types/node": "^24.3.1",
 		"@types/piexifjs": "^1.0.0",
 		"@types/sortablejs": "^1.15.8",
-		"@typescript-eslint/eslint-plugin": "5.29.0",
-		"@typescript-eslint/parser": "5.29.0",
+		"@typescript-eslint/eslint-plugin": "^8.42.0",
+		"@typescript-eslint/parser": "^8.42.0",
 		"builtin-modules": "3.3.0",
 		"esbuild": "0.17.3",
+		"eslint": "^9.35.0",
 		"fabric": "^6.5.0",
+		"globals": "^16.3.0",
 		"obsidian": "latest",
 		"sortablejs": "^1.15.6",
 		"tslib": "2.4.0",
-		"typescript": "4.7.4"
+		"typescript": "^5.9.2"
 	},
 	"dependencies": {
 		"piexifjs": "^1.0.6"
