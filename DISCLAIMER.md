@@ -30,5 +30,8 @@ By installing and using this plugin, you acknowledge and agree to the following 
 
 By using this plugin, you confirm that you have read, understood, and agreed to these terms.
 
+## Third-party tools
+For optional integrations (e.g., pngquant) and their installation/license notes, see docs/pngquant.md.
+
 ---
-Last updated: 2024-01-23
+Last updated: 2025-09-06

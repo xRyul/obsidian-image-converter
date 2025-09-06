@@ -25,8 +25,8 @@ Supported image formats: WEBP, JPG, PNG, HEIC, TIF
   <img src="https://github.com/user-attachments/assets/a4ead276-ac4e-4523-8567-fa064bdf7119" width="740px"><<img src="https://github.com/user-attachments/assets/6ff7c138-90fe-456d-b968-c5fb45d27bbf" width="740px"></br>
 
 - 📁 **Custom File Management and Renaming**:
-	- **Rename**: Use variables (e.g., `{noteName}`, `{fileName}`) to auto-rename images [List of Supported Variables](<Examples/Variables Reference Guide.md>)
-	- **Output**: Organize images into custom output folders with variables.[List of Supported Variables](<Examples/Variables Reference Guide.md>)
+	- **Rename**: Use variables (e.g., `{noteName}`, `{fileName}`) to auto-rename images [List of Supported Variables](<docs/Variables Reference Guide.md>)
+	- **Output**: Organize images into custom output folders with variables.[List of Supported Variables](<docs/Variables Reference Guide.md>)
 - 🌍 **Pure JavaScript implementation** that works completely **offline**. No external APIs or binary dependencies (such as ImageMagick, Cloudinary, FFmpeg, sharp, etc.) required - keeping it lightweight, portable and secure.
 
 
@@ -45,10 +45,11 @@ Supported image formats: WEBP, JPG, PNG, HEIC, TIF
 ## 📚 Documentation
 - Settings overview
 - Basic usage examples
-- [Annotation tool](<Examples/Annotation tool.md>)
+- [Annotation tool](<docs/Annotation tool.md>)
 - Crop tool
-- [List of supported variables and use-case examples](<Examples/Variables Reference Guide.md>)
-- [How to compress images without quality loss - empirical analysis of image format vs image quality vs file size](<Examples/How to compress images without quality loss - empirical analysis of image format vs image quality vs file size.md>)
+- [List of supported variables and use-case examples](<docs/Variables Reference Guide.md>)
+- [How to compress images without quality loss - empirical analysis of image format vs image quality vs file size](<docs/How to compress images without quality loss - empirical analysis of image format vs image quality vs file size.md>)
+- Optional PNG optimization (pngquant): see docs/pngquant.md
 
 
 ## How to install
