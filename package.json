@@ -5,7 +5,9 @@
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
-		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"build": "tsc -noEmit && node esbuild.config.mjs production",
+		"lint": "eslint src/**/*.ts",
+		"lint:fix": "eslint src/**/*.ts --fix",
 		"pre-release": "node scripts/prepare-release.js"
 	},
 	"keywords": [],
@@ -21,7 +23,7 @@
 		"@typescript-eslint/eslint-plugin": "^8.42.0",
 		"@typescript-eslint/parser": "^8.42.0",
 		"builtin-modules": "3.3.0",
-		"esbuild": "0.17.3",
+		"esbuild": "^0.25.9",
 		"eslint": "^9.35.0",
 		"fabric": "^6.5.0",
 		"globals": "^16.3.0",

@@ -70,6 +70,9 @@ jobs:
         
       - name: Minify main.js with Terser
         run: |
+          # Copy the built file from build directory to root
+          cp build/main.js main.js
+          
           echo "📦 Original main.js size:"
           ls -lh main.js
           

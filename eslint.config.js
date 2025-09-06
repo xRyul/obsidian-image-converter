@@ -13,7 +13,6 @@ export default [
       // Build outputs
       "main.js",
       "*.js.map",
-      "**/dist/**",
       "**/build/**",
       
       // Configuration files that don't need linting

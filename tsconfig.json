@@ -1,30 +1,63 @@
 {
   "compilerOptions": {
     "baseUrl": ".",
-    "inlineSourceMap": true,
-    "inlineSources": true,
+    
+    // Source maps handled by esbuild
+    
+    // Module settings optimized for Obsidian plugin
     "module": "ESNext",
-    "target": "ES6",
-    "allowJs": true,
-    "noImplicitAny": true,
+    "target": "ES2024",           // Electron 37 (Chromium 138) - Full ES2024 support!
     "moduleResolution": "node",
-    "importHelpers": true,
+    
+    // Type checking - only what ESLint can't handle
+    "noImplicitAny": true,        // TypeScript-specific, ESLint can't check
+    "strictNullChecks": true,     // Critical for image processing safety
+    "strictFunctionTypes": false, // Relaxed for Obsidian API callbacks
+    "useUnknownInCatchVariables": false, // Keep existing error handling patterns
+    
+    // JavaScript support for external libraries
+    "allowJs": true,
+    "checkJs": false,             // Don't type-check JS files (UTIF.js, etc.)
+    
+    // Required for esbuild
     "isolatedModules": true,
-	"strictNullChecks": true,
+    
+    // Performance optimizations
+    "skipLibCheck": true,         // Much faster compilation
+    "noEmit": true,               // esbuild handles emission
+    
+    // Module interop for npm packages
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    
+    // Library features for Electron 37 + image processing APIs
     "lib": [
       "DOM",
-      "ES5",
-      "ES6",
-      "ES7"
+      "DOM.Iterable",
+      "ES2024"
     ],
-    "allowSyntheticDefaultImports": true,
-    "outDir": "./dist"
+    
+    // Type roots for Obsidian and custom types
+    "typeRoots": [
+      "./node_modules/@types",
+      "./src/types"              // Custom type definitions
+    ]
   },
+  
   "include": [
-    "**/*.ts",
-    "**/*.js"
+    "src/**/*.ts",
+    "src/**/*.d.ts"              // Include type definition files
   ],
-  "exclude": [  // Add this section
-    "./dist"
+  
+  "exclude": [
+    "node_modules",
+    "build",                     // Exclude build output
+    "**/*.js",                   // Exclude compiled JS
+    "main.js",
+    "scripts",                   // Exclude build scripts
+    "**/*.test.ts",
+    "**/*.spec.ts"
   ]
 }
