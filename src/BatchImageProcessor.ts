@@ -29,8 +29,8 @@ export class BatchImageProcessor {
                 ProcessCurrentNoteresizeModaldesiredLength: desiredLength,
                 ProcessCurrentNoteEnlargeOrReduce: enlargeOrReduce,
                 allowLargerFiles,
-                ProcessCurrentNoteSkipFormats,
-                ProcessCurrentNoteskipImagesInTargetFormat
+                ProcessCurrentNoteSkipFormats: processCurrentNoteSkipFormats,
+                ProcessCurrentNoteskipImagesInTargetFormat: processCurrentNoteSkipImagesInTargetFormat
             } = this.plugin.settings;
 
             const isKeepOriginalFormat = convertTo === 'disabled';
@@ -41,7 +41,7 @@ export class BatchImageProcessor {
             const colorDepth = 1; // Assuming full color depth for now, adjust if needed
 
             // Parse skip formats
-            const skipFormats = ProcessCurrentNoteSkipFormats
+            const skipFormats = processCurrentNoteSkipFormats
                 .toLowerCase()
                 .split(',')
                 .map(format => format.trim())
@@ -88,11 +88,11 @@ export class BatchImageProcessor {
 
             // Filter files that actually need processing
             const filesToProcess = linkedFiles.filter(file =>
-                this.shouldProcessImage(file, isKeepOriginalFormat, targetFormat, skipFormats, ProcessCurrentNoteskipImagesInTargetFormat)
+                this.shouldProcessImage(file, isKeepOriginalFormat, targetFormat, skipFormats, processCurrentNoteSkipImagesInTargetFormat)
             );
 
             if (filesToProcess.length === 0) {
-                if (ProcessCurrentNoteskipImagesInTargetFormat) {
+                if (processCurrentNoteSkipImagesInTargetFormat) {
                     new Notice(`No processing needed: All images are already in ${isKeepOriginalFormat ? 'their original' : targetFormat.toUpperCase()} format.`);
                 } else {
                     new Notice('No images found that need processing.');
@@ -126,7 +126,7 @@ export class BatchImageProcessor {
                 );
 
                 // Construct the new file path based on conversion settings
-                const newFileName = linkedFile.basename + '.' + outputFormat.toLowerCase();
+                const newFileName = `${linkedFile.basename}.${outputFormat.toLowerCase()}`;
                 const newFilePath = linkedFile.path.replace(linkedFile.name, newFileName);
 
                 // Rename the file (async operation, should be awaited)
@@ -197,7 +197,7 @@ export class BatchImageProcessor {
     }
 
     private getLinkedImageFiles(noteFile: TFile): TFile[] {
-        const resolvedLinks = this.app.metadataCache.resolvedLinks;
+        const { resolvedLinks } = this.app.metadataCache;
         const linksInCurrentNote = resolvedLinks[noteFile.path];
 
         return Object.keys(linksInCurrentNote)
@@ -225,13 +225,13 @@ export class BatchImageProcessor {
                 ProcessCurrentNoteresizeModaldesiredLength: desiredLength,
                 ProcessCurrentNoteEnlargeOrReduce: enlargeOrReduce,
                 allowLargerFiles,
-                ProcessCurrentNoteSkipFormats,
+                ProcessCurrentNoteSkipFormats: processCurrentNoteSkipFormats,
             } = this.plugin.settings;
 
             const outputFormat = convertTo === 'disabled' ? 'ORIGINAL' : convertTo.toUpperCase() as 'WEBP' | 'JPEG' | 'PNG' | 'ORIGINAL';
             const colorDepth = 1; // Assuming full color depth for now, adjust if needed
 
-            const skipFormats = ProcessCurrentNoteSkipFormats
+            const skipFormats = processCurrentNoteSkipFormats
                 .toLowerCase()
                 .split(',')
                 .map(format => format.trim())
@@ -258,7 +258,7 @@ export class BatchImageProcessor {
                 imageCount++;
 
                 // Construct the new file path based on conversion settings
-                const newFileName = image.basename + '.' + outputFormat.toLowerCase();
+                const newFileName = `${image.basename}.${outputFormat.toLowerCase()}`;
                 const newFilePath = image.path.replace(image.name, newFileName);
 
                 const imageData = await this.app.vault.readBinary(image);
@@ -428,8 +428,7 @@ export class BatchImageProcessor {
                     );
 
                 // Construct the new file path based on conversion settings
-                const newFileName =
-                    image.basename + "." + outputFormat.toLowerCase();
+                const newFileName = `${image.basename}.${outputFormat.toLowerCase()}`;
                 let newFilePath = image.path.replace(image.name, newFileName);
 
                 // Check for conflicts and generate unique name if necessary using FolderAndFilenameManagement
@@ -512,7 +511,7 @@ export class BatchImageProcessor {
             for (const imagePath of canvasImages) {
                 const imageFile = this.app.vault.getAbstractFileByPath(imagePath);
                 if (imageFile instanceof TFile && this.plugin.supportedImageFormats.isSupported(undefined, imageFile.name)) {
-                    if (!imageFiles.find(f => f.path === imageFile.path)) {
+                    if (!imageFiles.find(existing => existing.path === imageFile.path)) {
                         imageFiles.push(imageFile);
                     }
                 }
@@ -538,7 +537,7 @@ export class BatchImageProcessor {
         return images;
     }
 
-    shouldProcessImage(image: TFile, isKeepOriginalFormat: boolean, targetFormat: string, skipFormats: string[], ProcessCurrentNoteskipImagesInTargetFormat: boolean): boolean {
+    shouldProcessImage(image: TFile, isKeepOriginalFormat: boolean, targetFormat: string, skipFormats: string[], skipImagesInTargetFormat: boolean): boolean {
         const effectiveTargetFormat = isKeepOriginalFormat
             ? image.extension
             : targetFormat;
@@ -550,7 +549,7 @@ export class BatchImageProcessor {
         }
 
         // Skip images already in target format (or original format if disabled)
-        if (ProcessCurrentNoteskipImagesInTargetFormat &&
+        if (skipImagesInTargetFormat &&
             image.extension === effectiveTargetFormat) {
             console.log(`Skipping ${image.name}: Already in ${effectiveTargetFormat} format`);
             return false;
@@ -571,7 +570,7 @@ export class BatchImageProcessor {
         // Update links in canvas files as well
         const canvasFiles = this.app.vault
             .getFiles()
-            .filter((f) => f.extension === "canvas");
+            .filter((file) => file.extension === "canvas");
         for (const canvasFile of canvasFiles) {
             await this.updateCanvasFileLinks(canvasFile, oldPath, newPath);
         }
