@@ -17,7 +17,7 @@ export class AsyncLock {
         }
 
         let resolve!: () => void;
-        const promise = new Promise<void>(r => resolve = r);
+        const promise = new Promise<void>(resolver => resolve = resolver);
         this.locks.set(key, promise);
 
         return () => {
