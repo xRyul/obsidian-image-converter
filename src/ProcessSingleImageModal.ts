@@ -458,7 +458,7 @@ export class ProcessSingleImageModal extends Modal {
                 return;
             }
 
-            if (conversionPreset && this.plugin.folderAndFilenameManagement.should_skip_conversion(this.imageFile.name, conversionPreset)) {
+            if (conversionPreset && this.plugin.folderAndFilenameManagement.shouldSkipConversion(this.imageFile.name, conversionPreset)) {
                 new Notice(`Skipped conversion of image "${this.imageFile.name}" due to skip pattern match in the conversion preset.`, 2000);
                 this.close();
                 return;

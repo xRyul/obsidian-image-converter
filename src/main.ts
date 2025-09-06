@@ -425,7 +425,7 @@ export default class ImageConverterPlugin extends Plugin {
                 // Check if we should process these files
                 const hasSupportedFiles = fileData.some(data =>
                     this.supportedImageFormats.isSupported(data.type, data.name) &&
-                    !this.folderAndFilenameManagement.matches_patterns(data.name, this.settings.neverProcessFilenames)
+                    !this.folderAndFilenameManagement.matchesPatterns(data.name, this.settings.neverProcessFilenames)
                 );
 
                 if (hasSupportedFiles) {
@@ -460,7 +460,7 @@ export default class ImageConverterPlugin extends Plugin {
                     data.kind === "file" &&
                     data.file &&
                     this.supportedImageFormats.isSupported(data.type, data.file.name) &&
-                    !this.folderAndFilenameManagement.matches_patterns(data.file.name, this.settings.neverProcessFilenames)
+                    !this.folderAndFilenameManagement.matchesPatterns(data.file.name, this.settings.neverProcessFilenames)
                 );
 
                 if (hasSupportedItems) {
@@ -627,7 +627,7 @@ export default class ImageConverterPlugin extends Plugin {
                 let existingFile = this.app.vault.getAbstractFileByPath(fullPath);
                 let skipFurtherProcessing = false;
 
-                if (selectedFilenamePreset && this.folderAndFilenameManagement.should_skip_rename(file.name, selectedFilenamePreset)) {
+                if (selectedFilenamePreset && this.folderAndFilenameManagement.shouldSkipRename(file.name, selectedFilenamePreset)) {
                     new Notice(
                         `Skipped renaming/conversion of image "${file.name}" due to skip pattern match.`
                     );
@@ -665,7 +665,7 @@ export default class ImageConverterPlugin extends Plugin {
                     // Step 3.5.2: Check for Skipped Conversion BEFORE Processing
                     // - Check if the current file matches a skip pattern defined in the selected conversion preset.
                     // - If it matches, skip the image processing step entirely.
-                    if (selectedConversionPreset && this.folderAndFilenameManagement.should_skip_conversion(file.name, selectedConversionPreset)) {
+                    if (selectedConversionPreset && this.folderAndFilenameManagement.shouldSkipConversion(file.name, selectedConversionPreset)) {
                         new Notice(`Skipped conversion of image "${file.name}" due to skip pattern match in the conversion preset.`);
 
 
@@ -937,7 +937,7 @@ export default class ImageConverterPlugin extends Plugin {
 
                 if (
                     selectedFilenamePreset &&
-                    this.folderAndFilenameManagement.should_skip_rename(
+                    this.folderAndFilenameManagement.shouldSkipRename(
                         file.name,
                         selectedFilenamePreset
                     )
@@ -980,7 +980,7 @@ export default class ImageConverterPlugin extends Plugin {
                     // Step 3.5.2: Check for Skipped Conversion BEFORE Processing
                     // - Check if the current file matches a skip pattern in the conversion preset.
                     // - If it matches, skip image processing entirely.
-                    if (selectedConversionPreset && this.folderAndFilenameManagement.should_skip_conversion(file.name, selectedConversionPreset)) {
+                    if (selectedConversionPreset && this.folderAndFilenameManagement.shouldSkipConversion(file.name, selectedConversionPreset)) {
                         new Notice(`Skipped conversion of image "${file.name}" due to skip pattern match in the conversion preset.`);
 
                         // Save the original file directly to the vault without any processing.

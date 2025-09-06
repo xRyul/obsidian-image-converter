@@ -83,7 +83,7 @@ export class FolderAndFilenameManagement {
         let shouldSkipRename = false;
 
         // Step 2: Handle filename generation based on whether we should skip renaming
-        if (selectedFilenamePreset && this.should_skip_rename(file.name, selectedFilenamePreset)) {
+        if (selectedFilenamePreset && this.shouldSkipRename(file.name, selectedFilenamePreset)) {
             // Skip rename case - use the original name without extension
             newFilename = file.name.substring(0, file.name.lastIndexOf('.'));
             shouldSkipRename = true; // Set the flag
@@ -113,7 +113,7 @@ export class FolderAndFilenameManagement {
         // Step 4: Return both the destination path and final filename
         return {
             destinationPath: destinationDir,
-            newFilename: newFilename
+            newFilename
         };
     }
 
@@ -145,9 +145,7 @@ export class FolderAndFilenameManagement {
                     : activeFile.basename;
 
                 destinationDir = activeFile.parent
-                    ? normalizePath(
-                        activeFile.parent.path + "/" + subfolderName
-                    )
+                    ? normalizePath(`${activeFile.parent.path}/${subfolderName}`)
                     : subfolderName;
                 break;
             }
@@ -181,10 +179,9 @@ export class FolderAndFilenameManagement {
      */
     combinePath(basePath: string, filename: string): string {
         if (basePath === "/") {
-            return normalizePath("/" + filename);
-        } else {
-            return normalizePath(basePath + "/" + filename);
+            return normalizePath(`/${filename}`);
         }
+        return normalizePath(`${basePath}/${filename}`);
     }
 
     /**
@@ -239,7 +236,7 @@ export class FolderAndFilenameManagement {
                     // Folder exists (exact case), check and correct case if needed (original logic)
                     const existingFolder = await this.app.vault.getAbstractFileByPath(currentPath);
                     if (existingFolder && existingFolder.name !== folder) {
-                        const newPath = currentPath.substring(0, currentPath.lastIndexOf('/')) + '/' + existingFolder.name;
+                        const newPath = `${currentPath.substring(0, currentPath.lastIndexOf('/'))}/${existingFolder.name}`;
                         if (await this.app.vault.adapter.exists(newPath)) {
                             currentPath = newPath;  // Use existing folder path
                         } else {
@@ -259,15 +256,10 @@ export class FolderAndFilenameManagement {
         );
         if (configuredPath.startsWith("./")) {
             return activeFile.parent?.path
-                ? normalizePath(
-                    activeFile.parent.path +
-                    "/" +
-                    configuredPath.substring(2)
-                )
+                ? normalizePath(`${activeFile.parent.path}/${configuredPath.substring(2)}`)
                 : configuredPath.substring(2);
-        } else {
-            return normalizePath(configuredPath);
         }
+        return normalizePath(configuredPath);
     }
 
     // Handle filename conflicts by adding a number suffix
@@ -348,16 +340,14 @@ export class FolderAndFilenameManagement {
                 if (mimeExtensions && mimeExtensions.includes(potentialExtension)) {
                     // Valid extension for the given mime type, remove it
                     return filename.substring(0, lastDotIndex);
-                } else {
-                    // Invalid extension for the given mime type, keep the original filename
-                    console.warn(`Mismatched extension for file: ${filename}, based on mime type: ${mimeType}. Keeping original filename.`);
-                    return filename;
                 }
-            } else {
-                // Mime type is unknown, remove the extension as a precaution
-                console.warn(`Unknown mime type for file: ${filename}. Removing potential extension.`);
-                return filename.substring(0, lastDotIndex);
+                // Invalid extension for the given mime type, keep the original filename
+                console.warn(`Mismatched extension for file: ${filename}, based on mime type: ${mimeType}. Keeping original filename.`);
+                return filename;
             }
+            // Mime type is unknown, remove the extension as a precaution
+            console.warn(`Unknown mime type for file: ${filename}. Removing potential extension.`);
+            return filename.substring(0, lastDotIndex);
         }
 
         // Potential extension is not supported, keep the original filename
@@ -374,8 +364,8 @@ export class FolderAndFilenameManagement {
             .toLowerCase();
 
         // First check if conversion should be skipped
-        if (selectedConversionPreset && this.should_skip_conversion(file.name, selectedConversionPreset)) {
-            return filename + originalExtension;
+        if (selectedConversionPreset && this.shouldSkipConversion(file.name, selectedConversionPreset)) {
+            return `${filename}${originalExtension}`;
         }
 
         // If not skipped, proceed with normal conversion logic
@@ -384,17 +374,17 @@ export class FolderAndFilenameManagement {
             : this.settings.outputFormat;
         switch (outputFormat) {
             case "WEBP":
-                return filename + ".webp";
+                return `${filename}.webp`;
             case "JPEG":
-                return filename + ".jpeg";  // Corrected to .jpeg
+                return `${filename}.jpeg`;  // Corrected to .jpeg
             case "PNG":
-                return filename + ".png";
+                return `${filename}.png`;
             case "AVIF": // Correctly handle AVIF
-                return filename + ".avif";
+                return `${filename}.avif`;
             case "ORIGINAL":
             case "NONE":
             default:
-                return filename + originalExtension;
+                return `${filename}${originalExtension}`;
         }
     }
 
@@ -453,12 +443,12 @@ export class FolderAndFilenameManagement {
      */
     sanitizeFilename(filename: string): string {
         // Leading and trailing spaces are removed using trim() in the beginning of the function.
-        filename = filename.trim();
+        const trimmed = filename.trim();
 
         // Handle the case where there's no extension
-        const lastDotIndex = filename.lastIndexOf(".");
-        const extension = lastDotIndex !== -1 ? filename.substring(lastDotIndex) : "";
-        const baseFilename = lastDotIndex !== -1 ? filename.substring(0, lastDotIndex) : filename;
+        const lastDotIndex = trimmed.lastIndexOf(".");
+        const extension = lastDotIndex !== -1 ? trimmed.substring(lastDotIndex) : "";
+        const baseFilename = lastDotIndex !== -1 ? trimmed.substring(0, lastDotIndex) : trimmed;
 
         // 1. Remove/replace invalid characters
         // \ / : * ? " < > | - will be replaced with underscore
@@ -500,18 +490,18 @@ export class FolderAndFilenameManagement {
         return sanitizedBase + extension;
     }
 
-    should_skip_conversion(filename: string, preset: ConversionPreset): boolean {
-        return this.matches_patterns(filename, preset.skipConversionPatterns);
+    shouldSkipConversion(filename: string, preset: ConversionPreset): boolean {
+        return this.matchesPatterns(filename, preset.skipConversionPatterns);
     }
 
-    should_skip_rename(
+    shouldSkipRename(
         filename: string,
         preset: FilenamePreset
     ): boolean {
-        return this.matches_patterns(filename, preset.skipRenamePatterns);
+        return this.matchesPatterns(filename, preset.skipRenamePatterns);
     }
 
-    matches_patterns(
+    matchesPatterns(
         filename: string,
         patternsString: string
     ): boolean {
@@ -521,8 +511,8 @@ export class FolderAndFilenameManagement {
 
         const patterns = patternsString
             .split(",")
-            .map((p) => p.trim())
-            .filter((p) => p.length > 0);
+            .map((part) => part.trim())
+            .filter((part) => part.length > 0);
 
         return patterns.some((pattern) => {
             try {
@@ -534,28 +524,26 @@ export class FolderAndFilenameManagement {
                     return regex.test(filename);
                 }
                 // Check if pattern is a regex (enclosed in r/)
-                else if (pattern.startsWith("r/") && pattern.endsWith("/")) {
+                if (pattern.startsWith("r/") && pattern.endsWith("/")) {
                     // Extract regex pattern without r/ and /
                     const regexPattern = pattern.slice(2, -1);
                     const regex = new RegExp(regexPattern, "i");
                     return regex.test(filename);
                 }
                 // Check if pattern is a regex (enclosed in regex:)
-                else if (pattern.startsWith("regex:")) {
+                if (pattern.startsWith("regex:")) {
                     // Extract regex pattern without regex:
                     const regexPattern = pattern.slice(6);
                     const regex = new RegExp(regexPattern, "i");
                     return regex.test(filename);
                 }
                 // Default to glob pattern
-                else {
-                    const globPattern = pattern
-                        .replace(/\./g, "\\.")
-                        .replace(/\*/g, ".*")
-                        .replace(/\?/g, ".");
-                    const regex = new RegExp(`^${globPattern}$`, "i");
-                    return regex.test(filename);
-                }
+                const globPattern = pattern
+                    .replace(/\./g, "\\.")
+                    .replace(/\*/g, ".*")
+                    .replace(/\?/g, ".");
+                const regex = new RegExp(`^${globPattern}$`, "i");
+                return regex.test(filename);
             } catch (e) {
                 console.error(`Invalid pattern: ${pattern}`, e);
                 return false;
@@ -569,8 +557,8 @@ export class FolderAndFilenameManagement {
         activeFile: TFile
     ): Promise<string> {
         const context: VariableContext = {
-            file: file,
-            activeFile: activeFile,
+            file,
+            activeFile,
         };
 
         let result = await this.variableProcessor.processTemplate(
@@ -614,10 +602,10 @@ export class FolderAndFilenameManagement {
                     // Handle the forward slash addition right at path construction
                     let potentialOsPathWithQuery = parts.slice(1).join('/');
                     if (process.platform !== 'win32' && !potentialOsPathWithQuery.startsWith('/')) {
-                        potentialOsPathWithQuery = '/' + potentialOsPathWithQuery;
+                        potentialOsPathWithQuery = `/${potentialOsPathWithQuery}`;
                     }
             
-                    const potentialOsPath = potentialOsPathWithQuery.split('?')[0]; // Remove query parameters
+                    const [potentialOsPath] = potentialOsPathWithQuery.split('?'); // Remove query parameters
                     let decodedOsPath = decodeURIComponent(potentialOsPath);
                     // Standardize path separators to forward slashes
                     decodedOsPath = decodedOsPath.replace(/\\/g, '/');
@@ -631,11 +619,9 @@ export class FolderAndFilenameManagement {
                     if (basePath && decodedOsPath.startsWith(basePath)) {
                         const vaultRelativePath = decodedOsPath.substring(basePath.length);
                         const normalizedVaultRelativePath = normalizePath(vaultRelativePath);
-                        // console.log(`Detected OS path within vault: ${normalizedVaultRelativePath}`);
                         return normalizedVaultRelativePath;
-                    } else {
-                        return decodedOsPath;
                     }
+                    return decodedOsPath;
                 }
             }
 
@@ -697,10 +683,9 @@ export class FolderAndFilenameManagement {
             if (tempFile instanceof TFile) {
                 await this.app.fileManager.renameFile(tempFile, newPath);
                 return true; // Indicate success
-            } else {
-                new Notice(`Error: Temporary file not found after renaming.`);
-                return false; // Indicate failure
             }
+            new Notice(`Error: Temporary file not found after renaming.`);
+            return false; // Indicate failure
         } catch (error) {
             console.error('Error during safe rename:', error);
             new Notice(`Error renaming file: ${error.message}`);
