@@ -220,7 +220,7 @@ export class PresetSelectionModal extends Modal {
             this.settings.folderPresets,
             (text) => { this.customFolderText = text; },
             (value) => {
-                this.selectedFolderPreset = this.settings.folderPresets.find(p => p.name === value) || this.settings.folderPresets[0];
+                this.selectedFolderPreset = this.settings.folderPresets.find(preset => preset.name === value) || this.settings.folderPresets[0];
                 
                 // Update session override and UI when preset changes
                 this.temporaryCustomFolderOverride = this.selectedFolderPreset.customTemplate || "";
@@ -242,7 +242,7 @@ export class PresetSelectionModal extends Modal {
             this.settings.filenamePresets,
             (text) => { this.customFilenameText = text; },
             (value) => {
-                this.selectedFilenamePreset = this.settings.filenamePresets.find(p => p.name === value) || this.settings.filenamePresets[0];
+                this.selectedFilenamePreset = this.settings.filenamePresets.find(preset => preset.name === value) || this.settings.filenamePresets[0];
                 
                 // Update session override and UI when preset changes
                 this.temporaryCustomFilenameOverride = this.selectedFilenamePreset.customTemplate || "";
@@ -386,7 +386,7 @@ export class PresetSelectionModal extends Modal {
                 });
                 dropdown.setValue(this.selectedConversionPreset.name);
                 dropdown.onChange((value) => {
-                    this.selectedConversionPreset = this.settings.conversionPresets.find(p => p.name === value) || this.settings.conversionPresets[0];
+                    this.selectedConversionPreset = this.settings.conversionPresets.find(preset => preset.name === value) || this.settings.conversionPresets[0];
                     this.updateConversionSettings(card);
                     this.updateProcessingPreview();
                 });
@@ -405,7 +405,7 @@ export class PresetSelectionModal extends Modal {
                 });
                 dropdown.setValue(this.selectedLinkFormatPreset.name);
                 dropdown.onChange((value) => {
-                    this.selectedLinkFormatPreset = this.settings.linkFormatSettings.linkFormatPresets.find(p => p.name === value) || this.settings.linkFormatSettings.linkFormatPresets[0];
+                    this.selectedLinkFormatPreset = this.settings.linkFormatSettings.linkFormatPresets.find(preset => preset.name === value) || this.settings.linkFormatSettings.linkFormatPresets[0];
                     this.updateProcessingPreview();
                 });
                 // Pre-fill with "Wiki/Md ▼" appearance
@@ -434,7 +434,7 @@ export class PresetSelectionModal extends Modal {
                 });
                 dropdown.setValue(this.selectedResizePreset.name);
                 dropdown.onChange((value) => {
-                    this.selectedResizePreset = this.settings.nonDestructiveResizeSettings.resizePresets.find(p => p.name === value) || this.settings.nonDestructiveResizeSettings.resizePresets[0];
+                    this.selectedResizePreset = this.settings.nonDestructiveResizeSettings.resizePresets.find(preset => preset.name === value) || this.settings.nonDestructiveResizeSettings.resizePresets[0];
                     this.updateProcessingPreview();
                 });
                 // Pre-fill with "Default ▼" appearance
@@ -556,48 +556,48 @@ export class PresetSelectionModal extends Modal {
                         // Reset to current settings
                         this.selectedConversionPreset =
                             this.settings.conversionPresets.find(
-                                (p) => p.name === this.settings.selectedConversionPreset
+                                (preset) => preset.name === this.settings.selectedConversionPreset
                             ) || this.settings.conversionPresets[0];
                         this.selectedFilenamePreset =
                             this.settings.filenamePresets.find(
-                                (p) => p.name === this.settings.selectedFilenamePreset
+                                (preset) => preset.name === this.settings.selectedFilenamePreset
                             ) || this.settings.filenamePresets[0];
                         this.selectedFolderPreset =
                             this.settings.folderPresets.find(
-                                (p) => p.name === this.settings.selectedFolderPreset
+                                (preset) => preset.name === this.settings.selectedFolderPreset
                             ) || this.settings.folderPresets[0];
                         this.selectedLinkFormatPreset =
                             this.settings.linkFormatSettings.linkFormatPresets.find(
-                                (p) => p.name === this.settings.linkFormatSettings.selectedLinkFormatPreset
+                                (preset) => preset.name === this.settings.linkFormatSettings.selectedLinkFormatPreset
                             ) || this.settings.linkFormatSettings.linkFormatPresets[0];
                         this.selectedResizePreset =
                             this.settings.nonDestructiveResizeSettings.resizePresets.find(
-                                (p) => p.name === this.settings.nonDestructiveResizeSettings.selectedResizePreset
+                                (preset) => preset.name === this.settings.nonDestructiveResizeSettings.selectedResizePreset
                             ) || this.settings.nonDestructiveResizeSettings.resizePresets[0];
                     } else {
                         this.selectedGlobalPreset =
-                            this.settings.globalPresets.find((p) => p.name === value) || null;
+                            this.settings.globalPresets.find((preset) => preset.name === value) || null;
                         if (this.selectedGlobalPreset) {
                             // Apply global preset
                             this.selectedConversionPreset =
                                 this.settings.conversionPresets.find(
-                                    (p) => p.name === (this.selectedGlobalPreset?.conversionPreset || '')
+                                    (preset) => preset.name === (this.selectedGlobalPreset?.conversionPreset || '')
                                 ) || this.settings.conversionPresets[0];
                             this.selectedFilenamePreset =
                                 this.settings.filenamePresets.find(
-                                    (p) => p.name === (this.selectedGlobalPreset?.filenamePreset || '')
+                                    (preset) => preset.name === (this.selectedGlobalPreset?.filenamePreset || '')
                                 ) || this.settings.filenamePresets[0];
                             this.selectedFolderPreset =
                                 this.settings.folderPresets.find(
-                                    (p) => p.name === (this.selectedGlobalPreset?.folderPreset || '')
+                                    (preset) => preset.name === (this.selectedGlobalPreset?.folderPreset || '')
                                 ) || this.settings.folderPresets[0];
                             this.selectedLinkFormatPreset =
                                 this.settings.linkFormatSettings.linkFormatPresets.find(
-                                    (p) => p.name === (this.selectedGlobalPreset?.linkFormatPreset || '')
+                                    (preset) => preset.name === (this.selectedGlobalPreset?.linkFormatPreset || '')
                                 ) || this.settings.linkFormatSettings.linkFormatPresets[0];
                             this.selectedResizePreset =
                                 this.settings.nonDestructiveResizeSettings.resizePresets.find(
-                                    (p) => p.name === (this.selectedGlobalPreset?.resizePreset || '')
+                                    (preset) => preset.name === (this.selectedGlobalPreset?.resizePreset || '')
                                 ) || this.settings.nonDestructiveResizeSettings.resizePresets[0];
                         }
                     }
@@ -655,7 +655,7 @@ export class PresetSelectionModal extends Modal {
                 const folderTemplate = this.temporaryCustomFolderOverride || "";
                 const filenameTemplate = this.temporaryCustomFilenameOverride || "";
 
-                const newContent = createEl('div');
+                const newContent = document.createElement("div");
 
                 if (folderTemplate || filenameTemplate) {
                     const folderPath = folderTemplate
