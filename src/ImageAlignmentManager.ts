@@ -94,7 +94,7 @@ export class ImageAlignmentManager {
 
     public async loadCache() {
         try {
-            const adapter = this.app.vault.adapter;
+            const { adapter } = this.app.vault;
             // OPTION 1. Keep it in plugins folder, but Obsidian Sync will not sync it so alignment wont work on all devices
             // const cachePath = `${this.pluginDir}/${this.CACHE_FILE}`;
             // Option 2. Keep it in the .obsidian e.g. '.obsidian/image-converter-image-alignments.json';
@@ -116,7 +116,7 @@ export class ImageAlignmentManager {
                 return;
             }
 
-            const adapter = this.app.vault.adapter;
+            const { adapter } = this.app.vault;
             // OPTION 1. Keep it in plugins folder, but Obsidian Sync will not sync it so alignment wont work on all devices
             // const cachePath = `${this.pluginDir}/${this.CACHE_FILE}`;
             // Option 2. Keep it in the .obsidian e.g. '.obsidian/image-converter-image-alignments.json';
@@ -364,7 +364,7 @@ export class ImageAlignmentManager {
 
         // Always use the normalized relative path for hashing
         const combinedPath = `${notePath}:${relativePath}`;
-        const hash = murmurHash3_128(combinedPath, 0);
+        const hash = murmurHash3128(combinedPath, 0);
 
         // console.log("Calculated Image Hash:", hash);
         return hash;
@@ -398,22 +398,22 @@ export class ImageAlignmentManager {
         }
 
         // Remove query parameters
-        const srcWithoutQuery = imageSrc.split('?')[0];
+        const [srcWithoutQuery] = imageSrc.split('?');
         // console.log("Clean full path after extensions:", srcWithoutQuery);
-        imageSrc = srcWithoutQuery;
+        const src = srcWithoutQuery;
 
 
         // Handle app:// and file:// URIs
-        if (imageSrc.startsWith('app://') || imageSrc.startsWith('file:///')) {
+        if (src.startsWith('app://') || src.startsWith('file:///')) {
             let osPath = '';
-            if (imageSrc.startsWith('app://')) {
-                const appUriParts = imageSrc.substring('app://'.length).split('/');
+            if (src.startsWith('app://')) {
+                const appUriParts = src.substring('app://'.length).split('/');
                 if (appUriParts.length > 1) {
                     osPath = decodeURIComponent(appUriParts.slice(1).join('/'));
                 }
                 // console.log("Full OS path:", osPath);
-            } else if (imageSrc.startsWith('file:///')) {
-                osPath = decodeURIComponent(imageSrc.substring('file:///'.length));
+            } else if (src.startsWith('file:///')) {
+                osPath = decodeURIComponent(src.substring('file:///'.length));
                 // console.log("Full OS path:", osPath);
             }
 
@@ -435,7 +435,7 @@ export class ImageAlignmentManager {
                     if (normalizedOsPath.startsWith(normalizedBasePath)) {
                         // Extract the relative path
                         let relativePath = osPath.substring(basePath.length);
-                        relativePath = relativePath.replace(/^\/+/, ''); // Remove leading slash
+                        relativePath = relativePath.replace(/^\\+/, ''); // Remove leading slash
 
                         // console.log("FINAL CLEANEDUP Relative path:", relativePath);
                         return relativePath;
@@ -446,14 +446,14 @@ export class ImageAlignmentManager {
 
         // If we couldn't get a relative path from the app:// URI,
         // let's try to find the image in the vault and get its path.**
-        const imageFile = this.app.vault.getFiles().find(file => file.path.endsWith(imageSrc));
+        const imageFile = this.app.vault.getFiles().find(file => file.path.endsWith(src));
         if (imageFile) {
             return imageFile.path;
         }
 
         // Fallback: return the original (which might be a relative path or just a filename)
-        // console.log("FAILED extracting relative path (it didnt start with app file URI or basepath)", imageSrc);
-        return imageSrc;
+        // console.log("FAILED extracting relative path (it didnt start with app file URI or basepath)", src);
+        return src;
     }
 
 
@@ -710,7 +710,7 @@ export class ImageAlignmentManager {
 
 // MurmurHash3 (32-bit)
 // - For quick hashing of relative image paths
-function murmurHash3_128(key: string, seed: number): string {
+function murmurHash3128(key: string, seed: number): string {
     let h1 = seed >>> 0;
     let h2 = seed >>> 0;
     let h3 = seed >>> 0;
@@ -719,7 +719,7 @@ function murmurHash3_128(key: string, seed: number): string {
     const c1 = 0x87c37b91;
     const c2 = 0x4cf5ad43;
 
-    const length = key.length;
+    const { length } = key;
     const nblocks = length >>> 4; // for performance use bitshift instead of equivalent Math.floor(length / 16)
 
     for (let i = 0; i < nblocks; i++) {
@@ -810,10 +810,5 @@ function murmurHash3_128(key: string, seed: number): string {
     h4 ^= h4 >>> 16; h4 = Math.imul(h4, 0x85ebca6b); h4 ^= h4 >>> 13; h4 = Math.imul(h4, 0xc2b2ae35); h4 ^= h4 >>> 16;
 
 
-    return (
-        ("00000000" + (h4 >>> 0).toString(16)).slice(-8) +
-        ("00000000" + (h3 >>> 0).toString(16)).slice(-8) +
-        ("00000000" + (h2 >>> 0).toString(16)).slice(-8) +
-        ("00000000" + (h1 >>> 0).toString(16)).slice(-8)
-    );
+    return `${(h4 >>> 0).toString(16).padStart(8, '0')}${(h3 >>> 0).toString(16).padStart(8, '0')}${(h2 >>> 0).toString(16).padStart(8, '0')}${(h1 >>> 0).toString(16).padStart(8, '0')}`;
 }
