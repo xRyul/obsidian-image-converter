@@ -1,7 +1,6 @@
 //  THESE are undocumented-obsidian-types.d.ts and are simply for the build to execute
 
-import 'obsidian';
-
+import type { EditorPosition } from 'obsidian';
 declare module 'obsidian' {
     interface App {
         /**
