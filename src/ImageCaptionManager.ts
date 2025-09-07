@@ -3,7 +3,7 @@ import ImageConverterPlugin from "./main";
 
 export class ImageCaptionManager {
     private observer: MutationObserver | null = null;
-    private observerTimeout: NodeJS.Timeout | null = null;
+    private observerTimeout: ReturnType<typeof setTimeout> | null = null;
     private processing = false;
 
     constructor(private plugin: ImageConverterPlugin) {
@@ -25,7 +25,7 @@ export class ImageCaptionManager {
     private startObserving() {
         if (!this.observer) return;
 
-        const config: MutationObserverInit = {
+        const config = {
             childList: true,
             subtree: true,
             attributes: true,
@@ -90,7 +90,7 @@ export class ImageCaptionManager {
     private isRelevantNode(node: Element): boolean {
         if (!(node instanceof Element)) return false;
 
-        const className = node.className;
+        const { className } = node;
 
         // Handle case where className might be undefined or not a string
         if (typeof className !== 'string') return false;
