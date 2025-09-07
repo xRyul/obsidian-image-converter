@@ -219,7 +219,7 @@ export class ImageAlignment extends Component {
         }
 
         // Fallback to CSS class detection
-        const alignClass = Array.from(img.classList).find(c => c.startsWith('image-position-'));
+        const alignClass = Array.from(img.classList).find(className => className.startsWith('image-position-'));
         const align = alignClass
             ? (alignClass.replace('image-position-', '') as 'left' | 'center' | 'right')
             : 'none';
