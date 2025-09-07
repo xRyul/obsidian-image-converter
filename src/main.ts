@@ -227,7 +227,7 @@ export default class ImageConverterPlugin extends Plugin {
         // }
 
         // Register PASTE/DROP events
-        this.dropPaste_registerEvents();
+        this.dropPasteRegisterEvents();
 
         // Register file menu events
         this.registerEvent(
@@ -285,7 +285,7 @@ export default class ImageConverterPlugin extends Plugin {
         this.addCommand({
             id: 'open-image-converter-settings',
             name: 'Open Image Converter Settings',
-            callback: () => this.command_openSettingsTab()
+            callback: () => this.commandOpenSettingsTab()
         });
 
         this.addReloadCommand();
@@ -345,8 +345,8 @@ export default class ImageConverterPlugin extends Plugin {
     }
 
     // Command to open settings tab
-    async command_openSettingsTab() {
-        const setting = (this.app as any).setting;
+    async commandOpenSettingsTab() {
+        const { setting } = this.app as any;
         if (setting) {
             await setting.open();
             setting.openTabById(this.manifest.id);
@@ -364,7 +364,7 @@ export default class ImageConverterPlugin extends Plugin {
 
                 try {
                     // Use the workaround to access the internal plugins API
-                    const plugins = (this.app as any).plugins;
+                    const { plugins } = this.app as any;
 
                     // 1. Disable the plugin
                     if (plugins && plugins.disablePlugin) {
@@ -397,7 +397,7 @@ export default class ImageConverterPlugin extends Plugin {
         });
     }
 
-    private dropPaste_registerEvents() {
+    private dropPasteRegisterEvents() {
         // On mobile DROP events are not supported, but lets still check as a precaution
         if (Platform.isMobile) return;
 
@@ -419,7 +419,7 @@ export default class ImageConverterPlugin extends Plugin {
                 const fileData: { name: string, type: string, file: File }[] = [];
                 for (let i = 0; i < evt.dataTransfer.files.length; i++) {
                     const file = evt.dataTransfer.files[i];
-                    fileData.push({ name: file.name, type: file.type, file: file });
+                    fileData.push({ name: file.name, type: file.type, file });
                 }
 
                 // Check if we should process these files
@@ -452,7 +452,7 @@ export default class ImageConverterPlugin extends Plugin {
                 for (let i = 0; i < evt.clipboardData.items.length; i++) {
                     const item = evt.clipboardData.items[i];
                     const file = item.kind === "file" ? item.getAsFile() : null;
-                    itemData.push({ kind: item.kind, type: item.type, file: file });
+                    itemData.push({ kind: item.kind, type: item.type, file });
                 }
 
                 // Check if we should process these items
@@ -498,7 +498,7 @@ export default class ImageConverterPlugin extends Plugin {
         const filePromises = supportedFiles.map(async (file) => {
             try {
                 // Check modal behavior setting
-                const modalBehavior = this.settings.modalBehavior;
+                const { modalBehavior } = this.settings;
                 let showModal = modalBehavior === "always";
 
                 if (modalBehavior === "ask") {
@@ -589,15 +589,13 @@ export default class ImageConverterPlugin extends Plugin {
                 let newFilename: string;
 
                 try {
-                    const result = await this.folderAndFilenameManagement.determineDestination(
+                    ({ destinationPath, newFilename } = await this.folderAndFilenameManagement.determineDestination(
                         file,
                         activeFile,
                         selectedConversionPreset,
                         selectedFilenamePreset,
                         selectedFolderPreset
-                    );
-                    destinationPath = result.destinationPath;
-                    newFilename = result.newFilename;
+                    ));
                 } catch (error) {
                     console.error("Error determining destination and filename:", error);
                     new Notice(`Failed to determine destination or filename for "${file.name}". Check console for details.`);
@@ -811,7 +809,7 @@ export default class ImageConverterPlugin extends Plugin {
         // - Create an array of promises, each responsible for processing one pasted file.
         const filePromises = supportedFiles.map(async (file) => {
             // Check modal behavior setting
-            const modalBehavior = this.settings.modalBehavior;
+            const { modalBehavior } = this.settings;
             let showModal = modalBehavior === "always";
 
             if (modalBehavior === "ask") {
@@ -902,15 +900,13 @@ export default class ImageConverterPlugin extends Plugin {
                 let newFilename: string;
 
                 try {
-                    const result = await this.folderAndFilenameManagement.determineDestination(
+                    ({ destinationPath, newFilename } = await this.folderAndFilenameManagement.determineDestination(
                         file,
                         activeFile,
                         selectedConversionPreset,
                         selectedFilenamePreset,
                         selectedFolderPreset
-                    );
-                    destinationPath = result.destinationPath;
-                    newFilename = result.newFilename;
+                    ));
                 } catch (error) {
                     console.error("Error determining destination and filename:", error);
                     new Notice(`Failed to determine destination or filename for "${file.name}". Check console for details.`);
@@ -1117,11 +1113,11 @@ export default class ImageConverterPlugin extends Plugin {
 
         // Use the passed presets or fall back to the plugin settings
         const linkFormatPresetToUse = selectedLinkFormatPreset || this.settings.linkFormatSettings.linkFormatPresets.find(
-            (p) => p.name === this.settings.linkFormatSettings.selectedLinkFormatPreset
+            (preset) => preset.name === this.settings.linkFormatSettings.selectedLinkFormatPreset
         );
 
         const resizePresetToUse = selectedResizePreset || this.settings.nonDestructiveResizeSettings.resizePresets.find(
-            (p) => p.name === this.settings.nonDestructiveResizeSettings.selectedResizePreset
+            (preset) => preset.name === this.settings.nonDestructiveResizeSettings.selectedResizePreset
         );
 
         // Await the result of formatLink
@@ -1153,11 +1149,11 @@ export default class ImageConverterPlugin extends Plugin {
     private formatFileSize(bytes: number): string {
         if (bytes < 1024) {
             return `${bytes} bytes`;
-        } else if (bytes < 1024 * 1024) {
-            return `${(bytes / 1024).toFixed(1)} KB`;
-        } else {
-            return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
         }
+        if (bytes < 1024 * 1024) {
+            return `${(bytes / 1024).toFixed(1)} KB`;
+        }
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     }
 
     showSizeComparisonNotification(originalSize: number, newSize: number) {
@@ -1178,7 +1174,7 @@ export default class ImageConverterPlugin extends Plugin {
         presetArray: T[],
         presetType: string
     ): T {
-        const preset = presetArray.find(p => p.name === presetName);
+        const preset = presetArray.find(candidate => candidate.name === presetName);
         if (!preset) {
             console.warn(`${presetType} preset "${presetName}" not found, using default`);
             return presetArray[0];
@@ -1194,9 +1190,9 @@ export default class ImageConverterPlugin extends Plugin {
 
         // Following might be pointless, but lets do it still  - clear any ArrayBuffers or Blobs in memory
         if (this.temporaryBuffers) {
-            this.temporaryBuffers.forEach(buffer => {
-                buffer = null;
-            });
+            for (let i = 0; i < this.temporaryBuffers.length; i++) {
+                this.temporaryBuffers[i] = null;
+            }
             this.temporaryBuffers = [];
         }
     }
