@@ -60,15 +60,15 @@ export interface ToolPreset {
 
 
 enum ToolMode {
-    None,
-    Draw,
-    Text,
-    Arrow
+    NONE,
+    DRAW,
+    TEXT,
+    ARROW
 }
 
 export class ImageAnnotationModal extends Modal {
     private componentContainer = new Component();
-    private currentTool: ToolMode = ToolMode.None;
+    private currentTool: ToolMode = ToolMode.NONE;
     private canvas: Canvas;
     
     // UI Components
@@ -456,11 +456,11 @@ export class ImageAnnotationModal extends Modal {
 		});
 	
 		// Sort dominant colors by luminosity
-		const colorPairs = this.dominantColors.map((dominantColor, index) => ({
-			dominant: dominantColor,
-			complementary: this.complementaryColors[index][0],
-			luminosity: this.getLuminosity(dominantColor)
-		})).sort((a, b) => a.luminosity - b.luminosity);
+        const colorPairs = this.dominantColors.map((dominantColor, index) => ({
+            dominant: dominantColor,
+            complementary: this.complementaryColors[index][0],
+            luminosity: this.getLuminosity(dominantColor)
+        })).sort((left, right) => left.luminosity - right.luminosity);
 	
 		// Create dominant colors row
 		const dominantRow = swatchesContainer.createDiv('image-converter-annotation-tool-color-row');
@@ -482,8 +482,8 @@ export class ImageAnnotationModal extends Modal {
 			complementarySwatch.style.backgroundColor = pair.complementary;
 			complementarySwatch.setAttribute('title', pair.complementary);
 			this.componentContainer.registerDomEvent(complementarySwatch, 'click', () => {
-				const rgb = this.hslToRgb(pair.complementary);
-				const hex = this.rgbToHex(rgb.r, rgb.g, rgb.b);
+                const rgb = this.hslToRgb(pair.complementary);
+                const hex = this.rgbToHex(rgb.red, rgb.green, rgb.blue);
 				updateObjectColor(hex);
 			});
 		});
@@ -611,7 +611,7 @@ export class ImageAnnotationModal extends Modal {
 				top: y,
 				fontSize: 20,
 				fill: color,
-				backgroundColor: backgroundColor, // Apply background color
+                backgroundColor, // Apply background color
 				selectable: true,
 				evented: true,
 				editable: true,
@@ -682,7 +682,7 @@ export class ImageAnnotationModal extends Modal {
 		this.scope.register([], 'A', (evt: KeyboardEvent) => {
 			if (this.isTextEditing()) return true;
 			evt.preventDefault();
-			this.switchTool(this.currentTool === ToolMode.Arrow ? ToolMode.None : ToolMode.Arrow);
+            this.switchTool(this.currentTool === ToolMode.ARROW ? ToolMode.NONE : ToolMode.ARROW);
 			return false;
 		});
 	
@@ -758,7 +758,7 @@ export class ImageAnnotationModal extends Modal {
 		
 		// Enable the selected tool
 		switch (newTool) {
-			case ToolMode.Draw:
+            case ToolMode.DRAW:
 				this.isDrawingMode = true;
 				if (this.drawButton) this.drawButton.buttonEl.addClass('is-active');
 				if (this.canvas) {
@@ -770,7 +770,7 @@ export class ImageAnnotationModal extends Modal {
 				}
 				break;
 				
-			case ToolMode.Text:
+            case ToolMode.TEXT:
 				this.isTextMode = true;
 				if (this.textButton) this.textButton.buttonEl.addClass('is-active');
 				if (this.canvas) {
@@ -778,7 +778,7 @@ export class ImageAnnotationModal extends Modal {
 				}
 				break;
 				
-			case ToolMode.Arrow:
+            case ToolMode.ARROW:
 				this.isArrowMode = true;
 				if (this.arrowButton) this.arrowButton.buttonEl.addClass('is-active');
 				if (this.canvas) {
@@ -791,7 +791,7 @@ export class ImageAnnotationModal extends Modal {
 				}
 				break;
 				
-			case ToolMode.None:
+            case ToolMode.NONE:
 				if (this.canvas) {
 					this.canvas.isDrawingMode = false;
 				}
@@ -805,31 +805,31 @@ export class ImageAnnotationModal extends Modal {
 		const textBgControls = this.modalEl.querySelector('.text-background-controls');
 		if (textBgControls instanceof HTMLElement) {
 			textBgControls.style.display = 
-				newTool === ToolMode.Text ? 'flex' : 'none';
+                newTool === ToolMode.TEXT ? 'flex' : 'none';
 		}
 
 		// Show/hide preset buttons based on tool
 		const presetContainer = this.modalEl.querySelector('.image-converter-annotation-tool-preset-buttons');
 		if (presetContainer instanceof HTMLElement) {
-			presetContainer.style.display = newTool === ToolMode.None ? 'none' : 'flex';
+            presetContainer.style.display = newTool === ToolMode.NONE ? 'none' : 'flex';
 			this.updatePresetButtons();
 		}
 	}
 
 	private toggleDrawingMode(drawBtn?: ButtonComponent) {
-		const newTool = this.currentTool === ToolMode.Draw ? ToolMode.None : ToolMode.Draw;
+        const newTool = this.currentTool === ToolMode.DRAW ? ToolMode.NONE : ToolMode.DRAW;
 		this.switchTool(newTool);
 	}
 	
 	private toggleTextMode() {
-		const newTool = this.currentTool === ToolMode.Text ? ToolMode.None : ToolMode.Text;
+        const newTool = this.currentTool === ToolMode.TEXT ? ToolMode.NONE : ToolMode.TEXT;
 		this.switchTool(newTool);
 	}
 	
 
 
 	private toggleArrowMode(arrowBtn?: ButtonComponent) {
-		const newTool = this.currentTool === ToolMode.Arrow ? ToolMode.None : ToolMode.Arrow;
+        const newTool = this.currentTool === ToolMode.ARROW ? ToolMode.NONE : ToolMode.ARROW;
 		this.switchTool(newTool);
 	}
 
@@ -1220,7 +1220,7 @@ export class ImageAnnotationModal extends Modal {
 		
 		this.brushOpacities.forEach((opacity, index) => {
 			const button = new ButtonComponent(opacityButtonContainer)
-				.setButtonText((opacity * 100).toString() + '') // removed percentage from buttons
+                .setButtonText(String(opacity * 100)) // removed percentage from buttons
 				.onClick(() => {
 					this.currentOpacityIndex = index;
 					
@@ -1279,14 +1279,14 @@ export class ImageAnnotationModal extends Modal {
 	}
 
 	// Add this helper method to update rgba opacity
-	private updateRgbaOpacity(rgba: string, newOpacity: number): string {
-		const matches = rgba.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*[\d.]+)?\)/);
-		if (matches) {
-			const [, r, g, b] = matches;
-			return `rgba(${r}, ${g}, ${b}, ${newOpacity})`;
-		}
-		return rgba;
-	}
+    private updateRgbaOpacity(rgba: string, newOpacity: number): string {
+        const matches = rgba.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*[\d.]+)?\)/);
+        if (matches) {
+            const [, redStr, greenStr, blueStr] = matches;
+            return `rgba(${redStr}, ${greenStr}, ${blueStr}, ${newOpacity})`;
+        }
+        return rgba;
+    }
 
 
 	private createBlendModeButtons(container: HTMLElement) {
@@ -1297,28 +1297,31 @@ export class ImageAnnotationModal extends Modal {
 		// Create a dropdown container
 		const dropdownContainer = blendModesContainer.createDiv('dropdown-container');
 	
-		// Create friendly names mapping
-		const friendlyNames: Record<BlendMode, string> = {
-			'source-over': 'Normal',
-			'multiply': 'Multiply',
-			'screen': 'Screen',
-			'overlay': 'Overlay',
-			'darken': 'Darken',
-			'lighten': 'Lighten',
-			'color-dodge': 'Dodge',
-			'color-burn': 'Burn',
-			'hard-light': 'Hard Light',
-			'soft-light': 'Soft Light',
-			'difference': 'Difference',
-			'exclusion': 'Exclusion'
-		} as Record<BlendMode, string>;
+        // Friendly name resolver
+        const getFriendlyName = (mode: BlendMode): string => {
+            switch (mode) {
+                case 'source-over': return 'Normal';
+                case 'multiply': return 'Multiply';
+                case 'screen': return 'Screen';
+                case 'overlay': return 'Overlay';
+                case 'darken': return 'Darken';
+                case 'lighten': return 'Lighten';
+                case 'color-dodge': return 'Dodge';
+                case 'color-burn': return 'Burn';
+                case 'hard-light': return 'Hard Light';
+                case 'soft-light': return 'Soft Light';
+                case 'difference': return 'Difference';
+                case 'exclusion': return 'Exclusion';
+                default: return mode;
+            }
+        };
 	
 		// Create the dropdown
 		const dropdown = new DropdownComponent(dropdownContainer);
 		
 		// Add options to the dropdown
 		this.blendModes.forEach((mode) => {
-			dropdown.addOption(mode, friendlyNames[mode]);
+            dropdown.addOption(mode, getFriendlyName(mode));
 		});
 	
 		// Set initial value
@@ -1568,7 +1571,7 @@ export class ImageAnnotationModal extends Modal {
 		});
 		// Mouse down handler with improved state management
 		this.canvas.on('mouse:down', (opt) => {
-			const target = opt.target;
+            const { target } = opt;
 			// logState('mouse:down', target);
 			
 			if (target instanceof IText) {
@@ -1610,7 +1613,7 @@ export class ImageAnnotationModal extends Modal {
 				return;
 			}
 	
-			const target = opt.target;
+            const { target } = opt;
 			if (target instanceof IText) {
 				this.isTextEditingBlocked = false;
 				target.enterEditing();
@@ -1754,7 +1757,7 @@ export class ImageAnnotationModal extends Modal {
 	
 		if (e.selected.length === 0) return;
 	
-		const firstObject = e.selected[0];
+        const [firstObject] = e.selected;
 		if (firstObject instanceof IText) {
 			// Only update if the color is actually defined
 			const color = firstObject.fill as string;
@@ -1809,36 +1812,38 @@ export class ImageAnnotationModal extends Modal {
 	
 		this.canvas.requestRenderAll();
 	}
-
-	private rgbaToHex(rgba: string): string {
-		const rgbaMatch = rgba.match(/rgba?\((\d+), (\d+), (\d+)/);
-		if (!rgbaMatch) return '#ff0000'; // Default to white if parsing fails -> RED COLOR TEXT
+    private rgbaToHex(rgba: string): string {
+        const rgbaMatch = rgba.match(/rgba?\((\d+), (\d+), (\d+)\)/);
+        if (!rgbaMatch) return '#ff0000'; // Default to white if parsing fails -> RED COLOR TEXT
+        
+        const [, red, green, blue] = rgbaMatch.map(Number); // Skip the first element (full match)
+        return `#${((1 << 24) + (red << 16) + (green << 8) + blue).toString(16).slice(1)}`;
+    }
 	
-		const [, r, g, b] = rgbaMatch.map(Number); // Skip the first element (full match)
-		return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
-	}
+    private rgbaToHexWithAlpha(rgba: string): { hex: string; alpha: number } {
+        const rgbaMatch = rgba.match(/rgba\((\d+), (\d+), (\d+), ([0-9.]+)\)/);
+        if (!rgbaMatch) return { hex: '#ffffff', alpha: 1 }; // Default to white and opaque
+        
+        const red = Number(rgbaMatch[1]);
+        const green = Number(rgbaMatch[2]);
+        const blue = Number(rgbaMatch[3]);
+        const alpha = parseFloat(rgbaMatch[4]);
+        const hex = `#${((1 << 24) + (red << 16) + (green << 8) + blue).toString(16).slice(1)}`;
+        return { hex, alpha };
+    }
 	
-	private rgbaToHexWithAlpha(rgba: string): { hex: string; alpha: number } {
-		const rgbaMatch = rgba.match(/rgba\((\d+), (\d+), (\d+), ([0-9.]+)\)/);
-		if (!rgbaMatch) return { hex: '#ffffff', alpha: 1 }; // Default to white and opaque
-	
-		const [, r, g, b, a] = rgbaMatch.map((v, i) => (i === 4 ? parseFloat(v) : Number(v))); // Skip first element
-		const hex = `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
-		return { hex, alpha: a };
-	}
-	
-	private hexToRgba(hex: string, opacity: number): string {
-		// Remove the hash if present
-		hex = hex.replace('#', '');
-		
-		// Parse the hex values
-		const r = parseInt(hex.substring(0, 2), 16);
-		const g = parseInt(hex.substring(2, 4), 16);
-		const b = parseInt(hex.substring(4, 6), 16);
-		
-		// Return rgba string
-		return `rgba(${r}, ${g}, ${b}, ${opacity})`;
-	}
+    private hexToRgba(hex: string, opacity: number): string {
+        // Remove the hash if present
+        const sanitizedHex = hex.replace('#', '');
+        
+        // Parse the hex values
+        const red = parseInt(sanitizedHex.substring(0, 2), 16);
+        const green = parseInt(sanitizedHex.substring(2, 4), 16);
+        const blue = parseInt(sanitizedHex.substring(4, 6), 16);
+        
+        // Return rgba string
+        return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
+    }
 	private async analyzeImageColors(img: HTMLImageElement): Promise<void> {
         // Create a temporary canvas for analysis
         const tempCanvas = document.createElement('canvas');
@@ -1861,27 +1866,27 @@ export class ImageAnnotationModal extends Modal {
 
         // Sample every 4th pixel for performance
         for (let i = 0; i < pixels.length; i += 16) {
-            const r = pixels[i];
-            const g = pixels[i + 1];
-            const b = pixels[i + 2];
-            const a = pixels[i + 3];
+            const red = pixels[i];
+            const green = pixels[i + 1];
+            const blue = pixels[i + 2];
+            const alpha = pixels[i + 3];
 
             // Skip transparent pixels
-            if (a < 128) continue;
+            if (alpha < 128) continue;
 
             // Quantize colors to reduce the number of unique colors
-            const quantizedR = Math.round(r / 32) * 32;
-            const quantizedG = Math.round(g / 32) * 32;
-            const quantizedB = Math.round(b / 32) * 32;
+            const quantizedRed = Math.round(red / 32) * 32;
+            const quantizedGreen = Math.round(green / 32) * 32;
+            const quantizedBlue = Math.round(blue / 32) * 32;
 
-            const hex = this.rgbToHex(quantizedR, quantizedG, quantizedB);
+            const hex = this.rgbToHex(quantizedRed, quantizedGreen, quantizedBlue);
             colorMap.set(hex, (colorMap.get(hex) || 0) + 1);
         }
 
         // Convert map to array and sort by frequency
         const sortedColors = Array.from(colorMap.entries())
             .map(([color, count]) => ({ color, count }))
-            .sort((a, b) => b.count - a.count)
+            .sort((entryA, entryB) => entryB.count - entryA.count)
             .slice(0, 6)
             .map(item => item.color);
 
@@ -1891,104 +1896,107 @@ export class ImageAnnotationModal extends Modal {
         // Create color swatches
         this.createColorSwatches();
     }
-	private getLuminosity(color: string): number {
-		const rgb = this.hexToRgb(color);
-		// Using relative luminance formula
-		return 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
-	}
-    private rgbToHex(r: number, g: number, b: number): string {
-        return '#' + [r, g, b].map(x => {
-            const hex = x.toString(16);
-            return hex.length === 1 ? '0' + hex : hex;
-        }).join('');
+    private getLuminosity(color: string): number {
+        const rgb = this.hexToRgb(color);
+        // Using relative luminance formula
+        return 0.299 * rgb.red + 0.587 * rgb.green + 0.114 * rgb.blue;
     }
-    private hexToRgb(hex: string): { r: number, g: number, b: number } {
+    private rgbToHex(red: number, green: number, blue: number): string {
+        const hex = [red, green, blue]
+            .map((x) => x.toString(16).padStart(2, '0'))
+            .join('');
+        return `#${hex}`;
+    }
+    private hexToRgb(hex: string): { red: number, green: number, blue: number } {
         const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
         return result ? {
-            r: parseInt(result[1], 16),
-            g: parseInt(result[2], 16),
-            b: parseInt(result[3], 16)
-        } : { r: 0, g: 0, b: 0 };
+            red: parseInt(result[1], 16),
+            green: parseInt(result[2], 16),
+            blue: parseInt(result[3], 16)
+        } : { red: 0, green: 0, blue: 0 };
     }
-	private getComplementaryColors(hex: string): string[] {
-		const rgb = this.hexToRgb(hex);
-		const hsl = this.rgbToHsl(rgb.r, rgb.g, rgb.b);
-	
-		// Return only the complementary color at 180 degrees
-		return [this.hslToString((hsl.h + 180) % 360, hsl.s, hsl.l)];
-	}
-    private rgbToHsl(r: number, g: number, b: number): { h: number, s: number, l: number } {
-        r /= 255;
-        g /= 255;
-        b /= 255;
+    private getComplementaryColors(hex: string): string[] {
+        const rgb = this.hexToRgb(hex);
+        const hsl = this.rgbToHsl(rgb.red, rgb.green, rgb.blue);
+        
+        // Return only the complementary color at 180 degrees
+        return [this.hslToString((hsl.hue + 180) % 360, hsl.saturation, hsl.lightness)];
+    }
+    private rgbToHsl(red: number, green: number, blue: number): { hue: number, saturation: number, lightness: number } {
+        const rNorm = red / 255;
+        const gNorm = green / 255;
+        const bNorm = blue / 255;
 
-        const max = Math.max(r, g, b);
-        const min = Math.min(r, g, b);
-        let h = 0;
-        let s = 0;
-        const l = (max + min) / 2;
+        const max = Math.max(rNorm, gNorm, bNorm);
+        const min = Math.min(rNorm, gNorm, bNorm);
+        let hue = 0;
+        let saturation = 0;
+        const lightness = (max + min) / 2;
 
         if (max !== min) {
-            const d = max - min;
-            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+            const delta = max - min;
+            saturation = lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
 
             switch (max) {
-                case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-                case g: h = (b - r) / d + 2; break;
-                case b: h = (r - g) / d + 4; break;
+                case rNorm: hue = (gNorm - bNorm) / delta + (gNorm < bNorm ? 6 : 0); break;
+                case gNorm: hue = (bNorm - rNorm) / delta + 2; break;
+                case bNorm: hue = (rNorm - gNorm) / delta + 4; break;
             }
 
-            h *= 60;
+            hue *= 60;
         }
 
-        // Convert s and l to percentages
-        s = s * 100;
-        const lPercent = l * 100;
+        // Convert saturation and lightness to percentages
+        const saturationPercent = saturation * 100;
+        const lightnessPercent = lightness * 100;
 
-        return { h, s: s, l: lPercent };
+        return { hue, saturation: saturationPercent, lightness: lightnessPercent };
     }
-	private hslToString(h: number, s: number, l: number): string {
-        // Ensure h is between 0 and 360
-        h = h % 360;
-        if (h < 0) h += 360;
+    private hslToString(hue: number, saturation: number, lightness: number): string {
+        // Ensure hue is between 0 and 360
+        let hueNormalized = hue % 360;
+        if (hueNormalized < 0) hueNormalized += 360;
 
-        // Keep s and l as percentages
-        return `hsl(${Math.round(h)}, ${Math.round(s)}%, ${Math.round(l)}%)`;
+        // Keep saturation and lightness as percentages
+        return `hsl(${Math.round(hueNormalized)}, ${Math.round(saturation)}%, ${Math.round(lightness)}%)`;
     }
-	private hslToRgb(hslStr: string): { r: number, g: number, b: number } {
+    private hslToRgb(hslStr: string): { red: number, green: number, blue: number } {
         const matches = hslStr.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
-        if (!matches) return { r: 0, g: 0, b: 0 };
+        if (!matches) return { red: 0, green: 0, blue: 0 };
 
-        const h = parseInt(matches[1]) / 360;
-        const s = parseInt(matches[2]) / 100;
-        const l = parseInt(matches[3]) / 100;
+        const hue = parseInt(matches[1]) / 360;
+        const saturation = parseInt(matches[2]) / 100;
+        const lightness = parseInt(matches[3]) / 100;
 
-        let r, g, b;
+        let redLinear: number;
+        let greenLinear: number;
+        let blueLinear: number;
 
-        if (s === 0) {
-            r = g = b = l;
+        if (saturation === 0) {
+            redLinear = greenLinear = blueLinear = lightness;
         } else {
-            const hue2rgb = (p: number, q: number, t: number) => {
-                if (t < 0) t += 1;
-                if (t > 1) t -= 1;
-                if (t < 1/6) return p + (q - p) * 6 * t;
-                if (t < 1/2) return q;
-                if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
-                return p;
+            const hue2rgb = (pComp: number, qComp: number, tComp: number) => {
+                let tVal = tComp;
+                if (tVal < 0) tVal += 1;
+                if (tVal > 1) tVal -= 1;
+                if (tVal < 1/6) return pComp + (qComp - pComp) * 6 * tVal;
+                if (tVal < 1/2) return qComp;
+                if (tVal < 2/3) return pComp + (qComp - pComp) * (2/3 - tVal) * 6;
+                return pComp;
             };
 
-            const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-            const p = 2 * l - q;
+            const qComp = lightness < 0.5 ? lightness * (1 + saturation) : lightness + saturation - lightness * saturation;
+            const pComp = 2 * lightness - qComp;
 
-            r = hue2rgb(p, q, h + 1/3);
-            g = hue2rgb(p, q, h);
-            b = hue2rgb(p, q, h - 1/3);
+            redLinear = hue2rgb(pComp, qComp, hue + 1/3);
+            greenLinear = hue2rgb(pComp, qComp, hue);
+            blueLinear = hue2rgb(pComp, qComp, hue - 1/3);
         }
 
         return {
-            r: Math.round(r * 255),
-            g: Math.round(g * 255),
-            b: Math.round(b * 255)
+            red: Math.round(redLinear * 255),
+            green: Math.round(greenLinear * 255),
+            blue: Math.round(blueLinear * 255)
         };
     }
 
@@ -2838,10 +2846,10 @@ export class ImageAnnotationModal extends Modal {
 						);
 						
 						const blob = await new Promise<Blob>((resolve, reject) => {
-							tempCanvas.toBlob((b: Blob | null) => {
-								if (b) resolve(b);
-								else reject(new Error('Blob creation failed'));
-							}, mimeType, 1);
+                        tempCanvas.toBlob((blobValue: Blob | null) => {
+                            if (blobValue) resolve(blobValue);
+                            else reject(new Error('Blob creation failed'));
+                        }, mimeType, 1);
 						});
 						arrayBuffer = await blob.arrayBuffer();
 					}
@@ -3092,7 +3100,7 @@ class ArrowBrush extends PencilBrush {
         if (points.length <= 2) return points;
 
         const simplified: Point[] = [points[0]];
-        let prevPoint = points[0];
+        let [prevPoint] = points;
 
         for (let i = 1; i < points.length - 1; i++) {
             const point = points[i];
@@ -3204,7 +3212,7 @@ class ArrowBrush extends PencilBrush {
 // Helper function to convert base64 to ArrayBuffer
 function base64ToArrayBuffer(base64: string): ArrayBuffer {
     const binary = atob(base64.split(',')[1]);
-    const length = binary.length;
+    const { length } = binary;
     const buffer = new ArrayBuffer(length);
     const view = new Uint8Array(buffer);
     
