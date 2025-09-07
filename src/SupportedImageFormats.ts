@@ -195,25 +195,32 @@ export class SupportedImageFormats {
             // Basic mime type checking based on file header
             if (headerHex.startsWith("89504e47")) { // PNG
                 return "image/png";
-            } else if (headerHex.startsWith("47494638")) { // GIF
+            }
+            if (headerHex.startsWith("47494638")) { // GIF
                 return "image/gif";
-            } else if (headerHex.startsWith("ffd8ffe")) { // JPEG (starts with ffd8ffe and then can have 0, 1, 2, 3, or 8)
+            }
+            if (headerHex.startsWith("ffd8ffe")) { // JPEG (starts with ffd8ffe and then can have 0, 1, 2, 3, or 8)
                 return "image/jpeg";
-            } else if (headerHex.startsWith('424d')) { // BMP
+            }
+            if (headerHex.startsWith('424d')) { // BMP
                 return 'image/bmp';
-            } else if (headerHex.startsWith('000000') && headerHex.substring(8, 16) === '66747970') {// HEIC/HEIF & AVIF - ftyp check
+            }
+            if (headerHex.startsWith('000000') && headerHex.substring(8, 16) === '66747970') {// HEIC/HEIF & AVIF - ftyp check
                 const ftyp = this.getFtyp(arrayBuffer);
 
                 if (ftyp !== null) {
                     if (['heic', 'heix', 'hevc', 'hevx', 'mif1', 'msf1'].includes(ftyp)) {
                         return 'image/heic'; // It's HEIC/HEIF
-                    } else if (['avif', 'avis'].includes(ftyp)) {
+                    }
+                    if (['avif', 'avis'].includes(ftyp)) {
                         return 'image/avif'; // It's AVIF
                     }
                 }
-            } else if (headerHex.startsWith('4949') || headerHex.startsWith('4d4d')) { // TIFF (II or MM)
+            }
+            if (headerHex.startsWith('4949') || headerHex.startsWith('4d4d')) { // TIFF (II or MM)
                 return 'image/tiff';
-            } else if (headerHex.startsWith('52494646') && headerHex.substring(8, 12) === '57454250') { // WEBP (RIFF + WEBP)
+            }
+            if (headerHex.startsWith('52494646') && headerHex.substring(8, 12) === '57454250') { // WEBP (RIFF + WEBP)
                 return 'image/webp';
             }
 
