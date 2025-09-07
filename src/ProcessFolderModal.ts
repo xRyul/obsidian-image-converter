@@ -15,15 +15,14 @@ import ImageConverterPlugin from './main';
 import { BatchImageProcessor } from './BatchImageProcessor';
 
 enum ImageSource {
-    Direct = "direct",
-    Linked = "linked",
+    DIRECT = "direct",
+    LINKED = "linked",
 }
-
 export class ProcessFolderModal extends Modal {
     private recursive = false;
 
     // --- Image Source Enum ---
-    private selectedImageSource: ImageSource = ImageSource.Direct; // Default to Direct
+    private selectedImageSource: ImageSource = ImageSource.DIRECT; // Default to Direct
 
     // --- Settings UI Elements ---
     imageSourceSetting: Setting | null = null;
@@ -171,10 +170,10 @@ export class ProcessFolderModal extends Modal {
         // Function to update the description text
         const updateDescription = (source: ImageSource | null) => {
             let descText = "No selection."; // Default text
-            if (source === ImageSource.Direct) {
+            if (source === ImageSource.DIRECT) {
                 descText =
                     "Processing images directly in the folder.";
-            } else if (source === ImageSource.Linked) {
+            } else if (source === ImageSource.LINKED) {
                 descText =
                     "Processing images linked in notes or Canvas files.";
             }
@@ -229,8 +228,8 @@ export class ProcessFolderModal extends Modal {
 
         // Store button references for updating later
         const buttonRefs: Record<ImageSource, any> = {
-            [ImageSource.Direct]: null,
-            [ImageSource.Linked]: null,
+            [ImageSource.DIRECT]: null,
+            [ImageSource.LINKED]: null,
         };
 
         // Function to update the icons of the radio buttons
@@ -251,20 +250,20 @@ export class ProcessFolderModal extends Modal {
             .setName("Direct images")
             .setDesc("Images directly in the folder")
             .addExtraButton((button) => {
-                buttonRefs[ImageSource.Direct] = button;
+                buttonRefs[ImageSource.DIRECT] = button;
                 button
                     .setIcon(
-                        this.selectedImageSource === ImageSource.Direct
+                        this.selectedImageSource === ImageSource.DIRECT
                             ? "lucide-check-circle"
                             : "lucide-circle"
                     )
                     .setTooltip(
-                        this.selectedImageSource === ImageSource.Direct
+                        this.selectedImageSource === ImageSource.DIRECT
                             ? "Selected"
                             : "Select"
                     )
                     .onClick(async () => {
-                        this.selectedImageSource = ImageSource.Direct;
+                        this.selectedImageSource = ImageSource.DIRECT;
                         if (this.updateImageSourceDescription) {
                             this.updateImageSourceDescription(
                                 this.selectedImageSource
@@ -279,20 +278,20 @@ export class ProcessFolderModal extends Modal {
             .setName("Linked images")
             .setDesc("Images linked in notes or Canvas")
             .addExtraButton((button) => {
-                buttonRefs[ImageSource.Linked] = button;
+                buttonRefs[ImageSource.LINKED] = button;
                 button
                     .setIcon(
-                        this.selectedImageSource === ImageSource.Linked
+                        this.selectedImageSource === ImageSource.LINKED
                             ? "lucide-check-circle"
                             : "lucide-circle"
                     )
                     .setTooltip(
-                        this.selectedImageSource === ImageSource.Linked
+                        this.selectedImageSource === ImageSource.LINKED
                             ? "Selected"
                             : "Select"
                     )
                     .onClick(async () => {
-                        this.selectedImageSource = ImageSource.Linked;
+                        this.selectedImageSource = ImageSource.LINKED;
                         if (this.updateImageSourceDescription) {
                             this.updateImageSourceDescription(
                                 this.selectedImageSource
@@ -780,13 +779,13 @@ export class ProcessFolderModal extends Modal {
                 }
             } else if (file instanceof TFile) {
                 if (
-                    selectedImageSource === ImageSource.Direct &&
+                    selectedImageSource === ImageSource.DIRECT &&
                     this.plugin.supportedImageFormats.isSupported(undefined, file.name)
                 ) {
                     // Direct image and direct source is selected
                     directImages.push(file);
                 } else if (
-                    selectedImageSource === ImageSource.Linked &&
+                    selectedImageSource === ImageSource.LINKED &&
                     file.extension === "md"
                 ) {
                     // Linked image in Markdown and linked source is selected
@@ -794,7 +793,7 @@ export class ProcessFolderModal extends Modal {
                         await this.getImagesFromMarkdownFile(file);
                     linkedImages.push(...linkedImagesInMarkdown);
                 } else if (
-                    selectedImageSource === ImageSource.Linked &&
+                    selectedImageSource === ImageSource.LINKED &&
                     file.extension === "canvas"
                 ) {
                     // Linked image in Canvas and linked source is selected
@@ -822,13 +821,13 @@ export class ProcessFolderModal extends Modal {
         console.log("Getting images from Markdown file:", markdownFile.path);
         const images: TFile[] = [];
         const content = await this.app.vault.read(markdownFile);
-        const vault = this.app.vault;
+        const { vault } = this.app;
 
         // 1. Handle WikiLinks
         const wikiRegex = /!\[\[([^\]]+?)(?:\|[^\]]+?)?\]\]/g; // Matches ![[image.png]] and ![[image.png|141]]
         let match;
         while ((match = wikiRegex.exec(content)) !== null) {
-            const linkedFileName = match[1];
+            const [, linkedFileName] = match;
             const linkedFile = this.app.metadataCache.getFirstLinkpathDest(
                 linkedFileName,
                 markdownFile.path
@@ -841,12 +840,12 @@ export class ProcessFolderModal extends Modal {
         // 2. Handle Markdown Links
         const markdownImageRegex = /!\[.*?\]\(([^)]+?)\)/g; // Matches ![alt text](image.png)
         while ((match = markdownImageRegex.exec(content)) !== null) {
-            const imagePath = match[1];
+            const [, imagePath] = match;
             if (!imagePath.startsWith("http")) {
                 // Skip external URLs
                 // Resolve the relative path of the image from the root of the vault
                 const absoluteImagePath = normalizePath(
-                    vault.getRoot().path + "/" + imagePath
+                    `${vault.getRoot().path}/${imagePath}`
                 );
 
                 const linkedImageFile =
@@ -867,7 +866,7 @@ export class ProcessFolderModal extends Modal {
 
         console.log(
             "Images found in Markdown file:",
-            images.map((f) => f.path)
+            images.map((file) => file.path)
         );
         return images;
     }
@@ -896,11 +895,10 @@ export class ProcessFolderModal extends Modal {
     // Helper function to get the full path relative to a folder
     getFullPath(parentFolder: TFolder | null, relativePath: string): string {
         if (parentFolder) {
-            return normalizePath(parentFolder.path + "/" + relativePath);
-        } else {
-            // If parentFolder is null, the file is in the root of the vault
-            return normalizePath(relativePath);
+            return normalizePath(`${parentFolder.path}/${relativePath}`);
         }
+        // If parentFolder is null, the file is in the root of the vault
+        return normalizePath(relativePath);
     }
 
     async getImagesFromCanvasFile(file: TFile): Promise<TFile[]> {
