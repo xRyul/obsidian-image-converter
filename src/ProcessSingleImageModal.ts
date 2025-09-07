@@ -435,11 +435,11 @@ export class ProcessSingleImageModal extends Modal {
             const destinationPath: string = this.imageFile.parent?.path || "";
             let newFilename: string = (this.modalSettings.outputFormat === "NONE" || this.modalSettings.outputFormat === "ORIGINAL")
                 ? this.imageFile.name
-                : this.imageFile.name.substring(0, this.imageFile.name.lastIndexOf(".")) + "." + this.modalSettings.outputFormat.toLowerCase();
+                : `${this.imageFile.name.substring(0, this.imageFile.name.lastIndexOf("."))}.${this.modalSettings.outputFormat.toLowerCase()}`;
 
             //  Handle PNGQuant extension
             if (this.modalSettings.outputFormat === "PNGQUANT") {
-                newFilename = this.imageFile.name.substring(0, this.imageFile.name.lastIndexOf(".")) + ".png"; // Force .png
+                newFilename = `${this.imageFile.name.substring(0, this.imageFile.name.lastIndexOf("."))}.png`; // Force .png
             }
 
             const fullPath: string = this.plugin.folderAndFilenameManagement.combinePath(destinationPath, newFilename);
@@ -574,7 +574,7 @@ export class ProcessSingleImageModal extends Modal {
             // --- Update Link in Active Note ---
             const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
             if (activeView) {
-                const editor = activeView.editor;
+                const { editor } = activeView;
                 const fileContent = editor.getValue();
 
                 const escapedOriginalName = this.imageFile.name.replace(/[[\]]/g, '\\$&');
