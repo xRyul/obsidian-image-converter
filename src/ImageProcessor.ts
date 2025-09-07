@@ -124,7 +124,7 @@ export class ImageProcessor {
         settings?: ImageConverterSettings
     ): Promise<ArrayBuffer> {
         this.preset = preset; // Store the preset
-        this.settings = settings ? settings : DEFAULT_SETTINGS;
+        this.settings = settings ?? DEFAULT_SETTINGS;
 
         try {
             // --- Handle NONE format ---
@@ -138,7 +138,8 @@ export class ImageProcessor {
                     desiredLongestEdge,
                     enlargeOrReduce
                 );
-            } else if (format === 'NONE') {
+            }
+            if (format === 'NONE') {
                 // No conversion or compression or resizing
                 return file.arrayBuffer();
             }
@@ -297,9 +298,9 @@ export class ImageProcessor {
 
             // Convert using heic-to
             return await heicTo({
-                blob: blob,
+                blob,
                 type: outputMimeType,
-                quality: quality
+                quality
             });
         } catch (error) {
             console.error('Error converting HEIC:', error);
@@ -469,7 +470,7 @@ export class ImageProcessor {
                 // For images with transparency
                 let filterChain = 'format=rgba';
                 if (scaleFilter) {
-                    filterChain += ',' + scaleFilter;
+                    filterChain += `,${scaleFilter}`;
                 }
 
                 args = [
@@ -490,7 +491,7 @@ export class ImageProcessor {
                 // For images without transparency
                 let filterChain = 'format=yuv420p';
                 if (scaleFilter) {
-                    filterChain += ',' + scaleFilter;
+                    filterChain += `,${scaleFilter}`;
                 }
 
                 args = [
@@ -543,7 +544,7 @@ export class ImageProcessor {
                     const errorMessage = `FFmpeg failed with code ${code}: ${errorData}`;
                     console.error(errorMessage);
                     // Clean up temp file on error
-                    try { await fs.unlink(tempFilePath); } catch (e) { /* ignore errors during cleanup */ }
+                    try { await fs.unlink(tempFilePath); } catch { /* ignore errors during cleanup */ }
                     reject(new Error(errorMessage));
                     return;
                 }
@@ -599,7 +600,7 @@ export class ImageProcessor {
 
                 // Get image data and check for non-255 alpha values
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                const data = imageData.data;
+                const { data } = imageData;
 
                 for (let i = 3; i < data.length; i += 4) {
                     if (data[i] < 255) {
@@ -864,7 +865,7 @@ export class ImageProcessor {
             ].filter(result => result.size > 0);
 
             // Sort by size
-            results.sort((a, b) => a.size - b.size);
+            results.sort((left, right) => left.size - right.size);
 
             // If we don't allow larger files, filter out results larger than original
             // if (!allowLargerFiles) {
@@ -1036,7 +1037,7 @@ export class ImageProcessor {
             ].filter(result => result.size > 0);
 
             // Sort by size
-            results.sort((a, b) => a.size - b.size);
+            results.sort((left, right) => left.size - right.size);
 
             // If we don't allow larger files, filter out results larger than original
             // if (!allowLargerFiles) {
@@ -1217,7 +1218,7 @@ export class ImageProcessor {
             // Filter out empty results and sort by size
             const validResults = results
                 .filter(result => result.size > 0)
-                .sort((a, b) => a.size - b.size);
+                .sort((left, right) => left.size - right.size);
 
             // If we don't allow larger files, filter out results larger than original
             // if (!allowLargerFiles) {
@@ -1633,16 +1634,16 @@ export class ImageProcessor {
         canvas.width = imageData.width;
         canvas.height = imageData.height;
         ctx.putImageData(imageData, 0, 0);
-        const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const numColors = Math.pow(256, colorDepth);
         const reducedData = new Uint8ClampedArray(data.length);
         for (let i = 0; i < data.length; i += 4) {
-            const r = data[i];
-            const g = data[i + 1];
-            const b = data[i + 2];
-            const reducedR = Math.round(r / (256 / numColors)) * (256 / numColors);
-            const reducedG = Math.round(g / (256 / numColors)) * (256 / numColors);
-            const reducedB = Math.round(b / (256 / numColors)) * (256 / numColors);
+            const red = data[i];
+            const green = data[i + 1];
+            const blue = data[i + 2];
+            const reducedR = Math.round(red / (256 / numColors)) * (256 / numColors);
+            const reducedG = Math.round(green / (256 / numColors)) * (256 / numColors);
+            const reducedB = Math.round(blue / (256 / numColors)) * (256 / numColors);
             reducedData[i] = reducedR;
             reducedData[i + 1] = reducedG;
             reducedData[i + 2] = reducedB;
@@ -1659,7 +1660,7 @@ export class ImageProcessor {
      */
     private base64ToArrayBuffer(base64: string): ArrayBuffer {
         const binary = atob(base64.split(',')[1]);
-        const length = binary.length;
+        const { length } = binary;
         const buffer = new ArrayBuffer(length);
         const view = new Uint8Array(buffer);
 
