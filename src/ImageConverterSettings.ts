@@ -379,8 +379,8 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
     },
 
     isImageAlignmentEnabled: true,
-    imageAlignment_cacheCleanupInterval: 3600000,
-    imageAlignment_cacheLocation: 'plugin',
+    ["imageAlignment_cacheCleanupInterval"]: 3600000,
+    ["imageAlignment_cacheLocation"]: 'plugin',
 
     isDragResizeEnabled: true,
     isScrollResizeEnabled: true,
@@ -662,7 +662,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 dropdown.onChange(async (value) => {
                     this.plugin.settings.selectedGlobalPreset = value;
                     if (value) {
-                        const selectedPreset = this.plugin.settings.globalPresets.find((p) => p.name === value);
+                        const selectedPreset = this.plugin.settings.globalPresets.find((presetItem) => presetItem.name === value);
                         if (selectedPreset) {
                             this.plugin.settings.selectedFolderPreset = selectedPreset.folderPreset;
                             this.plugin.settings.selectedFilenamePreset = selectedPreset.filenamePreset;
@@ -721,7 +721,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         "Delete",
                         async () => {
                             this.plugin.settings.globalPresets = this.plugin.settings.globalPresets.filter(
-                                (p) => p.name !== this.plugin.settings.selectedGlobalPreset
+                                (presetItem) => presetItem.name !== this.plugin.settings.selectedGlobalPreset
                             );
                             this.plugin.settings.selectedGlobalPreset = ""; // Reset selection
                             await this.plugin.saveSettings();
@@ -811,7 +811,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 )
                 .addDropdown(dropdown => dropdown
                     .addOptions({
-                        ".obsidian": "Within .obsidian folder (syncable)",
+                        [".obsidian"]: "Within .obsidian folder (syncable)",
                         "plugin": "Within plugin folder (not syncable)",
                     })
                     .setValue(this.plugin.settings.imageAlignment_cacheLocation)
@@ -1139,11 +1139,11 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                     dropdown.addOptions({
                         "normal": "Normal",
                         "bold": "Bold",
-                        "300": "Light",
-                        "400": "Regular",
-                        "500": "Medium",
-                        "600": "Semi-bold",
-                        "700": "Bold"
+                        ["300"]: "Light",
+                        ["400"]: "Regular",
+                        ["500"]: "Medium",
+                        ["600"]: "Semi-bold",
+                        ["700"]: "Bold"
                     })
                         .setValue(this.plugin.settings.captionFontWeight)
                         .onChange(async (value) => {
@@ -1472,11 +1472,11 @@ export class ImageConverterSettingTab extends PluginSettingTab {
     >(preset: T): string {
         if ('type' in preset) { // Check if the property exists to narrow down the type
             return `${preset.name}-${preset.type}`;
-        } else if ('linkFormat' in preset) {
-            return `${preset.name}-${preset.linkFormat}`;
-        } else {
-            return `${preset.name}`;
         }
+        if ('linkFormat' in preset) {
+            return `${preset.name}-${preset.linkFormat}`;
+        }
+        return `${preset.name}`;
     }
 
     getTabContentWrapper(): HTMLElement {
@@ -1569,24 +1569,24 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         async () => {
                             if (activePresetSetting === "selectedFolderPreset") {
                                 this.plugin.settings.folderPresets = this.plugin.settings.folderPresets.filter(
-                                    (p) => p.name !== preset.name
+                                    (presetItem) => presetItem.name !== preset.name
                                 );
                                 this.plugin.settings.selectedFolderPreset = DEFAULT_SETTINGS.selectedFolderPreset;
                             } else if (activePresetSetting === "selectedFilenamePreset") {
                                 this.plugin.settings.filenamePresets = this.plugin.settings.filenamePresets.filter(
-                                    (p) => p.name !== preset.name
+                                    (presetItem) => presetItem.name !== preset.name
                                 );
                                 this.plugin.settings.selectedFilenamePreset = DEFAULT_SETTINGS.selectedFilenamePreset;
                             } else if (activePresetSetting === "selectedConversionPreset") {
                                 this.plugin.settings.conversionPresets = this.plugin.settings.conversionPresets.filter(
-                                    (p) => p.name !== preset.name
+                                    (presetItem) => presetItem.name !== preset.name
                                 );
                                 this.plugin.settings.selectedConversionPreset = DEFAULT_SETTINGS.selectedConversionPreset;
                             } else if (activePresetSetting === "selectedLinkFormatPreset") {
-                                this.plugin.settings.linkFormatSettings.linkFormatPresets =
-                                    this.plugin.settings.linkFormatSettings.linkFormatPresets.filter(
-                                        (p) => p.name !== preset.name
-                                    );
+                                    this.plugin.settings.linkFormatSettings.linkFormatPresets =
+                                        this.plugin.settings.linkFormatSettings.linkFormatPresets.filter(
+                                            (presetItem) => presetItem.name !== preset.name
+                                        );
                                 if (this.plugin.settings.linkFormatSettings.selectedLinkFormatPreset === preset.name) {
                                     this.plugin.settings.linkFormatSettings.selectedLinkFormatPreset =
                                         DEFAULT_SETTINGS.linkFormatSettings.selectedLinkFormatPreset;
@@ -1594,7 +1594,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                             } else if (activePresetSetting === "selectedResizePreset") { // Add this case
                                 this.plugin.settings.nonDestructiveResizeSettings.resizePresets =
                                     this.plugin.settings.nonDestructiveResizeSettings.resizePresets.filter(
-                                        (p) => p.name !== preset.name
+                                        (presetItem) => presetItem.name !== preset.name
                                     );
                                 // Reset to default if the deleted preset was the active one
                                 if (this.plugin.settings.nonDestructiveResizeSettings.selectedResizePreset === preset.name) {
@@ -2524,7 +2524,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         const table = content.createEl("table", { cls: "image-converter-format-examples-table" });
 
         const buildExample = (format: PathFormat) => {
-            const linkFormat = preset.linkFormat;
+            const { linkFormat } = preset;
             switch (format) {
                 case "shortest":
                     return linkFormat === "wikilink" ? "![[image.jpg]]" : "![](image.jpg)";
@@ -2581,7 +2581,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         const resultValue = result.createEl("div", { cls: "image-converter-result-value" });
 
         const updateResult = () => {
-            const linkFormat = preset.linkFormat;
+            const { linkFormat } = preset;
 
             // Clear previous content first
             resultValue.empty();
@@ -2913,13 +2913,15 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         const fragment = document.createDocumentFragment();
 
         const addLine = (text: string) => {
-            fragment.appendChild(createEl("p", { text }));
+            const paragraphEl = document.createElement("p");
+            paragraphEl.textContent = text;
+            fragment.appendChild(paragraphEl);
         };
 
         // Store values in variables before the switch statement
         const widthValue = `${preset.width}${preset.resizeUnits === "percentage" ? "%" : "px"}`;
         const heightValue = `${preset.height}${preset.resizeUnits === "percentage" ? "%" : "px"}`;
-        const customValue = preset.customValue;
+        const { customValue } = preset;
         const longestEdgeValue = `${preset.longestEdge}${preset.resizeUnits === "percentage" ? "%" : "px"}`;
         const shortestEdgeValue = `${preset.shortestEdge}${preset.resizeUnits === "percentage" ? "%" : "px"}`;
         const editorMaxWidthValue = `${preset.editorMaxWidthValue}${preset.resizeUnits === "percentage" ? "%" : "px"}`;
@@ -2993,11 +2995,11 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         "width": "Width",
                         "height": "Height",
                         "both": "WidthxHeight (Custom)",
-                        "longest-edge": "Longest edge",
-                        "shortest-edge": "Shortest edge",
-                        "original-width": "Apply original image width",
-                        "original-height": "Apply original image height",
-                        "editor-max-width": "Fit editor max-width"
+                        ["longest-edge"]: "Longest edge",
+                        ["shortest-edge"]: "Shortest edge",
+                        ["original-width"]: "Apply original image width",
+                        ["original-height"]: "Apply original image height",
+                        ["editor-max-width"]: "Fit editor max-width"
                     })
                     .setValue(preset.resizeDimension)
                     .onChange((value: ResizeDimension) => {
@@ -3381,26 +3383,28 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 // Check for duplicate names
                 if (
                     !this.isDefaultPreset(preset, activePresetSetting) &&
-                    ((activePresetSetting === "selectedFolderPreset" &&
-                        this.plugin.settings.folderPresets.some(
-                            (p) => p.name === preset.name && p !== preset
-                        )) ||
+                    (
+                        (activePresetSetting === "selectedFolderPreset" &&
+                            this.plugin.settings.folderPresets.some(
+                                (presetItem) => presetItem.name === preset.name && presetItem !== preset
+                            )) ||
                         (activePresetSetting === "selectedFilenamePreset" &&
                             this.plugin.settings.filenamePresets.some(
-                                (p) => p.name === preset.name && p !== preset
+                                (presetItem) => presetItem.name === preset.name && presetItem !== preset
                             )) ||
                         (activePresetSetting === "selectedConversionPreset" &&
                             this.plugin.settings.conversionPresets.some(
-                                (p) => p.name === preset.name && p !== preset
+                                (presetItem) => presetItem.name === preset.name && presetItem !== preset
                             )) ||
                         (activePresetSetting === "selectedLinkFormatPreset" &&
                             this.plugin.settings.linkFormatSettings.linkFormatPresets.some(
-                                (p) => p.name === preset.name && p !== preset
+                                (presetItem) => presetItem.name === preset.name && presetItem !== preset
                             )) ||
                         (activePresetSetting === "selectedResizePreset" && // Add this check
                             this.plugin.settings.nonDestructiveResizeSettings.resizePresets.some(
-                                (p) => p.name === preset.name && p !== preset
-                            )))
+                                (presetItem) => presetItem.name === preset.name && presetItem !== preset
+                            ))
+                    )
                 ) {
                     new Notice("A preset with this name already exists.");
                     return;
@@ -3596,19 +3600,19 @@ export class SaveGlobalPresetModal extends Modal {
         summaryEl.createEl("h4", { text: "Summary" });
 
         const folderPreset = this.plugin.settings.folderPresets.find(
-            (p) => p.name === this.plugin.settings.selectedFolderPreset
+            (presetItem) => presetItem.name === this.plugin.settings.selectedFolderPreset
         );
         const filenamePreset = this.plugin.settings.filenamePresets.find(
-            (p) => p.name === this.plugin.settings.selectedFilenamePreset
+            (presetItem) => presetItem.name === this.plugin.settings.selectedFilenamePreset
         );
         const conversionPreset = this.plugin.settings.conversionPresets.find(
-            (p) => p.name === this.plugin.settings.selectedConversionPreset
+            (presetItem) => presetItem.name === this.plugin.settings.selectedConversionPreset
         );
         const linkFormatPreset = this.plugin.settings.linkFormatSettings.linkFormatPresets.find(
-            (p) => p.name === this.plugin.settings.linkFormatSettings.selectedLinkFormatPreset
+            (presetItem) => presetItem.name === this.plugin.settings.linkFormatSettings.selectedLinkFormatPreset
         );
         const resizePreset = this.plugin.settings.nonDestructiveResizeSettings.resizePresets.find(
-            (p) => p.name === this.plugin.settings.nonDestructiveResizeSettings.selectedResizePreset
+            (presetItem) => presetItem.name === this.plugin.settings.nonDestructiveResizeSettings.selectedResizePreset
         );
 
         // Use DocumentFragment for efficient DOM updates
