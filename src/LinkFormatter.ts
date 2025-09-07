@@ -85,7 +85,7 @@ export class LinkFormatter {
 
 
     private formatAbsolutePath(file: TFile): string {
-        return "/" + file.path; // Add the leading slash back
+        return `/${file.path}`; // Add the leading slash back
     }
 
     private formatRelativePath(file: TFile, activeFile: TFile | null): string {
@@ -101,7 +101,7 @@ export class LinkFormatter {
 
         // Always ensure we have either ./ or ../ prefix
         if (!relativePath.startsWith('../') && !relativePath.startsWith('./')) {
-            return './' + relativePath;
+            return `./${relativePath}`;
         }
 
         return relativePath;
@@ -134,7 +134,7 @@ export class LinkFormatter {
 
         // If we're in the same directory, prefix with "./"
         if (relativePath === toParts[toParts.length - 1]) {
-            relativePath = "./" + relativePath;
+            relativePath = `./${relativePath}`;
         }
 
         return relativePath;
@@ -203,8 +203,7 @@ export class LinkFormatter {
                         originalDimensions,
                         preset.resizeUnits
                     );
-                    width = dimensions.width;
-                    height = dimensions.height;
+                    ({ width, height } = dimensions);
                 }
                 break;
             case "longest-edge":
@@ -284,9 +283,9 @@ export class LinkFormatter {
                 }
                 break;
             case "original-width":
-                width = originalDimensions.width;
+                ({ width, height } = originalDimensions);
                 height = preset.maintainAspectRatio
-                    ? originalDimensions.height
+                    ? height
                     : undefined;
                 break;
             case "editor-max-width": {
@@ -401,9 +400,8 @@ export class LinkFormatter {
         if (presetValue === undefined) return undefined;
         if (resizeUnits === "percentage") {
             return Math.round(originalDimension * presetValue / 100);
-        } else {
-            return presetValue;
         }
+        return presetValue;
     }
 
     private parseCustomDimensions(customValue: string, originalDimensions: { width: number, height: number }, resizeUnits: ResizeUnits): { width: number | undefined, height: number | undefined } {
@@ -428,7 +426,8 @@ export class LinkFormatter {
     private applyScaleModeToDimension(currentDimension: number, originalDimension: number, scaleMode: ResizeScaleMode): number {
         if (scaleMode === "reduce" && currentDimension > originalDimension) {
             return originalDimension;
-        } else if (scaleMode === "enlarge" && currentDimension < originalDimension) {
+        }
+        if (scaleMode === "enlarge" && currentDimension < originalDimension) {
             return originalDimension;
         }
         return currentDimension;
@@ -511,8 +510,8 @@ export class LinkFormatter {
             return 800;
         }
 
-        const view = activeLeaf.view;
-        const editor = view.editor;
+        const { view } = activeLeaf;
+        const { editor } = view;
 
         // Access the CodeMirror EditorView through the Obsidian Editor.
         // We temporarily use `as any` to bypass type checking for the undocumented `.cm` property,
