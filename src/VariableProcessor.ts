@@ -533,7 +533,7 @@ export class VariableProcessor {
 
         return {
             valid: errors.length === 0,
-            errors: errors
+            errors,
         };
     }
 
@@ -548,6 +548,7 @@ export class VariableProcessor {
     // Method to group variables by category (used by AvailableVariablesModal)
     private groupVariablesByCategory(variables: VariableInfo[]): Record<string, VariableInfo[]> {
 
+        /* eslint-disable @typescript-eslint/naming-convention */
         const categorized: Record<string, VariableInfo[]> = {
             "Basic": [],
             "Date & Time": [],
@@ -556,6 +557,7 @@ export class VariableProcessor {
             "Calculated Image Properties": [],
             "Advanced": []
         };
+        /* eslint-enable @typescript-eslint/naming-convention */
 
         for (const variable of variables) {
             if (variable.name.startsWith("{date") || ["{YYYY}", "{MM}", "{DD}", "{HH}", "{mm}", "{ss}", "{weekday}", "{month}", "{calendar}", "{today}", "{YYYY-MM-DD}", "{tomorrow}", "{yesterday}", "{startofweek}", "{endofweek}", "{startofmonth}", "{endofmonth}", "{nextweek}", "{lastweek}", "{nextmonth}", "{lastmonth}", "{daysinmonth}", "{weekofyear}", "{quarterofyear}", "{week}", "{w}", "{quarter}", "{Q}", "{dayofyear}", "{DDD}", "{monthname}", "{MMMM}", "{dayname}", "{dddd}", "{dateordinal}", "{Do}", "{relativetime}", "{currentdate}", "{yyyy}", "{time}", "{timestamp}"].includes(variable.name)) {
@@ -581,7 +583,7 @@ export class VariableProcessor {
         template: string
     ): Promise<Record<string, string>> {
         const { file, activeFile } = context;
-        const moment = (window as any).moment;
+        const { moment } = window as any;
         let variables: Record<string, string> = {};
 
         // --- Static Variables ---
@@ -722,7 +724,7 @@ export class VariableProcessor {
         variables: Record<string, string>
     ): Promise<Record<string, string>> {
         const { file, activeFile } = context;
-        const moment = (window as any).moment;
+        const { moment } = window as any;
 
         // Handle {randomHex:X}
         const hexPattern = /{randomHex:(\d+)}/g;
@@ -747,14 +749,14 @@ export class VariableProcessor {
         const dateAndTimePattern = /{date:(.*?)}/g;
         let dateAndTimeMatch;
         while ((dateAndTimeMatch = dateAndTimePattern.exec(template)) !== null) {
-            if (dateAndTimeMatch[1]) {
+            const [full, format] = dateAndTimeMatch;
+            if (format) {
                 // It's a {date:FORMAT} pattern
-                const format = dateAndTimeMatch[1];
                 try {
-                    variables[dateAndTimeMatch[0]] = moment().format(format);
+                    variables[full] = moment().format(format);
                 } catch (error) {
                     console.error(`Invalid date format: ${format}`, error);
-                    variables[dateAndTimeMatch[0]] = moment().format("YYYY-MM-DD"); // Default format on error
+                    variables[full] = moment().format("YYYY-MM-DD"); // Default format on error
                 }
             }
         }
@@ -781,9 +783,9 @@ export class VariableProcessor {
         }
 
         while ((sizeMatch = sizePattern.exec(template)) !== null) {
-            const unit = sizeMatch[1];
-            const decimals = parseInt(sizeMatch[2]);
-            variables[sizeMatch[0]] = this.formatSize(fileSize, unit, decimals);
+            const [full, unit, decimalsStr] = sizeMatch;
+            const decimals = parseInt(decimalsStr, 10);
+            variables[full] = this.formatSize(fileSize, unit, decimals);
         }
 
         // --- Handle MD5 Hashes ---
@@ -849,7 +851,7 @@ export class VariableProcessor {
             if (length) {
                 md5Hash = md5Hash.substring(0, length);
             }
-            variables[`{MD5:${hashType}${(length ? ":" + length : "")}}`] = md5Hash;
+            variables[`{MD5:${hashType}${(length ? `:${length}` : "")}}`] = md5Hash;
         }
 
         // Handle SHA-256 hashes
@@ -909,7 +911,7 @@ export class VariableProcessor {
             if (length) {
                 sha256Hash = sha256Hash.substring(0, length);
             }
-            variables[`{sha256:${hashType}${(length ? ":" + length : "")}}`] = sha256Hash;
+            variables[`{sha256:${hashType}${(length ? `:${length}` : "")}}`] = sha256Hash;
         }
 
         return variables;
@@ -975,6 +977,7 @@ export class VariableProcessor {
                 }
 
                 // Add properties to metadata object
+                /* eslint-disable @typescript-eslint/naming-convention */
                 Object.assign(metadata, {
                     // Existing properties
                     '{ratio}': aspectRatio.toFixed(2),
@@ -1015,10 +1018,12 @@ export class VariableProcessor {
                     '{mindimension}': Math.min(width, height).toString(),
                     '{diagonalpixels}': Math.sqrt(width * width + height * height).toFixed(0),
                     '{aspectratiosimplified}': (() => {
-                        const gcd = (a: number, b: number): number => b ? gcd(b, a % b) : a;
+                        /* eslint-disable id-length */
+                        const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
                         const w = width;
                         const h = height;
                         const divisor = gcd(w, h);
+                        /* eslint-enable id-length */
                         return `${w / divisor}:${h / divisor}`;
                     })(),
                     '{screenfitcategory}': (() => {
@@ -1030,6 +1035,7 @@ export class VariableProcessor {
                         return 'above-4k';
                     })(),
                 });
+                /* eslint-enable @typescript-eslint/naming-convention */
 
                 // Clean up the Blob URL
                 URL.revokeObjectURL(img.src);
@@ -1073,6 +1079,7 @@ export class VariableProcessor {
                 const fileSizeInBytes = file.size;
 
                 // Add properties to metadata object
+                /* eslint-disable @typescript-eslint/naming-convention */
                 Object.assign(metadata, {
                     // Existing properties
                     '{ratio}': aspectRatio.toFixed(2),
@@ -1113,10 +1120,12 @@ export class VariableProcessor {
                     '{mindimension}': Math.min(width, height).toString(),
                     '{diagonalpixels}': Math.sqrt(width * width + height * height).toFixed(0),
                     '{aspectratiosimplified}': (() => {
-                        const gcd = (a: number, b: number): number => b ? gcd(b, a % b) : a;
+                        /* eslint-disable id-length */
+                        const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
                         const w = width;
                         const h = height;
                         const divisor = gcd(w, h);
+                        /* eslint-enable id-length */
                         return `${w / divisor}:${h / divisor}`;
                     })(),
                     '{screenfitcategory}': (() => {
@@ -1128,6 +1137,7 @@ export class VariableProcessor {
                         return 'above-4k';
                     })(),
                 });
+                /* eslint-enable @typescript-eslint/naming-convention */
 
                 // Clean up the Blob URL
                 URL.revokeObjectURL(img.src);
@@ -1161,7 +1171,7 @@ export class VariableProcessor {
         const array = new Uint8Array(Math.ceil(size / 2));
         window.crypto.getRandomValues(array);
         return Array.from(array)
-            .map((b) => b.toString(16).padStart(2, "0"))
+            .map((byte) => byte.toString(16).padStart(2, "0"))
             .join("")
             .substring(0, size); // Trim in case size is odd
     }
@@ -1180,6 +1190,7 @@ export class VariableProcessor {
     private async generateMD5(text: string): Promise<string> {
         // Implementation of MD5 algorithm
         function md5(string: string): string {
+            /* eslint-disable id-length, @typescript-eslint/naming-convention, no-param-reassign */
             function rotateLeft(value: number, shift: number): number {
                 return (value << shift) | (value >>> (32 - shift));
             }
@@ -1197,12 +1208,10 @@ export class VariableProcessor {
                 if (lX4 | lY4) {
                     if (lResult & 0x40000000) {
                         return lResult ^ 0xC0000000 ^ lX8 ^ lY8;
-                    } else {
-                        return lResult ^ 0x40000000 ^ lX8 ^ lY8;
                     }
-                } else {
-                    return lResult ^ lX8 ^ lY8;
+                    return lResult ^ 0x40000000 ^ lX8 ^ lY8;
                 }
+                return lResult ^ lX8 ^ lY8;
             }
 
             function F(x: number, y: number, z: number): number {
@@ -1274,7 +1283,7 @@ export class VariableProcessor {
 
                 for (lCount = 0; lCount <= 3; lCount++) {
                     lByte = (lValue >>> (lCount * 8)) & 255;
-                    WordToHexValueTemp = "0" + lByte.toString(16);
+                    WordToHexValueTemp = `0${lByte.toString(16)}`;
                     WordToHexValue = WordToHexValue + WordToHexValueTemp.substr(WordToHexValueTemp.length - 2, 2);
                 }
 
@@ -1375,6 +1384,7 @@ export class VariableProcessor {
 
             const temp = wordToHex(a) + wordToHex(b) + wordToHex(c) + wordToHex(d);
             return temp.toLowerCase();
+            /* eslint-enable id-length, @typescript-eslint/naming-convention, no-param-reassign */
         }
 
         try {
@@ -1394,7 +1404,7 @@ export class VariableProcessor {
         const data = encoder.encode(text);
         const hashBuffer = await crypto.subtle.digest('SHA-256', data);
         const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        const hashHex = hashArray.map(byte => byte.toString(16).padStart(2, '0')).join('');
         return hashHex;
     }
     
@@ -1412,7 +1422,7 @@ export class VariableProcessor {
             
             const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
             const hashArray = Array.from(new Uint8Array(hashBuffer));
-            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            const hashHex = hashArray.map(byte => byte.toString(16).padStart(2, '0')).join('');
             return hashHex;
         } catch (error) {
             console.error('Error generating SHA-256 hash of file content:', error);
