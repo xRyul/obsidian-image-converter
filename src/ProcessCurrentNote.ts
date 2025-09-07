@@ -471,7 +471,7 @@ export class ProcessCurrentNote extends Modal {
     }
 
     private getLinkedImageFiles(file: TFile): TFile[] {
-        const resolvedLinks = this.app.metadataCache.resolvedLinks;
+        const { resolvedLinks } = this.app.metadataCache;
         const linksInCurrentNote = resolvedLinks[file.path];
         return Object.keys(linksInCurrentNote)
             .map(link => this.app.vault.getAbstractFileByPath(link))
