@@ -360,7 +360,9 @@ export class ImageResizer {
         this.cleanupHandles();
         this.activeImage = image;
 
-        const container = createEl("div", { cls: "image-resize-container" });
+        const parent = image.parentElement;
+        if (!parent) return;
+        const container = parent.createEl("div", { cls: "image-resize-container" });
 
         // **NEW:** Check for and apply existing alignment classes
         const alignmentClasses = [
@@ -377,15 +379,16 @@ export class ImageResizer {
             }
         }
 
-        image.parentNode?.insertBefore(container, image);
+        parent.insertBefore(container, image);
         container.appendChild(image);
 
         const handleTypes = ["nw", "ne", "sw", "se", "n", "s", "e", "w"];
         this.handles = handleTypes.map((type) => {
-            return container.createEl("div", {
+            const el = container.createEl("div", {
                 cls: `image-resize-handle image-resize-handle-${type}`,
-                attr: { "data-handle-type": type },
             });
+            el.setAttr("data-handle-type", type);
+            return el;
         });
     }
 
@@ -885,13 +888,13 @@ export class ImageResizer {
                 return startLine; // Not in a callout, return the starting line
             }
             //If not trimmed there will be added extra line
-            const firstNonWhitespaceChar = lineContent.trimStart()[0];
+            const [firstNonWhitespaceChar] = lineContent.trimStart();
             // Iterate downwards, checking for the end of the callout
             while (currentLine < editor.lastLine()) {
                 currentLine++;
                 lineContent = editor.getLine(currentLine);
                 //If not trimmed there will be added extra line
-                const currentLineNonWhitespaceChar = lineContent.trimStart()[0];
+                const [currentLineNonWhitespaceChar] = lineContent.trimStart();
                 // A callout ends when a line doesn't start with ">"
                 if (currentLineNonWhitespaceChar != firstNonWhitespaceChar) {
                     return currentLine - 1; // Return the *previous* line (end of callout)
@@ -943,7 +946,7 @@ export class ImageResizer {
             return;
         }
 
-        const editor = this.editor;
+        const { editor } = this;
         const normalizedTargetName = this.isBase64Image(imageName) ? imageName : this.getFilenameFromPath(imageName);
 
         const activeFile = this.plugin.app.workspace.getActiveFile();
@@ -1003,12 +1006,12 @@ export class ImageResizer {
                             widthParam = `${Math.round(newWidth)}x`;
                             heightParam = `${Math.round(newHeight)}`;
                         } else if (["n", "s"].includes(currentHandle || "")) {
-                            widthParam = cachedWidth ? cachedWidth : (match.existingWidth !== undefined ? `${match.existingWidth}x` : "x");
+                            widthParam = cachedWidth ?? (match.existingWidth !== undefined ? `${match.existingWidth}x` : "x");
                             heightParam = `${Math.round(newHeight)}`;
                             if (widthParam === "x") widthParam = `${this.initialWidth}x`;
                         } else if (["e", "w"].includes(currentHandle || "")) {
                             widthParam = `${Math.round(newWidth)}x`;
-                            heightParam = cachedHeight ? cachedHeight : (match.existingHeight !== undefined ? `${match.existingHeight}` : "");
+                            heightParam = cachedHeight ?? (match.existingHeight !== undefined ? `${match.existingHeight}` : "");
                             if (heightParam === "") heightParam = `${this.initialHeight}`;
                         } else {
                             widthParam = `${Math.round(newWidth)}x`;
@@ -1028,12 +1031,12 @@ export class ImageResizer {
                             widthParam = `${Math.round(newWidth)}x`;
                             heightParam = `${Math.round(newHeight)}`;
                         } else if (["n", "s"].includes(currentHandle || "")) {
-                            widthParam = cachedWidth ? cachedWidth : (match.existingWidth !== undefined ? `${match.existingWidth}x` : "x");
+                            widthParam = cachedWidth ?? (match.existingWidth !== undefined ? `${match.existingWidth}x` : "x");
                             heightParam = `${Math.round(newHeight)}`;
                             if (widthParam === "x") widthParam = `${this.initialWidth}x`;
                         } else if (["e", "w"].includes(currentHandle || "")) {
                             widthParam = `${Math.round(newWidth)}x`;
-                            heightParam = cachedHeight ? cachedHeight : (match.existingHeight !== undefined ? `${match.existingHeight}` : "");
+                            heightParam = cachedHeight ?? (match.existingHeight !== undefined ? `${match.existingHeight}` : "");
                             if (heightParam === "") heightParam = `${this.initialHeight}`;
                         } else {
                             widthParam = `${Math.round(newWidth)}x`;
@@ -1090,7 +1093,7 @@ export class ImageResizer {
 
         if (!this.markdownView || !this.activeImage || !this.editor) return;
 
-        const editor = this.editor;
+        const { editor } = this;
         const cursorPos = editor.getCursor();
         const lineContent = editor.getLine(cursorPos.line);
 
@@ -1356,7 +1359,8 @@ export class ImageResizer {
         try {
             imageName = decodeURIComponent(imageName);
             const parts = imageName.split(/[/\\]/);
-            const fileName = parts[parts.length - 1].split("?")[0];
+            const [lastPart] = parts.slice(-1);
+            const [fileName] = (lastPart ?? "").split("?");
             return fileName;
         } catch (error) {
             console.error("Error processing image path:", error);
@@ -1403,7 +1407,8 @@ export class ImageResizer {
         // Check specific resize type permissions
         if (resizeType === 'drag') {
             return this.plugin.settings.isDragResizeEnabled;
-        } else if (resizeType === 'scroll') {
+        }
+        if (resizeType === 'scroll') {
             return this.plugin.settings.isScrollResizeEnabled;
         }
 
