@@ -2879,7 +2879,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         new Setting(containerEl)
             .setName(title)
             .setDesc(
-                "Comma-separated list of patterns to skip (glob or regex). Regex patterns must be enclosed in `/` or `r/` or `regex:` E.g. do not proecss images which include word CAT in them /CAT/"
+                "Comma-separated list of patterns to skip (glob or regex). Regex patterns must be enclosed in `/` or `r/` or `regex:` E.g. do not process images which include word CAT in them /CAT/"
             )
             .setTooltip(
                 "Supports multiple pattern types:\n\n" +
