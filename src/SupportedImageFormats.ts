@@ -220,8 +220,12 @@ export class SupportedImageFormats {
             if (headerHex.startsWith('4949') || headerHex.startsWith('4d4d')) { // TIFF (II or MM)
                 return 'image/tiff';
             }
-            if (headerHex.startsWith('52494646') && headerHex.substring(8, 12) === '57454250') { // WEBP (RIFF + WEBP)
-                return 'image/webp';
+            if (headerHex.startsWith('52494646')) { // 'RIFF'
+                // Check bytes 8..11 for 'WEBP' signature (each byte = 2 hex chars => positions 16..24)
+                const webpSig = headerHex.substring(16, 24);
+                if (webpSig === '57454250') { // 'WEBP'
+                    return 'image/webp';
+                }
             }
 
 
