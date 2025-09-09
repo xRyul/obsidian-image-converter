@@ -1,0 +1,29 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["vitest/globals", "node"],
+    "allowJs": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@mocks/*": ["./tests/__mocks__/*"],
+      "@fixtures/*": ["./tests/fixtures/*"],
+      "@helpers/*": ["./tests/helpers/*"],
+      "obsidian": ["./tests/__mocks__/obsidian.ts"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.d.ts",
+    "tests/**/*.ts",
+    "tests/**/*.d.ts",
+    "vitest.config.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "build",
+    "main.js",
+    "scripts"
+  ]
+}

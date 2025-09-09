@@ -8,7 +8,10 @@
 		"build": "tsc -noEmit && node esbuild.config.mjs production",
 		"lint": "eslint src/**/*.ts",
 		"lint:fix": "eslint src/**/*.ts --fix",
-		"pre-release": "node scripts/prepare-release.js"
+		"pre-release": "node scripts/prepare-release.js",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"test:coverage": "vitest run --coverage"
 	},
 	"keywords": [],
 	"author": "",
@@ -16,21 +19,26 @@
 	"devDependencies": {
 		"@codemirror/language": "^6.10.6",
 		"@eslint/js": "^9.35.0",
+		"@faker-js/faker": "^10.0.0",
 		"@types/fabric": "^5.3.9",
 		"@types/node": "^24.3.1",
 		"@types/piexifjs": "^1.0.0",
 		"@types/sortablejs": "^1.15.8",
 		"@typescript-eslint/eslint-plugin": "^8.42.0",
 		"@typescript-eslint/parser": "^8.42.0",
+		"@vitest/coverage-v8": "^3.2.4",
+		"@vitest/ui": "^3.2.4",
 		"builtin-modules": "3.3.0",
 		"esbuild": "^0.25.9",
 		"eslint": "^9.35.0",
 		"fabric": "^6.5.0",
 		"globals": "^16.3.0",
+		"happy-dom": "^18.0.1",
 		"obsidian": "latest",
 		"sortablejs": "^1.15.6",
 		"tslib": "2.4.0",
-		"typescript": "^5.9.2"
+		"typescript": "^5.9.2",
+		"vitest": "^3.2.4"
 	},
 	"dependencies": {
 		"piexifjs": "^1.0.6"
