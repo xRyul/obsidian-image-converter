@@ -212,10 +212,17 @@ export class SupportedImageFormats {
                 }
             }
 
-            // Unrecognized header -> unknown
+            // Unrecognized header -> fall back to Blob.type if available
+            if (file.type && file.type.length > 0) {
+                return file.type;
+            }
             return "unknown";
         } catch (error) {
             console.error("Error reading file:", error);
+            // On error, fall back to Blob.type if available
+            if (file.type && file.type.length > 0) {
+                return file.type;
+            }
             return "unknown";
         }
     }

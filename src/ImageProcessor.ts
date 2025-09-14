@@ -173,6 +173,10 @@ if (format === 'ORIGINAL') {
                 return file.arrayBuffer();
             }
             const mimeType = detected;
+            // If detected MIME isn't supported by our engine, treat as unknown and return original
+            if (!this.supportedImageFormats.isSupported(mimeType, filename)) {
+                return file.arrayBuffer();
+            }
 
             switch (mimeType) {
                 case 'image/tiff':
