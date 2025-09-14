@@ -37,24 +37,24 @@ export function fakeTFile(options: {
   parent?: TFolder | null;
   stat?: { mtime: number; ctime: number; size: number };
 } = {}): TFile {
-  const path = options.path ?? 'test-folder/test-file.md';
-  const name = options.name ?? path.split('/').pop() ?? 'test-file.md';
+  const fullPath = options.path ?? 'test-folder/test-file.md';
+  const name = options.name ?? fullPath.split('/').pop() ?? 'test-file.md';
   const basename = options.basename ?? name.replace(/\.[^.]+$/, '');
-  const extension = options.extension ?? name.split('.').pop() ?? 'md';
-  
-  return {
-    path,
-    name,
-    basename,
-    extension,
-    parent: options.parent ?? fakeTFolder({ path: path.substring(0, path.lastIndexOf('/')) }),
-    vault: undefined as any,
-    stat: options.stat ?? {
-      mtime: Date.now(),
-      ctime: Date.now(),
-      size: 1024
-    }
-  } as TFile;
+  const extension = options.extension ?? (name.includes('.') ? name.split('.').pop()! : 'md');
+
+  const instance = new (TFile as any)() as TFile;
+  (instance as any).path = fullPath;
+  (instance as any).name = name;
+  (instance as any).basename = basename;
+  (instance as any).extension = extension;
+  (instance as any).parent = options.parent ?? fakeTFolder({ path: fullPath.includes('/') ? fullPath.substring(0, fullPath.lastIndexOf('/')) : '' });
+  (instance as any).vault = undefined as any;
+  (instance as any).stat = options.stat ?? {
+    mtime: Date.now(),
+    ctime: Date.now(),
+    size: 1024
+  };
+  return instance;
 }
 
 /**
@@ -91,15 +91,21 @@ export function fakeVault(options: {
   folders?: TFolder[];
   fileContents?: Map<string, string>;
   binaryContents?: Map<string, ArrayBuffer>;
+  vaultName?: string;
+  attachmentFolderPath?: string; // for getConfig('attachmentFolderPath')
 } = {}): Partial<Vault> {
   const files = options.files ?? [];
   const folders = options.folders ?? [];
   const fileContents = options.fileContents ?? new Map();
   const binaryContents = options.binaryContents ?? new Map();
+  const vaultName = options.vaultName ?? 'TestVault';
+  const attachmentFolderPath = options.attachmentFolderPath ?? 'attachments';
+  const rootFolder = fakeTFolder({ path: '/', name: '/' });
   
   return {
     // File operations
     getAbstractFileByPath: vi.fn((path: string) => {
+      if (path === '/' || path === '') return rootFolder;
       return files.find(f => f.path === path) || folders.find(f => f.path === path) || null;
     }),
     
@@ -134,9 +140,12 @@ export function fakeVault(options: {
     }),
     
     createFolder: vi.fn(async (path: string) => {
-      const folder = fakeTFolder({ path });
-      folders.push(folder);
-      return folder;
+      if (!folders.find(f => f.path === path)) {
+        const folder = fakeTFolder({ path });
+        folders.push(folder);
+        return folder;
+      }
+      return folders.find(f => f.path === path) as TFolder;
     }),
     
     rename: vi.fn(async (file: TFile, newPath: string) => {
@@ -170,6 +179,7 @@ export function fakeVault(options: {
     // Adapter operations
     adapter: {
       exists: vi.fn(async (path: string) => {
+        if (path === '/' || path === '') return true;
         return files.some(f => f.path === path) || folders.some(f => f.path === path);
       }),
       
@@ -182,7 +192,7 @@ export function fakeVault(options: {
       }),
       
       list: vi.fn(async (path: string) => {
-        const folder = folders.find(f => f.path === path);
+        const folder = path === '/' ? rootFolder : folders.find(f => f.path === path);
         if (!folder) return { files: [], folders: [] };
         
         const folderFiles = files.filter(f => f.parent?.path === path);
@@ -235,10 +245,17 @@ export function fakeVault(options: {
       })
     },
     
-    // Utility methods
+    // Additional helpers used by code under test
+    getRoot: vi.fn(() => rootFolder as TFolder),
+    getName: vi.fn(() => vaultName),
     getFiles: vi.fn(() => files),
-    getAllLoadedFiles: vi.fn(() => [...files, ...folders]),
+    getAllLoadedFiles: vi.fn(() => [...files, ...folders, rootFolder]),
     getMarkdownFiles: vi.fn(() => files.filter(f => f.extension === 'md')),
+    // Obsidian config API used by FolderAndFilenameManagement
+    getConfig: vi.fn((key: string) => {
+      if (key === 'attachmentFolderPath') return attachmentFolderPath;
+      return '';
+    }),
     
     // Config
     configDir: '/.obsidian',
