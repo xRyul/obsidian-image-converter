@@ -163,26 +163,10 @@ export class SupportedImageFormats {
      * @returns A Promise that resolves to the mime type string.
      */
     async getMimeTypeFromFile(file: Blob): Promise<string> {
-        const reader = new FileReader();
-
-        const readAsArrayBufferPromise = new Promise<ArrayBuffer>((resolve, reject) => {
-            reader.onloadend = () => {
-                if (reader.result instanceof ArrayBuffer) {
-                    resolve(reader.result);
-                } else {
-                    reject(new Error("Failed to read file as ArrayBuffer."));
-                }
-            };
-
-            reader.onerror = () => {
-                reject(new Error("Error occurred while reading the file."));
-            };
-
-            reader.readAsArrayBuffer(file.slice(0, 12)); // Read e.g 12 bytes for HEIC detection
-        });
-
         try {
-            const arrayBuffer = await readAsArrayBufferPromise;
+            // Read a small slice of the blob directly to avoid relying on FileReader mocks
+            const slice = file.slice(0, 24);
+            const arrayBuffer = await slice.arrayBuffer();
 
             const arr = new Uint8Array(arrayBuffer).subarray(0, 12); // Read up to 12 bytes
             let headerHex = "";
@@ -228,8 +212,8 @@ export class SupportedImageFormats {
                 }
             }
 
-
-            return file.type || "unknown"; // Fallback to file.type if header check fails
+            // Unrecognized header -> unknown
+            return "unknown";
         } catch (error) {
             console.error("Error reading file:", error);
             return "unknown";

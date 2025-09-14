@@ -1,122 +1,205 @@
 /**
- * Global test setup and configuration for Obsidian plugin testing.
- *
- * Configures a deterministic, isolated test environment with:
- * - Fake timers at fixed date (2024-01-01) for repeatability
- * - Seeded faker for stable random data generation
- * - DOM cleanup between tests (Happy-DOM environment)
- * - Consistent polyfills (crypto, TextEncoder/Decoder)
- * - Optional console suppression for cleaner test output
- *
- * Imported automatically by Vitest; influences all test files.
+ * Global test setup and configuration
+ * Runs before all tests to configure the test environment
  */
 
-import { afterAll, afterEach, beforeAll, vi } from 'vitest';
-import { faker } from '@faker-js/faker';
-import { TextDecoder, TextEncoder } from 'node:util';
+import { vi, beforeEach, afterEach } from 'vitest';
 
-// Happy-DOM is configured in vitest.config.ts and is automatically available
+let __IMAGE_SIZE__ = { w: 100, h: 100 };
+let __IMAGE_FAIL_NEXT__ = false;
 
-// Stable time for deterministic tests unless a test overrides it
-const FIXED_DATE = new Date('2024-01-01T12:00:00.000Z');
+class MockImage {
+  onload: ((e?: any) => void) | null = null;
+  onerror: ((e?: any) => void) | null = null;
+  alt = '';
+  crossOrigin: string | null = null;
+  complete = true;
+  naturalWidth = __IMAGE_SIZE__.w;
+  naturalHeight = __IMAGE_SIZE__.h;
+  width = __IMAGE_SIZE__.w;
+  height = __IMAGE_SIZE__.h;
+  private _src = '';
 
-// Preserve original console methods for optional suppression and later restore
-const originalConsole = {
-  log: console.log,
-  warn: console.warn,
-  info: console.info,
-  debug: console.debug,
-  error: console.error,
-};
-
-beforeAll(() => {
-  // Use fake timers for deterministic timer-based logic
-  vi.useFakeTimers();
-  vi.setSystemTime(FIXED_DATE);
-
-  // Ensure deterministic faker output across runs
-  faker.seed(42);
-
-  // Optionally suppress noisy console output in tests
-  // Set SUPPRESS_LOGS=false to see logs locally when needed
-  if (process.env.SUPPRESS_LOGS !== 'false') {
-    console.log = vi.fn();
-    console.warn = vi.fn();
-    console.info = vi.fn();
-    console.debug = vi.fn();
-    // Keep console.error for visibility of real errors
+  get src() { return this._src; }
+  set src(v: string) {
+    this._src = v;
+    // Simulate async decode
+    queueMicrotask(() => {
+      // Refresh to current configured size at load time
+      this.naturalWidth = __IMAGE_SIZE__.w;
+      this.naturalHeight = __IMAGE_SIZE__.h;
+      this.width = __IMAGE_SIZE__.w;
+      this.height = __IMAGE_SIZE__.h;
+      if (__IMAGE_FAIL_NEXT__) {
+        __IMAGE_FAIL_NEXT__ = false;
+        this.onerror?.({ type: 'error' });
+      } else {
+        this.onload?.({ type: 'load' });
+      }
+    });
   }
 
-  // Consistent global polyfills
-  if (!globalThis.crypto?.randomUUID) {
-    (globalThis as any).crypto = {
-      ...(globalThis as any).crypto,
-      randomUUID: () =>
-        'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
-          const rand = (Math.random() * 16) | 0;
-          const value = ch === 'x' ? rand : (rand & 0x3) | 0x8;
-          return value.toString(16);
-        }),
+  addEventListener(type: string, handler: any) {
+    if (type === 'load') this.onload = handler;
+    if (type === 'error') this.onerror = handler;
+  }
+  removeEventListener = vi.fn();
+  dispatchEvent = vi.fn();
+}
+
+export function setMockImageSize(w: number, h: number) {
+  __IMAGE_SIZE__ = { w, h };
+}
+export function failNextImageLoad() {
+  __IMAGE_FAIL_NEXT__ = true;
+}
+
+// Minimal ImageData polyfill for environments lacking it (e.g., happy-dom versions)
+if (typeof (globalThis as any).ImageData === 'undefined') {
+  class ImageDataPolyfill {
+    data: Uint8ClampedArray;
+    width: number;
+    height: number;
+    colorSpace: any;
+    constructor(data: Uint8ClampedArray | number, width?: number, height?: number) {
+      if (typeof data === 'number' && typeof width === 'number' && typeof height === 'number') {
+        const buf = new Uint8ClampedArray(data * width * height);
+        this.data = buf;
+        this.width = width;
+        this.height = height;
+      } else if (data instanceof Uint8ClampedArray && typeof width === 'number' && typeof height === 'number') {
+        this.data = data;
+        this.width = width;
+        this.height = height;
+      } else {
+        this.data = new Uint8ClampedArray(0);
+        this.width = (width as number) || 0;
+        this.height = (height as number) || 0;
+      }
+      this.colorSpace = 'srgb';
+    }
+  }
+  ;(globalThis as any).ImageData = ImageDataPolyfill as any;
+}
+
+// Setup global test environment
+beforeEach(() => {
+  // Reset all mocks before each test
+  vi.clearAllMocks();
+  
+  // Setup global window object if needed
+  if (typeof window !== 'undefined') {
+    // Mock electron API if needed
+    (window as any).electron = undefined;
+    
+    // Mock Obsidian-specific globals
+    (window as any).app = undefined;
+    (window as any).moment = undefined;
+  }
+  
+  // Mock console methods to reduce noise in tests
+  global.console = {
+    ...console,
+    log: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn()
+  } as any;
+
+  // Reinstall stable Image mock each test (mockReset clears implementations)
+  (global as any).Image = MockImage as any;
+
+  // Reinstall FileReader mock each test (mockReset clears implementations)
+  (global as any).FileReader = vi.fn().mockImplementation(() => {
+    const reader = {
+      result: null as string | ArrayBuffer | null,
+      error: null,
+      onload: null as ((event: any) => void) | null,
+      onloadend: null as ((event: any) => void) | null,
+      onerror: null as ((event: any) => void) | null,
+      onabort: null,
+      onprogress: null,
+      readyState: 0,
+      EMPTY: 0,
+      LOADING: 1,
+      DONE: 2,
+      
+      readAsDataURL: vi.fn(function(this: any, blob: Blob) {
+        // Simulate async read
+        Promise.resolve().then(() => {
+          this.result = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+          this.readyState = 2; // DONE
+          const event = { target: this };
+          this.onload?.(event);
+          this.onloadend?.(event);
+        });
+      }),
+      
+      readAsArrayBuffer: vi.fn(function(this: any, blob: Blob) {
+        Promise.resolve().then(() => {
+          // Create a simple ArrayBuffer
+          const buffer = new ArrayBuffer(8);
+          const view = new Uint8Array(buffer);
+          view[0] = 0x89; // PNG signature start
+          view[1] = 0x50;
+          view[2] = 0x4E;
+          view[3] = 0x47;
+          this.result = buffer;
+          this.readyState = 2;
+          const event = { target: this };
+          this.onload?.(event);
+          this.onloadend?.(event);
+        });
+      }),
+      
+      readAsText: vi.fn(function(this: any, blob: Blob) {
+        Promise.resolve().then(() => {
+          this.result = 'mock text content';
+          this.readyState = 2;
+          const event = { target: this };
+          this.onload?.(event);
+          this.onloadend?.(event);
+        });
+      }),
+      
+      readAsBinaryString: vi.fn(),
+      abort: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn()
     };
-  }
+    
+    return reader;
+  }) as any;
 
-  if (!(globalThis as any).TextEncoder) (globalThis as any).TextEncoder = TextEncoder as any;
-  if (!(globalThis as any).TextDecoder) (globalThis as any).TextDecoder = TextDecoder as any;
-});
-
-afterAll(() => {
-  vi.useRealTimers();
-  // Restore original console methods
-  console.log = originalConsole.log;
-  console.warn = originalConsole.warn;
-  console.info = originalConsole.info;
-  console.debug = originalConsole.debug;
-  console.error = originalConsole.error;
+  // Reinstall URL mocks each test as well
+  global.URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+  global.URL.revokeObjectURL = vi.fn();
 });
 
 afterEach(() => {
-  // Ensure timers and mocks reset between tests
-  vi.clearAllMocks();
-  vi.clearAllTimers();
-
-  // Clean DOM to prevent test pollution across cases
-  if (typeof document !== 'undefined') {
-    document.body.innerHTML = '';
-    document.head.innerHTML = '';
+  // Clean up after each test
+  vi.restoreAllMocks();
+  
+  // Clear any fake timers if they were used
+  if (vi.isFakeTimers()) {
+    vi.useRealTimers();
   }
-
-  // Ensure we return to fake timers deterministically for subsequent tests
-  vi.useFakeTimers();
-
-  // Reset system time back to fixed date in case a test modified it
-  vi.setSystemTime(FIXED_DATE);
-
-  // Avoid aggressive module resets that can interfere with stable mocks
-  // vi.resetModules();
 });
 
-// Cross-platform and time utilities exposed for tests when helpful
-export const testUtils = {
-  normalizePath: (pathStr: string) => pathStr.replace(/\\\\/g, '/'),
-  mockFileStats: (overrides: Partial<{ ctime: number; mtime: number; size: number }> = {}) => ({
-    ctime: FIXED_DATE.getTime(),
-    mtime: FIXED_DATE.getTime(),
-    size: 1024,
-    ...overrides,
-  }),
-  restoreConsole: () => {
-    console.log = originalConsole.log;
-    console.warn = originalConsole.warn;
-    console.info = originalConsole.info;
-    console.debug = originalConsole.debug;
-    console.error = originalConsole.error;
-  },
-  advanceTime: (ms: number) => vi.advanceTimersByTime(ms),
-  setTestTime: (date: Date | string) => vi.setSystemTime(new Date(date)),
-};
-
-// Expose utilities globally for convenience in tests
-(globalThis as any).testUtilsGlobal = testUtils;
-declare global {
-  var testUtilsGlobal: typeof testUtils;
+// Global test utilities
+export function setupFakeTimers(date?: Date | string | number) {
+  vi.useFakeTimers();
+  if (date) {
+    vi.setSystemTime(date);
+  }
+  return {
+    advance: (ms: number) => vi.advanceTimersByTime(ms),
+    runAll: () => vi.runAllTimers(),
+    restore: () => vi.useRealTimers()
+  };
 }
+
+// Export test utilities
+export { vi };

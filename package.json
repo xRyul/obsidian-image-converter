@@ -10,6 +10,8 @@
 		"lint:fix": "eslint src/**/*.ts --fix",
 		"pre-release": "node scripts/prepare-release.js",
 		"test": "vitest run",
+		"test:clean": "vitest run --reporter=tap",
+		"test:json": "vitest run --reporter=json",
 		"test:watch": "vitest",
 		"test:coverage": "vitest run --coverage"
 	},

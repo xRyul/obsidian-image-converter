@@ -52,7 +52,12 @@ export default defineConfig({
     restoreMocks: true,
     
     // Reporter settings
-    reporters: process.env.CI ? ['verbose', 'json'] : ['verbose'],
+    reporters: process.env.CI ? ['verbose', 'json'] : [
+      ['default', { 
+        summary: true,
+        // Disable Unicode characters for better terminal compatibility
+      }]
+    ],
     outputFile: process.env.CI ? './test-results.json' : undefined,
     
     // Watch mode exclusions

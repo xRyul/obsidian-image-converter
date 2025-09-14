@@ -1,216 +1,23 @@
 /**
- * Comprehensive mocks for the Obsidian API used in tests.
- *
- * Provides lightweight test doubles for core Obsidian classes (App, Vault, Workspace,
- * TFile/TFolder, views, settings, etc.) with sensible defaults and Vitest spies. These
- * enable behavior-focused unit/integration tests without the real Obsidian runtime.
- *
- * Notes:
- * - Mirrors naming used by the real API (PascalCase/UPPER_CASE) for fidelity.
- * - Avoids shared state across tests; reset/mutate via test setup as needed.
+ * Mock implementation of the Obsidian module
+ * Provides test doubles for all Obsidian API imports
  */
-/* eslint-disable @typescript-eslint/naming-convention */
-// This mock mimics the upstream Obsidian API surface, which uses PascalCase and UPPER_CASE
-// identifiers in several places (e.g., Platform, ViewState, TYPE_MARKDOWN). We disable the
-// naming-convention rule here to preserve API fidelity for tests.
+
 import { vi } from 'vitest';
 
-// Mock Obsidian API classes and interfaces
-
-export class App {
-  vault = new Vault();
-  workspace = new Workspace();
-  metadataCache = new MetadataCache();
-  fileManager = new FileManager();
-}
-
-export class Vault {
-  adapter = {
-    path: {
-      join: (...parts: string[]) => parts.join('/'),
-      dirname: (path: string) => path.split('/').slice(0, -1).join('/'),
-      basename: (path: string, ext?: string) => {
-        const base = path.split('/').pop() || '';
-        return ext ? base.replace(new RegExp(`\\.${ext}$`), '') : base;
-      },
-      extname: (path: string) => {
-        const parts = path.split('.');
-        return parts.length > 1 ? `.${parts.pop()}` : '';
-      },
-    },
-    exists: vi.fn().mockResolvedValue(false),
-    stat: vi.fn().mockResolvedValue({ ctime: Date.now(), mtime: Date.now(), size: 1024 }),
-    list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
-    read: vi.fn().mockResolvedValue(''),
-    readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
-    write: vi.fn().mockResolvedValue(undefined),
-    writeBinary: vi.fn().mockResolvedValue(undefined),
-    mkdir: vi.fn().mockResolvedValue(undefined),
-    rmdir: vi.fn().mockResolvedValue(undefined),
-    remove: vi.fn().mockResolvedValue(undefined),
-    rename: vi.fn().mockResolvedValue(undefined),
-    copy: vi.fn().mockResolvedValue(undefined),
-  };
+// Core classes
+export class Notice {
+  message: string;
+  timeout?: number;
+  noticeEl: HTMLElement;
   
-  getFiles = vi.fn().mockReturnValue([]);
-  getAbstractFileByPath = vi.fn().mockReturnValue(null);
-  getMarkdownFiles = vi.fn().mockReturnValue([]);
-  getAllLoadedFiles = vi.fn().mockReturnValue([]);
-  create = vi.fn().mockResolvedValue(new TFile());
-  createBinary = vi.fn().mockResolvedValue(new TFile());
-  createFolder = vi.fn().mockResolvedValue(new TFolder());
-  read = vi.fn().mockResolvedValue('');
-  readBinary = vi.fn().mockResolvedValue(new ArrayBuffer(0));
-  modify = vi.fn().mockResolvedValue(undefined);
-  modifyBinary = vi.fn().mockResolvedValue(undefined);
-  delete = vi.fn().mockResolvedValue(undefined);
-  trash = vi.fn().mockResolvedValue(undefined);
-  rename = vi.fn().mockResolvedValue(undefined);
-  copy = vi.fn().mockResolvedValue(new TFile());
-  getResourcePath = vi.fn().mockReturnValue('');
-  
-  on = vi.fn();
-  off = vi.fn();
-  trigger = vi.fn();
-  tryTrigger = vi.fn();
-}
-
-export class Workspace {
-  activeLeaf = null;
-  leftSplit = null;
-  rightSplit = null;
-  rootSplit = null;
-  
-  getActiveFile = vi.fn().mockReturnValue(null);
-  getActiveViewOfType = vi.fn().mockReturnValue(null);
-  getLeaf = vi.fn().mockReturnValue(new WorkspaceLeaf());
-  getLeavesOfType = vi.fn().mockReturnValue([]);
-  openLinkText = vi.fn().mockResolvedValue(undefined);
-  
-  on = vi.fn();
-  off = vi.fn();
-  trigger = vi.fn();
-}
-
-export class WorkspaceLeaf {
-  view = new MarkdownView();
-  getViewState = vi.fn().mockReturnValue({});
-  setViewState = vi.fn().mockResolvedValue(undefined);
-  getEphemeralState = vi.fn().mockReturnValue({});
-  setEphemeralState = vi.fn().mockReturnValue(undefined);
-  setPinned = vi.fn();
-  detach = vi.fn();
-}
-
-export class MetadataCache {
-  getFileCache = vi.fn().mockReturnValue(null);
-  getCache = vi.fn().mockReturnValue(null);
-  fileToLinktext = vi.fn().mockReturnValue('');
-  
-  on = vi.fn();
-  off = vi.fn();
-  trigger = vi.fn();
-}
-
-export class FileManager {
-  getNewFileParent = vi.fn().mockReturnValue(null);
-  renameFile = vi.fn().mockResolvedValue(undefined);
-  generateMarkdownLink = vi.fn().mockReturnValue('');
-  processFrontMatter = vi.fn().mockResolvedValue(undefined);
-}
-
-export class TFile {
-  path = 'test.md';
-  name = 'test.md';
-  extension = 'md';
-  basename = 'test';
-  parent = null;
-  vault = null;
-  stat = { ctime: Date.now(), mtime: Date.now(), size: 1024 };
-}
-
-export class TFolder {
-  path = 'folder';
-  name = 'folder';
-  parent = null;
-  children = [];
-  isRoot = vi.fn().mockReturnValue(false);
-}
-
-export class TAbstractFile {
-  path = '';
-  name = '';
-  parent = null;
-}
-
-export class MarkdownView {
-  file = new TFile();
-  editor = new Editor();
-  previewMode = null;
-  currentMode = null;
-  
-  getViewData = vi.fn().mockReturnValue('');
-  setViewData = vi.fn();
-  clear = vi.fn();
-  getEphemeralState = vi.fn().mockReturnValue({});
-  setEphemeralState = vi.fn();
-  getViewType = vi.fn().mockReturnValue('markdown');
-  getState = vi.fn().mockReturnValue({});
-  setState = vi.fn().mockResolvedValue(undefined);
-  
-  onload = vi.fn();
-  onunload = vi.fn();
-}
-
-export class Editor {
-  getCursor = vi.fn().mockReturnValue({ line: 0, ch: 0 });
-  setCursor = vi.fn();
-  getLine = vi.fn().mockReturnValue('');
-  setLine = vi.fn();
-  getValue = vi.fn().mockReturnValue('');
-  setValue = vi.fn();
-  getSelection = vi.fn().mockReturnValue('');
-  replaceSelection = vi.fn();
-  replaceRange = vi.fn();
-  getDoc = vi.fn().mockReturnValue({
-    getCursor: vi.fn().mockReturnValue({ line: 0, ch: 0 }),
-    setCursor: vi.fn(),
-  });
-  transaction = vi.fn();
-  undo = vi.fn();
-  redo = vi.fn();
-  focus = vi.fn();
-  blur = vi.fn();
-  hasFocus = vi.fn().mockReturnValue(false);
-}
-
-export class Modal {
-  app: App;
-  containerEl: HTMLElement;
-  modalEl: HTMLElement;
-  titleEl: HTMLElement;
-  contentEl: HTMLElement;
-  
-  constructor(app: App) {
-    this.app = app;
-    this.containerEl = document.createElement('div');
-    this.modalEl = document.createElement('div');
-    this.titleEl = document.createElement('div');
-    this.contentEl = document.createElement('div');
-    this.modalEl.appendChild(this.titleEl);
-    this.modalEl.appendChild(this.contentEl);
-    this.containerEl.appendChild(this.modalEl);
+  constructor(message: string, timeout?: number) {
+    this.message = message;
+    this.timeout = timeout;
+    this.noticeEl = document.createElement('div');
   }
   
-  open = vi.fn();
-  close = vi.fn();
-  onOpen = vi.fn();
-  onClose = vi.fn();
-}
-
-export class Notice {
-  setMessage = vi.fn();
-  hide = vi.fn();
+  hide() {}
 }
 
 export class Plugin {
@@ -222,24 +29,37 @@ export class Plugin {
     this.manifest = manifest;
   }
   
-  addCommand = vi.fn();
-  addRibbonIcon = vi.fn();
-  addStatusBarItem = vi.fn().mockReturnValue(document.createElement('div'));
-  addSettingTab = vi.fn();
-  registerExtensions = vi.fn();
-  registerView = vi.fn();
-  registerMarkdownPostProcessor = vi.fn();
-  registerMarkdownCodeBlockProcessor = vi.fn();
-  registerEditorExtension = vi.fn();
-  registerEvent = vi.fn();
-  registerInterval = vi.fn();
-  registerDomEvent = vi.fn();
-  registerObsidianProtocolHandler = vi.fn();
-  loadData = vi.fn().mockResolvedValue({});
-  saveData = vi.fn().mockResolvedValue(undefined);
+  onload() {}
+  onunload() {}
+  addCommand(command: any) {}
+  addRibbonIcon(icon: string, title: string, callback: () => void) {}
+  addSettingTab(tab: any) {}
+  registerEvent(event: any) {}
+  registerDomEvent(el: HTMLElement, event: string, callback: () => void) {}
+  registerInterval(interval: number, callback: () => void): number { return 0; }
+  loadData(): Promise<any> { return Promise.resolve({}); }
+  saveData(data: any): Promise<void> { return Promise.resolve(); }
+}
+
+export class Modal {
+  app: App;
+  containerEl: HTMLElement;
+  modalEl: HTMLElement;
+  titleEl: HTMLElement;
+  contentEl: HTMLElement;
   
-  onload = vi.fn();
-  onunload = vi.fn();
+  constructor(app: App) {
+    this.app = app;
+    this.modalEl = document.createElement('div');
+    this.containerEl = document.createElement('div');
+    this.titleEl = document.createElement('div');
+    this.contentEl = document.createElement('div');
+  }
+  
+  open() {}
+  close() {}
+  onOpen() {}
+  onClose() {}
 }
 
 export class PluginSettingTab {
@@ -253,8 +73,8 @@ export class PluginSettingTab {
     this.containerEl = document.createElement('div');
   }
   
-  display = vi.fn();
-  hide = vi.fn();
+  display() {}
+  hide() {}
 }
 
 export class Setting {
@@ -268,147 +88,260 @@ export class Setting {
     this.nameEl = document.createElement('div');
     this.descEl = document.createElement('div');
     this.controlEl = document.createElement('div');
-    containerEl.appendChild(this.settingEl);
   }
   
-  setName = vi.fn().mockReturnThis();
-  setDesc = vi.fn().mockReturnThis();
-  setClass = vi.fn().mockReturnThis();
-  setTooltip = vi.fn().mockReturnThis();
-  setDisabled = vi.fn().mockReturnThis();
-  addButton = vi.fn((cb: any) => {
-    cb({
-      setTooltip: vi.fn().mockReturnThis(),
-      setIcon: vi.fn().mockReturnThis(),
-      setClass: vi.fn().mockReturnThis(),
-      setCta: vi.fn().mockReturnThis(),
-      onClick: vi.fn().mockReturnThis(),
-      setDisabled: vi.fn().mockReturnThis(),
-      setWarning: vi.fn().mockReturnThis(),
-    });
-    return this;
-  });
-  addDropdown = vi.fn((cb: any) => {
-    cb({
-      addOption: vi.fn().mockReturnThis(),
-      setValue: vi.fn().mockReturnThis(),
-      getValue: vi.fn().mockReturnValue(''),
-      onChange: vi.fn().mockReturnThis(),
-      setDisabled: vi.fn().mockReturnThis(),
-    });
-    return this;
-  });
-  addText = vi.fn((cb: any) => {
-    cb({
-      setPlaceholder: vi.fn().mockReturnThis(),
-      setValue: vi.fn().mockReturnThis(),
-      getValue: vi.fn().mockReturnValue(''),
-      onChange: vi.fn().mockReturnThis(),
-      setDisabled: vi.fn().mockReturnThis(),
-      inputEl: document.createElement('input'),
-    });
-    return this;
-  });
-  addTextArea = vi.fn((cb: any) => {
-    cb({
-      setPlaceholder: vi.fn().mockReturnThis(),
-      setValue: vi.fn().mockReturnThis(),
-      getValue: vi.fn().mockReturnValue(''),
-      onChange: vi.fn().mockReturnThis(),
-      setDisabled: vi.fn().mockReturnThis(),
-      inputEl: document.createElement('textarea'),
-    });
-    return this;
-  });
-  addToggle = vi.fn((cb: any) => {
-    cb({
-      setValue: vi.fn().mockReturnThis(),
-      getValue: vi.fn().mockReturnValue(false),
-      onChange: vi.fn().mockReturnThis(),
-      setDisabled: vi.fn().mockReturnThis(),
-      toggleEl: document.createElement('input'),
-    });
-    return this;
-  });
-  addSlider = vi.fn((cb: any) => {
-    cb({
-      setLimits: vi.fn().mockReturnThis(),
-      setValue: vi.fn().mockReturnThis(),
-      getValue: vi.fn().mockReturnValue(0),
-      setDynamicTooltip: vi.fn().mockReturnThis(),
-      onChange: vi.fn().mockReturnThis(),
-      setDisabled: vi.fn().mockReturnThis(),
-      sliderEl: document.createElement('input'),
-    });
-    return this;
-  });
+  setName(name: string): this { return this; }
+  setDesc(desc: string): this { return this; }
+  addText(cb: (text: any) => void): this { return this; }
+  addTextArea(cb: (text: any) => void): this { return this; }
+  addToggle(cb: (toggle: any) => void): this { return this; }
+  addButton(cb: (button: any) => void): this { return this; }
+  addDropdown(cb: (dropdown: any) => void): this { return this; }
+  addSlider(cb: (slider: any) => void): this { return this; }
+  then(cb: () => void): this { return this; }
 }
 
-// Export additional utilities
-export const normalizePath = (path: string) => {
-  return path.replace(/\\/g, '/').replace(/\/+/g, '/');
-};
+// UI Components
+export class ButtonComponent {
+  buttonEl: HTMLButtonElement;
+  
+  constructor(containerEl: HTMLElement) {
+    this.buttonEl = document.createElement('button');
+    containerEl.appendChild(this.buttonEl);
+  }
+  
+  setButtonText(text: string): this {
+    this.buttonEl.textContent = text;
+    return this;
+  }
+  
+  setCta(): this { return this; }
+  setWarning(): this { return this; }
+  setDisabled(disabled: boolean): this {
+    this.buttonEl.disabled = disabled;
+    return this;
+  }
+  onClick(callback: () => void): this {
+    this.buttonEl.addEventListener('click', callback);
+    return this;
+  }
+}
 
+export class TextComponent {
+  inputEl: HTMLInputElement;
+  
+  constructor(containerEl: HTMLElement) {
+    this.inputEl = document.createElement('input');
+    this.inputEl.type = 'text';
+    containerEl.appendChild(this.inputEl);
+  }
+  
+  setPlaceholder(placeholder: string): this {
+    this.inputEl.placeholder = placeholder;
+    return this;
+  }
+  
+  setValue(value: string): this {
+    this.inputEl.value = value;
+    return this;
+  }
+  
+  getValue(): string {
+    return this.inputEl.value;
+  }
+  
+  onChange(callback: (value: string) => void): this {
+    this.inputEl.addEventListener('change', (e) => {
+      callback((e.target as HTMLInputElement).value);
+    });
+    return this;
+  }
+  
+  setDisabled(disabled: boolean): this {
+    this.inputEl.disabled = disabled;
+    return this;
+  }
+}
+
+// File system types
+export interface TAbstractFile {
+  vault: Vault;
+  path: string;
+  name: string;
+  parent: TFolder | null;
+}
+
+export class TFile implements TAbstractFile {
+  vault: Vault = {} as Vault;
+  path: string = '';
+  name: string = '';
+  basename: string = '';
+  extension: string = '';
+  parent: TFolder | null = null;
+  stat: { mtime: number; ctime: number; size: number } = {
+    mtime: Date.now(),
+    ctime: Date.now(),
+    size: 0
+  };
+}
+
+export class TFolder implements TAbstractFile {
+  vault: Vault = {} as Vault;
+  path: string = '';
+  name: string = '';
+  parent: TFolder | null = null;
+  children: TAbstractFile[] = [];
+  
+  isRoot(): boolean { return false; }
+}
+
+// Core app interfaces
+export interface App {
+  vault: Vault;
+  metadataCache: MetadataCache;
+  workspace: Workspace;
+  fileManager: FileManager;
+  internalPlugins: any;
+  plugins: any;
+  
+  loadLocalStorage(key: string): string | null;
+  saveLocalStorage(key: string, value: string): void;
+}
+
+export interface Vault {
+  adapter: DataAdapter;
+  configDir: string;
+  
+  getAbstractFileByPath(path: string): TAbstractFile | null;
+  getFiles(): TFile[];
+  getMarkdownFiles(): TFile[];
+  getAllLoadedFiles(): TAbstractFile[];
+  
+  read(file: TFile): Promise<string>;
+  readBinary(file: TFile): Promise<ArrayBuffer>;
+  cachedRead(file: TFile): Promise<string>;
+  
+  modify(file: TFile, data: string): Promise<void>;
+  modifyBinary(file: TFile, data: ArrayBuffer): Promise<void>;
+  
+  create(path: string, data: string): Promise<TFile>;
+  createBinary(path: string, data: ArrayBuffer): Promise<TFile>;
+  createFolder(path: string): Promise<TFolder>;
+  
+  rename(file: TAbstractFile, newPath: string): Promise<void>;
+  delete(file: TAbstractFile, force?: boolean): Promise<void>;
+  trash(file: TAbstractFile, system?: boolean): Promise<void>;
+  
+  copy(file: TFile, newPath: string): Promise<TFile>;
+  
+  on(event: string, callback: Function): void;
+  off(event: string, callback: Function): void;
+  trigger(event: string, ...args: any[]): void;
+  tryTrigger(event: string, ...args: any[]): void;
+}
+
+export interface DataAdapter {
+  exists(path: string): Promise<boolean>;
+  stat(path: string): Promise<any>;
+  list(path: string): Promise<{ files: string[]; folders: string[] }>;
+  
+  read(path: string): Promise<string>;
+  readBinary(path: string): Promise<ArrayBuffer>;
+  
+  write(path: string, data: string): Promise<void>;
+  writeBinary(path: string, data: ArrayBuffer): Promise<void>;
+  append(path: string, data: string): Promise<void>;
+  
+  mkdir(path: string): Promise<void>;
+  rmdir(path: string, recursive?: boolean): Promise<void>;
+  remove(path: string): Promise<void>;
+  
+  rename(oldPath: string, newPath: string): Promise<void>;
+  copy(oldPath: string, newPath: string): Promise<void>;
+}
+
+export interface MetadataCache {
+  resolvedLinks: Record<string, Record<string, number>>;
+  unresolvedLinks: Record<string, Record<string, number>>;
+  
+  getFileCache(file: TFile): any;
+  getCache(path: string): any;
+  
+  getFirstLinkpathDest(linkpath: string, sourcePath: string): TFile | null;
+  
+  on(event: string, callback: Function): void;
+  off(event: string, callback: Function): void;
+  trigger(event: string, ...args: any[]): void;
+  tryTrigger(event: string, ...args: any[]): void;
+}
+
+export interface Workspace {
+  getActiveFile(): TFile | null;
+  getLeaf(newLeaf?: boolean | 'tab' | 'split' | 'window'): WorkspaceLeaf;
+  getLeavesOfType(type: string): WorkspaceLeaf[];
+  
+  on(event: string, callback: Function): void;
+  off(event: string, callback: Function): void;
+  trigger(event: string, ...args: any[]): void;
+  tryTrigger(event: string, ...args: any[]): void;
+}
+
+export interface WorkspaceLeaf {
+  view: any;
+  
+  openFile(file: TFile): Promise<void>;
+  setViewState(state: any): Promise<void>;
+  getViewState(): any;
+}
+
+export interface FileManager {
+  getNewFileParent(sourcePath?: string): TFolder;
+  generateMarkdownLink(file: TFile, sourcePath: string): string;
+  renameFile(file: TAbstractFile, newPath: string): Promise<void>;
+}
+
+// Platform utilities
 export const Platform = {
-  isWin: process.platform === 'win32',
-  isMacOS: process.platform === 'darwin',
-  isLinux: process.platform === 'linux',
+  isDesktop: true,
   isMobile: false,
+  isMobileApp: false,
+  isDesktopApp: true,
   isIosApp: false,
   isAndroidApp: false,
+  isMacOS: false,
+  isWin: true,
+  isLinux: false,
+  isSafari: false
 };
 
-export const moment = vi.fn((date?: any) => ({
-  format: vi.fn((format: string) => '2024-01-01'),
-  toDate: vi.fn(() => new Date('2024-01-01')),
-  add: vi.fn().mockReturnThis(),
-  subtract: vi.fn().mockReturnThis(),
-  startOf: vi.fn().mockReturnThis(),
-  endOf: vi.fn().mockReturnThis(),
-}));
+// Utility functions
+export function normalizePath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '');
+}
 
-// Export commonly used enums/constants
-export const ViewState = {
-  TYPE_MARKDOWN: 'markdown',
-  TYPE_EMPTY: 'empty',
-};
+export function getLinkpath(linktext: string): string {
+  return linktext;
+}
 
-export const MarkdownPreviewEvents = {
-  MARKDOWN_POST_PROCESS: 'markdown-post-process',
-};
+export function parseLinktext(linktext: string): { path: string; subpath?: string } {
+  return { path: linktext };
+}
 
-// Export type guards
-export const isTFile = (file: any): file is TFile => {
-  return file instanceof TFile;
-};
+export function setIcon(el: HTMLElement, icon: string): void {
+  // Mock implementation
+}
 
-export const isTFolder = (file: any): file is TFolder => {
-  return file instanceof TFolder;
-};
+export function getIcon(name: string): string | null {
+  return null;
+}
 
-// Default export for convenience
-export default {
+// Export additional types
+export type { 
   App,
   Vault,
+  MetadataCache,
   Workspace,
   WorkspaceLeaf,
-  MetadataCache,
   FileManager,
-  TFile,
-  TFolder,
-  TAbstractFile,
-  MarkdownView,
-  Editor,
-  Modal,
-  Notice,
-  Plugin,
-  PluginSettingTab,
-  Setting,
-  normalizePath,
-  Platform,
-  moment,
-  ViewState,
-  MarkdownPreviewEvents,
-  isTFile,
-  isTFolder,
+  DataAdapter
 };
