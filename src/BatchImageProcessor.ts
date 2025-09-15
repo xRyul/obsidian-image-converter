@@ -58,6 +58,14 @@ export class BatchImageProcessor {
                 linkedFiles = this.getLinkedImageFiles(noteFile);
             }
 
+            // De-duplicate by path while preserving order
+            const seen = new Set<string>();
+            linkedFiles = linkedFiles.filter((file) => {
+                if (seen.has(file.path)) return false;
+                seen.add(file.path);
+                return true;
+            });
+
             // If no images found at all
             if (linkedFiles.length === 0) {
                 new Notice('No images found in the note.');
@@ -129,8 +137,11 @@ export class BatchImageProcessor {
                 const newFileName = `${linkedFile.basename}.${outputFormat.toLowerCase()}`;
                 const newFilePath = linkedFile.path.replace(linkedFile.name, newFileName);
 
+                // Capture old path before any rename
+                const oldPath = linkedFile.path;
+
                 // Rename the file (async operation, should be awaited)
-                if (linkedFile.path !== newFilePath) {
+                if (oldPath !== newFilePath) {
                     await this.app.fileManager.renameFile(linkedFile, newFilePath);
                 }
 
@@ -146,8 +157,8 @@ export class BatchImageProcessor {
                 await this.app.vault.modifyBinary(renamedFile, processedImageData);
 
                 // Update links only if the file was renamed
-                if (linkedFile.path !== newFilePath) {
-                    await this.updateLinksInNote(noteFile, linkedFile.path, newFilePath);
+                if (oldPath !== newFilePath) {
+                    await this.updateLinksInNote(noteFile, oldPath, newFilePath);
                 }
 
                 const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -277,8 +288,11 @@ export class BatchImageProcessor {
                     allowLargerFiles
                 );
 
+                // Capture old path before any rename
+                const oldPath = image.path;
+
                 // Rename the file if the format has changed
-                if (image.path !== newFilePath) {
+                if (oldPath !== newFilePath) {
                     await this.app.fileManager.renameFile(image, newFilePath);
                 }
 
@@ -316,15 +330,30 @@ export class BatchImageProcessor {
 
     // Add helper methods like getImageFiles, shouldProcessImage, etc. (update accordingly)
     private getImageFiles(folder: TFolder, recursive: boolean): TFile[] {
-        let images: TFile[] = [];
-        folder.children.forEach(child => {
-            if (child instanceof TFile && this.plugin.supportedImageFormats.isSupported(undefined, child.name)) {
-                images.push(child);
-            } else if (recursive && child instanceof TFolder) {
-                images = images.concat(this.getImageFiles(child, recursive));
+        // Derive images by path prefix rather than relying on TFolder.children,
+        // so tests using thin fakes don't need to wire children relationships.
+        const allFiles = this.app.vault.getFiles();
+        const folderPath = folder.path.replace(/\\/g, '/').replace(/\/$/, '');
+        const prefix = folderPath === '' || folderPath === '/' ? '' : `${folderPath}/`;
+
+        const isImmediateChild = (filePath: string) => {
+            if (!prefix) {
+                // Root folder: immediate children have no '/'
+                return filePath.indexOf('/') === -1;
             }
+            if (!filePath.startsWith(prefix)) return false;
+            const remainder = filePath.slice(prefix.length);
+            return remainder.indexOf('/') === -1;
+        };
+
+        return allFiles.filter((file) => {
+            if (!this.plugin.supportedImageFormats.isSupported(undefined, file.name)) return false;
+            const normalized = file.path.replace(/\\/g, '/');
+            if (recursive) {
+                return prefix === '' ? true : normalized.startsWith(prefix);
+            }
+            return isImmediateChild(normalized);
         });
-        return images;
     }
 
 
@@ -405,7 +434,6 @@ export class BatchImageProcessor {
             const totalImages = filesToProcess.length;
 
             for (const image of filesToProcess) {
-
                 imageCount++;
 
                 const imageData = await this.app.vault.readBinary(image);
@@ -413,19 +441,18 @@ export class BatchImageProcessor {
                     type: `image/${image.extension}`,
                 });
 
-                const processedImageData =
-                    await this.imageProcessor.processImage(
-                        imageBlob,
-                        outputFormat,
-                        quality,
-                        colorDepth,
-                        resizeMode as ResizeMode,
-                        desiredWidth,
-                        desiredHeight,
-                        desiredLength,
-                        enlargeOrReduce as EnlargeReduce,
-                        allowLargerFiles
-                    );
+                const processedImageData = await this.imageProcessor.processImage(
+                    imageBlob,
+                    outputFormat,
+                    quality,
+                    colorDepth,
+                    resizeMode as ResizeMode,
+                    desiredWidth,
+                    desiredHeight,
+                    desiredLength,
+                    enlargeOrReduce as EnlargeReduce,
+                    allowLargerFiles
+                );
 
                 // Construct the new file path based on conversion settings
                 const newFileName = `${image.basename}.${outputFormat.toLowerCase()}`;
@@ -436,44 +463,37 @@ export class BatchImageProcessor {
                     image.path !== newFilePath &&
                     this.app.vault.getAbstractFileByPath(newFilePath)
                 ) {
-                    newFilePath =
-                        await this.folderAndFilenameManagement.handleNameConflicts(
-                            image.parent?.path || "",
-                    newFileName
-                );
+                    newFilePath = await this.folderAndFilenameManagement.handleNameConflicts(
+                        image.parent?.path || "",
+                        newFileName
+                    );
                 }
 
+                // Capture old path before any rename
+                const oldPath = image.path;
+
                 // Rename the file if the format has changed
-                if (image.path !== newFilePath) {
+                if (oldPath !== newFilePath) {
                     await this.app.fileManager.renameFile(image, newFilePath);
                 }
 
                 // Get the renamed file using the new path
-                const renamedFile = this.app.vault.getAbstractFileByPath(
-                    newFilePath
-                ) as TFile;
+                const renamedFile = this.app.vault.getAbstractFileByPath(newFilePath) as TFile;
 
                 if (!renamedFile) {
-                    console.error(
-                        "Failed to find renamed file:",
-                        newFilePath
-                    );
+                    console.error("Failed to find renamed file:", newFilePath);
                     continue; // Skip to the next file if the rename failed
                 }
 
                 // Modify the file content with processed image data
-                await this.app.vault.modifyBinary(
-                    renamedFile,
-                    processedImageData
-                );
+                await this.app.vault.modifyBinary(renamedFile, processedImageData);
 
                 // Update links in all notes to point to the renamed file
-                await this.updateLinksInAllNotes(image.path, newFilePath);
+                if (oldPath !== newFilePath) {
+                    await this.updateLinksInAllNotes(oldPath, newFilePath);
+                }
 
-                const elapsedTime = (
-                    (Date.now() - startTime) /
-                    1000
-                ).toFixed(2);
+                const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
                 statusBarItemEl.setText(
                     `Processing image ${imageCount} of ${totalImages}, elapsed time: ${elapsedTime} seconds`
                 );
@@ -582,13 +602,9 @@ export class BatchImageProcessor {
         newPath: string
     ): Promise<void> {
         const oldLinkText = this.escapeRegexCharacters(oldPath);
-        const newLinkText = this.escapeRegexCharacters(newPath);
-
         const content = await this.app.vault.read(noteFile);
-        const newContent = content.replace(
-            new RegExp(oldLinkText, "g"),
-            newLinkText
-        );
+        // Use direct replacement string to avoid escaping characters in the new path
+        const newContent = content.replace(new RegExp(oldLinkText, "g"), newPath);
 
         if (content !== newContent) {
             await this.app.vault.modify(noteFile, newContent);

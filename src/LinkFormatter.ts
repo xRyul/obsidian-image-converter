@@ -15,50 +15,36 @@ export class LinkFormatter {
         activeFile: TFile | null,
         resizePreset?: NonDestructiveResizePreset | null
     ): Promise<string> {
-        try {
-            if (!linkPath) {
-                throw new Error("Link path cannot be empty.");
-            }
-
-            // Get the TFile object using the provided linkPath
-            const file = this.app.vault.getAbstractFileByPath(linkPath);
-
-            // Check if the file exists
-            if (!(file instanceof TFile)) {
-                throw new Error(`No file found at path: ${linkPath}`);
-            }
-
-            const formattedPath = this.formatPath(
-                file,
-                linkFormat,
-                pathFormat,
-                activeFile
-            );
-
-            let resizeParams = "";
-            if (resizePreset) {
-                resizeParams = await this.getResizeParams(
-                    resizePreset,
-                    file
-                );
-            }
-
-            // console.log("Formatted Path (in formatLink):", formattedPath);
-
-            return linkFormat === "wikilink"
-                ? `![[${formattedPath}${resizeParams}]]`
-                : `![${resizeParams}](${this.encodeMarkdownPath(formattedPath)})`; // : `![${resizeParams}](${encodeURI(formattedPath)})`;
-        } catch (error) {
-            if (error instanceof Error) {
-                new Notice(`Error formatting link: ${error.message}`);
-            } else {
-                new Notice(
-                    "An unexpected error occurred while formatting the link."
-                );
-            }
-            console.error("Error in LinkFormatter:", error);
-            return "";
+        if (!linkPath) {
+            throw new Error("Link path cannot be empty.");
         }
+
+        // Get the TFile object using the provided linkPath
+        const file = this.app.vault.getAbstractFileByPath(linkPath);
+
+        // Check if the file exists
+        if (!(file instanceof TFile)) {
+            throw new Error(`No file found at path: ${linkPath}`);
+        }
+
+        const formattedPath = this.formatPath(
+            file,
+            linkFormat,
+            pathFormat,
+            activeFile
+        );
+
+        let resizeParams = "";
+        if (resizePreset) {
+            resizeParams = await this.getResizeParams(
+                resizePreset,
+                file
+            );
+        }
+
+        return linkFormat === "wikilink"
+            ? `![[${formattedPath}${resizeParams}]]`
+            : `![${resizeParams}](${this.encodeMarkdownPath(formattedPath)})`;
     }
 
     private encodeMarkdownPath(path: string): string {

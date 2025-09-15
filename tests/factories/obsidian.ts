@@ -12,7 +12,7 @@ import { Notice, TFile, TFolder, Vault, App, MetadataCache, Workspace } from 'ob
  * @returns Mock Notice with spy
  */
 export function fakeNotice(): typeof Notice {
-  const NoticeMock = vi.fn().mockImplementation((message: string, timeout?: number) => {
+  const noticeMock = vi.fn().mockImplementation((message: string, timeout?: number) => {
     return {
       message,
       timeout,
@@ -21,7 +21,7 @@ export function fakeNotice(): typeof Notice {
     };
   });
   
-  return NoticeMock as any;
+  return noticeMock as any;
 }
 
 /**
@@ -70,15 +70,15 @@ export function fakeTFolder(options: {
 } = {}): TFolder {
   const path = options.path ?? 'test-folder';
   const name = options.name ?? path.split('/').pop() ?? 'test-folder';
-  
-  return {
-    path,
-    name,
-    parent: options.parent ?? null,
-    children: options.children ?? [],
-    vault: undefined as any,
-    isRoot: () => path === '/'
-  } as TFolder;
+
+  const folder = new (TFolder as any)() as TFolder;
+  (folder as any).path = path;
+  (folder as any).name = name;
+  (folder as any).parent = options.parent ?? null;
+  (folder as any).children = options.children ?? [];
+  (folder as any).vault = undefined as any;
+  (folder as any).isRoot = () => path === '/';
+  return folder;
 }
 
 /**
@@ -106,7 +106,7 @@ export function fakeVault(options: {
     // File operations
     getAbstractFileByPath: vi.fn((path: string) => {
       if (path === '/' || path === '') return rootFolder;
-      return files.find(f => f.path === path) || folders.find(f => f.path === path) || null;
+      return files.find(fileItem => fileItem.path === path) || folders.find(folderItem => folderItem.path === path) || null;
     }),
     
     read: vi.fn(async (file: TFile) => {
@@ -140,12 +140,12 @@ export function fakeVault(options: {
     }),
     
     createFolder: vi.fn(async (path: string) => {
-      if (!folders.find(f => f.path === path)) {
+      if (!folders.find(folderItem => folderItem.path === path)) {
         const folder = fakeTFolder({ path });
         folders.push(folder);
         return folder;
       }
-      return folders.find(f => f.path === path) as TFolder;
+      return folders.find(folderItem => folderItem.path === path) as TFolder;
     }),
     
     rename: vi.fn(async (file: TFile, newPath: string) => {
@@ -180,11 +180,11 @@ export function fakeVault(options: {
     adapter: {
       exists: vi.fn(async (path: string) => {
         if (path === '/' || path === '') return true;
-        return files.some(f => f.path === path) || folders.some(f => f.path === path);
+        return files.some(fileItem => fileItem.path === path) || folders.some(folderItem => folderItem.path === path);
       }),
       
       stat: vi.fn(async (path: string) => {
-        const file = files.find(f => f.path === path);
+        const file = files.find(fileItem => fileItem.path === path);
         if (file) {
           return file.stat ?? { mtime: Date.now(), ctime: Date.now(), size: 1024 };
         }
@@ -192,15 +192,15 @@ export function fakeVault(options: {
       }),
       
       list: vi.fn(async (path: string) => {
-        const folder = path === '/' ? rootFolder : folders.find(f => f.path === path);
+        const folder = path === '/' ? rootFolder : folders.find(folderItem => folderItem.path === path);
         if (!folder) return { files: [], folders: [] };
         
-        const folderFiles = files.filter(f => f.parent?.path === path);
-        const subFolders = folders.filter(f => f.parent?.path === path);
+        const folderFiles = files.filter(fileItem => fileItem.parent?.path === path);
+        const subFolders = folders.filter(folderItem => folderItem.parent?.path === path);
         
         return {
-          files: folderFiles.map(f => f.name),
-          folders: subFolders.map(f => f.name)
+          files: folderFiles.map(fileItem => fileItem.name),
+          folders: subFolders.map(folderItem => folderItem.name)
         };
       }),
       
@@ -221,24 +221,24 @@ export function fakeVault(options: {
       }),
       
       mkdir: vi.fn(async (path: string) => {
-        if (!folders.find(f => f.path === path)) {
+        if (!folders.find(folderItem => folderItem.path === path)) {
           folders.push(fakeTFolder({ path }));
         }
       }),
       
       rmdir: vi.fn(async (path: string, recursive?: boolean) => {
-        const index = folders.findIndex(f => f.path === path);
+        const index = folders.findIndex(folderItem => folderItem.path === path);
         if (index > -1) folders.splice(index, 1);
       }),
       
       remove: vi.fn(async (path: string) => {
-        const fileIndex = files.findIndex(f => f.path === path);
+        const fileIndex = files.findIndex(fileItem => fileItem.path === path);
         if (fileIndex > -1) {
           files.splice(fileIndex, 1);
           fileContents.delete(path);
           binaryContents.delete(path);
         }
-        const folderIndex = folders.findIndex(f => f.path === path);
+        const folderIndex = folders.findIndex(folderItem => folderItem.path === path);
         if (folderIndex > -1) {
           folders.splice(folderIndex, 1);
         }
@@ -250,7 +250,7 @@ export function fakeVault(options: {
     getName: vi.fn(() => vaultName),
     getFiles: vi.fn(() => files),
     getAllLoadedFiles: vi.fn(() => [...files, ...folders, rootFolder]),
-    getMarkdownFiles: vi.fn(() => files.filter(f => f.extension === 'md')),
+    getMarkdownFiles: vi.fn(() => files.filter(fileItem => fileItem.extension === 'md')),
     // Obsidian config API used by FolderAndFilenameManagement
     getConfig: vi.fn((key: string) => {
       if (key === 'attachmentFolderPath') return attachmentFolderPath;
@@ -265,7 +265,7 @@ export function fakeVault(options: {
     off: vi.fn(),
     trigger: vi.fn(),
     tryTrigger: vi.fn()
-  } as Partial<Vault>;
+  } as unknown as Partial<Vault>;
 }
 
 /**
