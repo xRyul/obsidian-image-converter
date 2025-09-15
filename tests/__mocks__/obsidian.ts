@@ -239,8 +239,22 @@ export class Setting {
   addTextArea(cb: (text: TextComponent) => void): this { const textComponent = new TextComponent(this.controlEl); cb(textComponent); this.components.push(textComponent); return this; }
   addToggle(cb: (toggle: ToggleComponent) => void): this { const toggleComponent = new ToggleComponent(this.controlEl); cb(toggleComponent); this.components.push(toggleComponent); return this; }
   addButton(cb: (button: ButtonComponent) => void): this { const buttonComponent = new ButtonComponent(this.controlEl); cb(buttonComponent); this.components.push(buttonComponent); return this; }
+  addExtraButton(cb: (button: { setIcon: (icon: string) => any; setTooltip: (text: string) => any; onClick: (handler: () => void) => any; buttonEl: HTMLButtonElement }) => void): this {
+    const el = document.createElement('button');
+    this.controlEl.appendChild(el);
+    const extra = {
+      buttonEl: el,
+      setIcon: (_icon: string) => { /* no-op for tests */ return extra; },
+      setTooltip: (_text: string) => { el.title = _text; return extra; },
+      onClick: (handler: () => void) => { el.addEventListener('click', handler); return extra; }
+    } as any;
+    cb(extra);
+    this.components.push(extra);
+    return this;
+  }
   addDropdown(cb: (dropdown: DropdownComponent) => void): this { const dropdownComponent = new DropdownComponent(this.controlEl); cb(dropdownComponent); this.components.push(dropdownComponent); return this; }
   addSlider(cb: (slider: SliderComponent) => void): this { const sliderComponent = new SliderComponent(this.controlEl); cb(sliderComponent); this.components.push(sliderComponent); return this; }
+  clear(): this { while (this.controlEl.firstChild) this.controlEl.removeChild(this.controlEl.firstChild); this.components = []; return this; }
   then(_cb: () => void): this { return this; }
 }
 
