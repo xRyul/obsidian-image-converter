@@ -75,31 +75,7 @@ export class PluginSettingTab {
   hide() {}
 }
 
-export class Setting {
-  settingEl: HTMLElement;
-  nameEl: HTMLElement;
-  descEl: HTMLElement;
-  controlEl: HTMLElement;
-  
-  constructor(containerEl: HTMLElement) {
-    this.settingEl = document.createElement('div');
-    this.nameEl = document.createElement('div');
-    this.descEl = document.createElement('div');
-    this.controlEl = document.createElement('div');
-  }
-  
-  setName(name: string): this { return this; }
-  setDesc(desc: string): this { return this; }
-  addText(cb: (text: any) => void): this { return this; }
-  addTextArea(cb: (text: any) => void): this { return this; }
-  addToggle(cb: (toggle: any) => void): this { return this; }
-  addButton(cb: (button: any) => void): this { return this; }
-  addDropdown(cb: (dropdown: any) => void): this { return this; }
-  addSlider(cb: (slider: any) => void): this { return this; }
-  then(cb: () => void): this { return this; }
-}
-
-// UI Components
+// UI Components and helpers
 export class ButtonComponent {
   buttonEl: HTMLButtonElement;
   
@@ -112,9 +88,11 @@ export class ButtonComponent {
     this.buttonEl.textContent = text;
     return this;
   }
-  
-  setCta(): this { return this; }
-  setWarning(): this { return this; }
+  setIcon(_icon: string): this { return this; }
+  setTooltip(_text: string): this { return this; }
+  setClass(cls: string): this { this.buttonEl.classList.add(cls); return this; }
+  setCta(): this { this.buttonEl.classList.add('cta'); return this; }
+  setWarning(): this { this.buttonEl.classList.add('warning'); return this; }
   setDisabled(disabled: boolean): this {
     this.buttonEl.disabled = disabled;
     return this;
@@ -159,6 +137,111 @@ export class TextComponent {
     this.inputEl.disabled = disabled;
     return this;
   }
+}
+
+export class DropdownComponent {
+  selectEl: HTMLSelectElement;
+  private changeCb: ((val: string) => void) | null = null;
+  
+  constructor(containerEl: HTMLElement) {
+    this.selectEl = document.createElement('select');
+    containerEl.appendChild(this.selectEl);
+  }
+  addOption(value: string, label: string): this {
+    const opt = document.createElement('option');
+    opt.value = value; opt.textContent = label;
+    this.selectEl.appendChild(opt);
+    return this;
+  }
+  addOptions(options: Record<string,string>): this {
+    Object.entries(options).forEach(([value,label]) => this.addOption(value,label));
+    return this;
+  }
+  setValue(value: string): this {
+    this.selectEl.value = value;
+    return this;
+  }
+  onChange(cb: (value: string) => void): this {
+    this.changeCb = cb;
+    this.selectEl.addEventListener('change', (e) => {
+      cb((e.target as HTMLSelectElement).value);
+    });
+    return this;
+  }
+}
+
+export class SliderComponent {
+  sliderEl: HTMLInputElement;
+  private changeCb: ((val: number) => void) | null = null;
+  
+  constructor(containerEl: HTMLElement) {
+    this.sliderEl = document.createElement('input');
+    this.sliderEl.type = 'range';
+    containerEl.appendChild(this.sliderEl);
+  }
+  setLimits(min: number, max: number, step: number): this {
+    this.sliderEl.min = String(min);
+    this.sliderEl.max = String(max);
+    this.sliderEl.step = String(step);
+    return this;
+  }
+  setValue(value: number): this {
+    this.sliderEl.value = String(value);
+    return this;
+  }
+  setDynamicTooltip(): this { return this; }
+  onChange(cb: (value: number) => void): this {
+    this.changeCb = cb;
+    this.sliderEl.addEventListener('input', (event) => cb(Number((event.target as HTMLInputElement).value)));
+    return this;
+  }
+}
+
+export class ToggleComponent {
+  toggleEl: HTMLInputElement;
+  private changeCb: ((val: boolean) => void) | null = null;
+  constructor(containerEl: HTMLElement) {
+    this.toggleEl = document.createElement('input');
+    this.toggleEl.type = 'checkbox';
+    containerEl.appendChild(this.toggleEl);
+  }
+  setValue(value: boolean): this { this.toggleEl.checked = value; return this; }
+  onChange(cb: (value: boolean) => void): this {
+    this.changeCb = cb;
+    this.toggleEl.addEventListener('change', (event) => cb((event.target as HTMLInputElement).checked));
+    return this;
+  }
+}
+
+export class Setting {
+  settingEl: HTMLElement;
+  nameEl: HTMLElement;
+  descEl: HTMLElement;
+  controlEl: HTMLElement;
+  components: any[] = [];
+  
+  constructor(containerEl: HTMLElement) {
+    this.settingEl = document.createElement('div');
+    this.nameEl = document.createElement('div');
+    this.descEl = document.createElement('div');
+    this.controlEl = document.createElement('div');
+    this.settingEl.appendChild(this.nameEl);
+    this.settingEl.appendChild(this.descEl);
+    this.settingEl.appendChild(this.controlEl);
+    if (containerEl) containerEl.appendChild(this.settingEl);
+  }
+  
+  setClass(cls: string): this { this.settingEl.classList.add(cls); return this; }
+  setName(_name: string): this { return this; }
+  setDesc(_desc: string): this { return this; }
+  setTooltip(_text: string): this { return this; }
+  addText(cb: (text: TextComponent) => void): this { const textComponent = new TextComponent(this.controlEl); cb(textComponent); this.components.push(textComponent); return this; }
+  addTextArea(cb: (text: TextComponent) => void): this { const textComponent = new TextComponent(this.controlEl); cb(textComponent); this.components.push(textComponent); return this; }
+  addToggle(cb: (toggle: ToggleComponent) => void): this { const toggleComponent = new ToggleComponent(this.controlEl); cb(toggleComponent); this.components.push(toggleComponent); return this; }
+  addButton(cb: (button: ButtonComponent) => void): this { const buttonComponent = new ButtonComponent(this.controlEl); cb(buttonComponent); this.components.push(buttonComponent); return this; }
+  addDropdown(cb: (dropdown: DropdownComponent) => void): this { const dropdownComponent = new DropdownComponent(this.controlEl); cb(dropdownComponent); this.components.push(dropdownComponent); return this; }
+  addSlider(cb: (slider: SliderComponent) => void): this { const sliderComponent = new SliderComponent(this.controlEl); cb(sliderComponent); this.components.push(sliderComponent); return this; }
+  then(_cb: () => void): this { return this; }
 }
 
 // File system types
@@ -313,6 +396,39 @@ export const Platform = {
   isSafari: false
 };
 
+// Menu and component primitives
+export class Component {
+  private disposables: Array<() => void> = [];
+  register(cb?: () => void) {
+    if (cb) this.disposables.push(cb);
+  }
+  registerEvent(_event: any) {}
+  registerDomEvent(_el: HTMLElement | Document, _event: string, _handler: any, _useCapture?: boolean) {}
+  onunload() { this.disposables.forEach(dispose => dispose()); this.disposables = []; }
+}
+
+export class MenuItem {
+  private title = '';
+  private icon = '';
+  private click: (() => void) | null = null;
+  setTitle(title: string) { this.title = title; return this; }
+  setIcon(iconName: string) { this.icon = iconName; return this; }
+  onClick(cb: () => void) { this.click = cb; return this; }
+  trigger() { this.click?.(); }
+}
+
+export class Menu {
+  private items: MenuItem[] = [];
+  addItem(cb: (item: MenuItem) => void) { const i = new MenuItem(); cb(i); this.items.push(i); return this; }
+  addSeparator() { return this; }
+  showAtMouseEvent(_evt: MouseEvent) { /* no-op in tests */ }
+  hide() { /* no-op */ }
+}
+
+export class View { getViewType(): string { return 'markdown'; } }
+export class MarkdownView extends View { editor: any = { getValue: () => '', setValue: (_: string) => {} }; }
+export class Editor {}
+
 // Utility functions
 export function normalizePath(path: string): string {
   return path.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '');
@@ -326,11 +442,11 @@ export function parseLinktext(linktext: string): { path: string; subpath?: strin
   return { path: linktext };
 }
 
-export function setIcon(el: HTMLElement, icon: string): void {
+export function setIcon(_el: HTMLElement, _icon: string): void {
   // Mock implementation
 }
 
-export function getIcon(name: string): string | null {
+export function getIcon(_name: string): string | null {
   return null;
 }
 

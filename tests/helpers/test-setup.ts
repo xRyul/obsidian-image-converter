@@ -96,7 +96,109 @@ beforeEach(() => {
     (window as any).app = undefined;
     (window as any).moment = undefined;
   }
-  
+
+  // Obsidian DOM helpers polyfill on HTMLElement
+  const proto = HTMLElement.prototype as any;
+  if (!proto.addClass) {
+    proto.addClass = function (cls: string) { cls?.split(/\s+/).filter(Boolean).forEach((className: string) => this.classList.add(className)); return this; };
+  }
+  if (!proto.removeClass) {
+    proto.removeClass = function (cls: string) { cls?.split(/\s+/).filter(Boolean).forEach((className: string) => this.classList.remove(className)); return this; };
+  }
+  if (!proto.toggleClass) {
+    proto.toggleClass = function (cls: string, force?: boolean) { this.classList.toggle(cls, force); return this; };
+  }
+  if (!proto.empty) {
+    proto.empty = function () { while (this.firstChild) this.removeChild(this.firstChild); return this; };
+  }
+  if (!proto.setCssStyles) {
+    proto.setCssStyles = function (styles: Record<string, string>) { Object.assign(this.style, styles); return this; };
+  }
+  if (!proto.createDiv) {
+    proto.createDiv = function (clsOrOpts?: string | { cls?: string; text?: string }) {
+      const el = document.createElement('div');
+      if (typeof clsOrOpts === 'string') el.className = clsOrOpts;
+      else if (clsOrOpts) {
+        if (clsOrOpts.cls) el.className = clsOrOpts.cls;
+        if ((clsOrOpts as any).text) el.textContent = (clsOrOpts as any).text;
+      }
+      this.appendChild(el);
+      return el;
+    };
+  }
+  if (!proto.createEl) {
+    proto.createEl = function (tag: string, opts?: { cls?: string; text?: string; attr?: Record<string, string> }) {
+      const el = document.createElement(tag);
+      if (opts?.cls) el.className = opts.cls;
+      if (opts?.text) el.textContent = opts.text;
+      if (opts?.attr) {
+        Object.entries(opts.attr).forEach(([key, value]) => el.setAttribute(key, String(value)));
+      }
+      this.appendChild(el);
+      return el;
+    };
+  }
+  if (!proto.createSpan) {
+    proto.createSpan = function (opts?: { cls?: string; text?: string }) {
+      const el = document.createElement('span');
+      if (opts?.cls) el.className = opts.cls;
+      if (opts?.text) el.textContent = opts.text;
+      this.appendChild(el);
+      return el;
+    };
+  }
+  if (!proto.hide) {
+    proto.hide = function () { this.style.display = 'none'; return this; };
+  }
+  if (!proto.show) {
+    proto.show = function () { this.style.display = ''; return this; };
+  }
+  if (!proto.onClickEvent) {
+    proto.onClickEvent = function (handler: (e: MouseEvent) => void) { this.addEventListener('click', handler); return this; };
+  }
+  if (!proto.setAttr) {
+    proto.setAttr = function (name: string, value: string) { this.setAttribute(name, String(value)); return this; };
+  }
+  if (!proto.setText) {
+    proto.setText = function (text: string) { this.textContent = String(text); return this; };
+  }
+
+  // Polyfills for DocumentFragment (used in settings summaries)
+  const dfProto = DocumentFragment.prototype as any;
+  if (!dfProto.createEl) {
+    dfProto.createEl = function (tag: string, opts?: { cls?: string; text?: string; attr?: Record<string, string> }) {
+      const el = document.createElement(tag);
+      if (opts?.cls) el.className = opts.cls;
+      if (opts?.text) el.textContent = opts.text;
+      if (opts?.attr) {
+        Object.entries(opts.attr).forEach(([key, value]) => el.setAttribute(key, String(value)));
+      }
+      this.appendChild(el);
+      return el;
+    };
+  }
+  if (!dfProto.createDiv) {
+    dfProto.createDiv = function (clsOrOpts?: string | { cls?: string; text?: string }) {
+      const el = document.createElement('div');
+      if (typeof clsOrOpts === 'string') el.className = clsOrOpts;
+      else if (clsOrOpts) {
+        if (clsOrOpts.cls) el.className = clsOrOpts.cls;
+        if ((clsOrOpts as any).text) el.textContent = (clsOrOpts as any).text;
+      }
+      this.appendChild(el);
+      return el;
+    };
+  }
+  if (!dfProto.createSpan) {
+    dfProto.createSpan = function (opts?: { cls?: string; text?: string }) {
+      const el = document.createElement('span');
+      if (opts?.cls) el.className = opts.cls;
+      if (opts?.text) el.textContent = opts.text;
+      this.appendChild(el);
+      return el;
+    };
+  }
+
   // Mock console methods to reduce noise in tests
   global.console = {
     ...console,
