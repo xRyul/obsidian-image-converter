@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { FolderAndFilenameManagement } from '@/FolderAndFilenameManagement';
-import { VariableProcessor } from '@/VariableProcessor';
-import { SupportedImageFormats } from '@/SupportedImageFormats';
-import { DEFAULT_SETTINGS } from '@/ImageConverterSettings';
+import { FolderAndFilenameManagement } from '../../../src/FolderAndFilenameManagement';
+import { VariableProcessor } from '../../../src/VariableProcessor';
+import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
+import { DEFAULT_SETTINGS } from '../../../src/ImageConverterSettings';
 import { fakeApp, fakeVault } from '../../factories/obsidian';
 
 describe('FolderAndFilenameManagement sanitization and ensureFolderExists', () => {
@@ -20,7 +20,7 @@ describe('FolderAndFilenameManagement sanitization and ensureFolderExists', () =
     expect(ffm.sanitizeFilename('CON')).toMatch(/^CON_?$/);
     // Leading dots removed; internal dots preserved; trailing dots removed by base sanitization then extension is appended back by caller if present.
     expect(ffm.sanitizeFilename('..hidden..file..')).toBe('hidden..file.');
-    const long = 'A'.repeat(300) + '.txt';
+    const long = `${'A'.repeat(300)}.txt`;
     const out = ffm.sanitizeFilename(long);
     expect(out.length).toBeLessThanOrEqual(250 + '.txt'.length);
   });

@@ -1,3 +1,5 @@
+/* eslint-disable id-length */
+/* eslint-disable no-undef */
 /**
  * Factory functions for creating mock canvas objects
  * Provides testable canvas implementations for image processing tests
@@ -153,7 +155,7 @@ export function fakeContext2D(options: {
         data,
         width: sw,
         height: sh,
-        colorSpace: 'srgb' as PredefinedColorSpace
+colorSpace: 'srgb' as any
       } as ImageData;
     }),
     
@@ -172,18 +174,18 @@ export function fakeContext2D(options: {
     fillStyle: '#000000',
     strokeStyle: '#000000',
     globalAlpha: 1,
-    globalCompositeOperation: 'source-over' as GlobalCompositeOperation,
+globalCompositeOperation: 'source-over',
     lineWidth: 1,
-    lineCap: 'butt' as CanvasLineCap,
-    lineJoin: 'miter' as CanvasLineJoin,
+lineCap: 'butt',
+lineJoin: 'miter',
     miterLimit: 10,
     shadowOffsetX: 0,
     shadowOffsetY: 0,
     shadowBlur: 0,
     shadowColor: 'rgba(0, 0, 0, 0)',
     font: '10px sans-serif',
-    textAlign: 'start' as CanvasTextAlign,
-    textBaseline: 'alphabetic' as CanvasTextBaseline,
+textAlign: 'start',
+textBaseline: 'alphabetic',
     
     // Other methods
     clip: vi.fn(),

@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/naming-convention */
+/* eslint-disable prefer-destructuring */
 import { vi } from 'vitest';
 
 const piexif = {

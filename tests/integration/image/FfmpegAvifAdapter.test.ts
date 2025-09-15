@@ -15,10 +15,11 @@ vi.mock('fs/promises', () => {
   };
 });
 
-import { ImageProcessor } from '@/ImageProcessor';
-import { SupportedImageFormats } from '@/SupportedImageFormats';
+import { ImageProcessor } from '../../../src/ImageProcessor';
+import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
 import { makePngBytes, makeImageBlob } from '../../factories/image';
 import { mockChildProcess } from '../../factories/process';
+import { fakeApp } from '../../factories/obsidian';
 
 // Pull mocked fs
 import * as fs from 'fs/promises';
@@ -28,7 +29,8 @@ describe('Integration-lite: FfmpegAvifAdapter', () => {
   let supportedFormats: SupportedImageFormats;
 
   beforeEach(() => {
-    supportedFormats = new SupportedImageFormats();
+    const app = fakeApp() as any;
+    supportedFormats = new SupportedImageFormats(app);
     processor = new ImageProcessor(supportedFormats);
     (fs.readFile as any).mockReset();
     (fs.unlink as any).mockReset();
@@ -36,6 +38,7 @@ describe('Integration-lite: FfmpegAvifAdapter', () => {
 
   it('1.35 [I] Happy path: uses libaom-av1, reads temp file, deletes it', async () => {
     // Arrange
+    // eslint-disable-next-line id-length
     const inputBytes = makePngBytes({ w: 64, h: 64 });
     const inputBlob = makeImageBlob(inputBytes, 'image/png');
 
@@ -88,10 +91,10 @@ describe('Integration-lite: FfmpegAvifAdapter', () => {
     );
 
     // Assert args
-    const calls = (spawn as any).mock.calls;
+    const { calls } = (spawn as any).mock;
     expect(calls.length).toBeGreaterThan(0);
-    expect(calls[0][0]).toContain('ffmpeg');
-    const args: string[] = calls[0][1];
+    const [cmd, args] = calls[0] as [string, string[]];
+    expect(cmd).toContain('ffmpeg');
     expect(args).toContain('-c:v');
     expect(args).toContain('libaom-av1');
     expect(args).toContain('-crf');
@@ -109,6 +112,7 @@ describe('Integration-lite: FfmpegAvifAdapter', () => {
 
   it('1.36 [I] Alpha path: uses format=rgba and alphaextract in filter chain', async () => {
     // Arrange
+    // eslint-disable-next-line id-length
     const inputBytes = makePngBytes({ w: 16, h: 16, alpha: true });
     const inputBlob = makeImageBlob(inputBytes, 'image/png');
 
@@ -162,8 +166,8 @@ describe('Integration-lite: FfmpegAvifAdapter', () => {
     );
 
     // Assert filter parts in args
-    const calls = (spawn as any).mock.calls;
-    const args: string[] = calls[0][1];
+    const { calls } = (spawn as any).mock;
+    const [, args] = calls[0] as [string, string[]];
     expect(args).toContain('-filter:v:0');
     expect(args).toContain('format=rgba');
     expect(args).toContain('-filter:v:1');
@@ -172,6 +176,7 @@ describe('Integration-lite: FfmpegAvifAdapter', () => {
 
   it('1.37 [I] Missing path or failure: returns original bytes and cleans up temp on failure', async () => {
     // Arrange - missing path
+    // eslint-disable-next-line id-length
     const inputBytes = makePngBytes({ w: 20, h: 20 });
     const inputBlob = makeImageBlob(inputBytes, 'image/png');
 

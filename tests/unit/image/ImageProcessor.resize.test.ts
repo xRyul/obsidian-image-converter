@@ -2,9 +2,10 @@
  * Unit tests for ImageProcessor resize math functionality
  * Test checklist items 1.20-1.30 (resize calculations)
  * Following SDET testing rules: AAA pattern, Given-When-Then naming, behavior-focused
- */
+*/
+/* eslint-disable id-length */
 
-import { vi } from 'vitest';
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 // All mocks must be defined before imports due to hoisting
 vi.mock('child_process');
@@ -13,24 +14,22 @@ vi.mock('os');
 vi.mock('path');
 vi.mock('sortablejs');
 vi.mock('piexifjs');
-vi.mock('@/main');
+vi.mock('../../../src/main');
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { ImageProcessor } from '@/ImageProcessor';
-import { SupportedImageFormats } from '@/SupportedImageFormats';
+import { ImageProcessor } from '../../../src/ImageProcessor';
+import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
 import { makePngBytes, makeImageBlob } from '../../factories/image';
-import { fakeCanvas } from '../../factories/canvas';
-import { setMockImageSize } from '@helpers/test-setup';
+import { fakeCanvas, fakeImage } from '../../factories/canvas';
+import { setMockImageSize } from '../../helpers/test-setup';
 
 describe('ImageProcessor - Resize Math Tests', () => {
   let processor: ImageProcessor;
   let supportedFormats: SupportedImageFormats;
   let mockCanvas: HTMLCanvasElement;
-  let mockDocument: any;
 
   beforeEach(() => {
     // Arrange: Set up processor and mocks
-    supportedFormats = new SupportedImageFormats();
+    supportedFormats = new SupportedImageFormats(undefined as any);
     processor = new ImageProcessor(supportedFormats);
     
     // Mock document.createElement for canvas without replacing whole document
@@ -299,7 +298,11 @@ describe('ImageProcessor - Resize Math Tests', () => {
       
       global.Image = vi.fn().mockImplementation(() => {
         const img = fakeImage({ width: 800, height: 600 });
-        setTimeout(() => img.onload && img.onload(), 0);
+        setTimeout(() => {
+          if (typeof img.onload === 'function') {
+            img.onload.call(img, new Event('load'));
+          }
+        }, 0);
         return img;
       }) as any;
       

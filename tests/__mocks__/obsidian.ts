@@ -3,8 +3,6 @@
  * Provides test doubles for all Obsidian API imports
  */
 
-import { vi } from 'vitest';
-
 // Core classes
 export class Notice {
   message: string;
@@ -301,6 +299,7 @@ export interface FileManager {
 }
 
 // Platform utilities
+// eslint-disable-next-line @typescript-eslint/naming-convention
 export const Platform = {
   isDesktop: true,
   isMobile: false,
@@ -335,13 +334,3 @@ export function getIcon(name: string): string | null {
   return null;
 }
 
-// Export additional types
-export type { 
-  App,
-  Vault,
-  MetadataCache,
-  Workspace,
-  WorkspaceLeaf,
-  FileManager,
-  DataAdapter
-};

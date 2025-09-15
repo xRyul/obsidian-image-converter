@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { FolderAndFilenameManagement } from '@/FolderAndFilenameManagement';
-import { VariableProcessor } from '@/VariableProcessor';
-import { SupportedImageFormats } from '@/SupportedImageFormats';
-import { DEFAULT_SETTINGS, type FolderPreset, type FilenamePreset, type ConversionPreset } from '@/ImageConverterSettings';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { FolderAndFilenameManagement } from '../../../src/FolderAndFilenameManagement';
+import { VariableProcessor } from '../../../src/VariableProcessor';
+import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
+import { DEFAULT_SETTINGS, type FolderPreset, type FilenamePreset, type ConversionPreset } from '../../../src/ImageConverterSettings';
 import { fakeApp, fakeTFile, fakeVault } from '../../factories/obsidian';
 
 function makeDeps(opts?: { attachmentFolderPath?: string }) {
@@ -18,7 +18,7 @@ function makeDeps(opts?: { attachmentFolderPath?: string }) {
 function installMomentStub() {
   (globalThis as any).moment = ((input?: any) => {
     const api: any = {
-      format: (f: string) => '2025-01-02',
+      format: (fmt: string) => '2025-01-02',
       add: () => api,
       subtract: () => api,
       startOf: () => api,
@@ -41,8 +41,8 @@ describe('FolderAndFilenameManagement destination resolution', () => {
   });
 
   it('3.1 DEFAULT uses attachmentFolderPath; resolves relative ./ under active note parent', async () => {
-    const { ffm, app } = makeDeps({ attachmentFolderPath: './assets' });
-    const file = new File([1], 'img.png', { type: 'image/png' });
+    const { ffm } = makeDeps({ attachmentFolderPath: './assets' });
+const file = new File([new Uint8Array([1])], 'img.png', { type: 'image/png' });
     const conv: ConversionPreset = { ...DEFAULT_SETTINGS.conversionPresets[0] } as any;
     const fname: FilenamePreset = { name: 'Custom', customTemplate: '{imagename}', skipRenamePatterns: '', conflictResolution: 'increment' };
     const folder: FolderPreset = { type: 'DEFAULT', name: 'Default' };
@@ -52,7 +52,7 @@ describe('FolderAndFilenameManagement destination resolution', () => {
 
   it('3.2 ROOT resolves to vault root path', async () => {
     const { ffm } = makeDeps();
-    const file = new File([1], 'img.png', { type: 'image/png' });
+    const file = new File([new Uint8Array([1])], 'img.png', { type: 'image/png' });
     const conv: ConversionPreset = { ...DEFAULT_SETTINGS.conversionPresets[0] } as any;
     const fname: FilenamePreset = { name: 'Custom', customTemplate: '{imagename}', skipRenamePatterns: '', conflictResolution: 'increment' };
     const folder: FolderPreset = { type: 'ROOT', name: 'Root' };
@@ -62,7 +62,7 @@ describe('FolderAndFilenameManagement destination resolution', () => {
 
   it('3.3 CURRENT resolves to active note parent', async () => {
     const { ffm } = makeDeps();
-    const file = new File([1], 'img.png', { type: 'image/png' });
+    const file = new File([new Uint8Array([1])], 'img.png', { type: 'image/png' });
     const conv: ConversionPreset = { ...DEFAULT_SETTINGS.conversionPresets[0] } as any;
     const fname: FilenamePreset = { name: 'Custom', customTemplate: '{imagename}', skipRenamePatterns: '', conflictResolution: 'increment' };
     const folder: FolderPreset = { type: 'CURRENT', name: 'Current' };
@@ -73,7 +73,7 @@ describe('FolderAndFilenameManagement destination resolution', () => {
   it('3.4 SUBFOLDER processes template, sanitizes segments, and joins under active parent', async () => {
     const { ffm, settings } = makeDeps();
     settings.subfolderTemplate = '{notename}/pics:*?';
-    const file = new File([1], 'img.png', { type: 'image/png' });
+    const file = new File([new Uint8Array([1])], 'img.png', { type: 'image/png' });
     const conv: ConversionPreset = { ...DEFAULT_SETTINGS.conversionPresets[0] } as any;
     const fname: FilenamePreset = { name: 'Custom', customTemplate: '{imagename}', skipRenamePatterns: '', conflictResolution: 'increment' };
     const folder: FolderPreset = { type: 'SUBFOLDER', name: 'Sub' };
@@ -84,7 +84,7 @@ describe('FolderAndFilenameManagement destination resolution', () => {
 
   it('3.5 CUSTOM without template falls back to default attachment folder', async () => {
     const { ffm } = makeDeps({ attachmentFolderPath: 'attachments' });
-    const file = new File([1], 'img.png', { type: 'image/png' });
+    const file = new File([new Uint8Array([1])], 'img.png', { type: 'image/png' });
     const conv: ConversionPreset = { ...DEFAULT_SETTINGS.conversionPresets[0] } as any;
     const fname: FilenamePreset = { name: 'Custom', customTemplate: '{imagename}', skipRenamePatterns: '', conflictResolution: 'increment' };
     const folder: FolderPreset = { type: 'CUSTOM', name: 'Custom (missing)' };

@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { FolderAndFilenameManagement } from '@/FolderAndFilenameManagement';
-import { VariableProcessor } from '@/VariableProcessor';
-import { SupportedImageFormats } from '@/SupportedImageFormats';
-import { DEFAULT_SETTINGS, type FilenamePreset, type ConversionPreset } from '@/ImageConverterSettings';
-import { fakeApp, fakeVault, fakeTFile } from '../../factories/obsidian';
+import { FolderAndFilenameManagement } from '../../../src/FolderAndFilenameManagement';
+import { VariableProcessor } from '../../../src/VariableProcessor';
+import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
+import { DEFAULT_SETTINGS, type FilenamePreset, type ConversionPreset } from '../../../src/ImageConverterSettings';
+import { fakeApp, fakeVault } from '../../factories/obsidian';
 
 describe('FolderAndFilenameManagement conflicts and rename/convert skip rules', () => {
   function makeFFM() {

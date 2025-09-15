@@ -5,22 +5,25 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-import { ImageProcessor } from '@/ImageProcessor';
-import { SupportedImageFormats } from '@/SupportedImageFormats';
+import { ImageProcessor } from '../../../src/ImageProcessor';
+import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
 import { makePngBytes, makeImageBlob } from '../../factories/image';
 import { fakeCanvas } from '../../factories/canvas';
+import { fakeApp } from '../../factories/obsidian';
 
 describe('Integration-lite: Quality Effect (1.41)', () => {
   let processor: ImageProcessor;
   let supportedFormats: SupportedImageFormats;
 
   beforeEach(() => {
-    supportedFormats = new SupportedImageFormats();
+    const app = fakeApp() as any;
+    supportedFormats = new SupportedImageFormats(app);
     processor = new ImageProcessor(supportedFormats);
   });
 
-  it('Given a fixed input, When q is reduced, Then output size is smaller or equal (WEBP)', async () => {
+  it('Given a fixed input, When quality is reduced, Then output size is smaller or equal (WEBP)', async () => {
     // Arrange: fixed PNG input as the fixture
+    // eslint-disable-next-line id-length
     const inputBytes = makePngBytes({ w: 80, h: 80, alpha: true });
     const inputBlob = makeImageBlob(inputBytes, 'image/png');
 
@@ -29,13 +32,13 @@ describe('Integration-lite: Quality Effect (1.41)', () => {
 
     // Build a canvas whose toBlob output depends on quality (higher q => bigger)
     const dynamicCanvas = fakeCanvas({
-      toBlob: vi.fn((callback: (b: Blob|null) => void, type?: string, q?: number) => {
+      toBlob: vi.fn((callback: (b: Blob|null) => void, type?: string, quality?: number) => {
         const base = 500; // base size
-        const size = base + Math.round((q ?? 1) * 500); // q in [0,1] => size in [500,1000]
+        const size = base + Math.round((quality ?? 1) * 500); // quality in [0,1] => size in [500,1000]
         const buf = new ArrayBuffer(size);
         callback(new Blob([buf], { type: type || 'image/webp' }));
       }),
-      toDataURL: vi.fn((type?: string, q?: number) => {
+      toDataURL: vi.fn((type?: string, quality?: number) => {
         // dataURL yields larger size to ensure toBlob path is chosen
         const buf = new ArrayBuffer(2000);
         const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
@@ -50,14 +53,14 @@ describe('Integration-lite: Quality Effect (1.41)', () => {
     });
 
     // Act: high q vs low q
-    const highQ = await processor.processImage(
+    const highQuality = await processor.processImage(
       inputBlob, 'WEBP', 0.9, 1.0, 'None', 0, 0, 0, 'Auto', true
     );
-    const lowQ = await processor.processImage(
+    const lowQuality = await processor.processImage(
       inputBlob, 'WEBP', 0.5, 1.0, 'None', 0, 0, 0, 'Auto', true
     );
 
     // Assert: low quality should be smaller or equal
-    expect(lowQ.byteLength).toBeLessThanOrEqual(highQ.byteLength);
+    expect(lowQuality.byteLength).toBeLessThanOrEqual(highQuality.byteLength);
   });
 });

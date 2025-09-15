@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { FolderAndFilenameManagement } from '@/FolderAndFilenameManagement';
-import { VariableProcessor } from '@/VariableProcessor';
-import { SupportedImageFormats } from '@/SupportedImageFormats';
-import { DEFAULT_SETTINGS, type FolderPreset, type FilenamePreset } from '@/ImageConverterSettings';
+import { FolderAndFilenameManagement } from '../../../src/FolderAndFilenameManagement';
+import { VariableProcessor } from '../../../src/VariableProcessor';
+import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
+import { DEFAULT_SETTINGS, type FolderPreset, type FilenamePreset } from '../../../src/ImageConverterSettings';
 import { fakeApp, fakeVault, fakeTFile } from '../../factories/obsidian';
 
 describe('FolderAndFilenameManagement.validateTemplates delegates to VariableProcessor and throws on invalid', () => {
@@ -14,7 +14,7 @@ describe('FolderAndFilenameManagement.validateTemplates delegates to VariablePro
     const ffm = new FolderAndFilenameManagement(app, settings, supported, vp);
 
     const activeRoot = fakeTFile({ path: 'Root.md', name: 'Root.md', basename: 'Root', parent: { path: '/', name: '/', parent: null, children: [] } as any });
-    const file = new File([1], 'x.png', { type: 'image/png' });
+    const file = new File([new Uint8Array([1])], 'x.png', { type: 'image/png' });
     const fname: FilenamePreset = { name: 'Custom', customTemplate: '{imagename}', skipRenamePatterns: '', conflictResolution: 'increment' };
     const folder: FolderPreset = { type: 'CUSTOM', name: 'Custom', customTemplate: 'x/{grandparentfolder}' };
 

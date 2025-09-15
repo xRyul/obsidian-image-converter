@@ -8,16 +8,18 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // Mocks before imports
 vi.mock('child_process');
 
-import { ImageProcessor } from '@/ImageProcessor';
-import { SupportedImageFormats } from '@/SupportedImageFormats';
+import { ImageProcessor } from '../../../src/ImageProcessor';
+import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
 import { makeImageBlob } from '../../factories/image';
+import { fakeApp } from '../../factories/obsidian';
 
 describe('Integration-lite: HeicDecoderAdapter', () => {
   let processor: ImageProcessor;
   let supportedFormats: SupportedImageFormats;
 
   beforeEach(() => {
-    supportedFormats = new SupportedImageFormats();
+    const app = fakeApp() as any;
+    supportedFormats = new SupportedImageFormats(app);
     processor = new ImageProcessor(supportedFormats);
   });
 

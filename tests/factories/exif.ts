@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention */
 /**
  * Factory functions for EXIF metadata manipulation
  * Used for testing JPEG metadata handling

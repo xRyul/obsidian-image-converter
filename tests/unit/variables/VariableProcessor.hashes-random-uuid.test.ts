@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { VariableProcessor } from '@/VariableProcessor';
-import { DEFAULT_SETTINGS } from '@/ImageConverterSettings';
+import { VariableProcessor } from '../../../src/VariableProcessor';
+import { DEFAULT_SETTINGS } from '../../../src/ImageConverterSettings';
 import { fakeApp, fakeTFile, fakeVault } from '../../factories/obsidian';
 
 function installMomentStub() {
   (globalThis as any).moment = ((input?: any) => {
     const api: any = {
-      format: (f: string) => '2025-01-02',
+      format: (formatStr: string) => '2025-01-02',
       add: () => api,
       subtract: () => api,
       startOf: () => api,
@@ -42,13 +42,13 @@ describe('VariableProcessor hashes, random, and uuid', () => {
   });
 
   it('2.23 MD5 hashing of filename and truncation', async () => {
-    const file = new File([1,2,3], 'example.png', { type: 'image/png' });
+    const file = new File([new Uint8Array([1,2,3])], 'example.png', { type: 'image/png' });
     const out = await processor.processTemplate('{MD5:filename:8}', { file, activeFile: activeNote });
     expect(out).toMatch(/^[a-f0-9]{8}$/);
   });
 
   it('2.23 MD5 of notename/notepath and custom text', async () => {
-    const file = new File([1,2,3], 'ex.png', { type: 'image/png' });
+    const file = new File([new Uint8Array([1,2,3])], 'ex.png', { type: 'image/png' });
     const out = await processor.processTemplate('{MD5:notename}-{MD5:notepath:6}-{MD5:custom-text}', { file, activeFile: activeNote });
     const parts = out.split('-');
     expect(parts[0]).toMatch(/^[a-f0-9]{32}$/);
@@ -60,20 +60,20 @@ describe('VariableProcessor hashes, random, and uuid', () => {
     const data = new Uint8Array([1,2,3,4]).buffer;
     const file = new File([data], 'img.jpg', { type: 'image/jpeg' });
     const out = await processor.processTemplate('{sha256:image:10}-{sha256:filename:10}', { file, activeFile: activeNote });
-    const [a, b] = out.split('-');
-    expect(a).toMatch(/^[a-f0-9]{10}$/);
-    expect(b).toMatch(/^[a-f0-9]{10}$/);
+    const [hashA, hashB] = out.split('-');
+    expect(hashA).toMatch(/^[a-f0-9]{10}$/);
+    expect(hashB).toMatch(/^[a-f0-9]{10}$/);
   });
 
   it('2.25 uuid returns RFC 4122 string', async () => {
-    const f = new File([1], 'x.png', { type: 'image/png' });
-    const out = await processor.processTemplate('{uuid}', { file: f, activeFile: activeNote });
+    const file = new File([new Uint8Array([1])], 'x.png', { type: 'image/png' });
+    const out = await processor.processTemplate('{uuid}', { file, activeFile: activeNote });
     expect(out).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   });
 
   it('2.26 random is 6-char alphanumeric', async () => {
-    const f = new File([1], 'x.png', { type: 'image/png' });
-    const out = await processor.processTemplate('{random}', { file: f, activeFile: activeNote });
+    const file = new File([new Uint8Array([1])], 'x.png', { type: 'image/png' });
+    const out = await processor.processTemplate('{random}', { file, activeFile: activeNote });
     expect(out).toMatch(/^[a-z0-9]{1,6}$/);
   });
 });

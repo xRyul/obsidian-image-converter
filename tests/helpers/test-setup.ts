@@ -5,8 +5,8 @@
 
 import { vi, beforeEach, afterEach } from 'vitest';
 
-let __IMAGE_SIZE__ = { w: 100, h: 100 };
-let __IMAGE_FAIL_NEXT__ = false;
+let imageSize = { width: 100, height: 100 };
+let imageFailNext = false;
 
 class MockImage {
   onload: ((e?: any) => void) | null = null;
@@ -14,24 +14,24 @@ class MockImage {
   alt = '';
   crossOrigin: string | null = null;
   complete = true;
-  naturalWidth = __IMAGE_SIZE__.w;
-  naturalHeight = __IMAGE_SIZE__.h;
-  width = __IMAGE_SIZE__.w;
-  height = __IMAGE_SIZE__.h;
+  naturalWidth = imageSize.width;
+  naturalHeight = imageSize.height;
+  width = imageSize.width;
+  height = imageSize.height;
   private _src = '';
 
   get src() { return this._src; }
-  set src(v: string) {
-    this._src = v;
+  set src(value: string) {
+    this._src = value;
     // Simulate async decode
     queueMicrotask(() => {
       // Refresh to current configured size at load time
-      this.naturalWidth = __IMAGE_SIZE__.w;
-      this.naturalHeight = __IMAGE_SIZE__.h;
-      this.width = __IMAGE_SIZE__.w;
-      this.height = __IMAGE_SIZE__.h;
-      if (__IMAGE_FAIL_NEXT__) {
-        __IMAGE_FAIL_NEXT__ = false;
+      this.naturalWidth = imageSize.width;
+      this.naturalHeight = imageSize.height;
+      this.width = imageSize.width;
+      this.height = imageSize.height;
+      if (imageFailNext) {
+        imageFailNext = false;
         this.onerror?.({ type: 'error' });
       } else {
         this.onload?.({ type: 'load' });
@@ -47,11 +47,11 @@ class MockImage {
   dispatchEvent = vi.fn();
 }
 
-export function setMockImageSize(w: number, h: number) {
-  __IMAGE_SIZE__ = { w, h };
+export function setMockImageSize(width: number, height: number) {
+  imageSize = { width, height };
 }
 export function failNextImageLoad() {
-  __IMAGE_FAIL_NEXT__ = true;
+  imageFailNext = true;
 }
 
 // Minimal ImageData polyfill for environments lacking it (e.g., happy-dom versions)

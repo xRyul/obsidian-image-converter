@@ -3,8 +3,9 @@
  * Test checklist items 1.1-1.19 (conversion and selection logic)
  * Following SDET testing rules: AAA pattern, Given-When-Then naming, behavior-focused
  */
+/* eslint-disable id-length */
 
-import { vi } from 'vitest';
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 // All mocks must be defined before imports due to hoisting
 vi.mock('child_process');
@@ -15,26 +16,20 @@ vi.mock('sortablejs');
 vi.mock('piexifjs');
 vi.mock('@/main');
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { ImageProcessor } from '@/ImageProcessor';
-import { SupportedImageFormats } from '@/SupportedImageFormats';
-import { Notice } from 'obsidian';
-import * as piexif from 'piexifjs';
+import { ImageProcessor } from '../../../src/ImageProcessor';
+import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
 import { 
   makePngBytes, 
   makeJpegBytes, 
   makeWebpBytes, 
   makeImageBlob,
-  makeImageFile,
   corruptedBytes 
 } from '../../factories/image';
-import { setMockImageSize, failNextImageLoad } from '@helpers/test-setup';
+import { setMockImageSize, failNextImageLoad } from '../../helpers/test-setup';
 import { 
-  fakeCanvas, 
-  createCanvasWithPresetBehavior,
-  fakeImage 
+  fakeCanvas
 } from '../../factories/canvas';
-import { exifFrom, stripOrientation, exifToBinary } from '../../factories/exif';
+import { exifFrom } from '../../factories/exif';
 import { fakeNotice } from '../../factories/obsidian';
 
 // Mock dependencies
@@ -44,11 +39,10 @@ describe('ImageProcessor - Conversion Tests', () => {
   let processor: ImageProcessor;
   let supportedFormats: SupportedImageFormats;
   let mockCanvas: HTMLCanvasElement;
-  let mockDocument: any;
 
   beforeEach(() => {
     // Arrange: Set up processor and mocks
-    supportedFormats = new SupportedImageFormats();
+    supportedFormats = new SupportedImageFormats(undefined as any);
     processor = new ImageProcessor(supportedFormats);
     
     // Mock document.createElement for canvas without replacing the whole document (avoid recursion)
@@ -127,7 +121,7 @@ describe('ImageProcessor - Conversion Tests', () => {
       setMockImageSize(1000, 800);
       
       // Act
-      const result = await processor.processImage(
+  await processor.processImage(
         inputBlob,
         'WEBP',
         0.8,
@@ -156,12 +150,12 @@ describe('ImageProcessor - Conversion Tests', () => {
       setMockImageSize(1000, 800);
       
       // Act
-      const result = await processor.processImage(
+  await processor.processImage(
         inputBlob,
         'WEBP',
         0.8,
         1.0,
-        'Fill', // Fill mode
+        'Fill',
         400,
         400, // Square target
         0,
@@ -260,7 +254,7 @@ describe('ImageProcessor - Conversion Tests', () => {
       });
       
       // Act
-      const result = await processor.processImage(
+  await processor.processImage(
         inputBlob,
         'JPEG',
         0.85,
@@ -288,7 +282,7 @@ describe('ImageProcessor - Conversion Tests', () => {
       const compressOriginalSpy = vi.spyOn(processor as any, 'compressOriginalImage');
       
       // Act
-      const result = await processor.processImage(
+  await processor.processImage(
         inputBlob,
         'JPEG',
         0.85,
@@ -321,7 +315,7 @@ describe('ImageProcessor - Conversion Tests', () => {
       const mockApplyMetadata = vi.spyOn(processor as any, 'applyMetadata');
       
       // Act
-      const result = await processor.processImage(
+      await processor.processImage(
         inputBlob,
         'JPEG',
         0.85,
@@ -429,7 +423,7 @@ describe('ImageProcessor - Conversion Tests', () => {
       // Assert
       expect(result.byteLength).toBe(smallerBlobBytes.byteLength);
       // PNG ignores quality; ensure correct MIME used
-      const calls = (mockCanvas.toBlob as any).mock.calls;
+      const { calls } = (mockCanvas.toBlob as any).mock;
       expect(calls.length).toBeGreaterThan(0);
       expect(calls[0][1]).toBe('image/png');
     });
@@ -443,7 +437,7 @@ describe('ImageProcessor - Conversion Tests', () => {
       const reduceColorsSpy = vi.spyOn(processor as any, 'reduceColorDepth');
       
       // Act
-      const result = await processor.processImage(
+      await processor.processImage(
         inputBlob,
         'PNG',
         1.0,
@@ -498,7 +492,7 @@ describe('ImageProcessor - Conversion Tests', () => {
       const inputBlob = makeImageBlob(inputBytes, 'image/jpeg');
       
       // Act
-      const result = await processor.processImage(
+      await processor.processImage(
         inputBlob,
         'ORIGINAL',
         0.9,
@@ -527,8 +521,8 @@ describe('ImageProcessor - Conversion Tests', () => {
       const inputBlob = makeImageBlob(inputBytes, 'invalid/type');
       
       mockCanvas.toBlob = vi.fn((callback) => callback(null));
-      const NoticeMock = fakeNotice();
-      (global as any).Notice = NoticeMock;
+  const noticeMock = fakeNotice();
+      (global as any).Notice = noticeMock;
       
       // Act
       const result = await processor.processImage(
@@ -580,7 +574,7 @@ describe('ImageProcessor - Conversion Tests', () => {
       const inputBlob = makeImageBlob(inputBytes, 'image/png');
       
       // Act
-      const result = await processor.processImage(
+      await processor.processImage(
         inputBlob,
         'NONE',
         1.0,

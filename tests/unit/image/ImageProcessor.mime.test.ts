@@ -4,7 +4,7 @@
  * Following SDET testing rules: AAA pattern, Given-When-Then naming
  */
 
-import { vi } from 'vitest';
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 // All mocks must be defined before imports due to hoisting
 vi.mock('child_process');
@@ -13,31 +13,29 @@ vi.mock('os');
 vi.mock('path');
 vi.mock('sortablejs');
 vi.mock('piexifjs');
-vi.mock('@/main');
+vi.mock('../../../src/main');
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { ImageProcessor } from '@/ImageProcessor';
-import { SupportedImageFormats } from '@/SupportedImageFormats';
+import { ImageProcessor } from '../../../src/ImageProcessor';
+import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
 import { 
   makePngBytes, 
   makeJpegBytes, 
   makeWebpBytes,
   makeImageBlob,
-  makeImageFile,
   corruptedBytes 
 } from '../../factories/image';
 import { fakeCanvas } from '../../factories/canvas';
-import { setMockImageSize, failNextImageLoad } from '@helpers/test-setup';
+import { setMockImageSize } from '../../helpers/test-setup';
 
 describe('ImageProcessor - MIME Type Detection Tests', () => {
   let processor: ImageProcessor;
   let supportedFormats: SupportedImageFormats;
   let mockCanvas: HTMLCanvasElement;
-  let mockDocument: any;
 
   beforeEach(() => {
     // Arrange: Set up processor and mocks
-    supportedFormats = new SupportedImageFormats();
+    const appMock: any = { metadataCache: { getFileCache: vi.fn() } };
+    supportedFormats = new SupportedImageFormats(appMock);
     processor = new ImageProcessor(supportedFormats);
     
     // Mock document.createElement for canvas without replacing whole document
@@ -62,7 +60,7 @@ describe('ImageProcessor - MIME Type Detection Tests', () => {
     // Test 1.18
     it('Given unknown/mismatched MIME, When detected via magic bytes, Then uses detected type; on failure returns original', async () => {
       // Arrange - PNG data but wrong MIME type
-      const pngBytes = makePngBytes({ w: 100, h: 100 });
+      const pngBytes = makePngBytes();
       // Create blob with wrong MIME type
       const mislabeledBlob = new Blob([pngBytes], { type: 'image/jpeg' });
       
@@ -114,7 +112,7 @@ describe('ImageProcessor - MIME Type Detection Tests', () => {
 
     it('Given file with no extension and valid magic bytes, When processing, Then detects and processes correctly', async () => {
       // Arrange - JPEG data with no type hint
-      const jpegBytes = makeJpegBytes({ w: 100, h: 100 });
+      const jpegBytes = makeJpegBytes();
       const unTypedBlob = new Blob([jpegBytes]); // No type specified
       
       // Act
@@ -139,10 +137,12 @@ describe('ImageProcessor - MIME Type Detection Tests', () => {
     // Test 1.19
     it('Given allowLargerFiles flag, When toggled, Then engine selection ignores it (same result)', async () => {
       // Arrange
+      // eslint-disable-next-line id-length
       const inputBytes = makePngBytes({ w: 50, h: 50 });
       const inputBlob = makeImageBlob(inputBytes, 'image/png');
       
       // Mock canvas to return larger result
+      // eslint-disable-next-line id-length
       const largerBytes = makeWebpBytes({ w: 200, h: 200 });
       mockCanvas.toBlob = vi.fn((callback) => {
         callback(new Blob([largerBytes], { type: 'image/webp' }));
@@ -177,10 +177,12 @@ describe('ImageProcessor - MIME Type Detection Tests', () => {
 
     it('Given allowLargerFiles=false (handled by caller), When processing returns larger, Then caller responsible for reverting', async () => {
       // Arrange
+      // eslint-disable-next-line id-length
       const inputBytes = makePngBytes({ w: 50, h: 50 });
       const inputBlob = makeImageBlob(inputBytes, 'image/png');
       
       // Mock canvas to return larger result
+      // eslint-disable-next-line id-length
       const largerBytes = makeWebpBytes({ w: 200, h: 200 });
       mockCanvas.toBlob = vi.fn((callback) => {
         callback(new Blob([largerBytes], { type: 'image/webp' }));
@@ -245,8 +247,8 @@ describe('ImageProcessor - MIME Type Detection Tests', () => {
       
       // Mock heic-to module
       const mockHeicTo = {
-        PNG: vi.fn().mockResolvedValue({ data: makePngBytes({ w: 100, h: 100 }) }),
-        JPEG: vi.fn().mockResolvedValue({ data: makeJpegBytes({ w: 100, h: 100 }) })
+        PNG: vi.fn().mockResolvedValue({ data: makePngBytes() }),
+        JPEG: vi.fn().mockResolvedValue({ data: makeJpegBytes() })
       };
       (global as any).heicTo = mockHeicTo;
       
@@ -300,7 +302,7 @@ describe('ImageProcessor - MIME Type Detection Tests', () => {
 
     it('Given animated WEBP, When processing to WEBP, Then first frame is drawn to canvas and output is produced', async () => {
       // Arrange - WebP bytes (animation flag not strictly required for unit scope)
-      const animatedWebpBytes = makeWebpBytes({ w: 100, h: 100 });
+      const animatedWebpBytes = makeWebpBytes();
       const animatedWebpBlob = new Blob([animatedWebpBytes], { type: 'image/webp' });
       
       // Act

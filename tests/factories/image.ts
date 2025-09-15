@@ -12,9 +12,11 @@ export function makePngBytes(options: {
   w?: number;
   h?: number;
   alpha?: boolean;
+  width?: number;
+  height?: number;
 } = {}): ArrayBuffer {
-  const width = options.w ?? 100;
-  const height = options.h ?? 100;
+  const width = options.width ?? options.w ?? 100;
+  const height = options.height ?? options.h ?? 100;
   const hasAlpha = options.alpha ?? false;
   
   // PNG signature
@@ -66,9 +68,11 @@ export function makeJpegBytes(options: {
   w?: number;
   h?: number;
   exif?: Record<string, any>;
+  width?: number;
+  height?: number;
 } = {}): ArrayBuffer {
-  const width = options.w ?? 100;
-  const height = options.h ?? 100;
+  const width = options.width ?? options.w ?? 100;
+  const height = options.height ?? options.h ?? 100;
   
   // Basic JPEG structure with SOI, APP0 (JFIF), and EOI markers
   const soi = new Uint8Array([0xFF, 0xD8]); // Start of Image
@@ -183,9 +187,11 @@ export function makeWebpBytes(options: {
   w?: number;
   h?: number;
   alpha?: boolean;
+  width?: number;
+  height?: number;
 } = {}): ArrayBuffer {
-  const width = options.w ?? 100;
-  const height = options.h ?? 100;
+  const width = options.width ?? options.w ?? 100;
+  const height = options.height ?? options.h ?? 100;
   const hasAlpha = options.alpha ?? false;
   
   // RIFF header
@@ -272,6 +278,7 @@ export function corruptedBytes(size: number = 100): ArrayBuffer {
  * Helper function to create a PNG chunk
  */
 function createPngChunk(type: string, data: Uint8Array): Uint8Array {
+  // eslint-disable-next-line prefer-destructuring
   const length = data.length;
   const chunk = new Uint8Array(length + 12); // 4 (length) + 4 (type) + data + 4 (CRC)
   const view = new DataView(chunk.buffer);

@@ -4,7 +4,7 @@
  * Following SDET testing rules: AAA pattern, Given-When-Then naming, behavior-focused
  */
 
-import { vi } from 'vitest';
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 // All mocks must be defined before imports due to hoisting
 vi.mock('child_process');
@@ -13,12 +13,10 @@ vi.mock('os');
 vi.mock('path');
 vi.mock('sortablejs');
 vi.mock('piexifjs');
-vi.mock('@/main');
+vi.mock('../../../src/main');
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { ImageProcessor } from '@/ImageProcessor';
-import { SupportedImageFormats } from '@/SupportedImageFormats';
-import { Notice } from 'obsidian';
+import { ImageProcessor } from '../../../src/ImageProcessor';
+import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
 import { 
   makePngBytes, 
   makeJpegBytes,
@@ -26,24 +24,23 @@ import {
   corruptedBytes 
 } from '../../factories/image';
 import { fakeCanvas } from '../../factories/canvas';
-import { setMockImageSize, failNextImageLoad } from '@helpers/test-setup';
-import { fakeNotice } from '../../factories/obsidian';
+import { setMockImageSize, failNextImageLoad } from '../../helpers/test-setup';
+import { fakeNotice, fakeApp } from '../../factories/obsidian';
 
 describe('ImageProcessor - Error Handling Tests', () => {
   let processor: ImageProcessor;
   let supportedFormats: SupportedImageFormats;
   let mockCanvas: HTMLCanvasElement;
-  let mockDocument: any;
-  let NoticeSpy: any;
+  let noticeSpy: any;
 
   beforeEach(() => {
     // Arrange: Set up processor and mocks
-    supportedFormats = new SupportedImageFormats();
+    supportedFormats = new SupportedImageFormats(fakeApp() as any);
     processor = new ImageProcessor(supportedFormats);
     
     // Mock Notice
-    NoticeSpy = fakeNotice();
-    (global as any).Notice = NoticeSpy;
+    noticeSpy = fakeNotice();
+    (global as any).Notice = noticeSpy;
     
     // Mock document.createElement for canvas without replacing whole document
     mockCanvas = fakeCanvas();
@@ -67,7 +64,7 @@ describe('ImageProcessor - Error Handling Tests', () => {
   describe('Graceful Fallback on Any Error', () => {
     it('Given canvas decode error, When processing image, Then returns original bytes and shows Notice', async () => {
       // Arrange
-      const inputBytes = makePngBytes({ w: 100, h: 100 });
+      const inputBytes = makePngBytes({ width: 100, height: 100 });
       const inputBlob = makeImageBlob(inputBytes, 'image/png');
       
       // Simulate next image load failure
@@ -95,7 +92,7 @@ describe('ImageProcessor - Error Handling Tests', () => {
 
     it('Given canvas encode error (toBlob returns null), When processing, Then returns original bytes', async () => {
       // Arrange
-      const inputBytes = makeJpegBytes({ w: 100, h: 100 });
+      const inputBytes = makeJpegBytes({ width: 100, height: 100 });
       const inputBlob = makeImageBlob(inputBytes, 'image/jpeg');
       
       // Mock canvas to fail encoding
@@ -193,11 +190,11 @@ describe('ImageProcessor - Error Handling Tests', () => {
 
     it('Given PNGQUANT processing error, When pngquant fails, Then returns original bytes and shows Notice', async () => {
       // Arrange
-      const inputBytes = makePngBytes({ w: 100, h: 100 });
+      const inputBytes = makePngBytes({ width: 100, height: 100 });
       const inputBlob = makeImageBlob(inputBytes, 'image/png');
       
       // Mock spawn to simulate pngquant failure
-      const spawn = await import('child_process').then(m => m.spawn);
+      const spawn = await import('child_process').then(cpModule => cpModule.spawn);
       (spawn as any).mockImplementation(() => {
         const proc = new (require('events').EventEmitter)();
         proc.stdin = { write: vi.fn(), end: vi.fn() };
@@ -247,11 +244,11 @@ describe('ImageProcessor - Error Handling Tests', () => {
 
     it('Given FFmpeg AVIF processing error, When ffmpeg fails, Then returns original bytes and shows Notice', async () => {
       // Arrange
-      const inputBytes = makePngBytes({ w: 100, h: 100 });
+      const inputBytes = makePngBytes({ width: 100, height: 100 });
       const inputBlob = makeImageBlob(inputBytes, 'image/png');
       
       // Mock spawn to simulate ffmpeg failure
-      const spawn = await import('child_process').then(m => m.spawn);
+      const spawn = await import('child_process').then(cpModule => cpModule.spawn);
       (spawn as any).mockImplementation(() => {
         const proc = new (require('events').EventEmitter)();
         proc.stdin = { write: vi.fn(), end: vi.fn() };
@@ -325,7 +322,7 @@ describe('ImageProcessor - Error Handling Tests', () => {
 
     it('Given any unexpected error in processing pipeline, When error occurs, Then never throws to caller and returns original', async () => {
       // Arrange
-      const inputBytes = makePngBytes({ w: 100, h: 100 });
+      const inputBytes = makePngBytes({ width: 100, height: 100 });
       const inputBlob = makeImageBlob(inputBytes, 'image/png');
       
       // Mock an internal method to throw unexpectedly
@@ -350,7 +347,7 @@ describe('ImageProcessor - Error Handling Tests', () => {
           'Auto',
           true
         );
-      } catch (error) {
+      } catch {
         errorThrown = true;
       }
       
@@ -362,7 +359,7 @@ describe('ImageProcessor - Error Handling Tests', () => {
 
     it('Given memory/resource error, When processing large image, Then returns original bytes gracefully', async () => {
       // Arrange
-      const inputBytes = makePngBytes({ w: 10000, h: 10000 }); // Very large
+      const inputBytes = makePngBytes({ width: 10000, height: 10000 }); // Very large
       const inputBlob = makeImageBlob(inputBytes, 'image/png');
       
       // Mock canvas context creation to fail (simulating memory issue)
@@ -388,8 +385,8 @@ describe('ImageProcessor - Error Handling Tests', () => {
 
     it('Given concurrent processing attempts, When errors occur, Then each returns original bytes independently', async () => {
       // Arrange
-      const inputBytes1 = makePngBytes({ w: 100, h: 100 });
-      const inputBytes2 = makeJpegBytes({ w: 200, h: 200 });
+      const inputBytes1 = makePngBytes({ width: 100, height: 100 });
+      const inputBytes2 = makeJpegBytes({ width: 200, height: 200 });
       const inputBlob1 = makeImageBlob(inputBytes1, 'image/png');
       const inputBlob2 = makeImageBlob(inputBytes2, 'image/jpeg');
       
@@ -411,7 +408,7 @@ describe('ImageProcessor - Error Handling Tests', () => {
   describe('Notice Display on Errors', () => {
     it('Given error with Notice implementation point, When error occurs, Then Notice is shown with appropriate message', async () => {
       // Arrange
-      const inputBytes = makePngBytes({ w: 100, h: 100 });
+      const inputBytes = makePngBytes({ width: 100, height: 100 });
       const inputBlob = makeImageBlob(inputBytes, 'image/png');
       
       // Mock to trigger a specific error path that shows Notice

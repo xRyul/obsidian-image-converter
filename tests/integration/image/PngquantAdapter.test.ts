@@ -8,22 +8,25 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // Mocks must be declared before imports
 vi.mock('child_process');
 
-import { ImageProcessor } from '@/ImageProcessor';
-import { SupportedImageFormats } from '@/SupportedImageFormats';
+import { ImageProcessor } from '../../../src/ImageProcessor';
+import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
 import { makePngBytes, makeImageBlob } from '../../factories/image';
 import { mockChildProcess } from '../../factories/process';
+import { fakeApp } from '../../factories/obsidian';
 
 describe('Integration-lite: PngquantAdapter', () => {
   let processor: ImageProcessor;
   let supportedFormats: SupportedImageFormats;
 
   beforeEach(() => {
-    supportedFormats = new SupportedImageFormats();
+    const app = fakeApp() as any;
+    supportedFormats = new SupportedImageFormats(app);
     processor = new ImageProcessor(supportedFormats);
   });
 
   it('1.32 [I] Happy path: pipes stdin, uses --quality, stdout used as output', async () => {
     // Arrange
+    // eslint-disable-next-line id-length
     const inputBytes = makePngBytes({ w: 64, h: 64 });
     const inputBlob = makeImageBlob(inputBytes, 'image/png');
 
@@ -62,10 +65,11 @@ describe('Integration-lite: PngquantAdapter', () => {
     );
 
     // Assert
-    const calls = (spawn as any).mock.calls;
+    const { calls } = (spawn as any).mock;
     expect(calls.length).toBeGreaterThan(0);
-    expect(calls[0][0]).toContain('pngquant');
-    expect(calls[0][1]).toEqual(['--quality', '65-80', '-']);
+    const [cmd, args] = calls[0] as [string, string[]];
+    expect(cmd).toContain('pngquant');
+    expect(args).toEqual(['--quality', '65-80', '-']);
 
     const out = new Uint8Array(result);
     expect(out).toEqual(processed);
@@ -73,6 +77,7 @@ describe('Integration-lite: PngquantAdapter', () => {
 
   it('1.33 [I] Missing path: shows Notice and returns original bytes (spawn not called)', async () => {
     // Arrange
+    // eslint-disable-next-line id-length
     const inputBytes = makePngBytes({ w: 32, h: 32 });
     const inputBlob = makeImageBlob(inputBytes, 'image/png');
 
@@ -115,6 +120,7 @@ describe('Integration-lite: PngquantAdapter', () => {
 
   it('1.34 [I] Failure: non-zero exit or spawn error -> returns original bytes', async () => {
     // Arrange
+    // eslint-disable-next-line id-length
     const inputBytes = makePngBytes({ w: 40, h: 40 });
     const inputBlob = makeImageBlob(inputBytes, 'image/png');
 

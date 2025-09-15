@@ -1,49 +1,49 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { VariableProcessor } from '@/VariableProcessor';
-import { DEFAULT_SETTINGS } from '@/ImageConverterSettings';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { VariableProcessor } from '../../../src/VariableProcessor';
+import { DEFAULT_SETTINGS } from '../../../src/ImageConverterSettings';
 import { fakeApp, fakeTFile, fakeVault } from '../../factories/obsidian';
 
 function setMoment(date: Date) {
-  const pad2 = (n: number) => n.toString().padStart(2, '0');
+  const pad2 = (num: number) => num.toString().padStart(2, '0');
   (globalThis as any).moment = ((input?: any) => {
-    const d = input ? new Date(input) : new Date(date);
+    const base = input ? new Date(input) : new Date(date);
     return {
-      format: (f: string) => {
-        switch (f) {
-          case 'YYYY-MM-DD': return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth()+1)}-${pad2(d.getUTCDate())}`;
-          case 'HH-mm-ss': return `${pad2(d.getUTCHours())}-${pad2(d.getUTCMinutes())}-${pad2(d.getUTCSeconds())}`;
-          case 'YYYY': return d.getUTCFullYear().toString();
-          case 'MM': return pad2(d.getUTCMonth()+1);
-          case 'DD': return pad2(d.getUTCDate());
-          case 'dddd': return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d.getUTCDay()];
-          case 'MMMM': return ['January','February','March','April','May','June','July','August','September','October','November','December'][d.getUTCMonth()];
-          default: return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth()+1)}-${pad2(d.getUTCDate())}`;
+      format: (fmt: string) => {
+        switch (fmt) {
+          case 'YYYY-MM-DD': return `${base.getUTCFullYear()}-${pad2(base.getUTCMonth()+1)}-${pad2(base.getUTCDate())}`;
+          case 'HH-mm-ss': return `${pad2(base.getUTCHours())}-${pad2(base.getUTCMinutes())}-${pad2(base.getUTCSeconds())}`;
+          case 'YYYY': return base.getUTCFullYear().toString();
+          case 'MM': return pad2(base.getUTCMonth()+1);
+          case 'DD': return pad2(base.getUTCDate());
+          case 'dddd': return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][base.getUTCDay()];
+          case 'MMMM': return ['January','February','March','April','May','June','July','August','September','October','November','December'][base.getUTCMonth()];
+          default: return `${base.getUTCFullYear()}-${pad2(base.getUTCMonth()+1)}-${pad2(base.getUTCDate())}`;
         }
       },
-      add: (n: number, unit: string) => {
-        const nd = new Date(d);
-        if (unit.startsWith('day')) nd.setUTCDate(nd.getUTCDate()+n);
-        if (unit.startsWith('week')) nd.setUTCDate(nd.getUTCDate()+7*n);
-        if (unit.startsWith('month')) nd.setUTCMonth(nd.getUTCMonth()+n);
+      add: (num: number, unit: string) => {
+        const nd = new Date(base);
+        if (unit.startsWith('day')) nd.setUTCDate(nd.getUTCDate()+num);
+        if (unit.startsWith('week')) nd.setUTCDate(nd.getUTCDate()+7*num);
+        if (unit.startsWith('month')) nd.setUTCMonth(nd.getUTCMonth()+num);
         return (globalThis as any).moment(nd);
       },
-      subtract: (n: number, unit: string) => (globalThis as any).moment(d).add(-n, unit),
+      subtract: (num: number, unit: string) => (globalThis as any).moment(base).add(-num, unit),
       startOf: (unit: string) => {
-        const nd = new Date(d);
+        const nd = new Date(base);
         if (unit==='week') { const day = nd.getUTCDay(); nd.setUTCDate(nd.getUTCDate()-day); nd.setUTCHours(0,0,0,0);} 
         if (unit==='month') { nd.setUTCDate(1); nd.setUTCHours(0,0,0,0);} 
         return (globalThis as any).moment(nd);
       },
       endOf: (unit: string) => {
-        const nd = new Date(d);
+        const nd = new Date(base);
         if (unit==='week') { const day = nd.getUTCDay(); nd.setUTCDate(nd.getUTCDate() + (6-day)); nd.setUTCHours(23,59,59,999);} 
         if (unit==='month') { nd.setUTCMonth(nd.getUTCMonth()+1, 0); nd.setUTCHours(23,59,59,999);} 
         return (globalThis as any).moment(nd);
       },
-      daysInMonth: () => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth()+1, 0)).getUTCDate(),
+      daysInMonth: () => new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth()+1, 0)).getUTCDate(),
       week: () => 1,
-      quarter: () => Math.floor(d.getUTCMonth()/3)+1,
-      calendar: () => `${d.getUTCFullYear()}-${pad2(d.getUTCMonth()+1)}-${pad2(d.getUTCDate())} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`,
+      quarter: () => Math.floor(base.getUTCMonth()/3)+1,
+      calendar: () => `${base.getUTCFullYear()}-${pad2(base.getUTCMonth()+1)}-${pad2(base.getUTCDate())} ${pad2(base.getUTCHours())}:${pad2(base.getUTCMinutes())}`,
       fromNow: () => 'in a few seconds'
     };
   }) as any;
@@ -60,29 +60,29 @@ describe('VariableProcessor time and counters', () => {
   });
 
   it('2.9 date and 2.11 time', async () => {
-    const f = new File([1], 'f.png', { type: 'image/png' });
-    const out = await processor.processTemplate('{date} {time}', { file: f, activeFile: activeNote });
+    const file = new File([new Uint8Array([1])], 'f.png', { type: 'image/png' });
+    const out = await processor.processTemplate('{date} {time}', { file, activeFile: activeNote });
     expect(out).toMatch(/^2025-01-05 08-00-00$/);
   });
 
   it('2.29 startofweek and 2.30 endofweek (Sunday-based)', async () => {
-    const f = new File([1], 'f.png', { type: 'image/png' });
-    const out = await processor.processTemplate('{startofweek}|{endofweek}', { file: f, activeFile: activeNote });
+    const file = new File([new Uint8Array([1])], 'f.png', { type: 'image/png' });
+    const out = await processor.processTemplate('{startofweek}|{endofweek}', { file, activeFile: activeNote });
     expect(out).toBe('2025-01-05|2025-01-11');
   });
 
   it('2.33 nextweek and 2.34 lastweek', async () => {
-    const f = new File([1], 'f.png', { type: 'image/png' });
-    const out = await processor.processTemplate('{nextweek}|{lastweek}', { file: f, activeFile: activeNote });
+    const file = new File([new Uint8Array([1])], 'f.png', { type: 'image/png' });
+    const out = await processor.processTemplate('{nextweek}|{lastweek}', { file, activeFile: activeNote });
     expect(out).toBe('2025-01-12|2024-12-29');
   });
 
   it('2.40 counter increments per folder and is zero-padded', async () => {
-    const f = new File([1], 'f.png', { type: 'image/png' });
-    const ctx = { file: f, activeFile: activeNote };
-    const a = await processor.processTemplate('{counter:000}', ctx);
-    const b = await processor.processTemplate('{counter:000}', ctx);
-    expect(a).toBe('001');
-    expect(b).toBe('002');
+    const file = new File([new Uint8Array([1])], 'f.png', { type: 'image/png' });
+    const ctx = { file, activeFile: activeNote };
+    const first = await processor.processTemplate('{counter:000}', ctx);
+    const second = await processor.processTemplate('{counter:000}', ctx);
+    expect(first).toBe('001');
+    expect(second).toBe('002');
   });
 });
