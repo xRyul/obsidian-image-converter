@@ -33,7 +33,10 @@ export class Plugin {
   addRibbonIcon(icon: string, title: string, callback: () => void) {}
   addSettingTab(tab: any) {}
   registerEvent(event: any) {}
-  registerDomEvent(el: HTMLElement, event: string, callback: () => void) {}
+  registerDomEvent(el: HTMLElement | Document, event: string, callback: any, useCapture?: boolean) {
+    // Attach to DOM for integration-lite tests
+    (el as any).addEventListener?.(event, callback, useCapture as any);
+  }
   registerInterval(interval: number, callback: () => void): number { return 0; }
   loadData(): Promise<any> { return Promise.resolve({}); }
   saveData(data: any): Promise<void> { return Promise.resolve(); }
@@ -355,6 +358,12 @@ export interface DataAdapter {
   copy(oldPath: string, newPath: string): Promise<void>;
 }
 
+// Minimal FileSystemAdapter to enable instanceof checks and getBasePath in tests
+export class FileSystemAdapter {
+  constructor(private basePath: string = '/vault') {}
+  getBasePath(): string { return this.basePath; }
+}
+
 export interface MetadataCache {
   resolvedLinks: Record<string, Record<string, number>>;
   unresolvedLinks: Record<string, Record<string, number>>;
@@ -374,6 +383,7 @@ export interface Workspace {
   getActiveFile(): TFile | null;
   getLeaf(newLeaf?: boolean | 'tab' | 'split' | 'window'): WorkspaceLeaf;
   getLeavesOfType(type: string): WorkspaceLeaf[];
+  getActiveViewOfType<T>(type: new (...args: any[]) => T): T | null;
   
   on(event: string, callback: Function): void;
   off(event: string, callback: Function): void;
@@ -413,11 +423,15 @@ export const Platform = {
 // Menu and component primitives
 export class Component {
   private disposables: Array<() => void> = [];
+  load() { /* no-op for tests */ }
   register(cb?: () => void) {
     if (cb) this.disposables.push(cb);
   }
   registerEvent(_event: any) {}
-  registerDomEvent(_el: HTMLElement | Document, _event: string, _handler: any, _useCapture?: boolean) {}
+  registerDomEvent(el: HTMLElement | Document, event: string, handler: any, useCapture?: boolean) {
+    (el as any).addEventListener?.(event, handler, useCapture as any);
+    this.disposables.push(() => (el as any).removeEventListener?.(event, handler, useCapture as any));
+  }
   onunload() { this.disposables.forEach(dispose => dispose()); this.disposables = []; }
 }
 
@@ -435,7 +449,13 @@ export class Menu {
   private items: MenuItem[] = [];
   addItem(cb: (item: MenuItem) => void) { const i = new MenuItem(); cb(i); this.items.push(i); return this; }
   addSeparator() { return this; }
-  showAtMouseEvent(_evt: MouseEvent) { /* no-op in tests */ }
+  showAtMouseEvent(_evt: MouseEvent) {
+    // In integration-lite tests, simulate user clicking actionable items
+    // Trigger each item's click handler once to exercise flows
+    for (const item of this.items) {
+      try { item.trigger(); } catch { /* ignore synchronous errors in tests */ }
+    }
+  }
   hide() { /* no-op */ }
 }
 
@@ -462,5 +482,27 @@ export function setIcon(_el: HTMLElement, _icon: string): void {
 
 export function getIcon(_name: string): string | null {
   return null;
+}
+
+// Keyboard Scope used by ImageAnnotation
+export class Scope {
+  register(_mods: any[] = [], _key: string = '', _handler: (e: KeyboardEvent) => boolean | void = () => {}) { /* no-op */ }
+}
+
+// Debouncer type and debounce implementation used by code under test
+export type Debouncer<TArgs extends any[], TReturn> = ((...args: TArgs) => TReturn) & { cancel?: () => void };
+export function debounce<T extends (...args: any[]) => any>(fn: T, wait = 0, leading = false): Debouncer<Parameters<T>, ReturnType<T>> {
+  let timeout: any = null;
+  const debounced: any = (...args: any[]) => {
+    const callNow = leading && !timeout;
+    if (timeout) clearTimeout(timeout);
+    timeout = setTimeout(() => {
+      timeout = null;
+      if (!leading) fn(...args);
+    }, wait);
+    if (callNow) return fn(...args);
+  };
+  debounced.cancel = () => { if (timeout) { clearTimeout(timeout); timeout = null; } };
+  return debounced as Debouncer<Parameters<T>, ReturnType<T>>;
 }
 

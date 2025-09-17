@@ -4,7 +4,7 @@
  */
 
 import { vi } from 'vitest';
-import { Notice, TFile, TFolder, Vault, App, MetadataCache, Workspace } from 'obsidian';
+import { Notice, TFile, TFolder, Vault, App, MetadataCache, Workspace, MarkdownView, PluginManifest } from 'obsidian';
 
 /**
  * Create a mock Notice object
@@ -22,6 +22,35 @@ export function fakeNotice(): typeof Notice {
   });
   
   return noticeMock as any;
+}
+
+/**
+ * Create a mock PluginManifest object
+ * @param options - Configuration for the manifest
+ * @returns Mock PluginManifest
+ */
+export function fakePluginManifest(options: {
+  id?: string;
+  name?: string;
+  author?: string;
+  version?: string;
+  minAppVersion?: string;
+  description?: string;
+  dir?: string;
+  authorUrl?: string;
+  isDesktopOnly?: boolean;
+} = {}): PluginManifest {
+  return {
+    id: options.id ?? 'test-plugin',
+    name: options.name ?? 'Test Plugin',
+    author: options.author ?? 'Test Author',
+    version: options.version ?? '1.0.0',
+    minAppVersion: options.minAppVersion ?? '0.15.0',
+    description: options.description ?? 'A test plugin',
+    dir: options.dir,
+    authorUrl: options.authorUrl,
+    isDesktopOnly: options.isDesktopOnly
+  };
 }
 
 /**
@@ -311,6 +340,7 @@ export function fakeMetadataCache(options: {
 export function fakeWorkspace(options: {
   activeFile?: TFile | null;
   activeLeaf?: any;
+  activeView?: any;
 } = {}): Partial<Workspace> {
   return {
     getActiveFile: vi.fn(() => options.activeFile ?? null),
@@ -321,6 +351,46 @@ export function fakeWorkspace(options: {
           file: options.activeFile
         },
         openFile: vi.fn()
+      };
+    }),
+
+    // Provide a most-recent leaf with a MarkdownView instance so instanceof checks pass
+    getMostRecentLeaf: vi.fn(() => {
+      const mv = new (MarkdownView as any)();
+      (mv as any).containerEl = document.body;
+      (mv as any).editor = {
+        getValue: () => '',
+        getCursor: () => ({ line: 0, ch: 0 }),
+        getLine: () => '',
+        lastLine: () => 0,
+        transaction: () => {},
+        setCursor: () => {},
+        // No .cm, so LinkFormatter will fall back to default width
+      };
+      let currentState: any = { type: 'markdown', state: {} };
+      return {
+        view: mv,
+        getViewState: vi.fn(() => currentState),
+        setViewState: vi.fn(async (st: any) => { currentState = st; })
+      } as any;
+    }),
+
+    getActiveViewOfType: vi.fn((_type: any) => {
+      // Return a minimal MarkdownView-like object with contentEl/containerEl and getViewType()
+      if (options.activeView) return options.activeView;
+      return {
+        getViewType: () => 'markdown',
+        contentEl: document.body,
+        containerEl: document.body,
+        editor: {
+          getValue: () => '',
+          getCursor: () => ({ line: 0, ch: 0 }),
+          getLine: () => '',
+          lastLine: () => 0,
+          transaction: () => {},
+          setCursor: () => {}
+        },
+        getState: () => ({ mode: 'preview' })
       };
     }),
     
@@ -352,6 +422,17 @@ export function fakeApp(options: {
       }),
       generateMarkdownLink: vi.fn((file: TFile, sourcePath: string) => {
         return `[[${file.basename}]]`;
+      }),
+      renameFile: vi.fn(async (file: TFile, newPath: string) => {
+        // Update file path + name + basename
+        (file as any).path = newPath;
+        (file as any).name = newPath.split('/').pop() ?? '';
+        (file as any).basename = (file as any).name.replace(/\.[^.]+$/, '');
+        // Also update vault stores if present
+        const vaultRef = (options.vault ?? {}) as any;
+        if (vaultRef?.adapter?.write) {
+          // no-op: adapter-based stores updated by vault.rename in tests, but ensure presence
+        }
       })
     },
     

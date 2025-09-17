@@ -83,6 +83,9 @@ if (typeof (globalThis as any).ImageData === 'undefined') {
 }
 
 // Setup global test environment
+let originalRAF: any = null;
+let originalCAF: any = null;
+
 beforeEach(() => {
   // Reset all mocks before each test
   vi.clearAllMocks();
@@ -97,16 +100,39 @@ beforeEach(() => {
     (window as any).moment = undefined;
   }
 
+  // Ensure requestAnimationFrame/cancelAnimationFrame behave predictably in tests
+  originalRAF = globalThis.requestAnimationFrame;
+  originalCAF = globalThis.cancelAnimationFrame;
+  globalThis.requestAnimationFrame = ((cb: any) => { try { cb(0 as any); } catch (e) { void e; } return 0 as any; }) as any;
+  globalThis.cancelAnimationFrame = (() => {}) as any;
+
   // Obsidian DOM helpers polyfill on HTMLElement
   const proto = HTMLElement.prototype as any;
   if (!proto.addClass) {
-    proto.addClass = function (cls: string) { cls?.split(/\s+/).filter(Boolean).forEach((className: string) => this.classList.add(className)); return this; };
+    // Match Obsidian/browser semantics: add/remove accept one token (no spaces).
+    // If multiple classes are needed, call addClass twice.
+    proto.addClass = function (cls: string) { this.classList.add(cls); return this; };
   }
   if (!proto.removeClass) {
-    proto.removeClass = function (cls: string) { cls?.split(/\s+/).filter(Boolean).forEach((className: string) => this.classList.remove(className)); return this; };
+    proto.removeClass = function (cls: string) { this.classList.remove(cls); return this; };
   }
   if (!proto.toggleClass) {
     proto.toggleClass = function (cls: string, force?: boolean) { this.classList.toggle(cls, force); return this; };
+  }
+  if (!proto.hasClass) {
+    proto.hasClass = function (cls: string) { return this.classList.contains(cls); };
+  }
+  if (!proto.getAttr) {
+    proto.getAttr = function (name: string) { return this.getAttribute(name); };
+  }
+  if (!proto.matchParent) {
+    proto.matchParent = function (selector: string) { return (this as Element).closest(selector); };
+  }
+  if (!proto.findAll) {
+    proto.findAll = function (selector: string) { return Array.from((this as Element).querySelectorAll(selector)); };
+  }
+  if (!proto.instanceOf) {
+    proto.instanceOf = function (ctor: any) { return this instanceof ctor; };
   }
   if (!proto.empty) {
     proto.empty = function () { while (this.firstChild) this.removeChild(this.firstChild); return this; };
@@ -163,6 +189,18 @@ beforeEach(() => {
     proto.setText = function (text: string) { this.textContent = String(text); return this; };
   }
 
+  // Also add minimal helpers on Element prototype if not present
+  const elProto = Element.prototype as any;
+  if (!elProto.findAll) {
+    elProto.findAll = function (selector: string) { return Array.from(this.querySelectorAll(selector)); };
+  }
+  if (!elProto.matchParent) {
+    elProto.matchParent = function (selector: string) { return this.closest(selector); };
+  }
+  if (!elProto.instanceOf) {
+    elProto.instanceOf = function (ctor: any) { return this instanceof ctor; };
+  }
+
   // Polyfills for DocumentFragment (used in settings summaries)
   const dfProto = DocumentFragment.prototype as any;
   if (!dfProto.createEl) {
@@ -208,6 +246,30 @@ beforeEach(() => {
     debug: vi.fn(),
     info: vi.fn()
   } as any;
+
+  // Base64 polyfills for Node/happy-dom
+  if (!(globalThis as any).atob) {
+    (globalThis as any).atob = (b64: string) => Buffer.from(b64, 'base64').toString('binary');
+  }
+  if (!(globalThis as any).btoa) {
+    (globalThis as any).btoa = (bin: string) => Buffer.from(bin, 'binary').toString('base64');
+  }
+
+  // Polyfill HTMLCanvasElement.toBlob using toDataURL when missing
+  if (typeof (HTMLCanvasElement.prototype as any).toBlob !== 'function') {
+    (HTMLCanvasElement.prototype as any).toBlob = function (
+      cb: (blob: Blob | null) => void,
+      type?: string,
+      quality?: any
+    ) {
+      try {
+        const dataUrl = (this as HTMLCanvasElement).toDataURL(type, quality);
+        fetch(dataUrl).then(r => r.blob()).then(b => cb(b)).catch(() => cb(null));
+      } catch {
+        cb(null);
+      }
+    };
+  }
 
   // Reinstall stable Image mock each test (mockReset clears implementations)
   (global as any).Image = MockImage as any;
@@ -278,12 +340,37 @@ beforeEach(() => {
   // Reinstall URL mocks each test as well
   global.URL.createObjectURL = vi.fn(() => 'blob:mock-url');
   global.URL.revokeObjectURL = vi.fn();
+
+  // Provide a deterministic murmurHash3128 stub if missing (used by ImageAlignmentManager)
+  if (!(global as any).murmurHash3128) {
+    (global as any).murmurHash3128 = (str: string, seed = 0) => {
+      // Simple DJB2 variant to return a 32-hex string for stability in tests
+      let hash = 5381 + seed;
+      for (let i = 0; i < str.length; i++) {
+        hash = ((hash << 5) + hash) ^ str.charCodeAt(i);
+        hash |= 0;
+      }
+      // Convert to 32 hex chars
+      const hex = (hash >>> 0).toString(16).padStart(8, '0');
+      return (hex + hex + hex + hex).slice(0, 32);
+    };
+  }
 });
 
 afterEach(() => {
   // Clean up after each test
   vi.restoreAllMocks();
   
+  // Restore requestAnimationFrame if overridden
+  if (originalRAF) {
+    globalThis.requestAnimationFrame = originalRAF;
+    originalRAF = null;
+  }
+  if (originalCAF) {
+    globalThis.cancelAnimationFrame = originalCAF;
+    originalCAF = null;
+  }
+
   // Clear any fake timers if they were used
   if (vi.isFakeTimers()) {
     vi.useRealTimers();

@@ -107,15 +107,18 @@ export class Crop extends Modal {
 		this.selectionArea = this.cropContainer.createDiv('selection-area');
 		this.selectionArea.style.display = 'none';
 	
+		// Register events early so drawing works even before image load completes
+		this.setupEventListeners();
+	
 		// Create buttons - Move this inside modalWrapper
 		const buttonContainer = modalWrapper.createDiv('crop-modal-buttons');
 		const saveButton = buttonContainer.createEl('button', { text: 'Save' });
 		const cancelButton = buttonContainer.createEl('button', { text: 'Cancel' });
 		const resetButton = buttonContainer.createEl('button', { text: 'Reset' });
-
+		
 		// Add aspect ratio controls
 		const aspectRatioContainer = modalHeader.createDiv('aspect-ratio-controls');
-
+		
 		// Add transform controls
 		this.createTransformControls(aspectRatioContainer);
 		aspectRatioContainer.createEl('span', { text: ' ' });
@@ -204,23 +207,22 @@ export class Crop extends Modal {
 		// Add image controls (rotation and zoom)
 		this.createImageControls(modalHeader);
 
+        // Early Escape key handler so reset works even before image load completes
+        this.componentContainer.registerDomEvent(document, 'keydown', (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                this.resetSelection();
+                // keep modal open; prevent default close behavior
+                e.stopPropagation();
+            }
+        });
+
         try {
             await this.loadImage();
-            this.setupEventListeners();
 
             // Add button listeners
-			this.componentContainer.registerDomEvent(saveButton, 'click', () => this.saveImage());
-			this.componentContainer.registerDomEvent(cancelButton, 'click', () => this.close());
-			this.componentContainer.registerDomEvent(resetButton, 'click', () => this.resetSelection());
-
-			// Add escape key handler
-			this.componentContainer.registerDomEvent(document, 'keydown', (e: KeyboardEvent) => {
-				if (e.key === 'Escape') {
-					this.resetSelection();
-					// Optionally, prevent modal from closing
-					e.stopPropagation();
-				}
-			});
+            this.componentContainer.registerDomEvent(saveButton, 'click', () => this.saveImage());
+            this.componentContainer.registerDomEvent(cancelButton, 'click', () => this.close());
+            this.componentContainer.registerDomEvent(resetButton, 'click', () => this.resetSelection());
         } catch (error) {
             new Notice('Error loading image for cropping');
             console.error('Crop modal error:', error);
@@ -236,6 +238,12 @@ export class Crop extends Modal {
         // Create and load the original image
         this.originalImage = document.createElement('img');
         this.originalImage.className = 'crop-original-image';
+
+        // Append the image element immediately so tests (and UI) can reference it before load
+        // The sizing and scale will still be initialized on load below
+        if (!this.originalImage.parentElement) {
+            this.cropContainer.appendChild(this.originalImage);
+        }
         
         return new Promise<void>((resolve, reject) => {
             this.originalImage.onload = () => {
@@ -244,7 +252,6 @@ export class Crop extends Modal {
                 // Calculate scaling factors
                 this.imageScale.x = this.originalImage.naturalWidth / this.originalImage.clientWidth;
                 this.imageScale.y = this.originalImage.naturalHeight / this.originalImage.clientHeight;
-                this.cropContainer.appendChild(this.originalImage);
                 resolve();
             };
             this.originalImage.onerror = reject;

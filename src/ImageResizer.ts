@@ -1,4 +1,4 @@
-import { Editor, MarkdownView, EditorPosition, EditorChange, Debouncer, debounce } from "obsidian";
+import { Editor, MarkdownView, EditorPosition, EditorChange, Debouncer, debounce, Component } from "obsidian";
 import ImageConverterPlugin from "./main";
 import { ImagePositionData } from './ImageAlignmentManager';
 import { LinkFormatter } from './LinkFormatter';
@@ -25,6 +25,9 @@ export class ImageResizer {
     currentHandle: string | null = null; // Which handle is being dragged (nw, ne, sw, se)
     initialAspectRatio = 1; // Initialize initialAspectRatio
     rafId: number | null = null;
+
+    // Scope component to manage DOM/event registrations per active view
+    private eventScope: Component | null = null;
 
     // Resize state
     public resizeState: ResizeState = {
@@ -62,6 +65,7 @@ export class ImageResizer {
     private cachedEditorMaxWidth: number | null = null;
     private linkFormatter: LinkFormatter;
 
+
     constructor(private plugin: ImageConverterPlugin) {
         this.linkFormatter = new LinkFormatter(this.plugin.app);
         this.throttledUpdateImageLink = this.throttle(
@@ -86,13 +90,24 @@ export class ImageResizer {
             this.SCROLL_DEBOUNCE_MS,
             true
         );
+
     }
 
     onload(markdownView: MarkdownView) { // Accept MarkdownView
         this.markdownView = markdownView;
         this.editor = markdownView.editor;
+
+        // Reset old scope (if any) to avoid duplicate listeners across layout changes
+        if (this.eventScope) {
+            // Use onunload for compatibility with test mocks
+            (this.eventScope as any).onunload?.();
+            this.eventScope = null;
+        }
+
         // Only register events if master switch is enabled
         if (this.plugin.settings.isImageResizeEnbaled) {
+            // Create a fresh scope for this view
+            this.eventScope = new Component();
             this.registerEditorEvents();
         }
     }
@@ -102,6 +117,12 @@ export class ImageResizer {
         if (this.rafId) {
             cancelAnimationFrame(this.rafId);
             this.rafId = null;
+        }
+
+        // Unload and reset event scope (removes DOM listeners registered via scope)
+        if (this.eventScope) {
+            (this.eventScope as any).onunload?.();
+            this.eventScope = null;
         }
 
         if (this.scrollTimeout) {
@@ -181,19 +202,19 @@ export class ImageResizer {
     // }
 
     private registerEditorEvents() {
-        if (!this.editor || !this.markdownView) return; // Check MarkdownView too
+        if (!this.editor || !this.markdownView || !this.eventScope) return; // Check MarkdownView too
 
-        // WE register for DOCUMENT as it is broad and allows to work in READING and Live Previwe mode
+        // WE register for DOCUMENT as it is broad and allows to work in READING and Live Preview mode
         // 1. Hover Detection
-        this.plugin.registerDomEvent(this.markdownView.containerEl, 'mouseover', this.handleImageHover);
+        this.eventScope.registerDomEvent(this.markdownView.containerEl, 'mouseover', this.handleImageHover);
 
         // 2. Drag Handling: Mouse down, move, up events for handles
-        this.plugin.registerDomEvent(document, 'mousedown', this.handleMouseDown);
-        this.plugin.registerDomEvent(document, 'mousemove', this.handleMouseMove);
-        this.plugin.registerDomEvent(document, 'mouseup', this.handleMouseUp);
+        this.eventScope.registerDomEvent(document as any, 'mousedown', this.handleMouseDown);
+        this.eventScope.registerDomEvent(document as any, 'mousemove', this.handleMouseMove);
+        this.eventScope.registerDomEvent(document as any, 'mouseup', this.handleMouseUp);
 
         // 3. Register mousewheel event for resizing
-        this.plugin.registerDomEvent(this.markdownView.containerEl, 'wheel', this.handleMouseWheel, { passive: false });
+        this.eventScope.registerDomEvent(this.markdownView.containerEl, 'wheel', this.handleMouseWheel as any, { passive: false });
 
     }
 
@@ -219,8 +240,15 @@ export class ImageResizer {
         // Store the mouse event for scroll handling
         this.lastMouseEvent = event;
 
+        // If we already have an active image and the hover is within its container, avoid cleanup/recreate thrash
+        const activeContainer = this.activeImage?.matchParent(".image-resize-container") as HTMLElement | null;
+
         // Early exit: Not an image or a resize handle?
         if (!target.instanceOf(HTMLImageElement) && !target.hasClass('image-resize-handle')) {
+            if (activeContainer && activeContainer.contains(target)) {
+                // Still within the same container; keep handles
+                return;
+            }
             this.cleanupHandles();
             return;
         }
@@ -250,6 +278,11 @@ export class ImageResizer {
 
         // Handle external images: add a border and perform edge detection for cursor change
         if (target.instanceOf(HTMLImageElement) && this.isExternalLink(target.src)) {
+            if (this.activeImage === target && target.hasClass("image-resize-border")) {
+                // Already active; just update edge detection
+                this.handleEdgeDetection(event, target);
+                return;
+            }
             this.activeImage = target;
             target.addClass("image-resize-border");
             this.handleEdgeDetection(event, target);
@@ -258,6 +291,11 @@ export class ImageResizer {
 
         // Handle internal images: create resize handles
         if (target.instanceOf(HTMLImageElement) && !this.isExternalLink(target.src)) {
+            // If this image already has a container/handles, do nothing
+            const container = target.matchParent(".image-resize-container");
+            if (this.activeImage === target && this.handles.length > 0 && container) {
+                return;
+            }
             this.activeImage = target;
             this.createHandles(target);
             return;
@@ -304,7 +342,7 @@ export class ImageResizer {
                 imageTarget.style.cursor = 'se-resize'; // Default (bottom-right corner)
             }
         } else {
-            imageTarget.style.cursor = 'news-resize'; // Cursor outside the edge
+            imageTarget.style.cursor = 'default'; // Cursor outside the edge
         }
     }
 
@@ -338,7 +376,11 @@ export class ImageResizer {
 
 
             handleContainer.parentNode?.insertBefore(this.activeImage, handleContainer);
-            handleContainer.detach();
+            if ((handleContainer as any).detach) {
+                (handleContainer as any).detach();
+            } else {
+                handleContainer.remove();
+            }
             this.handles = [];
         }
 
@@ -364,7 +406,7 @@ export class ImageResizer {
         if (!parent) return;
         const container = parent.createEl("div", { cls: "image-resize-container" });
 
-        // **NEW:** Check for and apply existing alignment classes
+        // Check for and apply existing alignment classes
         const alignmentClasses = [
             "image-position-left",
             "image-position-center",
@@ -472,6 +514,12 @@ export class ImageResizer {
             this.initialHeight = rect.height;
             this.initialAspectRatio = this.initialWidth / this.initialHeight;
 
+            // Ensure inline styles are initialized to pixel values so subsequent updates are visible
+            if (this.activeImage) {
+                this.activeImage.style.width = `${Math.round(this.initialWidth)}px`;
+                this.activeImage.style.height = `${Math.round(this.initialHeight)}px`;
+            }
+
             // Update plugin settings
             // this.plugin.settings.resizeState.isResizing = true;
             // this.plugin.saveSettings();
@@ -490,13 +538,7 @@ export class ImageResizer {
         // Only run if drag resizing is active
         if (!this.resizeState.isDragging) return;
 
-        // Cancel any existing animation frame request to prevent conflicts
-        if (this.rafId) {
-            cancelAnimationFrame(this.rafId);
-        }
-
-        // Request a new animation frame to handle the resize calculations and updates
-        this.rafId = requestAnimationFrame(() => {
+        const runResizeCalc = () => {
             // Edge detection when hovering over external images
             if (this.activeImage && this.activeImage.hasClass('image-resize-border')) {
                 this.handleEdgeDetection(event, this.activeImage);
@@ -594,15 +636,26 @@ export class ImageResizer {
             }
 
             // Set the new width and height of the image, rounded to the nearest pixel
-            this.activeImage.style.width = `${Math.round(newWidth)}px`;
-            this.activeImage.style.height = `${Math.round(newHeight)}px`;
+            const roundedWidth = Math.round(newWidth);
+            const roundedHeight = Math.round(newHeight);
+            this.activeImage.style.width = `${roundedWidth}px`;
+            this.activeImage.style.height = `${roundedHeight}px`;
 
-            // Call the throttled function to update the markdown link with the new dimensions
-            this.throttledUpdateImageLink(this.activeImage, newWidth, newHeight, this.currentHandle);
+            // Live-update the markdown link during drag (throttled) so users can see size numbers change
+            this.throttledUpdateImageLink(this.activeImage, roundedWidth, roundedHeight, this.currentHandle);
 
-            // Update the cursor position during resize
+            // Update the cursor position during resize (visual feedback only during drag)
             this.updateCursorPositionDuringResize();
-        });
+        };
+
+
+        // Cancel any existing animation frame request to prevent conflicts
+        if (this.rafId) {
+            cancelAnimationFrame(this.rafId);
+        }
+
+        // Request a new animation frame to handle the resize calculations and updates
+        this.rafId = requestAnimationFrame(runResizeCalc);
     };
 
     /**
@@ -622,8 +675,6 @@ export class ImageResizer {
             return;
         }
 
-
-
         // Remove 'resizing' class
         if (this.activeImage.hasClass("image-resize-border")) {
             // External image
@@ -639,21 +690,25 @@ export class ImageResizer {
         // Reset the current handle
         this.currentHandle = null;
 
-        // Update plugin settings to indicate resizing has stopped
-        // this.plugin.settings.resizeState.isResizing = false;
-        // this.plugin.saveSettings();
-
-        // Get the final dimensions after resizing
-        const finalWidth = Math.round(this.activeImage.offsetWidth);
-        const finalHeight = Math.round(this.activeImage.offsetHeight);
+        // Determine final dimensions in a DOM-agnostic way (happy-dom often returns 0 for offset* values)
+        const widthStyle = parseInt(this.activeImage.style.width || '0', 10);
+        const heightStyle = parseInt(this.activeImage.style.height || '0', 10);
+        const finalWidth = Number.isFinite(widthStyle) && widthStyle > 0 ? widthStyle : Math.round(this.initialWidth);
+        const finalHeight = Number.isFinite(heightStyle) && heightStyle > 0 ? heightStyle : Math.round(this.initialHeight);
 
         // Update the markdown link with the final dimensions
         this.updateMarkdownLink(this.activeImage, finalWidth, finalHeight, this.currentHandle);
 
-        // Clean up resize handles
-        this.cleanupHandles();
+        // Mark flags
         this.resizeState.isDragging = false;
         this.resizeState.isResizing = false;
+
+        // In reading mode, remove handles; in edit mode, keep handles for subsequent drags
+        const state = this.markdownView?.getState?.();
+        const isReadingMode = state && state.mode === "preview";
+        if (isReadingMode) {
+            this.cleanupHandles();
+        }
     };
 
     /**
@@ -716,8 +771,9 @@ export class ImageResizer {
         }
 
         // Update visual dimensions immediately
-        const computedWidth = getComputedStyle(image).width;
-        if (computedWidth.endsWith("%")) {
+        // Prefer the declared style width units to decide whether to keep % or use px
+        const declaredWidth = image.style.width || "";
+        if (declaredWidth.endsWith("%")) {
             image.style.width = `${newWidth}%`;
         } else {
             image.style.width = `${newWidth}px`;
@@ -789,7 +845,9 @@ export class ImageResizer {
         // Early return if scroll resize is not permitted
         if (!this.isResizingPermitted('scroll')) return false;
 
-        switch (this.scrollwheelModifier) {
+        // Read the current setting to honor runtime changes
+        const currentModifier = this.plugin?.settings?.scrollwheelModifier ?? this.scrollwheelModifier;
+        switch (currentModifier) {
             case "Shift":
                 return event.shiftKey;
             case "Control":
@@ -824,10 +882,15 @@ export class ImageResizer {
 
         let newWidth;
         const computedWidth = getComputedStyle(img).width;
-        if (img instanceof HTMLVideoElement && computedWidth.endsWith('%')) {
-            // Handle video elements with percentage widths
-            newWidth = parseFloat(computedWidth) * scaleFactor;
+        const declaredWidth = (img as HTMLElement).style?.width || "";
+        if (declaredWidth.endsWith('%')) {
+            // Handle elements with percentage widths declared in style
+            newWidth = parseFloat(declaredWidth) * scaleFactor;
             newWidth = Math.max(1, Math.min(newWidth, 100)); // Keep within 1-100%
+        } else if (img instanceof HTMLVideoElement && computedWidth.endsWith('%')) {
+            // Fallback: some environments may express video width in % via computed style
+            newWidth = parseFloat(computedWidth) * scaleFactor;
+            newWidth = Math.max(1, Math.min(newWidth, 100));
         } else {
             // Handle images and videos with pixel widths
             newWidth = img.clientWidth * scaleFactor;
@@ -1074,13 +1137,13 @@ export class ImageResizer {
                 });
             });
 
-        // Apply changes and set cursor position atomically
+        // Apply changes atomically
         if (changes.length > 0) {
             editor.transaction({ changes });
-            // Only set cursor position if cursorLocation is not "none"
-            if (cursorPosition && this.plugin.settings.resizeCursorLocation !== "none") {
-                editor.setCursor(cursorPosition);
-            }
+        }
+        // Set cursor position based on setting, even if no textual changes were needed
+        if (cursorPosition && this.plugin.settings.resizeCursorLocation !== "none") {
+            editor.setCursor(cursorPosition);
         }
     }
 

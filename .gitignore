@@ -23,3 +23,8 @@ data.json
 
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store
+
+# Test coverage output
+coverage/
+*.lcov
+.vscode-test/

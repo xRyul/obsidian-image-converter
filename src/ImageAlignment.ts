@@ -87,29 +87,28 @@ export class ImageAlignment extends Component {
         // Parent embed handling
         const parentEmbed = img.matchParent('.internal-embed.image-embed'); // Use matchParent
         if (parentEmbed) {
-            parentEmbed.removeClass(
-                'image-position-left',
-                'image-position-center',
-                'image-position-right',
-                'image-wrap',
-                'image-no-wrap'
-            );
+            // Remove each class token individually to match DOMTokenList semantics
+            parentEmbed.removeClass('image-position-left');
+            parentEmbed.removeClass('image-position-center');
+            parentEmbed.removeClass('image-position-right');
+            parentEmbed.removeClass('image-wrap');
+            parentEmbed.removeClass('image-no-wrap');
+            parentEmbed.removeClass('image-converter-aligned');
 
             if (positionData.position !== 'none') {
-                parentEmbed.addClass(`image-position-${positionData.position}`, 'image-converter-aligned');
+                parentEmbed.addClass(`image-position-${positionData.position}`);
+                parentEmbed.addClass('image-converter-aligned');
                 parentEmbed.addClass(positionData.wrap ? 'image-wrap' : 'image-no-wrap');
             }
         }
 
         // Remove existing alignment classes first
-        img.removeClass(
-            'image-position-left',
-            'image-position-center',
-            'image-position-right',
-            'image-wrap',
-            'image-no-wrap',
-            'image-converter-aligned'
-        );
+        img.removeClass('image-position-left');
+        img.removeClass('image-position-center');
+        img.removeClass('image-position-right');
+        img.removeClass('image-wrap');
+        img.removeClass('image-no-wrap');
+        img.removeClass('image-converter-aligned');
 
         // Re-apply alignment unconditionally
         if (positionData.position !== 'none') {
@@ -146,30 +145,27 @@ export class ImageAlignment extends Component {
         const relativeSrc = this.imageAlignmentManager.getRelativePath(src);
 
         // --- Apply Visual Changes to IMG ---
-        img.removeClass(
-            'image-position-left',
-            'image-position-center',
-            'image-position-right',
-            'image-wrap',
-            'image-no-wrap',
-            'image-converter-aligned'
-        );
+        img.removeClass('image-position-left');
+        img.removeClass('image-position-center');
+        img.removeClass('image-position-right');
+        img.removeClass('image-wrap');
+        img.removeClass('image-no-wrap');
+        img.removeClass('image-converter-aligned');
         if (options.align !== 'none') {
-            img.addClass(`image-position-${options.align}`, 'image-converter-aligned');
+            img.addClass(`image-position-${options.align}`);
+            img.addClass('image-converter-aligned');
             img.addClass(options.wrap ? 'image-wrap' : 'image-no-wrap');
         }
 
         // --- Apply Visual Changes to PARENT SPAN ---
         const parentEmbed = img.matchParent('.internal-embed.image-embed');
         if (parentEmbed) {
-            parentEmbed.removeClass(
-                'image-position-left',
-                'image-position-center',
-                'image-position-right',
-                'image-wrap',
-                'image-no-wrap',
-                'image-converter-aligned'
-            );
+            parentEmbed.removeClass('image-position-left');
+            parentEmbed.removeClass('image-position-center');
+            parentEmbed.removeClass('image-position-right');
+            parentEmbed.removeClass('image-wrap');
+            parentEmbed.removeClass('image-no-wrap');
+            parentEmbed.removeClass('image-converter-aligned');
             if (options.align !== 'none') {
                 parentEmbed.addClass(`image-position-${options.align}`);
                 parentEmbed.addClass(options.wrap ? 'image-wrap' : 'image-no-wrap');
