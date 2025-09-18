@@ -93,12 +93,14 @@ function makeResizer({ viewMode = 'source', overrides = {}, workspaceOverride }:
     resizeCursorLocation: 'front'
   }, overrides) as any;
   const resizer = new ImageResizer(plugin);
+  // Patch instance to satisfy Component.addChild in tests without touching global mocks
+  (resizer as any).addChild = (child: any) => { ((resizer as any).__children ||= []).push(child); };
   const markdownView = {
     containerEl: document.body,
     editor: { getValue: () => '', getCursor: () => ({ line: 0, ch: 0 }), getLine: () => '', lastLine: () => 0, transaction: () => {}, setCursor: () => {} },
     getState: () => ({ mode: viewMode })
   } as any;
-  resizer.onload(markdownView);
+  (resizer as any).attachView(markdownView);
   activeResizers.push(resizer);
   return { app, plugin, resizer, markdownView };
 }
@@ -461,9 +463,9 @@ describe('ImageResizer lifecycle and wheel behaviors (13.15–13.16, 13.17–13.
     const { container } = setupView();
     const img = addInternalImage(container);
 
-    resizer.onload({ containerEl: document.body, editor: (resizer as any).editor, getState: () => ({ mode: 'preview' }) } as any);
+    (resizer as any).attachView({ containerEl: document.body, editor: (resizer as any).editor, getState: () => ({ mode: 'preview' }) } as any);
 
-    const scope: any = (resizer as any).eventScope;
+    const scope: any = (resizer as any).viewScope;
     expect(Array.isArray(scope?.disposables)).toBe(true);
     expect(scope.disposables.length).toBe(5);
 
@@ -636,8 +638,10 @@ describe('ImageResizer throttle policy when alignment disabled (13.23 variant)',
       isResizeInReadingModeEnabled: true,
     }, overrides) as any;
     const resizer = new ImageResizer(plugin);
+    // Patch instance to satisfy Component.addChild in tests without touching global mocks
+    (resizer as any).addChild = (child: any) => { ((resizer as any).__children ||= []).push(child); };
     const markdownView = { containerEl: document.body, editor: { getValue: () => '', getCursor: () => ({ line: 0, ch: 0 }), getLine: () => '', lastLine: () => 0, transaction: () => {}, setCursor: () => {} }, getState: () => ({ mode: 'source' }) } as any;
-    resizer.onload(markdownView);
+    (resizer as any).attachView(markdownView);
     activeResizers.push(resizer);
     return { app, plugin, resizer };
   }

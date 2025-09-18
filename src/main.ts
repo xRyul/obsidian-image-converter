@@ -190,9 +190,10 @@ export default class ImageConverterPlugin extends Plugin {
 
         if (this.settings.isImageResizeEnbaled) {
             this.imageResizer = new ImageResizer(this);
+            this.addChild(this.imageResizer);
             const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
             if (activeView) {
-                this.imageResizer.onload(activeView);
+                this.imageResizer.attachView(activeView);
             }
         }
 
@@ -299,9 +300,8 @@ export default class ImageConverterPlugin extends Plugin {
             this.ImageAlignmentManager = null;
         }
 
-        // Clean up resizer next since other components might depend on it
+        // Clean up resizer reference (it will be unloaded automatically as a child)
         if (this.imageResizer) {
-            this.imageResizer.onunload();
             this.imageResizer = null;
         }
 

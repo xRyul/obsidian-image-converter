@@ -10,7 +10,7 @@ export interface ResizeState {
 }
 
 
-export class ImageResizer {
+export class ImageResizer extends Component {
 
     editor: Editor | null = null;
     markdownView: MarkdownView | null = null;
@@ -27,7 +27,7 @@ export class ImageResizer {
     rafId: number | null = null;
 
     // Scope component to manage DOM/event registrations per active view
-    private eventScope: Component | null = null;
+    private viewScope: Component | null = null;
 
     // Resize state
     public resizeState: ResizeState = {
@@ -67,6 +67,7 @@ export class ImageResizer {
 
 
     constructor(private plugin: ImageConverterPlugin) {
+        super();
         this.linkFormatter = new LinkFormatter(this.plugin.app);
         this.throttledUpdateImageLink = this.throttle(
             (
@@ -93,21 +94,22 @@ export class ImageResizer {
 
     }
 
-    onload(markdownView: MarkdownView) { // Accept MarkdownView
+    attachView(markdownView: MarkdownView) { // Accept MarkdownView
         this.markdownView = markdownView;
         this.editor = markdownView.editor;
 
         // Reset old scope (if any) to avoid duplicate listeners across layout changes
-        if (this.eventScope) {
+        if (this.viewScope) {
             // Use onunload for compatibility with test mocks
-            (this.eventScope as any).onunload?.();
-            this.eventScope = null;
+            (this.viewScope as any).onunload?.();
+            this.viewScope = null;
         }
 
         // Only register events if master switch is enabled
         if (this.plugin.settings.isImageResizeEnbaled) {
-            // Create a fresh scope for this view
-            this.eventScope = new Component();
+            // Create a fresh scope for this view and parent it to this component
+            this.viewScope = new Component();
+            this.addChild(this.viewScope);
             this.registerEditorEvents();
         }
     }
@@ -119,10 +121,9 @@ export class ImageResizer {
             this.rafId = null;
         }
 
-        // Unload and reset event scope (removes DOM listeners registered via scope)
-        if (this.eventScope) {
-            (this.eventScope as any).onunload?.();
-            this.eventScope = null;
+        // Reset event scope reference; child will be unloaded by super.onunload()
+        if (this.viewScope) {
+            this.viewScope = null;
         }
 
         if (this.scrollTimeout) {
@@ -159,6 +160,8 @@ export class ImageResizer {
         this.editor = null;
         this.markdownView = null;
 
+        // Ensure base class cleanup (children, etc.)
+        super.onunload();
     }
 
     onLayoutChange(markdownView: MarkdownView) {
@@ -167,7 +170,7 @@ export class ImageResizer {
         
         // Handle layout changes (e.g., reposition handles)
         this.cleanupHandles();
-        this.onload(markdownView);
+        this.attachView(markdownView);
         if (this.lastMouseEvent) {
             this.handleImageHover(this.lastMouseEvent);
         }
@@ -202,19 +205,19 @@ export class ImageResizer {
     // }
 
     private registerEditorEvents() {
-        if (!this.editor || !this.markdownView || !this.eventScope) return; // Check MarkdownView too
+        if (!this.editor || !this.markdownView || !this.viewScope) return; // Check MarkdownView too
 
         // WE register for DOCUMENT as it is broad and allows to work in READING and Live Preview mode
         // 1. Hover Detection
-        this.eventScope.registerDomEvent(this.markdownView.containerEl, 'mouseover', this.handleImageHover);
+        this.viewScope.registerDomEvent(this.markdownView.containerEl, 'mouseover', this.handleImageHover);
 
         // 2. Drag Handling: Mouse down, move, up events for handles
-        this.eventScope.registerDomEvent(document as any, 'mousedown', this.handleMouseDown);
-        this.eventScope.registerDomEvent(document as any, 'mousemove', this.handleMouseMove);
-        this.eventScope.registerDomEvent(document as any, 'mouseup', this.handleMouseUp);
+        this.viewScope.registerDomEvent(document as any, 'mousedown', this.handleMouseDown);
+        this.viewScope.registerDomEvent(document as any, 'mousemove', this.handleMouseMove);
+        this.viewScope.registerDomEvent(document as any, 'mouseup', this.handleMouseUp);
 
         // 3. Register mousewheel event for resizing
-        this.eventScope.registerDomEvent(this.markdownView.containerEl, 'wheel', this.handleMouseWheel as any, { passive: false });
+        this.viewScope.registerDomEvent(this.markdownView.containerEl, 'wheel', this.handleMouseWheel as any, { passive: false });
 
     }
 
