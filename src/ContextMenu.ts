@@ -11,14 +11,14 @@ import {
 	MenuItem,
 	MarkdownView,
 	Editor,
-} from 'obsidian';
-import * as path from 'path';
+} from "obsidian";
+import * as path from "path";
 import ImageConverterPlugin from "./main";
-import { FolderAndFilenameManagement } from './FolderAndFilenameManagement';
-import { ConfirmDialog } from './ImageConverterSettings';
-import { VariableProcessor, VariableContext } from './VariableProcessor';
-import { ImageAnnotationModal } from './ImageAnnotation';
-import { Crop } from './Crop';
+import { FolderAndFilenameManagement } from "./FolderAndFilenameManagement";
+import { ConfirmDialog } from "./ImageConverterSettings";
+import { VariableProcessor, VariableContext } from "./VariableProcessor";
+import { ImageAnnotationModal } from "./ImageAnnotation";
+import { Crop } from "./Crop";
 import { ProcessSingleImageModal } from "./ProcessSingleImageModal";
 
 interface ImageMatch {
@@ -33,9 +33,13 @@ export class ContextMenu extends Component {
 
 	private readonly stopPropagationHandler = (e: Event) => e.stopPropagation();
 	private readonly documentClickHandler = (event: MouseEvent) => {
-		if (!(event.target as HTMLElement).closest('.image-converter-contextmenu-info-container') &&
-			!(event.target as HTMLElement).closest('.menu-item')) {
-			this.currentMenu?.hide();
+		if (
+			!(event.target as HTMLElement).closest(
+				".image-converter-contextmenu-info-container"
+			) &&
+			!(event.target as HTMLElement).closest(".menu-item")
+		) {
+			(this.currentMenu as any)?.hide?.();
 		}
 	};
 
@@ -43,7 +47,7 @@ export class ContextMenu extends Component {
 		private app: App,
 		private plugin: ImageConverterPlugin,
 		private folderAndFilenameManagement: FolderAndFilenameManagement,
-		private variableProcessor: VariableProcessor,
+		private variableProcessor: VariableProcessor
 	) {
 		super();
 		this.registerContextMenuListener();
@@ -64,48 +68,51 @@ export class ContextMenu extends Component {
 
 		this.registerDomEvent(
 			document,
-			'contextmenu',
+			"contextmenu",
 			this.handleContextMenuEvent,
 			true
 		);
 		this.contextMenuRegistered = true;
 	}
 
-    /**
-     * Handles the context menu event.
-     * This function is called when the context menu is triggered on an image.
-     * @param event - The MouseEvent object.
-     */
-    handleContextMenuEvent = (event: MouseEvent) => {
-        const target = event.target as HTMLElement;
-        const activeView = this.app.workspace.getActiveViewOfType(View);
-        const isCanvasView = activeView?.getViewType() === 'canvas';
+	/**
+	 * Handles the context menu event.
+	 * This function is called when the context menu is triggered on an image.
+	 * @param event - The MouseEvent object.
+	 */
+	handleContextMenuEvent = (event: MouseEvent) => {
+		const target = event.target as HTMLElement;
+		const activeView = this.app.workspace.getActiveViewOfType(View);
+		const isCanvasView = activeView?.getViewType() === "canvas";
 
-        if (isCanvasView) {
-            return;
-        }
+		if (isCanvasView) {
+			return;
+		}
 
-        const img = target instanceof HTMLImageElement ? target : target.closest('img');
-        if (!img) {
-            return;
-        }
+		const img =
+			target instanceof HTMLImageElement ? target : target.closest("img");
+		if (!img) {
+			return;
+		}
 
-        // Skip Excalidraw images
-        if (this.plugin.supportedImageFormats.isExcalidrawImage(img)) {
-            return;
-        }
+		// Skip Excalidraw images
+		if (this.plugin.supportedImageFormats.isExcalidrawImage(img)) {
+			return;
+		}
 
-        const isImageInSupportedContainer = !!(
-            img.closest('.markdown-preview-view') ||
-            img.closest('.markdown-source-view')
-            // img.closest('.view-content > div') // uncomment this to enable it inside its individual window
-        );
-        if (!isImageInSupportedContainer) {
-            if (target.closest('.map-view-main')) {
-                return;
-            }
-            return;
-        }
+		const isImageInSupportedContainer = !!(
+			(
+				img.closest(".markdown-preview-view") ||
+				img.closest(".markdown-source-view")
+			)
+			// img.closest('.view-content > div') // uncomment this to enable it inside its individual window
+		);
+		if (!isImageInSupportedContainer) {
+			if (target.closest(".map-view-main")) {
+				return;
+			}
+			return;
+		}
 
 		event.preventDefault(); // prevents the default context menu from appearing (if any)
 		event.stopPropagation(); // prevents the event from bubbling up to parent elements (like the callout)
@@ -113,8 +120,10 @@ export class ContextMenu extends Component {
 		const menu = new Menu();
 		let activeFile = this.app.workspace.getActiveFile();
 		if (!activeFile) {
-			const mv = this.app.workspace.getActiveViewOfType(MarkdownView) as any;
-			activeFile = (mv && (mv as any).file) ? (mv as any).file : null;
+			const mv = this.app.workspace.getActiveViewOfType(
+				MarkdownView
+			) as any;
+			activeFile = mv && (mv as any).file ? (mv as any).file : null;
 		}
 
 		if (activeFile) {
@@ -144,7 +153,6 @@ export class ContextMenu extends Component {
 	) {
 		this.currentMenu = menu;
 
-
 		this.addRenameAndMoveInputs(menu, img, activeFile);
 
 		menu.addSeparator();
@@ -161,8 +169,15 @@ export class ContextMenu extends Component {
 		menu.addSeparator();
 
 		// Only add image alignment if enabled
-		if (this.plugin.settings.isImageAlignmentEnabled && this.plugin.ImageAlignmentManager) {
-			this.plugin.ImageAlignmentManager.addAlignmentOptionsToContextMenu(menu, img, activeFile);
+		if (
+			this.plugin.settings.isImageAlignmentEnabled &&
+			this.plugin.ImageAlignmentManager
+		) {
+			this.plugin.ImageAlignmentManager.addAlignmentOptionsToContextMenu(
+				menu,
+				img,
+				activeFile
+			);
 		}
 
 		this.addProcessImageMenuItem(menu, img, event); // Pass the event here
@@ -171,16 +186,12 @@ export class ContextMenu extends Component {
 
 		this.addAnnotateImageMenuItem(menu, img);
 
-
-
 		menu.addSeparator();
 
 		if (!Platform.isMobile) {
-			this.addShowInNavigationMenuItem(menu, img)
-			this.addShowInSystemExplorerMenuItem(menu, img)
+			this.addShowInNavigationMenuItem(menu, img);
+			this.addShowInSystemExplorerMenuItem(menu, img);
 		}
-
-
 
 		menu.addSeparator();
 		this.addDeleteImageAndLinkMenuItem(menu, event);
@@ -188,35 +199,50 @@ export class ContextMenu extends Component {
 		return true;
 	}
 
-
 	/*-----------------------------------------------------------------*/
 	/*                        CAPTION INPUT                            */
 	/*-----------------------------------------------------------------*/
 
-	private async loadCurrentCaption(img: HTMLImageElement, activeFile: TFile): Promise<string> {
+	private async loadCurrentCaption(
+		img: HTMLImageElement,
+		activeFile: TFile
+	): Promise<string> {
 		try {
-			const imagePath = (this.folderAndFilenameManagement && typeof (this.folderAndFilenameManagement as any).getImagePath === 'function')
-				? (this.folderAndFilenameManagement as any).getImagePath(img)
-				: null;
+			const imagePath =
+				this.folderAndFilenameManagement &&
+				typeof (this.folderAndFilenameManagement as any)
+					.getImagePath === "function"
+					? (this.folderAndFilenameManagement as any).getImagePath(
+							img
+					  )
+					: null;
 			if (!imagePath) return "";
 
-			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+			const activeView =
+				this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (!activeView) return "";
 
 			const { editor } = activeView;
 			const isExternal = !imagePath;
-			const matches = await this.findImageMatches(editor, imagePath, isExternal);
+			const matches = await this.findImageMatches(
+				editor,
+				imagePath,
+				isExternal
+			);
 
 			if (matches && matches.length > 0) {
 				const [firstMatch] = matches;
 
 				// Handle wiki-style links
-				const wikiMatch = firstMatch.fullMatch.match(/!\[\[([^\]]+?)(?:\|([^|\]]+?))?\s*(?:\|([^|\]]+?))?\]\]/);
+				const wikiMatch = firstMatch.fullMatch.match(
+					/!\[\[([^\]]+?)(?:\|([^|\]]+?))?\s*(?:\|([^|\]]+?))?\]\]/
+				);
 				if (wikiMatch) {
 					const secondPart = wikiMatch[2] || "";
 					const thirdPart = wikiMatch[3] || "";
 
-					const isDimensions = (part: string) => /^\s*\d+x\d+\s*$/.test(part);
+					const isDimensions = (part: string) =>
+						/^\s*\d+x\d+\s*$/.test(part);
 
 					if (thirdPart && !isDimensions(secondPart)) {
 						return secondPart.trim();
@@ -228,7 +254,9 @@ export class ContextMenu extends Component {
 				}
 
 				// Handle markdown-style links
-				const markdownMatch = firstMatch.fullMatch.match(/!\[([^|\]]*?)(?:\|(\d+x\d+))?\]\(([^)]+)\)/);
+				const markdownMatch = firstMatch.fullMatch.match(
+					/!\[([^|\]]*?)(?:\|(\d+x\d+))?\]\(([^)]+)\)/
+				);
 				if (markdownMatch) {
 					const caption = markdownMatch[1] || "";
 					return caption.trim();
@@ -236,82 +264,104 @@ export class ContextMenu extends Component {
 			}
 			return "";
 		} catch (error) {
-			console.error('Error loading caption:', error);
+			console.error("Error loading caption:", error);
 			return "";
 		}
 	}
 
-	private async loadCurrentDimensions(img: HTMLImageElement, activeFile: TFile): Promise<{ width: string, height: string }> {
+	private async loadCurrentDimensions(
+		img: HTMLImageElement,
+		activeFile: TFile
+	): Promise<{ width: string; height: string }> {
 		try {
-			const imagePath = (this.folderAndFilenameManagement && typeof (this.folderAndFilenameManagement as any).getImagePath === 'function')
-				? (this.folderAndFilenameManagement as any).getImagePath(img)
-				: null;
-			if (!imagePath) return { width: '', height: '' };
-	
-			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-			if (!activeView) return { width: '', height: '' };
-	
+			const imagePath =
+				this.folderAndFilenameManagement &&
+				typeof (this.folderAndFilenameManagement as any)
+					.getImagePath === "function"
+					? (this.folderAndFilenameManagement as any).getImagePath(
+							img
+					  )
+					: null;
+			if (!imagePath) return { width: "", height: "" };
+
+			const activeView =
+				this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!activeView) return { width: "", height: "" };
+
 			const { editor } = activeView;
 			const isExternal = !imagePath;
-			const matches = await this.findImageMatches(editor, imagePath, isExternal);
-			
+			const matches = await this.findImageMatches(
+				editor,
+				imagePath,
+				isExternal
+			);
+
 			if (matches && matches.length > 0) {
 				const [firstMatch] = matches;
-				
+
 				// Handle wiki-style links
-				const wikiMatch = firstMatch.fullMatch.match(/!\[\[([^\]]+?)(?:\|([^|\]]+?))?\s*(?:\|([^|\]]+?))?\]\]/);
+				const wikiMatch = firstMatch.fullMatch.match(
+					/!\[\[([^\]]+?)(?:\|([^|\]]+?))?\s*(?:\|([^|\]]+?))?\]\]/
+				);
 				if (wikiMatch) {
 					const secondPart = wikiMatch[2] || "";
 					const thirdPart = wikiMatch[3] || "";
-					
-					const isDimensions = (part: string) => /^\s*\d+(?:x\d+)?\s*$/.test(part);
-					
+
+					const isDimensions = (part: string) =>
+						/^\s*\d+(?:x\d+)?\s*$/.test(part);
+
 					// Check third part first, then second part for dimensions
-					let dimensionPart = '';
+					let dimensionPart = "";
 					if (isDimensions(thirdPart)) {
 						dimensionPart = thirdPart.trim();
 					} else if (isDimensions(secondPart)) {
 						dimensionPart = secondPart.trim();
 					}
-	
+
 					if (dimensionPart) {
-						const parts = dimensionPart.split('x');
+						const parts = dimensionPart.split("x");
 						return {
 							width: parts[0],
-							height: parts.length > 1 ? parts[1] : ''
+							height: parts.length > 1 ? parts[1] : "",
 						};
 					}
 				}
-	
+
 				// Handle markdown-style links
-				const markdownMatch = firstMatch.fullMatch.match(/!\[([^|\]]*?)(?:\|(\d+(?:x\d+)?))?\]\(([^)]+)\)/);
+				const markdownMatch = firstMatch.fullMatch.match(
+					/!\[([^|\]]*?)(?:\|(\d+(?:x\d+)?))?\]\(([^)]+)\)/
+				);
 				if (markdownMatch && markdownMatch[2]) {
-					const parts = markdownMatch[2].split('x');
+					const parts = markdownMatch[2].split("x");
 					return {
 						width: parts[0],
-						height: parts.length > 1 ? parts[1] : ''
+						height: parts.length > 1 ? parts[1] : "",
 					};
 				}
 			}
-			return { width: '', height: '' };
+			return { width: "", height: "" };
 		} catch (error) {
-			console.error('Error loading dimensions:', error);
-			return { width: '', height: '' };
+			console.error("Error loading dimensions:", error);
+			return { width: "", height: "" };
 		}
 	}
 
 	private async updateImageLinkWithDimensions(
-		editor: Editor, 
-		match: { lineNumber: number, line: string }, 
+		editor: Editor,
+		match: { lineNumber: number; line: string },
 		newCaption: string,
 		width: string,
 		height: string
 	): Promise<string> {
 		// Format dimensions based on what's provided
-		const dimensionsPart = width ? (height ? `${width}x${height}` : width) : '';
-		
+		const dimensionsPart = width
+			? height
+				? `${width}x${height}`
+				: width
+			: "";
+
 		const { line } = match;
-		
+
 		// Handle Wiki-style links
 		if (line.includes("![[")) {
 			return line.replace(
@@ -330,7 +380,7 @@ export class ContextMenu extends Component {
 				}
 			);
 		}
-		
+
 		// Handle Markdown-style links
 		return line.replace(
 			/!\[([^|\]]*?)(?:\|(\d+(?:x\d+)?))?\]\(([^)]+)\)/g,
@@ -359,32 +409,42 @@ export class ContextMenu extends Component {
 		isImageResolvable: boolean
 	) {
 		if (!isImageResolvable) return;
-	
+
 		const newCaption = captionInput.value.trim();
 		const width = widthInput.value.trim();
 		const height = heightInput.value.trim();
-		
+
 		// Validate dimensions
-		if ((width && !(/^\d+$/.test(width))) || (height && !(/^\d+$/.test(height)))) {
-			new Notice('Dimensions must be positive numbers');
+		if (
+			(width && !/^\d+$/.test(width)) ||
+			(height && !/^\d+$/.test(height))
+		) {
+			new Notice("Dimensions must be positive numbers");
 			return;
 		}
-	
+
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!activeView) return;
-	
+
 		const { editor } = activeView;
-		const imagePath = (this.folderAndFilenameManagement && typeof (this.folderAndFilenameManagement as any).getImagePath === 'function')
-			? (this.folderAndFilenameManagement as any).getImagePath(img)
-			: null;
+		const imagePath =
+			this.folderAndFilenameManagement &&
+			typeof (this.folderAndFilenameManagement as any).getImagePath ===
+				"function"
+				? (this.folderAndFilenameManagement as any).getImagePath(img)
+				: null;
 		const isExternal = !imagePath;
-		const matches = await this.findImageMatches(editor, imagePath, isExternal);
-	
+		const matches = await this.findImageMatches(
+			editor,
+			imagePath,
+			isExternal
+		);
+
 		if (matches.length === 0) {
-			new Notice('Failed to find image link in the current note.');
+			new Notice("Failed to find image link in the current note.");
 			return;
 		}
-	
+
 		const handleConfirmation = async () => {
 			for (const match of matches) {
 				const updatedLine = await this.updateImageLinkWithDimensions(
@@ -396,10 +456,10 @@ export class ContextMenu extends Component {
 				);
 				editor.setLine(match.lineNumber, updatedLine);
 			}
-			new Notice('Image caption and dimensions updated successfully.');
+			new Notice("Image caption and dimensions updated successfully.");
 			this.plugin.captionManager?.refresh();
 		};
-	
+
 		if (matches.length > 1) {
 			new ConfirmDialog(
 				this.app,
@@ -411,8 +471,8 @@ export class ContextMenu extends Component {
 		} else {
 			await handleConfirmation();
 		}
-	
-		menu.hide();
+
+		(menu as any).hide?.();
 	}
 
 	/*-----------------------------------------------------------------*/
@@ -432,18 +492,27 @@ export class ContextMenu extends Component {
 	 * @param img - The HTMLImageElement that was right-clicked.
 	 * @param activeFile - The currently active TFile.
 	 */
-	addRenameAndMoveInputs(menu: Menu, img: HTMLImageElement, activeFile: TFile) {
-		const isNativeMenus = (this.app.vault as any).getConfig('nativeMenus');
+	addRenameAndMoveInputs(
+		menu: Menu,
+		img: HTMLImageElement,
+		activeFile: TFile
+	) {
+		const isNativeMenus = (this.app.vault as any).getConfig("nativeMenus");
 
 		if (!isNativeMenus && !Platform.isMobile) {
-			const imagePath = (this.folderAndFilenameManagement && typeof (this.folderAndFilenameManagement as any).getImagePath === 'function')
-				? (this.folderAndFilenameManagement as any).getImagePath(img)
-				: null;
+			const imagePath =
+				this.folderAndFilenameManagement &&
+				typeof (this.folderAndFilenameManagement as any)
+					.getImagePath === "function"
+					? (this.folderAndFilenameManagement as any).getImagePath(
+							img
+					  )
+					: null;
 			const isImageResolvable = imagePath !== null;
 
-			let fileNameWithoutExt = '';
-			let directoryPath = '';
-			let fileExtension = '';
+			let fileNameWithoutExt = "";
+			let directoryPath = "";
+			let fileExtension = "";
 			let obsidianVaultPathForRename: string | undefined;
 			let file: TFile | File;
 
@@ -454,137 +523,164 @@ export class ContextMenu extends Component {
 				fileExtension = parsedPath.ext;
 				obsidianVaultPathForRename = imagePath;
 				if (!directoryPath) {
-					directoryPath = '/';
+					directoryPath = "/";
 				}
 
-				const abstractFile = this.app.vault.getAbstractFileByPath(imagePath);
-				file = abstractFile instanceof TFile ? abstractFile : new File([""], imagePath);
+				const abstractFile =
+					this.app.vault.getAbstractFileByPath(imagePath);
+				file =
+					abstractFile instanceof TFile
+						? abstractFile
+						: new File([""], imagePath);
 			}
 
 			menu.addItem((item) => {
 				const menuItem = item as any;
 
 				// Create main container
-				const inputContainer = document.createElement('div');
-				inputContainer.className = 'image-converter-contextmenu-info-container';
+				const inputContainer = document.createElement("div");
+				inputContainer.className =
+					"image-converter-contextmenu-info-container";
 
 				// Create name input group
-				const nameGroup = document.createElement('div');
-				nameGroup.className = 'image-converter-contextmenu-input-group';
+				const nameGroup = document.createElement("div");
+				nameGroup.className = "image-converter-contextmenu-input-group";
 
-				const nameIcon = document.createElement('div');
-				nameIcon.className = 'image-converter-contextmenu-icon-container';
-				setIcon(nameIcon, 'file-text');
+				const nameIcon = document.createElement("div");
+				nameIcon.className =
+					"image-converter-contextmenu-icon-container";
+				setIcon(nameIcon, "file-text");
 				nameGroup.appendChild(nameIcon);
 
-				const nameLabel = document.createElement('label');
-				nameLabel.textContent = 'Name:';
-				nameLabel.setAttribute('for', 'image-converter-name-input');
+				const nameLabel = document.createElement("label");
+				nameLabel.textContent = "Name:";
+				nameLabel.setAttribute("for", "image-converter-name-input");
 				nameGroup.appendChild(nameLabel);
 
-				const nameInput = document.createElement('input');
-				nameInput.type = 'text';
+				const nameInput = document.createElement("input");
+				nameInput.type = "text";
 				nameInput.value = fileNameWithoutExt;
-				nameInput.placeholder = 'Enter a new image name';
-				nameInput.className = 'image-converter-contextmenu-name-input';
-				nameInput.id = 'image-converter-name-input';
+				nameInput.placeholder = "Enter a new image name";
+				nameInput.className = "image-converter-contextmenu-name-input";
+				nameInput.id = "image-converter-name-input";
 				if (!isImageResolvable) {
-					nameInput.classList.add('image-converter-contextmenu-disabled');
+					nameInput.classList.add(
+						"image-converter-contextmenu-disabled"
+					);
 				}
 				nameGroup.appendChild(nameInput);
 
 				// Create path input group
-				const pathGroup = document.createElement('div');
-				pathGroup.className = 'image-converter-contextmenu-input-group';
+				const pathGroup = document.createElement("div");
+				pathGroup.className = "image-converter-contextmenu-input-group";
 
-				const pathIcon = document.createElement('div');
-				pathIcon.className = 'image-converter-contextmenu-icon-container';
-				setIcon(pathIcon, 'folder');
+				const pathIcon = document.createElement("div");
+				pathIcon.className =
+					"image-converter-contextmenu-icon-container";
+				setIcon(pathIcon, "folder");
 				pathGroup.appendChild(pathIcon);
 
-				const pathLabel = document.createElement('label');
-				pathLabel.textContent = 'Folder:';
-				pathLabel.setAttribute('for', 'image-converter-path-input');
+				const pathLabel = document.createElement("label");
+				pathLabel.textContent = "Folder:";
+				pathLabel.setAttribute("for", "image-converter-path-input");
 				pathGroup.appendChild(pathLabel);
 
-				const pathInput = document.createElement('input');
-				pathInput.type = 'text';
+				const pathInput = document.createElement("input");
+				pathInput.type = "text";
 				pathInput.value = directoryPath;
-				pathInput.placeholder = 'Enter a new path for the image';
-				pathInput.className = 'image-converter-contextmenu-path-input';
-				pathInput.id = 'image-converter-path-input';
+				pathInput.placeholder = "Enter a new path for the image";
+				pathInput.className = "image-converter-contextmenu-path-input";
+				pathInput.id = "image-converter-path-input";
 				if (!isImageResolvable) {
-					pathInput.classList.add('image-converter-contextmenu-disabled');
+					pathInput.classList.add(
+						"image-converter-contextmenu-disabled"
+					);
 				}
 				pathGroup.appendChild(pathInput);
 
 				// Create caption input group
-				const captionGroup = document.createElement('div');
-				captionGroup.className = 'image-converter-contextmenu-input-group';
+				const captionGroup = document.createElement("div");
+				captionGroup.className =
+					"image-converter-contextmenu-input-group";
 
-				const captionIcon = document.createElement('div');
-				captionIcon.className = 'image-converter-contextmenu-icon-container';
-				setIcon(captionIcon, 'subtitles');
+				const captionIcon = document.createElement("div");
+				captionIcon.className =
+					"image-converter-contextmenu-icon-container";
+				setIcon(captionIcon, "subtitles");
 				captionGroup.appendChild(captionIcon);
 
-				const captionLabel = document.createElement('label');
-				captionLabel.textContent = 'Caption:';
-				captionLabel.setAttribute('for', 'image-converter-caption-input');
+				const captionLabel = document.createElement("label");
+				captionLabel.textContent = "Caption:";
+				captionLabel.setAttribute(
+					"for",
+					"image-converter-caption-input"
+				);
 				captionGroup.appendChild(captionLabel);
 
-				const captionInput = document.createElement('input');
-				captionInput.type = 'text';
-				captionInput.placeholder = 'Loading caption...';
-				captionInput.className = 'image-converter-contextmenu-caption-input';
-				captionInput.id = 'image-converter-caption-input';
+				const captionInput = document.createElement("input");
+				captionInput.type = "text";
+				captionInput.placeholder = "Loading caption...";
+				captionInput.className =
+					"image-converter-contextmenu-caption-input";
+				captionInput.id = "image-converter-caption-input";
 				captionGroup.appendChild(captionInput);
 
 				// Create dimensions input group
-				const dimensionsGroup = document.createElement('div');
-				dimensionsGroup.className = 'image-converter-contextmenu-input-group';
+				const dimensionsGroup = document.createElement("div");
+				dimensionsGroup.className =
+					"image-converter-contextmenu-input-group";
 
-				const dimensionsIcon = document.createElement('div');
-				dimensionsIcon.className = 'image-converter-contextmenu-icon-container';
-				setIcon(dimensionsIcon, 'aspect-ratio');
+				const dimensionsIcon = document.createElement("div");
+				dimensionsIcon.className =
+					"image-converter-contextmenu-icon-container";
+				setIcon(dimensionsIcon, "aspect-ratio");
 				dimensionsGroup.appendChild(dimensionsIcon);
 
-				const dimensionsLabel = document.createElement('label');
-				dimensionsLabel.textContent = 'Size:';
-				dimensionsLabel.setAttribute('for', 'image-converter-width-input');
+				const dimensionsLabel = document.createElement("label");
+				dimensionsLabel.textContent = "Size:";
+				dimensionsLabel.setAttribute(
+					"for",
+					"image-converter-width-input"
+				);
 				dimensionsGroup.appendChild(dimensionsLabel);
 
 				// Create width input
-				const widthInput = document.createElement('input');
-				widthInput.type = 'number';
-				widthInput.min = '1';
-				widthInput.placeholder = 'W';
-				widthInput.className = 'image-converter-contextmenu-dimension-input';
-				widthInput.id = 'image-converter-width-input';
+				const widthInput = document.createElement("input");
+				widthInput.type = "number";
+				widthInput.min = "1";
+				widthInput.placeholder = "W";
+				widthInput.className =
+					"image-converter-contextmenu-dimension-input";
+				widthInput.id = "image-converter-width-input";
 
 				// Create height input
-				const heightInput = document.createElement('input');
-				heightInput.type = 'number';
-				heightInput.min = '1';
-				heightInput.placeholder = 'H';
-				heightInput.className = 'image-converter-contextmenu-dimension-input';
-				heightInput.id = 'image-converter-height-input';
+				const heightInput = document.createElement("input");
+				heightInput.type = "number";
+				heightInput.min = "1";
+				heightInput.placeholder = "H";
+				heightInput.className =
+					"image-converter-contextmenu-dimension-input";
+				heightInput.id = "image-converter-height-input";
 
 				// Create dimension inputs container
-				const dimensionInputsContainer = document.createElement('div');
-				dimensionInputsContainer.className = 'image-converter-contextmenu-dimension-inputs';
+				const dimensionInputsContainer = document.createElement("div");
+				dimensionInputsContainer.className =
+					"image-converter-contextmenu-dimension-inputs";
 				dimensionInputsContainer.appendChild(widthInput);
-				dimensionInputsContainer.appendChild(document.createTextNode('×')); // multiplication symbol
+				dimensionInputsContainer.appendChild(
+					document.createTextNode("×")
+				); // multiplication symbol
 				dimensionInputsContainer.appendChild(heightInput);
 
 				dimensionsGroup.appendChild(dimensionInputsContainer);
 
 				// Load current dimensions
-				this.loadCurrentDimensions(img, activeFile).then(({ width, height }) => {
-					widthInput.value = width;
-					heightInput.value = height;
-				});
-
-
+				this.loadCurrentDimensions(img, activeFile).then(
+					({ width, height }) => {
+						widthInput.value = width;
+						heightInput.value = height;
+					}
+				);
 
 				// Add all groups to container
 				inputContainer.appendChild(nameGroup);
@@ -592,31 +688,54 @@ export class ContextMenu extends Component {
 				inputContainer.appendChild(captionGroup);
 				inputContainer.appendChild(dimensionsGroup);
 
-
 				// Add single confirm button
-				const confirmButton = document.createElement('div');
-				confirmButton.className = 'image-converter-contextmenu-button image-converter-contextmenu-confirm';
-				setIcon(confirmButton, 'check');
+				const confirmButton = document.createElement("div");
+				confirmButton.className =
+					"image-converter-contextmenu-button image-converter-contextmenu-confirm";
+				setIcon(confirmButton, "check");
 				inputContainer.appendChild(confirmButton);
 
 				// Register event listeners for all inputs
-				[nameInput, pathInput, captionInput, widthInput, heightInput].forEach(input => {
-					this.registerDomEvent(input, 'mousedown', this.stopPropagationHandler);
-					this.registerDomEvent(input, 'click', this.stopPropagationHandler);
-					this.registerDomEvent(input, 'keydown', this.stopPropagationHandler);
+				[
+					nameInput,
+					pathInput,
+					captionInput,
+					widthInput,
+					heightInput,
+				].forEach((input) => {
+					this.registerDomEvent(
+						input,
+						"mousedown",
+						this.stopPropagationHandler
+					);
+					this.registerDomEvent(
+						input,
+						"click",
+						this.stopPropagationHandler
+					);
+					this.registerDomEvent(
+						input,
+						"keydown",
+						this.stopPropagationHandler
+					);
 				});
-				
 
-				this.registerDomEvent(document, 'click', this.documentClickHandler);
+				this.registerDomEvent(
+					document,
+					"click",
+					this.documentClickHandler
+				);
 
 				// Load the current caption asynchronously
-				this.loadCurrentCaption(img, activeFile).then(currentCaption => {
-					captionInput.value = currentCaption;
-					captionInput.placeholder = 'Enter a custom caption';
-				});
+				this.loadCurrentCaption(img, activeFile).then(
+					(currentCaption) => {
+						captionInput.value = currentCaption;
+						captionInput.placeholder = "Enter a custom caption";
+					}
+				);
 
 				// Single confirm button handler
-				this.registerDomEvent(confirmButton, 'click', async () => {
+				this.registerDomEvent(confirmButton, "click", async () => {
 					if (isImageResolvable) {
 						// First handle rename and move
 						await this.handleRenameAndMove(
@@ -647,18 +766,22 @@ export class ContextMenu extends Component {
 
 				// Clear and set the menu item content (gracefully handle test mocks without a DOM property)
 				const maybeDom: any = (menuItem as any).dom;
-				if (maybeDom && typeof maybeDom.appendChild === 'function') {
+				if (maybeDom && typeof maybeDom.appendChild === "function") {
 					// If Obsidian exposes a DOM element, populate it
-					if (typeof maybeDom.empty === 'function') {
+					if (typeof maybeDom.empty === "function") {
 						maybeDom.empty();
 					} else {
 						// Fallback: clear via innerHTML if available
-						try { maybeDom.innerHTML = ''; } catch (e) { void e; }
+						try {
+							maybeDom.innerHTML = "";
+						} catch (e) {
+							void e;
+						}
 					}
 					maybeDom.appendChild(inputContainer);
 				} else {
 					// Minimal fallback for test environment without MenuItem DOM
-					(menuItem as any).setTitle?.('Image tools');
+					(menuItem as any).setTitle?.("Image tools");
 				}
 			});
 		}
@@ -697,22 +820,28 @@ export class ContextMenu extends Component {
 
 		// --- Process variables in the input fields ---
 		const variableContext: VariableContext = { file, activeFile };
-		newName = await this.variableProcessor.processTemplate(newName, variableContext);
-		newDirectoryPath = await this.variableProcessor.processTemplate(newDirectoryPath, variableContext);
+		newName = await this.variableProcessor.processTemplate(
+			newName,
+			variableContext
+		);
+		newDirectoryPath = await this.variableProcessor.processTemplate(
+			newDirectoryPath,
+			variableContext
+		);
 
 		if (!newName.trim()) {
-			new Notice('Please enter a new file name.');
+			new Notice("Please enter a new file name.");
 			return;
 		}
 
 		newName = this.folderAndFilenameManagement.sanitizeFilename(newName);
 
 		if (/^[.]+$/.test(newName.trim())) {
-			new Notice('Please enter a valid file name');
+			new Notice("Please enter a valid file name");
 			return;
 		}
 		if (!newDirectoryPath.trim()) {
-			new Notice('Please enter a new path.');
+			new Notice("Please enter a new path.");
 			return;
 		}
 
@@ -720,51 +849,82 @@ export class ContextMenu extends Component {
 			try {
 				// Handle Rename
 				if (newName && newName !== fileNameWithoutExt) {
-					const newPath = normalizePath(path.join(newDirectoryPath, `${newName}${fileExtension}`));
-					const abstractFile = this.app.vault.getAbstractFileByPath(obsidianVaultPathForRename);
+					const newPath = normalizePath(
+						path.join(
+							newDirectoryPath,
+							`${newName}${fileExtension}`
+						)
+					);
+					const abstractFile = this.app.vault.getAbstractFileByPath(
+						obsidianVaultPathForRename
+					);
 					if (abstractFile instanceof TFile) {
-						await this.folderAndFilenameManagement.ensureFolderExists(newDirectoryPath);
-						await this.app.fileManager.renameFile(abstractFile, newPath);
+						await this.folderAndFilenameManagement.ensureFolderExists(
+							newDirectoryPath
+						);
+						await this.app.fileManager.renameFile(
+							abstractFile,
+							newPath
+						);
 						img.src = this.app.vault.getResourcePath(abstractFile);
-						new Notice('Image name updated successfully');
+						new Notice("Image name updated successfully");
 					}
 				}
 				// Handle Movea
 				const currentNameWithExtension = `${newName}${fileExtension}`;
 				const oldPath = obsidianVaultPathForRename;
-				const newPath = normalizePath(path.join(newDirectoryPath, currentNameWithExtension));
+				const newPath = normalizePath(
+					path.join(newDirectoryPath, currentNameWithExtension)
+				);
 
 				if (newPath !== oldPath) {
-					const abstractFile = this.app.vault.getAbstractFileByPath(oldPath);
+					const abstractFile =
+						this.app.vault.getAbstractFileByPath(oldPath);
 					if (abstractFile instanceof TFile) {
-						await this.folderAndFilenameManagement.ensureFolderExists(newDirectoryPath);
+						await this.folderAndFilenameManagement.ensureFolderExists(
+							newDirectoryPath
+						);
 
 						if (oldPath.toLowerCase() === newPath.toLowerCase()) {
-							const safeRenameSuccessful = await this.folderAndFilenameManagement.safeRenameFile(abstractFile, newPath);
+							const safeRenameSuccessful =
+								await this.folderAndFilenameManagement.safeRenameFile(
+									abstractFile,
+									newPath
+								);
 							if (safeRenameSuccessful) {
-								new Notice('Image path updated (case-sensitive change).');
+								new Notice(
+									"Image path updated (case-sensitive change)."
+								);
 							} else {
-								new Notice('Image path update failed (case-sensitive change).');
+								new Notice(
+									"Image path update failed (case-sensitive change)."
+								);
 							}
 						} else {
-							await this.app.fileManager.renameFile(abstractFile, newPath);
-							new Notice('Image path updated successfully');
+							await this.app.fileManager.renameFile(
+								abstractFile,
+								newPath
+							);
+							new Notice("Image path updated successfully");
 						}
 						img.src = this.app.vault.getResourcePath(abstractFile);
 						const leaf = this.app.workspace.getMostRecentLeaf();
 						if (leaf) {
 							const currentState = leaf.getViewState();
-							await leaf.setViewState({ type: 'empty', state: {} });
+							await leaf.setViewState({
+								type: "empty",
+								state: {},
+							});
 							await leaf.setViewState(currentState);
 						}
 					}
 				}
 			} catch (error) {
-				console.error('Failed to update image path:', error);
-				new Notice('Failed to update image path');
+				console.error("Failed to update image path:", error);
+				new Notice("Failed to update image path");
 			}
 		}
-		menu.hide();
+		(menu as any).hide?.();
 	};
 
 	/*-----------------------------------------------------------------*/
@@ -778,23 +938,25 @@ export class ContextMenu extends Component {
 	 */
 	addOpenInNewWindowMenuItem(menu: Menu, img: HTMLImageElement) {
 		menu.addItem((item) => {
-			item
-				.setTitle('Open in new window')
-				.setIcon('square-arrow-out-up-right')
+			item.setTitle("Open in new window")
+				.setIcon("square-arrow-out-up-right")
 				.onClick(async () => {
 					try {
-						const imagePath = this.folderAndFilenameManagement.getImagePath(img);
+						const imagePath =
+							this.folderAndFilenameManagement.getImagePath(img);
 						if (imagePath) {
-							const file = this.app.vault.getAbstractFileByPath(imagePath);
+							const file =
+								this.app.vault.getAbstractFileByPath(imagePath);
 							if (file instanceof TFile) {
-								const leaf = this.app.workspace.getLeaf('window');
+								const leaf =
+									this.app.workspace.getLeaf("window");
 								if (leaf) {
 									await leaf.openFile(file);
 								}
 							}
 						}
 					} catch (error) {
-						new Notice('Failed to open in new window');
+						new Notice("Failed to open in new window");
 						console.error(error);
 					}
 				});
@@ -814,23 +976,23 @@ export class ContextMenu extends Component {
 	 * @returns The normalized image path, always starting with a '/'.
 	 */
 	private normalizeImagePath(path: string): string {
-		if (!path) return '';
+		if (!path) return "";
 
 		// Decode URL encoded characters first
 		let normalizedPath = decodeURIComponent(path);
 
 		// Remove any URL parameters
-		const [pathWithoutQuery] = normalizedPath.split('?');
+		const [pathWithoutQuery] = normalizedPath.split("?");
 		normalizedPath = pathWithoutQuery;
 
 		// Convert backslashes to forward slashes
-		normalizedPath = normalizedPath.replace(/\\/g, '/');
+		normalizedPath = normalizedPath.replace(/\\/g, "/");
 
 		// Handle spaces in paths
-		normalizedPath = normalizedPath.replace(/%20/g, ' ');
+		normalizedPath = normalizedPath.replace(/%20/g, " ");
 
 		// Ensure consistent leading slash
-		if (!normalizedPath.startsWith('/')) {
+		if (!normalizedPath.startsWith("/")) {
 			normalizedPath = `/${normalizedPath}`;
 		}
 
@@ -852,7 +1014,7 @@ export class ContextMenu extends Component {
 
 		for (let i = 0; i < lineCount; i++) {
 			const line = editor.getLine(i).trim();
-			if (line === '---') {
+			if (line === "---") {
 				if (!inFrontmatter && i === 0) {
 					inFrontmatter = true;
 				} else if (inFrontmatter) {
@@ -872,17 +1034,16 @@ export class ContextMenu extends Component {
 	private extractFilenameFromLink(link: string): string | null {
 		const wikiMatch = link.match(/!\[\[\s*([^|\]]+?)\s*(?:\|[^\]]+)?\]\]/);
 		if (wikiMatch) {
-			return wikiMatch[1].trim();  // Trim spaces
+			return wikiMatch[1].trim(); // Trim spaces
 		}
 
 		const markdownMatch = link.match(/!\[.*?\]\(\s*(.*?)\s*\)/);
 		if (markdownMatch) {
-			return markdownMatch[1].trim();  // Trim spaces
+			return markdownMatch[1].trim(); // Trim spaces
 		}
 
 		return null;
 	}
-
 
 	/**
 	 * Finds image links in the editor's content based on the provided criteria.
@@ -897,11 +1058,14 @@ export class ContextMenu extends Component {
 		editor: Editor,
 		imagePath: string | null,
 		isExternal: boolean
-	): Promise<{ lineNumber: number, line: string, fullMatch: string }[]> {
+	): Promise<{ lineNumber: number; line: string; fullMatch: string }[]> {
 		// Helper function to resolve relative paths
-		const resolveRelativePath = (linkPath: string, activeFilePath: string): string => {
+		const resolveRelativePath = (
+			linkPath: string,
+			activeFilePath: string
+		): string => {
 			const activeFileDir = path.dirname(activeFilePath);
-			if (linkPath.startsWith('./') || linkPath.startsWith('../')) {
+			if (linkPath.startsWith("./") || linkPath.startsWith("../")) {
 				return normalizePath(path.join(activeFileDir, linkPath));
 			}
 			return normalizePath(linkPath);
@@ -909,7 +1073,11 @@ export class ContextMenu extends Component {
 
 		const lineCount = editor.getDoc().lineCount();
 		const frontmatterEnd = this.findFrontmatterEnd(editor);
-		const matches: { lineNumber: number, line: string, fullMatch: string }[] = [];
+		const matches: {
+			lineNumber: number;
+			line: string;
+			fullMatch: string;
+		}[] = [];
 		const activeFile = this.app.workspace.getActiveFile();
 
 		if (!activeFile) return matches;
@@ -918,21 +1086,30 @@ export class ContextMenu extends Component {
 			const line = editor.getLine(i);
 
 			// Check wiki-style links (![[path/to/image.png]])  Added ? after last ] to be non-greedy
-			const wikiMatches = [...line.matchAll(/!\[\[([^\]]+?)(?:\|[^\]]+?)??\]\]/g)];
+			const wikiMatches = [
+				...line.matchAll(/!\[\[([^\]]+?)(?:\|[^\]]+?)??\]\]/g),
+			];
 			for (const match of wikiMatches) {
 				const fullMatch = match[0].trim();
 
 				const filename = this.extractFilenameFromLink(fullMatch);
 				if (filename && !isExternal) {
-					const resolvedPath = resolveRelativePath(filename, activeFile.path);
+					const resolvedPath = resolveRelativePath(
+						filename,
+						activeFile.path
+					);
 
 					if (imagePath) {
-						const normalizedImagePath = this.normalizeImagePath(imagePath);
-						const normalizedResolvedPath = this.normalizeImagePath(resolvedPath);
+						const normalizedImagePath =
+							this.normalizeImagePath(imagePath);
+						const normalizedResolvedPath =
+							this.normalizeImagePath(resolvedPath);
 
 						// Check for exact match or if the normalized image path ends with the resolved path
-						if (normalizedImagePath === normalizedResolvedPath ||
-							normalizedImagePath.endsWith(normalizedResolvedPath)) {
+						if (
+							normalizedImagePath === normalizedResolvedPath ||
+							normalizedImagePath.endsWith(normalizedResolvedPath)
+						) {
 							matches.push({ lineNumber: i, line, fullMatch });
 							// console.log('Wiki match found:', {
 							// 	normalizedImagePath,
@@ -945,20 +1122,31 @@ export class ContextMenu extends Component {
 			}
 
 			// Check markdown-style links (![alt](path/to/image.png))
-			const mdMatches = [...line.matchAll(/!\[([^\]]*?)(?:\|\d+(?:\|\d+)?)?\]\(([^)]+)\)/g)];
+			const mdMatches = [
+				...line.matchAll(
+					/!\[([^\]]*?)(?:\|\d+(?:\|\d+)?)?\]\(([^)]+)\)/g
+				),
+			];
 			for (const match of mdMatches) {
 				const [fullMatch, , linkPath] = match;
 
 				if (!isExternal && linkPath) {
-					const resolvedPath = resolveRelativePath(linkPath, activeFile.path);
+					const resolvedPath = resolveRelativePath(
+						linkPath,
+						activeFile.path
+					);
 
 					if (imagePath) {
-						const normalizedImagePath = this.normalizeImagePath(imagePath);
-						const normalizedResolvedPath = this.normalizeImagePath(resolvedPath);
+						const normalizedImagePath =
+							this.normalizeImagePath(imagePath);
+						const normalizedResolvedPath =
+							this.normalizeImagePath(resolvedPath);
 
 						// Check for exact match or if the normalized image path ends with the resolved path
-						if (normalizedImagePath === normalizedResolvedPath ||
-							normalizedImagePath.endsWith(normalizedResolvedPath)) {
+						if (
+							normalizedImagePath === normalizedResolvedPath ||
+							normalizedImagePath.endsWith(normalizedResolvedPath)
+						) {
 							matches.push({ lineNumber: i, line, fullMatch });
 							// console.log('Markdown match found:', {
 							// 	normalizedImagePath,
@@ -968,12 +1156,24 @@ export class ContextMenu extends Component {
 						}
 
 						// Additional check for paths starting with ./
-						if (linkPath.startsWith('./')) {
-							const linkPathWithoutDotSlash = linkPath.substring(2);
-							const normalizedLinkPathWithoutDotSlash = this.normalizeImagePath(linkPathWithoutDotSlash);
+						if (linkPath.startsWith("./")) {
+							const linkPathWithoutDotSlash =
+								linkPath.substring(2);
+							const normalizedLinkPathWithoutDotSlash =
+								this.normalizeImagePath(
+									linkPathWithoutDotSlash
+								);
 
-							if (normalizedImagePath.endsWith(normalizedLinkPathWithoutDotSlash)) {
-								matches.push({ lineNumber: i, line, fullMatch });
+							if (
+								normalizedImagePath.endsWith(
+									normalizedLinkPathWithoutDotSlash
+								)
+							) {
+								matches.push({
+									lineNumber: i,
+									line,
+									fullMatch,
+								});
 								// console.log('Markdown dot-slash match found:', {
 								// 	normalizedImagePath,
 								// 	normalizedLinkPathWithoutDotSlash,
@@ -982,7 +1182,11 @@ export class ContextMenu extends Component {
 							}
 						}
 					}
-				} else if (isExternal && (linkPath.startsWith('http://') || linkPath.startsWith('https://'))) {
+				} else if (
+					isExternal &&
+					(linkPath.startsWith("http://") ||
+						linkPath.startsWith("https://"))
+				) {
 					matches.push({ lineNumber: i, line, fullMatch });
 					// console.log('External link match found:', {
 					// 	linkPath,
@@ -1017,12 +1221,19 @@ export class ContextMenu extends Component {
 	private async processBase64Image(
 		editor: Editor,
 		src: string,
-		processor: (editor: Editor, lineNumber: number, line: string, fullMatch: string) => Promise<void>
+		processor: (
+			editor: Editor,
+			lineNumber: number,
+			line: string,
+			fullMatch: string
+		) => Promise<void>
 	): Promise<boolean> {
 		const lineCount = editor.getDoc().lineCount();
 		for (let i = 0; i < lineCount; i++) {
 			const line = editor.getLine(i);
-			const base64Matches = [...line.matchAll(/<img\s+src="data:image\/[^"]+"\s*\/?>/g)];
+			const base64Matches = [
+				...line.matchAll(/<img\s+src="data:image\/[^"]+"\s*\/?>/g),
+			];
 
 			for (const match of base64Matches) {
 				if (match[0].includes(src)) {
@@ -1055,30 +1266,35 @@ export class ContextMenu extends Component {
 
 		const startPos = {
 			line: lineNumber,
-			ch: line.indexOf(fullMatch)
+			ch: line.indexOf(fullMatch),
 		};
 		const endPos = {
 			line: lineNumber,
-			ch: startPos.ch + fullMatch.length
+			ch: startPos.ch + fullMatch.length,
 		};
 
 		// Calculate trailing whitespace
 		let trailingWhitespace = 0;
-		while (line[endPos.ch + trailingWhitespace] === ' ' ||
-			line[endPos.ch + trailingWhitespace] === '\t') {
+		while (
+			line[endPos.ch + trailingWhitespace] === " " ||
+			line[endPos.ch + trailingWhitespace] === "\t"
+		) {
 			trailingWhitespace++;
 		}
 
 		// If this is the only content on the line, delete the entire line
 		if (line.trim() === fullMatch.trim()) {
-			editor.replaceRange('',
+			editor.replaceRange(
+				"",
 				{ line: lineNumber, ch: 0 },
-				{ line: lineNumber + 1, ch: 0 });
+				{ line: lineNumber + 1, ch: 0 }
+			);
 		} else {
 			// Otherwise, just delete the match and its trailing whitespace
-			editor.replaceRange('',
-				startPos,
-				{ line: lineNumber, ch: endPos.ch + trailingWhitespace });
+			editor.replaceRange("", startPos, {
+				line: lineNumber,
+				ch: endPos.ch + trailingWhitespace,
+			});
 		}
 	}
 
@@ -1093,8 +1309,8 @@ export class ContextMenu extends Component {
 	 */
 	addCutImageMenuItem(menu: Menu, event: MouseEvent) {
 		menu.addItem((item) => {
-			item.setTitle('Cut')
-				.setIcon('scissors')
+			item.setTitle("Cut")
+				.setIcon("scissors")
 				.onClick(async () => {
 					await this.cutImageAndLinkFromNote(event);
 				});
@@ -1107,47 +1323,70 @@ export class ContextMenu extends Component {
 	 */
 	async cutImageAndLinkFromNote(event: MouseEvent) {
 		const img = event.target as HTMLImageElement;
-		const src = img.getAttribute('src');
+		const src = img.getAttribute("src");
 		if (!src) return;
 
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!activeView) {
-			new Notice('No active Markdown view found');
+			new Notice("No active Markdown view found");
 			return;
 		}
 
 		try {
-				const { editor } = activeView;
+			const { editor } = activeView;
 
-			if (src.startsWith('data:image/')) {
-				const found = await this.processBase64Image(editor, src, async (editor, lineNumber, line, fullMatch) => {
-					await this.removeImageLinkFromEditor(editor, lineNumber, line, fullMatch, true);
-				});
+			if (src.startsWith("data:image/")) {
+				const found = await this.processBase64Image(
+					editor,
+					src,
+					async (editor, lineNumber, line, fullMatch) => {
+						await this.removeImageLinkFromEditor(
+							editor,
+							lineNumber,
+							line,
+							fullMatch,
+							true
+						);
+					}
+				);
 				if (!found) {
-					new Notice('Failed to find Base64 image link');
+					new Notice("Failed to find Base64 image link");
 				}
 				return;
 			}
 
-			const imagePath = (src.startsWith('http://') || src.startsWith('https://'))
-				? null
-				: this.folderAndFilenameManagement.getImagePath(img);
+			const imagePath =
+				src.startsWith("http://") || src.startsWith("https://")
+					? null
+					: this.folderAndFilenameManagement.getImagePath(img);
 
 			const isExternal = !imagePath;
 
 			// Use the modified findImageMatches
-			const matches = await this.findImageMatches(editor, imagePath, isExternal);
+			const matches = await this.findImageMatches(
+				editor,
+				imagePath,
+				isExternal
+			);
 
 			if (matches.length === 0) {
-				new Notice('Failed to find image link in the current note.');
+				new Notice("Failed to find image link in the current note.");
 				return;
 			}
 
 			const handleConfirmation = async () => {
 				for (const match of matches) {
-					await this.removeImageLinkFromEditor(editor, match.lineNumber, match.line, match.fullMatch, true);
+					await this.removeImageLinkFromEditor(
+						editor,
+						match.lineNumber,
+						match.line,
+						match.fullMatch,
+						true
+					);
 				}
-				new Notice('Image link(s) cut from note and copied to clipboard');
+				new Notice(
+					"Image link(s) cut from note and copied to clipboard"
+				);
 			};
 
 			if (matches.length > 1) {
@@ -1157,21 +1396,29 @@ export class ContextMenu extends Component {
 					"Confirm Cut", // Title
 					`Found ${matches.length} matching image links inside current note. Do you want to cut all of them?`, // Message
 					"Cut", // Confirm text
-					async () => { // Callback for confirmation
+					async () => {
+						// Callback for confirmation
 						for (const match of matches) {
-							await this.removeImageLinkFromEditor(editor, match.lineNumber, match.line, match.fullMatch, true);
+							await this.removeImageLinkFromEditor(
+								editor,
+								match.lineNumber,
+								match.line,
+								match.fullMatch,
+								true
+							);
 						}
-						new Notice('Image link(s) cut from note and copied to clipboard');
+						new Notice(
+							"Image link(s) cut from note and copied to clipboard"
+						);
 					}
 				).open();
 			} else {
 				// Proceed directly if only one match
 				await handleConfirmation();
 			}
-
 		} catch (error) {
-			console.error('Error cutting image:', error);
-			new Notice('Failed to cut image. Check console for details.');
+			console.error("Error cutting image:", error);
+			new Notice("Failed to cut image. Check console for details.");
 		}
 	}
 
@@ -1187,8 +1434,8 @@ export class ContextMenu extends Component {
 	addCopyImageMenuItem(menu: Menu, event: MouseEvent) {
 		menu.addItem((item: MenuItem) =>
 			item
-				.setTitle('Copy image')
-				.setIcon('copy')
+				.setTitle("Copy image")
+				.setIcon("copy")
 				.onClick(async () => {
 					await this.copyImageToClipboard(event);
 				})
@@ -1201,18 +1448,18 @@ export class ContextMenu extends Component {
 	 */
 	async copyImageToClipboard(event: MouseEvent) {
 		const img = new Image();
-		img.crossOrigin = 'anonymous';
+		img.crossOrigin = "anonymous";
 		const targetImg = event.target as HTMLImageElement;
 
 		// Use this.registerDomEvent() for proper cleanup
-		this.registerDomEvent(img, 'load', async () => {
+		this.registerDomEvent(img, "load", async () => {
 			try {
-				const canvas = document.createElement('canvas');
+				const canvas = document.createElement("canvas");
 				canvas.width = img.naturalWidth;
 				canvas.height = img.naturalHeight;
-				const ctx = canvas.getContext('2d');
+				const ctx = canvas.getContext("2d");
 				if (!ctx) {
-					new Notice('Failed to get canvas context');
+					new Notice("Failed to get canvas context");
 					return;
 				}
 				ctx.drawImage(img, 0, 0);
@@ -1221,10 +1468,10 @@ export class ContextMenu extends Component {
 				const blob = await response.blob();
 				const item = new ClipboardItem({ [blob.type]: blob });
 				await navigator.clipboard.write([item]);
-				new Notice('Image copied to clipboard');
+				new Notice("Image copied to clipboard");
 			} catch (error) {
-				console.error('Failed to copy image:', error);
-				new Notice('Failed to copy image to clipboard');
+				console.error("Failed to copy image:", error);
+				new Notice("Failed to copy image to clipboard");
 			}
 		});
 
@@ -1243,8 +1490,8 @@ export class ContextMenu extends Component {
 	addCopyBase64ImageMenuItem(menu: Menu, event: MouseEvent) {
 		menu.addItem((item: MenuItem) =>
 			item
-				.setTitle('Copy as Base64 encoded image')
-				.setIcon('copy')
+				.setTitle("Copy as Base64 encoded image")
+				.setIcon("copy")
 				.onClick(() => {
 					this.copyImageAsBase64(event);
 				})
@@ -1258,25 +1505,25 @@ export class ContextMenu extends Component {
 	async copyImageAsBase64(event: MouseEvent) {
 		const targetImg = event.target as HTMLImageElement;
 		const img = new Image();
-		img.crossOrigin = 'anonymous';
+		img.crossOrigin = "anonymous";
 
-		this.registerDomEvent(img, 'load', async () => {
+		this.registerDomEvent(img, "load", async () => {
 			try {
-				const canvas = document.createElement('canvas');
+				const canvas = document.createElement("canvas");
 				canvas.width = img.naturalWidth;
 				canvas.height = img.naturalHeight;
-				const ctx = canvas.getContext('2d');
+				const ctx = canvas.getContext("2d");
 				if (!ctx) {
-					new Notice('Failed to get canvas context');
+					new Notice("Failed to get canvas context");
 					return;
 				}
 				ctx.drawImage(img, 0, 0);
 				const dataURL = canvas.toDataURL();
 				await navigator.clipboard.writeText(`<img src="${dataURL}"/>`);
-				new Notice('Image copied to clipboard as Base64');
+				new Notice("Image copied to clipboard as Base64");
 			} catch (error) {
-				console.error('Failed to copy image as Base64:', error);
-				new Notice('Failed to copy image as Base64');
+				console.error("Failed to copy image as Base64:", error);
+				new Notice("Failed to copy image as Base64");
 			}
 		});
 
@@ -1294,15 +1541,21 @@ export class ContextMenu extends Component {
 	 * @param img - The HTMLImageElement representing the image.
 	 * @param event - The MouseEvent representing the context menu event.
 	 */
-	addProcessImageMenuItem(menu: Menu, img: HTMLImageElement, event: MouseEvent) {
+	addProcessImageMenuItem(
+		menu: Menu,
+		img: HTMLImageElement,
+		event: MouseEvent
+	) {
 		menu.addItem((item) => {
 			item.setTitle("Convert/compress...")
 				.setIcon("cog")
 				.onClick(async () => {
-
 					try {
 						// Ensure there is an active markdown view
-						const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+						const activeView =
+							this.app.workspace.getActiveViewOfType(
+								MarkdownView
+							);
 						if (!activeView) {
 							new Notice("No active markdown view");
 							return;
@@ -1318,21 +1571,32 @@ export class ContextMenu extends Component {
 						// Extract the filename from the img's src attribute
 						const srcAttribute = img.getAttribute("src");
 						if (!srcAttribute) {
-							new Notice("No source attribute found on the image");
+							new Notice(
+								"No source attribute found on the image"
+							);
 							return;
 						}
 
 						// Decode the filename from the src attribute
-						const filename = decodeURIComponent(srcAttribute.split("?")[0].split("/").pop() || "");
+						const filename = decodeURIComponent(
+							srcAttribute.split("?")[0].split("/").pop() || ""
+						);
 						if (!filename) {
-							new Notice("Unable to extract filename from the image source");
+							new Notice(
+								"Unable to extract filename from the image source"
+							);
 							return;
 						}
 
 						// Search for matching files in the vault
-						const matchingFiles = this.app.vault.getFiles().filter((file) => file.name === filename);
+						const matchingFiles = this.app.vault
+							.getFiles()
+							.filter((file) => file.name === filename);
 						if (matchingFiles.length === 0) {
-							console.error("No matching files found for:", filename);
+							console.error(
+								"No matching files found for:",
+								filename
+							);
 							new Notice(`Unable to find image: ${filename}`);
 							return;
 						}
@@ -1341,18 +1605,26 @@ export class ContextMenu extends Component {
 						const file =
 							matchingFiles.length === 1
 								? matchingFiles[0]
-							: matchingFiles.find((fileItem) => {
-									const parentPath = currentFile.parent?.path;
-									return parentPath ? fileItem.path.startsWith(parentPath) : false;
-								}) || matchingFiles[0];
+								: matchingFiles.find((fileItem) => {
+										const parentPath =
+											currentFile.parent?.path;
+										return parentPath
+											? fileItem.path.startsWith(
+													parentPath
+											  )
+											: false;
+								  }) || matchingFiles[0];
 
 						// Process the found file
 						if (file instanceof TFile) {
-							new ProcessSingleImageModal(this.app, this.plugin, file).open();
+							new ProcessSingleImageModal(
+								this.app,
+								this.plugin,
+								file
+							).open();
 						} else {
 							new Notice("Error: Not a valid image file.");
 						}
-
 					} catch (error) {
 						console.error("Error processing image:", error);
 						new Notice("Error processing image");
@@ -1372,65 +1644,67 @@ export class ContextMenu extends Component {
 	 */
 	addCropRotateFlipMenuItem(menu: Menu, img: HTMLImageElement) {
 		menu.addItem((item) => {
-			item
-				.setTitle('Crop/Rotate/Flip')
-				.setIcon('scissors')
+			item.setTitle("Crop/Rotate/Flip")
+				.setIcon("scissors")
 				.onClick(async () => {
 					// Get the active markdown view
-					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+					const activeView =
+						this.app.workspace.getActiveViewOfType(MarkdownView);
 					if (!activeView) {
-						new Notice('No active markdown view');
+						new Notice("No active markdown view");
 						return;
 					}
 
 					// Get the current file (note) being viewed
 					const currentFile = activeView.file;
 					if (!currentFile) {
-						new Notice('No current file found');
+						new Notice("No current file found");
 						return;
 					}
 
 					// Get the filename from the src attribute
-					const srcAttribute = img.getAttribute('src');
+					const srcAttribute = img.getAttribute("src");
 					if (!srcAttribute) {
-						new Notice('No source attribute found');
+						new Notice("No source attribute found");
 						return;
 					}
 
 					// Extract just the filename
-					const filename = decodeURIComponent(srcAttribute.split('?')[0].split('/').pop() || '');
-
-					// Search for the file in the vault
-					const matchingFiles = this.app.vault.getFiles().filter(file =>
-						file.name === filename
+					const filename = decodeURIComponent(
+						srcAttribute.split("?")[0].split("/").pop() || ""
 					);
 
+					// Search for the file in the vault
+					const matchingFiles = this.app.vault
+						.getFiles()
+						.filter((file) => file.name === filename);
+
 					if (matchingFiles.length === 0) {
-						console.error('No matching files found for:', filename);
+						console.error("No matching files found for:", filename);
 						new Notice(`Unable to find image: ${filename}`);
 						return;
 					}
 
 					// If multiple matches, try to find the one in the same folder as the current note
-					const file = matchingFiles.length === 1
-						? matchingFiles[0]
-						: matchingFiles.find((fileItem) => {
-							// Get the parent folder of the current file
-							const parentPath = currentFile.parent?.path;
-							return parentPath
-								? fileItem.path.startsWith(parentPath)
-								: false;
-						}) || matchingFiles[0];
+					const file =
+						matchingFiles.length === 1
+							? matchingFiles[0]
+							: matchingFiles.find((fileItem) => {
+									// Get the parent folder of the current file
+									const parentPath = currentFile.parent?.path;
+									return parentPath
+										? fileItem.path.startsWith(parentPath)
+										: false;
+							  }) || matchingFiles[0];
 
 					if (file instanceof TFile) {
 						new Crop(this.app, file).open();
 					} else {
-						new Notice('Unable to locate image file');
+						new Notice("Unable to locate image file");
 					}
 				});
 		});
 	}
-
 
 	/*-----------------------------------------------------------------*/
 	/*                      Image Annotation                           */
@@ -1438,67 +1712,82 @@ export class ContextMenu extends Component {
 
 	addAnnotateImageMenuItem(menu: Menu, img: HTMLImageElement) {
 		menu.addItem((item) => {
-			item
-				.setTitle('Annotate image')
-				.setIcon('pencil')
+			item.setTitle("Annotate image")
+				.setIcon("pencil")
 				.onClick(async () => {
 					try {
 						// Get the active markdown view
-						const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+						const activeView =
+							this.app.workspace.getActiveViewOfType(
+								MarkdownView
+							);
 						if (!activeView) {
-							new Notice('No active markdown view');
+							new Notice("No active markdown view");
 							return;
 						}
 
 						// Get the current file (note) being viewed
 						const currentFile = activeView.file;
 						if (!currentFile) {
-							new Notice('No current file found');
+							new Notice("No current file found");
 							return;
 						}
 
 						// Get the filename from the src attribute
-						const srcAttribute = img.getAttribute('src');
+						const srcAttribute = img.getAttribute("src");
 						if (!srcAttribute) {
-							new Notice('No source attribute found');
+							new Notice("No source attribute found");
 							return;
 						}
 
 						// Extract just the filename
-						const filename = decodeURIComponent(srcAttribute.split('?')[0].split('/').pop() || '');
+						const filename = decodeURIComponent(
+							srcAttribute.split("?")[0].split("/").pop() || ""
+						);
 						// console.log('Extracted filename:', filename);
 
 						// Search for the file in the vault
-						const matchingFiles = this.app.vault.getFiles().filter(file =>
-							file.name === filename
-						);
+						const matchingFiles = this.app.vault
+							.getFiles()
+							.filter((file) => file.name === filename);
 
 						if (matchingFiles.length === 0) {
-							console.error('No matching files found for:', filename);
+							console.error(
+								"No matching files found for:",
+								filename
+							);
 							new Notice(`Unable to find image: ${filename}`);
 							return;
 						}
 
 						// If multiple matches, try to find the one in the same folder as the current note
-						const file = matchingFiles.length === 1
-							? matchingFiles[0]
-							: matchingFiles.find((fileItem) => {
-								// Get the parent folder of the current file
-								const parentPath = currentFile.parent?.path;
-								return parentPath
-									? fileItem.path.startsWith(parentPath)
-									: false;
-							}) || matchingFiles[0];
+						const file =
+							matchingFiles.length === 1
+								? matchingFiles[0]
+								: matchingFiles.find((fileItem) => {
+										// Get the parent folder of the current file
+										const parentPath =
+											currentFile.parent?.path;
+										return parentPath
+											? fileItem.path.startsWith(
+													parentPath
+											  )
+											: false;
+								  }) || matchingFiles[0];
 
 						if (file instanceof TFile) {
 							// console.log('Found file:', file.path);
-							new ImageAnnotationModal(this.app, this.plugin, file).open();
+							new ImageAnnotationModal(
+								this.app,
+								this.plugin,
+								file
+							).open();
 						} else {
-							new Notice('Unable to locate image file');
+							new Notice("Unable to locate image file");
 						}
 					} catch (error) {
-						console.error('Image location error:', error);
-						new Notice('Error processing image path');
+						console.error("Image location error:", error);
+						new Notice("Error processing image path");
 					}
 				});
 		});
@@ -1515,9 +1804,8 @@ export class ContextMenu extends Component {
 	 */
 	addShowInNavigationMenuItem(menu: Menu, img: HTMLImageElement) {
 		menu.addItem((item) => {
-			item
-				.setTitle('Show in navigation')
-				.setIcon('folder-open')
+			item.setTitle("Show in navigation")
+				.setIcon("folder-open")
 				.onClick(async () => {
 					await this.showImageInNavigation(img);
 				});
@@ -1530,19 +1818,21 @@ export class ContextMenu extends Component {
 	 */
 	async showImageInNavigation(img: HTMLImageElement) {
 		try {
-			const imagePath = this.folderAndFilenameManagement.getImagePath(img);
+			const imagePath =
+				this.folderAndFilenameManagement.getImagePath(img);
 			if (imagePath) {
 				const file = this.app.vault.getAbstractFileByPath(imagePath);
 				if (file instanceof TFile) {
 					// First, try to get existing file explorer
-					let [fileExplorerLeaf] = this.app.workspace.getLeavesOfType('file-explorer');
+					let [fileExplorerLeaf] =
+						this.app.workspace.getLeavesOfType("file-explorer");
 
 					// If file explorer isn't open, create it
 					if (!fileExplorerLeaf) {
 						const newLeaf = this.app.workspace.getLeftLeaf(false);
 						if (newLeaf) {
 							await newLeaf.setViewState({
-								type: 'file-explorer'
+								type: "file-explorer",
 							});
 							fileExplorerLeaf = newLeaf;
 						}
@@ -1565,11 +1855,10 @@ export class ContextMenu extends Component {
 				}
 			}
 		} catch (error) {
-			new Notice('Failed to show in navigation');
+			new Notice("Failed to show in navigation");
 			console.error(error);
 		}
 	}
-
 
 	/*-----------------------------------------------------------------*/
 	/*                  SHOW IN SYSTEM EXPLORER                        */
@@ -1581,9 +1870,8 @@ export class ContextMenu extends Component {
 	 */
 	addShowInSystemExplorerMenuItem(menu: Menu, img: HTMLImageElement) {
 		menu.addItem((item) => {
-			item
-				.setTitle('Show in system explorer')
-				.setIcon('arrow-up-right')
+			item.setTitle("Show in system explorer")
+				.setIcon("arrow-up-right")
 				.onClick(async () => {
 					await this.showImageInSystemExplorer(img);
 				});
@@ -1596,13 +1884,14 @@ export class ContextMenu extends Component {
 	 */
 	async showImageInSystemExplorer(img: HTMLImageElement) {
 		try {
-			const imagePath = this.folderAndFilenameManagement.getImagePath(img);
+			const imagePath =
+				this.folderAndFilenameManagement.getImagePath(img);
 			if (imagePath) {
 				// Use the Obsidian API to reveal the file in the system explorer
 				await this.app.showInFolder(imagePath);
 			}
 		} catch (error) {
-			new Notice('Failed to show in system explorer');
+			new Notice("Failed to show in system explorer");
 			console.error(error);
 		}
 	}
@@ -1618,8 +1907,8 @@ export class ContextMenu extends Component {
 	 */
 	addDeleteImageAndLinkMenuItem(menu: Menu, event: MouseEvent) {
 		menu.addItem((item) => {
-			item.setTitle('Delete Image and Link')
-				.setIcon('trash')
+			item.setTitle("Delete Image and Link")
+				.setIcon("trash")
 				.onClick(async () => {
 					await this.deleteImageAndLinkFromNote(event);
 				});
@@ -1632,37 +1921,52 @@ export class ContextMenu extends Component {
 	 */
 	async deleteImageAndLinkFromNote(event: MouseEvent) {
 		const img = event.target as HTMLImageElement;
-		const src = img.getAttribute('src');
+		const src = img.getAttribute("src");
 		if (!src) return;
 
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!activeView) {
-			new Notice('No active Markdown view found');
+			new Notice("No active Markdown view found");
 			return;
 		}
 
 		try {
 			const { editor } = activeView;
 
-			if (src.startsWith('data:image/')) {
-				const found = await this.processBase64Image(editor, src, async (editor, lineNumber, line, fullMatch) => {
-					await this.removeImageLinkFromEditor(editor, lineNumber, line, fullMatch, false);
-				});
+			if (src.startsWith("data:image/")) {
+				const found = await this.processBase64Image(
+					editor,
+					src,
+					async (editor, lineNumber, line, fullMatch) => {
+						await this.removeImageLinkFromEditor(
+							editor,
+							lineNumber,
+							line,
+							fullMatch,
+							false
+						);
+					}
+				);
 				if (!found) {
-					new Notice('Failed to find Base64 image link');
+					new Notice("Failed to find Base64 image link");
 				}
 				return;
 			}
 
-			const imagePath = (src.startsWith('http://') || src.startsWith('https://'))
-				? null
-				: this.folderAndFilenameManagement.getImagePath(img);
+			const imagePath =
+				src.startsWith("http://") || src.startsWith("https://")
+					? null
+					: this.folderAndFilenameManagement.getImagePath(img);
 
 			const isExternal = !imagePath;
-			const matches = await this.findImageMatches(editor, imagePath, isExternal);
+			const matches = await this.findImageMatches(
+				editor,
+				imagePath,
+				isExternal
+			);
 
 			if (matches.length === 0) {
-				new Notice('Failed to find image link in the current note.');
+				new Notice("Failed to find image link in the current note.");
 				return;
 			}
 
@@ -1674,32 +1978,43 @@ export class ContextMenu extends Component {
 					uniqueMatchesMap.set(key, match); // Add to map if not already present
 				}
 			}
-			const uniqueMatches: ImageMatch[] = Array.from(uniqueMatchesMap.values());
-
+			const uniqueMatches: ImageMatch[] = Array.from(
+				uniqueMatchesMap.values()
+			);
 
 			if (uniqueMatches.length === 0) {
-				new Notice('Failed to find unique image links in the current note.'); // Should not happen ideally as 'matches.length > 0' check is before, but good to have.
+				new Notice(
+					"Failed to find unique image links in the current note."
+				); // Should not happen ideally as 'matches.length > 0' check is before, but good to have.
 				return;
 			}
-
 
 			const handleConfirmation = async () => {
 				// Sort matches by line number in descending order to handle deletions from bottom to top
 				// This prevents line number shifting from affecting subsequent deletions
-				const sortedMatches = uniqueMatches.sort((matchA, matchB) => matchB.lineNumber - matchA.lineNumber);
+				const sortedMatches = uniqueMatches.sort(
+					(matchA, matchB) => matchB.lineNumber - matchA.lineNumber
+				);
 
 				for (const match of sortedMatches) {
-					await this.removeImageLinkFromEditor(editor, match.lineNumber, match.line, match.fullMatch, false);
+					await this.removeImageLinkFromEditor(
+						editor,
+						match.lineNumber,
+						match.line,
+						match.fullMatch,
+						false
+					);
 				}
 
-				new Notice('Image link(s) removed from note');
+				new Notice("Image link(s) removed from note");
 
 				// Delete the actual image file if it exists in the vault
 				if (imagePath) {
-					const imageFile = this.app.vault.getAbstractFileByPath(imagePath);
+					const imageFile =
+						this.app.vault.getAbstractFileByPath(imagePath);
 					if (imageFile instanceof TFile) {
 						await this.app.vault.trash(imageFile, true);
-						new Notice('Image file moved to trash');
+						new Notice("Image file moved to trash");
 					}
 				}
 			};
@@ -1710,21 +2025,24 @@ export class ContextMenu extends Component {
 				const detailsFragment = document.createDocumentFragment();
 
 				// Create a container div for the message within the fragment
-				const messageContainer = document.createElement('div');
+				const messageContainer = document.createElement("div");
 				detailsFragment.appendChild(messageContainer);
 
 				// Add introductory text
-				const introText = document.createElement('p');
+				const introText = document.createElement("p");
 				introText.textContent = `Found ${uniqueMatches.length} unique matching image links inside current note. Do you want to delete all of them?`; // Updated message
 				messageContainer.appendChild(introText);
 
 				// Add details to the message container
-				uniqueMatches.forEach((match, index) => { // Iterate over uniqueMatches
+				uniqueMatches.forEach((match, index) => {
+					// Iterate over uniqueMatches
 					const lineNumber = match.lineNumber + 1;
 					const lineContent = match.line.trim();
-					const detailDiv = document.createElement('div');
-					detailDiv.style.marginBottom = '5px'; // Add some spacing between lines
-					detailDiv.innerHTML = `  ${index + 1}. Line ${lineNumber}: ${lineContent}`;
+					const detailDiv = document.createElement("div");
+					detailDiv.style.marginBottom = "5px"; // Add some spacing between lines
+					detailDiv.innerHTML = `  ${
+						index + 1
+					}. Line ${lineNumber}: ${lineContent}`;
 					messageContainer.appendChild(detailDiv); // Append to messageContainer
 				});
 
@@ -1735,27 +2053,25 @@ export class ContextMenu extends Component {
 					"Delete",
 					handleConfirmation
 				).open();
-			} else if (uniqueMatches.length === 1) { // if only 1 unique match, proceed directly without confirmation for multiple
+			} else if (uniqueMatches.length === 1) {
+				// if only 1 unique match, proceed directly without confirmation for multiple
 				await handleConfirmation();
 			} else {
 				// This case should not happen because of the initial check `if (uniqueMatches.length === 0)` but for completeness.
-				new Notice('No unique image links found to delete.');
+				new Notice("No unique image links found to delete.");
 			}
-
-
 		} catch (error) {
-			console.error('Error deleting image:', error);
-			new Notice('Failed to delete image. Check console for details.');
+			console.error("Error deleting image:", error);
+			new Notice("Failed to delete image. Check console for details.");
 		}
 	}
 
 	onunload() {
-		super.onunload();  // Important! Calls Component's cleanup
+		super.onunload(); // Important! Calls Component's cleanup
 		if (this.currentMenu) {
-			this.currentMenu.hide();
+			(this.currentMenu as any).hide?.();
 			this.currentMenu = null;
 		}
 		this.contextMenuRegistered = false;
 	}
-
 }

@@ -159,4 +159,56 @@ describe('Integration-lite: PngquantAdapter', () => {
     // Assert (outer catch returns original bytes)
     expect(new Uint8Array(result).byteLength).toBe(inputBytes.byteLength);
   });
+
+  it('27.3 [I] Argument safety: spawn receives args array and no shell with path spaces', async () => {
+    // Arrange
+    // eslint-disable-next-line id-length
+    const inputBytes = makePngBytes({ w: 32, h: 32 });
+    const inputBlob = makeImageBlob(inputBytes, 'image/png');
+
+    const { spawn } = await import('child_process');
+    (spawn as any).mockImplementation(() => mockChildProcess({ stdout: Buffer.from(new Uint8Array([7, 8, 9])), exitCode: 0 }));
+
+    const exePath = 'C:/Program Files/pngquant/pngquant.exe';
+    const quality = '50-70';
+
+    // Act
+    await processor.processImage(
+      inputBlob,
+      'PNGQUANT',
+      1.0,
+      1.0,
+      'None',
+      0,
+      0,
+      0,
+      'Auto',
+      true,
+      {
+        name: 'test',
+        outputFormat: 'PNGQUANT',
+        pngquantExecutablePath: exePath,
+        pngquantQuality: quality,
+        quality: 1,
+        colorDepth: 1,
+        resizeMode: 'None',
+        desiredWidth: 0,
+        desiredHeight: 0,
+        desiredLongestEdge: 0,
+        enlargeOrReduce: 'Auto',
+        allowLargerFiles: true,
+        skipConversionPatterns: ''
+      }
+    );
+
+    // Assert
+    const { calls } = (spawn as any).mock;
+    expect(calls.length).toBeGreaterThan(0);
+    const [cmd, args, options] = calls[0] as [string, string[], any];
+    expect(typeof cmd).toBe('string'); // command
+    expect(Array.isArray(args)).toBe(true); // args array, not string
+    if (options) {
+      expect(options.shell !== true).toBe(true);
+    }
+  });
 });

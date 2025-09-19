@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import ImageConverterPlugin from '../../../src/main';
 import { fakeApp, fakeTFile, fakeVault, fakePluginManifest } from '../../factories/obsidian';
-import { Menu } from 'obsidian';
+import { Menu, Platform } from 'obsidian';
 
 // Mock modules that are constructed by ContextMenu actions
 vi.mock('../../../src/ProcessSingleImageModal.ts', () => ({
@@ -173,6 +173,32 @@ expect(modalSpy).toHaveBeenCalled();
       plugin.settings.isImageAlignmentEnabled = false;
       img.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       expect(alignmentSpy).not.toHaveBeenCalled();
+      (ctx as any).onunload?.();
+    });
+  });
+
+  describe('Mobile gating (Phase 9: 25.4/25.5)', () => {
+    it('does not add desktop-only items when Platform.isMobile=true', async () => {
+      // Arrange
+      Platform.isMobile = true;
+      const ctx = new contextMenuCls(app as any, plugin, {} as any, {} as any);
+
+      const openInNewWindowSpy = vi.spyOn(ctx as any, 'addOpenInNewWindowMenuItem');
+      const cutImageSpy = vi.spyOn(ctx as any, 'addCutImageMenuItem');
+
+      const img = document.createElement('img');
+      img.setAttribute('src', '/images/a.png');
+      const active = fakeTFile({ path: 'notes/n.md' });
+
+      // Act
+      (ctx as any).createContextMenuItems({ addSeparator: () => {}, addItem: () => {} } as any, img, active as any, new MouseEvent('contextmenu'));
+
+      // Assert
+      expect(openInNewWindowSpy).not.toHaveBeenCalled();
+      expect(cutImageSpy).not.toHaveBeenCalled();
+
+      // Cleanup
+      Platform.isMobile = false;
       (ctx as any).onunload?.();
     });
   });

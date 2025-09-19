@@ -253,4 +253,72 @@ describe('Integration-lite: FfmpegAvifAdapter', () => {
     expect(new Uint8Array(resultFail).byteLength).toBe(inputBytes.byteLength);
     // unlink may be called in close handler on error; at least ensure no crash
   });
+
+  it('27.3 [I] Argument safety: spawn receives args array and no shell with path spaces', async () => {
+    // Arrange
+    // eslint-disable-next-line id-length
+    const inputBytes = makePngBytes({ w: 16, h: 16 });
+    const inputBlob = makeImageBlob(inputBytes, 'image/png');
+
+    const { spawn } = await import('child_process');
+    (spawn as any).mockImplementation(() => {
+      const proc: any = new EventEmitter();
+      proc.stdin = { write: vi.fn(), end: vi.fn() };
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      setTimeout(() => {
+        proc.emit('close', 0, null);
+        proc.emit('exit', 0, null);
+      }, 0);
+      return proc;
+    });
+
+    // Avoid DOM-dependent code paths for speed/determinism
+    vi.spyOn<any, any>(processor as any, 'getImageDimensions').mockResolvedValue({ width: 64, height: 64 });
+    vi.spyOn<any, any>(processor as any, 'checkForTransparency').mockResolvedValue(false);
+
+    ;(fs.readFile as any).mockResolvedValue(Buffer.from(new Uint8Array([1, 2, 3])));
+    ;(fs.unlink as any).mockResolvedValue(undefined);
+
+    // Act
+    await processor.processImage(
+      inputBlob,
+      'AVIF',
+      1.0,
+      1.0,
+      'None',
+      0,
+      0,
+      0,
+      'Auto',
+      true,
+      {
+        name: 'test',
+        outputFormat: 'AVIF',
+        ffmpegExecutablePath: 'C:/Program Files/ffmpeg/bin/ffmpeg.exe',
+        ffmpegCrf: 28,
+        ffmpegPreset: 'fast',
+        quality: 1,
+        colorDepth: 1,
+        resizeMode: 'None',
+        desiredWidth: 0,
+        desiredHeight: 0,
+        desiredLongestEdge: 0,
+        enlargeOrReduce: 'Auto',
+        allowLargerFiles: true,
+        skipConversionPatterns: ''
+      }
+    );
+
+    // Assert argument safety
+    const { calls } = (spawn as any).mock;
+    expect(calls.length).toBeGreaterThan(0);
+    const [firstCall] = calls;
+    const [command, args, options] = firstCall;
+    expect(typeof command).toBe('string'); // command
+    expect(Array.isArray(args)).toBe(true); // args array, not string
+    if (firstCall.length > 2) {
+      expect(!options || options.shell !== true).toBe(true);
+    }
+  });
 });

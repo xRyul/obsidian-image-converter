@@ -52,4 +52,33 @@ describe('Integration-lite: HeicDecoderAdapter', () => {
     expect(spy).toHaveBeenCalled();
     expect(new Uint8Array(result).byteLength).toBeGreaterThan(0);
   });
+
+  it('23.6 [I] HEIC failure: when decoder rejects, original bytes are returned (no throw)', async () => {
+    // Arrange - HEIC-like header
+    const heicHeader = new Uint8Array([
+      0x00, 0x00, 0x00, 0x20,
+      0x66, 0x74, 0x79, 0x70,
+      0x68, 0x65, 0x69, 0x63
+    ]);
+    const heicBytes = heicHeader.buffer;
+    const heicBlob = makeImageBlob(heicBytes, 'image/heic');
+
+    const spy = vi.spyOn<any, any>(processor as any, 'handleHeic').mockRejectedValue(new Error('decode fail'));
+
+    // Act
+    const result = await processor.processImage(
+      heicBlob,
+      'JPEG',
+      0.85,
+      1.0,
+      'None',
+      0, 0, 0,
+      'Auto',
+      true
+    );
+
+    // Assert - original returned
+    expect(spy).toHaveBeenCalled();
+    expect(new Uint8Array(result).byteLength).toBe(heicBytes.byteLength);
+  });
 });

@@ -315,4 +315,57 @@ describe('BatchImageProcessor — Progress, scope, and error behaviors', () => {
     // Assert: no renames performed, run aborted early
     expect(app.fileManager.renameFile).not.toHaveBeenCalled();
   });
+
+  it('23.3 Permission denied on write: modifyBinary throws -> aborts run and logs error', async () => {
+    // Arrange a simple single-file case
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
+    (app.metadataCache as any).resolvedLinks[note1.path] = { [imgA.path]: 1 };
+    await app.vault.modify(note1, '![a](images/a.png)');
+
+    // Throw on binary write to simulate EACCES/ENOSPC
+    const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
+    (app.vault.modifyBinary as any) = vi.fn(async () => {
+      const err: any = new Error('EACCES: permission denied');
+      (err as any).code = 'EACCES';
+      throw err;
+    });
+
+    // Act
+    await bip.processImagesInNote(note1);
+
+    // Assert: rename attempted prior to write, then error and abort
+    expect(app.fileManager.renameFile).toHaveBeenCalledTimes(1);
+    expect(consoleErr).toHaveBeenCalled();
+  });
+
+  it('23.1 External URLs are ignored: http/https image links do not trigger processing or writes', async () => {
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
+    await app.vault.modify(note1, '![ext](https://example.com/a.png) and ![ext2](http://example.com/b.jpg)');
+    (app.metadataCache as any).resolvedLinks[note1.path] = {};
+    await bip.processImagesInNote(note1);
+    expect(app.fileManager.renameFile).not.toHaveBeenCalled();
+    expect(app.vault.modifyBinary).not.toHaveBeenCalled();
+  });
+
+  it('23.2 Missing file: unresolved link is skipped and remaining items continue', async () => {
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
+    const missingPath = 'images/missing.png';
+    (app.metadataCache as any).resolvedLinks[note1.path] = { [missingPath]: 1, [imgA.path]: 1 };
+    await app.vault.modify(note1, '![m](images/missing.png) and ![a](images/a.png)');
+    await bip.processImagesInNote(note1);
+    expect(app.fileManager.renameFile).toHaveBeenCalledTimes(1);
+    const renameTargets = (app.fileManager.renameFile as any).mock.calls.map((callArgs: any[]) => callArgs[1] as string);
+    expect(renameTargets).toEqual(['images/a.webp']);
+  });
+
+  it('23.5 Duplicate references: same image referenced twice processed once', async () => {
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
+    (app.metadataCache as any).resolvedLinks[note1.path] = { [imgA.path]: 2 };
+    await app.vault.modify(note1, '![a](images/a.png) and ![a2](images/a.png)');
+    await bip.processImagesInNote(note1);
+    expect(app.fileManager.renameFile).toHaveBeenCalledTimes(1);
+    const renameTargets = (app.fileManager.renameFile as any).mock.calls.map((callArgs: any[]) => callArgs[1] as string);
+    expect(renameTargets).toEqual(['images/a.webp']);
+  });
+
 });

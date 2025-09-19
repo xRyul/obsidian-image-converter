@@ -21,6 +21,7 @@ export class Notice {
 export class Plugin {
   app: App;
   manifest: any;
+  private disposables: Array<() => void> = [];
   
   constructor(app: App, manifest: any) {
     this.app = app;
@@ -28,18 +29,26 @@ export class Plugin {
   }
   
   onload() {}
-  onunload() {}
-  addCommand(command: any) {}
-  addRibbonIcon(icon: string, title: string, callback: () => void) {}
-  addSettingTab(tab: any) {}
-  registerEvent(event: any) {}
-  registerDomEvent(el: HTMLElement | Document, event: string, callback: any, useCapture?: boolean) {
-    // Attach to DOM for integration-lite tests
-    (el as any).addEventListener?.(event, callback, useCapture as any);
+  onunload() { this.disposables.forEach(disposer => { try { disposer(); } catch { /* noop */ } }); this.disposables = []; }
+  addCommand(_command: any) {}
+  addRibbonIcon(_icon: string, _title: string, _callback: () => void) {}
+  addSettingTab(_tab: any) {}
+  registerEvent(_event: any) {}
+  register(cb?: () => void) { if (cb) this.disposables.push(cb); }
+  addChild(child: any) {
+    ((this as any).__children ||= []).push(child);
+    if (child && typeof child.onunload === 'function') {
+      this.register(() => { try { child.onunload(); } catch { /*noop*/ } });
+    }
   }
-  registerInterval(interval: number, callback: () => void): number { return 0; }
+  registerDomEvent(el: HTMLElement | Document, event: string, callback: any, useCapture?: boolean) {
+    // Attach to DOM for integration-lite tests and track for cleanup
+    (el as any).addEventListener?.(event, callback, useCapture as any);
+    this.disposables.push(() => (el as any).removeEventListener?.(event, callback, useCapture as any));
+  }
+  registerInterval(_interval: number, _callback: () => void): number { return 0; }
   loadData(): Promise<any> { return Promise.resolve({}); }
-  saveData(data: any): Promise<void> { return Promise.resolve(); }
+  saveData(_data: any): Promise<void> { return Promise.resolve(); }
 }
 
 export class Modal {
@@ -399,6 +408,7 @@ export interface WorkspaceLeaf {
   getViewState(): any;
 }
 
+
 export interface FileManager {
   getNewFileParent(sourcePath?: string): TFolder;
   generateMarkdownLink(file: TFile, sourcePath: string): string;
@@ -426,6 +436,12 @@ export class Component {
   load() { /* no-op for tests */ }
   register(cb?: () => void) {
     if (cb) this.disposables.push(cb);
+  }
+  addChild(child: any) {
+    ((this as any).__children ||= []).push(child);
+    if (child && typeof child.onunload === 'function') {
+      this.register(() => { try { child.onunload(); } catch { /* noop */ } });
+    }
   }
   registerEvent(_event: any) {}
   registerDomEvent(el: HTMLElement | Document, event: string, handler: any, useCapture?: boolean) {

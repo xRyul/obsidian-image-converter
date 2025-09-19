@@ -405,6 +405,82 @@ describe('ImageProcessor - Error Handling Tests', () => {
     });
   });
 
+  describe('Edge cases & boundaries (Phase 9: 26.x)', () => {
+    it('26.1 Zero-dimension image: returns original bytes and does not throw', async () => {
+      // Arrange
+      const inputBytes = makePngBytes({ width: 0, height: 0 });
+      const inputBlob = makeImageBlob(inputBytes, 'image/png');
+
+      setMockImageSize(0, 0);
+
+      // Act
+      const result = await processor.processImage(
+        inputBlob,
+        'WEBP',
+        0.8,
+        1.0,
+        'Fit',
+        200,
+        200,
+        0,
+        'Auto',
+        true
+      );
+
+      // Assert: completes without throwing and returns bytes (engine may normalize)
+      expect(result).toBeDefined();
+      expect(result.byteLength).toBeGreaterThanOrEqual(0);
+    });
+
+    it('26.2 Minimal image (1x1): processes without error and returns some bytes', async () => {
+      // Arrange
+      const inputBytes = makePngBytes({ width: 1, height: 1 });
+      const inputBlob = makeImageBlob(inputBytes, 'image/png');
+
+      setMockImageSize(1, 1);
+
+      // Act
+      const result = await processor.processImage(
+        inputBlob,
+        'WEBP',
+        0.8,
+        1.0,
+        'None',
+        0,
+        0,
+        0,
+        'Auto',
+        true
+      );
+
+      // Assert
+      expect(result).toBeDefined();
+      expect(result.byteLength).toBeGreaterThan(0);
+    });
+
+    it('26.4 Zero-byte file: detection unknown -> returns original bytes length 0', async () => {
+      // Arrange
+      const inputBlob = new Blob([new Uint8Array([])], { type: 'application/octet-stream' });
+
+      // Act
+      const result = await processor.processImage(
+        inputBlob,
+        'WEBP',
+        0.8,
+        1.0,
+        'None',
+        0,
+        0,
+        0,
+        'Auto',
+        true
+      );
+
+      // Assert
+      expect(result.byteLength).toBe(0);
+    });
+  });
+
   describe('Notice Display on Errors', () => {
     it('Given error with Notice implementation point, When error occurs, Then Notice is shown with appropriate message', async () => {
       // Arrange

@@ -397,3 +397,92 @@ describe('FolderAndFilenameManagement.sanitizeFilename additional cases', () => 
     expect(ffm.sanitizeFilename('nb\u00A0space.png')).toBe('nb\u00A0space.png');
   });
 });
+
+// -----------------------------------------------------------------------------
+// 9) Platform and security specifics (Phase 9)
+// -----------------------------------------------------------------------------
+
+describe('FolderAndFilenameManagement — Platform/Security (Phase 9)', () => {
+  it('25.1 Windows-style inputs normalized via processSubfolderVariables', async () => {
+    installMomentStub();
+    const { ffm } = makeFFMGeneric();
+    const active = fakeTFile({ path: 'notes/n.md' });
+    const file = new File([new Uint8Array([1])], 'x.png', { type: 'image/png' });
+
+    // Mixed Windows/relative path with duplicate slashes
+    const raw = 'C\\\\Temp\\imgs\\..\\..\\vault/Images//Final';
+    const result = await ffm.processSubfolderVariables(raw, file, active as any);
+
+    // Structure and normalization assertions
+    expect(result.startsWith('/')).toBe(false);
+    expect(result.includes('\\')).toBe(false);
+    expect(result.includes('//')).toBe(false);
+    expect(result).toContain('Temp');
+    expect(result).toContain('imgs');
+    expect(result).toContain('vault');
+    expect(result).toContain('Images');
+    expect(result).toContain('Final');
+    // Drive colon sanitized
+    expect(result.startsWith('C_')).toBe(true);
+  });
+
+  it('26.5 No-extension filenames: addCorrectExtension appends conversion extension', () => {
+    const { ffm } = makeFFMGeneric();
+    const file = new File([new Uint8Array([1])], 'image', { type: 'image/png' });
+    const preset = { outputFormat: 'PNG', skipConversionPatterns: '' } as any;
+    const out = (ffm as any).addCorrectExtension('output/name', file, preset);
+    expect(out).toBe('output/name.png');
+  });
+
+  it('25.2 POSIX inputs: forward slashes preserved; leading/trailing slashes trimmed', async () => {
+    installMomentStub();
+    const { ffm } = makeFFMGeneric();
+    const active = fakeTFile({ path: 'notes/n.md' });
+    const file = new File([new Uint8Array([1])], 'x.png', { type: 'image/png' });
+
+    const raw = '/projects/assets//images/final/';
+    const result = await ffm.processSubfolderVariables(raw, file, active as any);
+    expect(result.startsWith('/')).toBe(false);
+    expect(result.endsWith('/')).toBe(false);
+    expect(result).toBe('projects/assets/images/final');
+  });
+
+  it('25.3 Linux app://obsidian absolute path under base → vault-relative with POSIX separators', () => {
+    const { ffm } = makeSutImagePath({ basePath: '/home/user/Vault' } as any);
+    const img = makeImg('app://obsidian//home/user/Vault/Assets/img%20x.png');
+    expect(ffm.getImagePath(img)).toBe('/Assets/img x.png');
+  });
+
+  it('27.1 Path traversal prevention: .. segments and leading / are normalized away', async () => {
+    installMomentStub();
+    const { ffm } = makeFFMGeneric();
+    const active = fakeTFile({ path: 'notes/n.md' });
+    const file = new File([new Uint8Array([1])], 'x.png', { type: 'image/png' });
+
+    const raw = '../../../../../../etc/../notes/./../images/../final';
+    const result = await ffm.processSubfolderVariables(raw, file, active as any);
+    expect((result as string).startsWith('/')).toBe(false);
+    expect(result.includes('..')).toBe(false);
+    expect(result.includes('\\')).toBe(false);
+  });
+
+  it('27.5 Vault boundary enforcement: app:// path outside base is not mapped to vault-relative (boundary enforced at write)', () => {
+    const { ffm } = makeSutImagePath({ basePath: 'C:/Vault' });
+    const img = makeImg('app://obsidian/C:/OtherVault/Assets/x.png');
+    const result = ffm.getImagePath(img);
+    expect(result).toBe('C:/OtherVault/Assets/x.png');
+    expect((result as string).startsWith('/')).toBe(false);
+  });
+
+  it('26.8 Deeply nested folders: ensureFolderExists creates all intermediate levels', async () => {
+    const { app, ffm } = makeFFMGeneric();
+    const deep = 'a/b/c/d/e/f/g/h/i/j/k';
+    await ffm.ensureFolderExists(deep);
+    const expectedLevels = [
+      'a','a/b','a/b/c','a/b/c/d','a/b/c/d/e','a/b/c/d/e/f','a/b/c/d/e/f/g','a/b/c/d/e/f/g/h','a/b/c/d/e/f/g/h/i','a/b/c/d/e/f/g/h/i/j','a/b/c/d/e/f/g/h/i/j/k'
+    ];
+    for (const lvl of expectedLevels) {
+      expect(app.vault.createFolder).toHaveBeenCalledWith(lvl);
+    }
+  });
+});

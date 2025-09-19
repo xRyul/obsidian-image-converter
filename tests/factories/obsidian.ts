@@ -280,6 +280,7 @@ export function fakeVault(options: {
     getFiles: vi.fn(() => files),
     getAllLoadedFiles: vi.fn(() => [...files, ...folders, rootFolder]),
     getMarkdownFiles: vi.fn(() => files.filter(fileItem => fileItem.extension === 'md')),
+    getResourcePath: vi.fn((_file: TFile) => 'blob://mock'),
     // Obsidian config API used by FolderAndFilenameManagement
     getConfig: vi.fn((key: string) => {
       if (key === 'attachmentFolderPath') return attachmentFolderPath;
@@ -345,6 +346,8 @@ export function fakeWorkspace(options: {
   return {
     getActiveFile: vi.fn(() => options.activeFile ?? null),
     
+    onLayoutReady: vi.fn((cb: () => void) => { try { cb(); } catch { /* noop */ } }),
+
     getLeaf: vi.fn((newLeaf?: boolean | 'tab' | 'split' | 'window') => {
       return options.activeLeaf ?? {
         view: {
