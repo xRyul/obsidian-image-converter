@@ -108,8 +108,8 @@ function makeResizer({ viewMode = 'source', overrides = {}, workspaceOverride }:
 // 13.1–13.3 core interactions
 afterEach(() => {
   // Ensure no leaked listeners between tests
-  for (const r of activeResizers.splice(0)) {
-    try { (r as any).onunload(); } catch {}
+  for (const resizerToUnload of activeResizers.splice(0)) {
+    try { (resizerToUnload as any).onunload(); } catch (err) { void err; }
   }
 });
 
@@ -117,8 +117,8 @@ describe('ImageResizer interactions core (13.1–13.3)', () => {
   let resizer: ImageResizer;
 
   beforeEach(() => {
-    const { resizer: r } = makeResizer({ viewMode: 'preview', overrides: { isScrollResizeEnabled: false } });
-    resizer = r;
+    const { resizer: createdResizer } = makeResizer({ viewMode: 'preview', overrides: { isScrollResizeEnabled: false } });
+    resizer = createdResizer;
   });
 
   it('13.1 creates handles when hovering internal image and preserves alignment classes on cleanup', () => {
@@ -378,10 +378,10 @@ describe('ImageResizer additional behaviors (13.4–13.6, 13.7–13.14, 13.19, 1
     img.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     document.dispatchEvent(new MouseEvent('mousemove', { clientX: 30, clientY: 30, bubbles: true }));
     document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-    const w = parseInt(img.style.width || '0', 10);
-    const h = parseInt(img.style.height || '0', 10);
-    expect(w).toBeGreaterThan(0);
-    expect(h).toBeGreaterThan(0);
+    const widthPx = parseInt(img.style.width || '0', 10);
+    const heightPx = parseInt(img.style.height || '0', 10);
+    expect(widthPx).toBeGreaterThan(0);
+    expect(heightPx).toBeGreaterThan(0);
   });
 
   it('13.13 Alignment cache update on drag-resize when enabled', async () => {
@@ -583,7 +583,7 @@ describe('ImageResizer lifecycle and wheel behaviors (13.15–13.16, 13.17–13.
   });
 
   it('13.23 Debounce/throttle for scroll: debouncedSaveToCache fires once per debounce window (tail simulated)', () => {
-    const { resizer, plugin } = makeResizer({ viewMode: 'source', overrides: { isScrollResizeEnabled: true, scrollwheelModifier: 'None', isImageAlignmentEnabled: true } });
+    const { resizer } = makeResizer({ viewMode: 'source', overrides: { isScrollResizeEnabled: true, scrollwheelModifier: 'None', isImageAlignmentEnabled: true } });
     const { container } = setupView();
     const img = addInternalImage(container);
     // Avoid alignment path entirely for this debounce test (we're validating debouncedSaveToCache wiring)
@@ -714,11 +714,11 @@ describe('ImageResizer undo/redo after live updates (13.11)', () => {
         // Apply all changes on a copy then commit once
         const work = [...lines];
         // Sort by from position descending to keep indices valid
-        const sorted = [...changes].sort((a, b) => (b.from.line - a.from.line) || (b.from.ch - a.from.ch));
-        for (const c of sorted) {
-          const line = work[c.from.line];
-          const newLine = line.substring(0, c.from.ch) + c.text + line.substring(c.to.ch);
-          work[c.from.line] = newLine;
+        const sorted = [...changes].sort((changeA, changeB) => (changeB.from.line - changeA.from.line) || (changeB.from.ch - changeA.from.ch));
+        for (const change of sorted) {
+          const line = work[change.from.line];
+          const newLine = line.substring(0, change.from.ch) + change.text + line.substring(change.to.ch);
+          work[change.from.line] = newLine;
         }
         lines = work;
         history.push({ before, after: [...lines] });

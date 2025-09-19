@@ -44,6 +44,104 @@ function changeInput(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event('change'));
 }
 
+describe('PresetSelectionModal compact UI flows (18.1, 18.3, 18.4)', () => {
+  it('Given modal opens, When constructed, Then processing preview text is composed (format • link • resize) (18.1/processing preview)', async () => {
+    const app = makeAppWithVault(['img.png']);
+    const plugin = new ImageConverterPlugin(app, { id: 'image-converter' } as any);
+    vi.spyOn(plugin as any, 'loadData').mockResolvedValue(undefined);
+    await plugin.loadSettings();
+
+    // Spy on saveSettings to ensure session state persists on Apply
+const saveSpy = vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
+
+    let applied = false;
+    const modal = new PresetSelectionModal(
+      app,
+      plugin.settings,
+      () => { applied = true; },
+      plugin,
+      new VariableProcessor(app, plugin.settings)
+    );
+
+    // Render content
+    modal.onOpen();
+
+    // Expect preview element exists and contains selected preset names once updateProcessingPreview runs
+    const container = (modal as any).contentEl as HTMLElement;
+    const preview = container.querySelector('.image-converter-processing-preview-text') as HTMLElement;
+    expect(preview).toBeTruthy();
+    // The default shows selectedConversionPreset + quality + link + resize
+    expect(preview.textContent).toContain(plugin.settings.selectedConversionPreset);
+    expect(preview.textContent).toContain('%');
+    expect(preview.textContent).toContain(plugin.settings.linkFormatSettings.selectedLinkFormatPreset);
+    expect(preview.textContent).toContain(plugin.settings.nonDestructiveResizeSettings.selectedResizePreset);
+
+    // Simulate Apply click: call internal method to persist session state and onApply
+    // Access the created Apply button via class: image-converter-compact-actions
+    const actions = container.querySelector('.image-converter-compact-actions');
+    expect(actions).toBeTruthy();
+
+    // Since our mock only wires callbacks, we can directly call saveSessionState and onApply via the Apply handler
+    // Instead, emulate clicking the last button in that setting
+    const buttons = actions!.querySelectorAll('button');
+    // The last should be Apply
+    const applyBtn = buttons[buttons.length - 1] as HTMLButtonElement;
+    applyBtn?.click();
+
+    expect(applied).toBe(true);
+    expect(saveSpy).toHaveBeenCalled();
+  });
+
+  it('Given custom folder/filename text, When paused 150ms, Then preview shows processed path (18.3 debounce)', async () => {
+    const app = makeAppWithVault(['photo.webp']);
+    const plugin = new ImageConverterPlugin(app, { id: 'image-converter' } as any);
+    vi.spyOn(plugin as any, 'loadData').mockResolvedValue(undefined);
+    await plugin.loadSettings();
+
+    const modal = new PresetSelectionModal(
+      app,
+      plugin.settings,
+      () => {},
+      plugin,
+      new VariableProcessor(app, plugin.settings)
+    );
+
+    // Stub variableProcessor to avoid cross-module path dependencies in preview
+    (modal as any).variableProcessor = {
+      processTemplate: vi.fn(async (template: string) => {
+        return template
+          .replace('{YYYY}', '2025')
+          .replace('{MM}', '09')
+          .replace('{imagename}', 'photo')
+          .replace('{timestamp}', '1234567890');
+      })
+    };
+
+    modal.onOpen();
+
+    const container = (modal as any).contentEl as HTMLElement;
+
+    // Find the two text inputs (folder and filename) and set custom values that resolve
+    const inputs = container.querySelectorAll('.image-converter-text-setting input');
+    expect(inputs.length).toBeGreaterThanOrEqual(2);
+
+    const folderInput = inputs[0] as HTMLInputElement;
+    const fileInput = inputs[1] as HTMLInputElement;
+
+    folderInput.value = 'assets/{YYYY}/{MM}';
+    folderInput.dispatchEvent(new Event('change'));
+
+    fileInput.value = '{imagename}-{timestamp}';
+    fileInput.dispatchEvent(new Event('change'));
+
+    // Wait >150ms for debounce
+    await new Promise((resolve) => setTimeout(resolve, 180));
+
+    const previewContent = container.querySelector('.image-converter-preview-content-compact');
+    expect(previewContent?.textContent || '').toMatch(/assets\/.+/);
+  });
+});
+
 describe('PresetSelectionModal additional UI flows for Phase 6 (18.1–18.6)', () => {
   it('18.1 Modal displays all expected controls', async () => {
     const app = makeAppWithVault(['img.png']);
@@ -105,16 +203,16 @@ describe('PresetSelectionModal additional UI flows for Phase 6 (18.1–18.6)', (
     const container = (modal as any).contentEl as HTMLElement;
 
     // Folder select -> updates folder input text
-    const folderSelect = container.querySelector('select[data-preset-type="folder"]') as HTMLSelectElement;
-    changeSelect(folderSelect, 'Custom Folder');
-    const folderInput = container.querySelectorAll('.image-converter-text-setting input')[0] as HTMLInputElement;
-    expect(folderInput.value).toBe('assets/{YYYY}');
+    const folderSelect2 = container.querySelector('select[data-preset-type="folder"]') as HTMLSelectElement;
+    changeSelect(folderSelect2, 'Custom Folder');
+    const folderInput2 = container.querySelectorAll('.image-converter-text-setting input')[0] as HTMLInputElement;
+    expect(folderInput2.value).toBe('assets/{YYYY}');
 
     // Filename preset selection -> updates filename input
-    const filenameSelect = container.querySelector('select[data-preset-type="filename"]') as HTMLSelectElement;
-    changeSelect(filenameSelect, 'NoteName-Timestamp');
-    const filenameInput = container.querySelectorAll('.image-converter-text-setting input')[1] as HTMLInputElement;
-    expect(filenameInput.value).toContain('{notename}');
+    const filenameSelect2 = container.querySelector('select[data-preset-type="filename"]') as HTMLSelectElement;
+    changeSelect(filenameSelect2, 'NoteName-Timestamp');
+    const filenameInput2 = container.querySelectorAll('.image-converter-text-setting input')[1] as HTMLInputElement;
+    expect(filenameInput2.value).toContain('{notename}');
 
     // Conversion/link/resize -> processing preview text updates
     const preview = container.querySelector('.image-converter-processing-preview-text') as HTMLElement;
@@ -171,7 +269,7 @@ describe('PresetSelectionModal additional UI flows for Phase 6 (18.1–18.6)', (
     vi.spyOn(plugin as any, 'loadData').mockResolvedValue(undefined);
     await plugin.loadSettings();
 
-const saveSpy = vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
+const saveSpy2 = vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
 
     let appliedArgs: any[] | null = null;
     const modal = new PresetSelectionModal(
@@ -194,10 +292,10 @@ const saveSpy = vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
     const container = (modal as any).contentEl as HTMLElement;
 
     const inputsNodeList = container.querySelectorAll('.image-converter-text-setting input');
-    const folderInput = inputsNodeList[0] as HTMLInputElement;
-    const filenameInput = inputsNodeList[1] as HTMLInputElement;
-    changeInput(folderInput, 'assets/{YYYY}/{MM}');
-    changeInput(filenameInput, '{imagename}-{timestamp}');
+    const folderInputX = inputsNodeList[0] as HTMLInputElement;
+    const filenameInputX = inputsNodeList[1] as HTMLInputElement;
+    changeInput(folderInputX, 'assets/{YYYY}/{MM}');
+    changeInput(filenameInputX, '{imagename}-{timestamp}');
 
     // Click Apply (cta button)
     const actions = container.querySelector('.image-converter-compact-actions')!;
@@ -205,7 +303,7 @@ const saveSpy = vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
     const applyBtn = buttons[buttons.length - 1] as HTMLButtonElement;
     applyBtn.click();
 
-    expect(saveSpy).toHaveBeenCalled();
+    expect(saveSpy2).toHaveBeenCalled();
     expect(plugin.settings.modalSessionState?.customFolderOverride).toBe('assets/{YYYY}/{MM}');
     expect(plugin.settings.modalSessionState?.customFilenameOverride).toBe('{imagename}-{timestamp}');
 
@@ -220,7 +318,7 @@ const saveSpy = vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
     vi.spyOn(plugin as any, 'loadData').mockResolvedValue(undefined);
     await plugin.loadSettings();
 
-const saveSpy = vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
+const saveSpy3 = vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
     let called = false;
 
     const modal = new PresetSelectionModal(app, plugin.settings, () => { called = true; }, plugin, new VariableProcessor(app, plugin.settings));
@@ -230,7 +328,7 @@ const saveSpy = vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
     modal.onClose();
 
     expect(called).toBe(false);
-    expect(saveSpy).not.toHaveBeenCalled();
+    expect(saveSpy3).not.toHaveBeenCalled();
     expect(plugin.settings.modalSessionState).toBeUndefined();
   });
 

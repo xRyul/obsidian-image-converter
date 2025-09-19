@@ -181,7 +181,7 @@ describe('ImageAnnotation — 16.2–16.11 Behaviors (integration-lite)', () => 
     // Wait until writeSpy is called (polling up to ~1s)
     let tries = 0;
     while (!(writeSpy as any).mock?.calls?.length && tries < 20) {
-      await new Promise(r => setTimeout(r, 50));
+      await new Promise(resolve => setTimeout(resolve, 50));
       tries++;
     }
     expect(writeSpy).toHaveBeenCalled();
