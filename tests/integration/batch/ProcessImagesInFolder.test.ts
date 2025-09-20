@@ -128,4 +128,41 @@ describe('BatchImageProcessor — Folder processing (recursive, skipFormats)', (
 
     expect(recursiveRenames).toBeGreaterThan(nonRecursiveRenames);
   });
+
+  it('4.6 Linked mode — Given note in folder links images outside folder, When processing linked images, Then images are processed and note links updated', async () => {
+    // Arrange
+    const welcome = fakeTFolder({ path: 'Welcome', name: 'Welcome' });
+    const note = fakeTFile({ path: 'Welcome/Untitled.md' });
+    const img1 = fakeTFile({ path: 'SubSubfolder2-1757522743837.jpg' });
+    const img2 = fakeTFile({ path: 'SubSubfolder2-1757527917825.jpg' });
+
+    const files = [note, img1, img2];
+    const folders = [welcome];
+    const vault = fakeVault({ files, folders }) as any;
+    await (vault as any).modify(note, `![](SubSubfolder2-1757522743837.jpg)\n![](SubSubfolder2-1757527917825.jpg)`);
+
+    const metadataCache = { resolvedLinks: { [note.path]: { [img1.path]: 1, [img2.path]: 1 } } } as any;
+    const app = fakeApp({ vault, metadataCache }) as any;
+    app.fileManager = {
+      renameFile: vi.fn(async (file: any, newPath: string) => { await app.vault.rename(file, newPath); })
+    };
+
+    const plugin = makePluginStub();
+    const imageProcessor = { processImage: vi.fn(async (_blob: Blob) => new ArrayBuffer(4)) };
+    const ffm = { handleNameConflicts: vi.fn(async (_dir: string, name: string) => name) };
+    const bip = new BatchImageProcessor(app, plugin as any, imageProcessor as any, ffm as any);
+
+    // Act
+    await bip.processLinkedImagesInFolder('Welcome', false);
+
+    // Assert
+    const renameCalls = (app.fileManager.renameFile as any).mock.calls.map((args: any[]) => (args[0] as any).path);
+    expect(renameCalls.some((pathStr: string) => pathStr.endsWith('SubSubfolder2-1757522743837.webp') || pathStr.endsWith('SubSubfolder2-1757522743837.jpg'))).toBe(true);
+    expect(renameCalls.some((pathStr: string) => pathStr.endsWith('SubSubfolder2-1757527917825.webp') || pathStr.endsWith('SubSubfolder2-1757527917825.jpg'))).toBe(true);
+
+    // If convertTo is webp (default in stub), links in note should be updated
+    const contentAfter = await app.vault.read(note);
+    expect(contentAfter).toContain('SubSubfolder2-1757522743837.webp');
+    expect(contentAfter).toContain('SubSubfolder2-1757527917825.webp');
+  });
 });

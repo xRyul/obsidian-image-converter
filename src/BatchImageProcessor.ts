@@ -237,8 +237,11 @@ export class BatchImageProcessor {
                 ProcessCurrentNoteEnlargeOrReduce: enlargeOrReduce,
                 allowLargerFiles,
                 ProcessCurrentNoteSkipFormats: processCurrentNoteSkipFormats,
+                ProcessCurrentNoteskipImagesInTargetFormat: skipTargetFormat,
             } = this.plugin.settings;
 
+            const isKeepOriginalFormat = convertTo === 'disabled';
+            const targetFormat = convertTo;
             const outputFormat = convertTo === 'disabled' ? 'ORIGINAL' : convertTo.toUpperCase() as 'WEBP' | 'JPEG' | 'PNG' | 'ORIGINAL';
             const colorDepth = 1; // Assuming full color depth for now, adjust if needed
 
@@ -254,18 +257,22 @@ export class BatchImageProcessor {
                 return;
             }
 
+            // Filter files that actually need processing (respect skip formats and skip target)
+            const filesToProcess = images.filter(file =>
+                this.shouldProcessImage(file, isKeepOriginalFormat, targetFormat, skipFormats, skipTargetFormat)
+            );
+
+            if (filesToProcess.length === 0) {
+                new Notice('No images found that need processing.');
+                return;
+            }
+
             let imageCount = 0;
             const statusBarItemEl = this.plugin.addStatusBarItem();
             const startTime = Date.now();
-            const totalImages = images.length;
+            const totalImages = filesToProcess.length;
 
-            for (const image of images) {
-                // Skip image if its format is in the skipFormats list
-                if (skipFormats.includes(image.extension.toLowerCase())) {
-                    console.log(`Skipping image ${image.name} (format in skip list)`);
-                    continue; // Skip to the next image
-                }
-
+            for (const image of filesToProcess) {
                 imageCount++;
 
                 // Construct the new file path based on conversion settings
@@ -307,8 +314,7 @@ export class BatchImageProcessor {
                 // Modify the file content with processed image data
                 await this.app.vault.modifyBinary(renamedFile, processedImageData);
 
-                // No need to update links in notes when processing a whole folder, right?
-                // If you do, you would need to iterate over all notes and call updateLinksInNote()
+                // No need to update links in notes when processing a whole folder (DIRECT mode)
 
                 const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
                 statusBarItemEl.setText(
@@ -324,6 +330,175 @@ export class BatchImageProcessor {
 
         } catch (error) {
             console.error('Error processing images in folder:', error);
+            new Notice(`Error processing images: ${error.message}`);
+        }
+    }
+
+    async processLinkedImagesInFolder(folderPath: string, recursive: boolean): Promise<void> {
+        try {
+            const folder = this.app.vault.getAbstractFileByPath(folderPath);
+            if (!(folder instanceof TFolder)) {
+                new Notice('Error: Invalid folder path.');
+                return;
+            }
+
+            const {
+                ProcessCurrentNoteconvertTo: convertTo,
+                ProcessCurrentNotequality: quality,
+                ProcessCurrentNoteResizeModalresizeMode: resizeMode,
+                ProcessCurrentNoteresizeModaldesiredWidth: desiredWidth,
+                ProcessCurrentNoteresizeModaldesiredHeight: desiredHeight,
+                ProcessCurrentNoteresizeModaldesiredLength: desiredLength,
+                ProcessCurrentNoteEnlargeOrReduce: enlargeOrReduce,
+                allowLargerFiles,
+                ProcessCurrentNoteSkipFormats: processCurrentNoteSkipFormats,
+                ProcessCurrentNoteskipImagesInTargetFormat: skipTargetFormat,
+            } = this.plugin.settings;
+
+            const isKeepOriginalFormat = convertTo === 'disabled';
+            const targetFormat = convertTo;
+            const outputFormat = convertTo === 'disabled' ? 'ORIGINAL' : convertTo.toUpperCase() as 'WEBP' | 'JPEG' | 'PNG' | 'ORIGINAL';
+            const colorDepth = 1;
+
+            const skipFormats = processCurrentNoteSkipFormats
+                .toLowerCase()
+                .split(',')
+                .map((format) => format.trim())
+                .filter((format) => format.length > 0);
+
+            // Collect notes (md and canvas) within the folder
+            const allFiles = this.app.vault.getFiles();
+            const folderPathNorm = folder.path.replace(/\\/g, '/').replace(/\/$/, '');
+            const prefix = folderPathNorm === '' || folderPathNorm === '/' ? '' : `${folderPathNorm}/`;
+
+            const isImmediateChild = (filePath: string) => {
+                if (!prefix) {
+                    return filePath.indexOf('/') === -1;
+                }
+                if (!filePath.startsWith(prefix)) return false;
+                const remainder = filePath.slice(prefix.length);
+                return remainder.indexOf('/') === -1;
+            };
+
+            const inScope = (filePath: string) => {
+                const normalized = filePath.replace(/\\/g, '/');
+                return recursive ? (prefix === '' ? true : normalized.startsWith(prefix)) : isImmediateChild(normalized);
+            };
+
+            const noteFiles = allFiles.filter((file) => (file.extension === 'md' || file.extension === 'canvas') && inScope(file.path));
+
+            // Build image set and reverse index of references
+            const imageMap = new Map<string, TFile>();
+            const refsMd = new Map<string, Set<TFile>>();
+            const refsCanvas = new Map<string, Set<TFile>>();
+
+            for (const note of noteFiles) {
+                let linked: TFile[] = [];
+                if (note.extension === 'canvas') {
+                    linked = await this.getImageFilesFromCanvas(note);
+                    for (const img of linked) {
+                        imageMap.set(img.path, img);
+                        if (!refsCanvas.has(img.path)) refsCanvas.set(img.path, new Set());
+                        refsCanvas.get(img.path)!.add(note);
+                    }
+                } else {
+                    linked = this.getLinkedImageFiles(note);
+                    for (const img of linked) {
+                        imageMap.set(img.path, img);
+                        if (!refsMd.has(img.path)) refsMd.set(img.path, new Set());
+                        refsMd.get(img.path)!.add(note);
+                    }
+                }
+            }
+
+            const linkedImages = Array.from(imageMap.values());
+
+            if (linkedImages.length === 0) {
+                new Notice('No images found in the folder.');
+                return;
+            }
+
+            const filesToProcess = linkedImages.filter((file) =>
+                this.shouldProcessImage(file, isKeepOriginalFormat, targetFormat, skipFormats, skipTargetFormat)
+            );
+
+            if (filesToProcess.length === 0) {
+                new Notice('No images found that need processing.');
+                return;
+            }
+
+            let imageCount = 0;
+            const statusBarItemEl = this.plugin.addStatusBarItem();
+            const startTime = Date.now();
+            const totalImages = filesToProcess.length;
+
+            for (const image of filesToProcess) {
+                imageCount++;
+
+                const imageData = await this.app.vault.readBinary(image);
+                const imageBlob = new Blob([imageData], { type: `image/${image.extension}` });
+
+                const processedImageData = await this.imageProcessor.processImage(
+                    imageBlob,
+                    outputFormat,
+                    quality,
+                    colorDepth,
+                    resizeMode as ResizeMode,
+                    desiredWidth,
+                    desiredHeight,
+                    desiredLength,
+                    enlargeOrReduce as EnlargeReduce,
+                    allowLargerFiles
+                );
+
+                // Construct target path
+                const targetName = `${image.basename}.${outputFormat.toLowerCase()}`;
+                let targetPath = image.path.replace(image.name, targetName);
+
+                // Resolve conflicts similar to vault-wide behavior
+                if (image.path !== targetPath && this.app.vault.getAbstractFileByPath(targetPath)) {
+                    targetPath = await this.folderAndFilenameManagement.handleNameConflicts(image.parent?.path || '', targetName);
+                }
+
+                const oldPath = image.path;
+
+                if (oldPath !== targetPath) {
+                    await this.app.fileManager.renameFile(image, targetPath);
+                }
+
+                const renamedFile = this.app.vault.getAbstractFileByPath(targetPath) as TFile;
+                if (!renamedFile) {
+                    console.error('Failed to find renamed file:', targetPath);
+                    continue;
+                }
+
+                await this.app.vault.modifyBinary(renamedFile, processedImageData);
+
+                // Update links only in notes within this folder that referenced this image
+                if (oldPath !== targetPath) {
+                    const mdNotes = refsMd.get(oldPath);
+                    if (mdNotes) {
+                        for (const note of mdNotes) {
+                            await this.updateLinksInNote(note, oldPath, targetPath);
+                        }
+                    }
+                    const canvasNotes = refsCanvas.get(oldPath);
+                    if (canvasNotes) {
+                        for (const canvas of canvasNotes) {
+                            await this.updateCanvasFileLinks(canvas, oldPath, targetPath);
+                        }
+                    }
+                }
+
+                const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+                statusBarItemEl.setText(`Processing image ${imageCount} of ${totalImages}, elapsed time: ${elapsedTime} seconds`);
+            }
+
+            const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
+            statusBarItemEl.setText(`Finished processing ${imageCount} images, total time: ${totalTime} seconds`);
+            window.setTimeout(() => { statusBarItemEl.remove(); }, 5000);
+        } catch (error) {
+            console.error('Error processing linked images in folder:', error);
             new Notice(`Error processing images: ${error.message}`);
         }
     }

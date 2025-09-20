@@ -485,7 +485,12 @@ export class ProcessFolderModal extends Modal {
             .setCta()
             .onClick(async () => { // Use async here
                 this.close();
-                await this.batchImageProcessor.processImagesInFolder(this.folderPath, this.recursive);
+                // Respect the selected image source when processing
+                if (this.selectedImageSource === ImageSource.DIRECT) {
+                    await this.batchImageProcessor.processImagesInFolder(this.folderPath, this.recursive);
+                } else if (this.selectedImageSource === ImageSource.LINKED) {
+                    await this.batchImageProcessor.processLinkedImagesInFolder(this.folderPath, this.recursive);
+                }
             });
     }
 

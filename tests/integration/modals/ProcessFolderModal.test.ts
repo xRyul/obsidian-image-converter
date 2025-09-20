@@ -96,6 +96,33 @@ describe('ProcessFolderModal UI flows (Phase 7: 8.1–8.12 subset)', () => {
     expect((processor as any).processImagesInFolder).toHaveBeenCalledWith(folder.path, true);
   });
 
+  it('8.3b Linked mode: Clicking Process calls processLinkedImagesInFolder', async () => {
+    const plugin = await makePlugin(app);
+    (plugin as any).supportedImageFormats = {
+      isSupported: vi.fn((_mime?: string, name?: string) => /\.(png|jpg|jpeg|webp)$/i.test(name || ''))
+    };
+    const processor = { processImagesInFolder: vi.fn(), processLinkedImagesInFolder: vi.fn().mockResolvedValue(undefined) } as unknown as BatchImageProcessor;
+    const modal = new ProcessFolderModal(app, plugin as any, folder.path, processor);
+
+    await modal.onOpen();
+    const container = (modal as any).contentEl as HTMLElement;
+
+    // Switch to Linked mode
+    const buttons = Array.from(container.querySelectorAll('.image-source-setting-container button')) as HTMLButtonElement[];
+    const linkedButton = buttons[buttons.length - 1];
+    linkedButton.click();
+    await Promise.resolve();
+
+    // Click Process button
+    const processBtn = Array.from(container.querySelectorAll('button')).find(btnEl => (btnEl as HTMLButtonElement).textContent?.includes('Process')) as HTMLButtonElement;
+    expect(processBtn).toBeTruthy();
+    processBtn.click();
+
+    await Promise.resolve();
+
+    expect((processor as any).processLinkedImagesInFolder).toHaveBeenCalledWith(folder.path, false);
+  });
+
   it('8.11 Counts update when skip formats input changes', async () => {
     const plugin = await makePlugin(app);
     (plugin as any).supportedImageFormats = {
