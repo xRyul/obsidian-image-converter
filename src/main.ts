@@ -725,10 +725,11 @@ export default class ImageConverterPlugin extends Plugin {
                             // - Create the new image file in the Obsidian vault using `createBinary`.
                             // Show space savings notification
                             // Check if processed image is larger than original
-                            if (this.settings.revertToOriginalIfLarger && this.processedImage.byteLength > originalSize) {
+                            // 如果大于原图的30KB则视为更大，那也不压缩——说明压缩的量小于 30kb
+                            if (this.settings.revertToOriginalIfLarger && this.processedImage.byteLength + 30720 > originalSize) {
                                 // User wants to revert AND processed image is larger
                                 this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
-                                new Notice(`Using original image for "${file.name}" as processed image is larger.`);
+                                new Notice(`Using original image for "${file.name}" as processed image is larger / compress less than 30KB.`);
 
                                 const fileBuffer = await file.arrayBuffer();
                                 tfile = await this.app.vault.createBinary(newFullPath, fileBuffer) as TFile;
@@ -1034,10 +1035,11 @@ export default class ImageConverterPlugin extends Plugin {
                             // - Create the new image file in the Obsidian vault using `createBinary`.
                             // - Show space savings notification
                             // Check if processed image is larger than original
-                            if (this.settings.revertToOriginalIfLarger && this.processedImage.byteLength > originalSize) {
+                            // 如果大于原图的30KB则视为更大，那也不压缩——说明压缩的量小于 30kb
+                            if (this.settings.revertToOriginalIfLarger && this.processedImage.byteLength + 30720 > originalSize) {
                                 // User wants to revert AND processed image is larger
                                 this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
-                                new Notice(`Using original image for "${file.name}" as processed image is larger.`);
+                                new Notice(`Using original image for "${file.name}" as processed image is larger / compress less than 30KB.`);
 
                                 const fileBuffer = await file.arrayBuffer();
                                 tfile = await this.app.vault.createBinary(newFullPath, fileBuffer) as TFile;
