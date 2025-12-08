@@ -1135,6 +1135,29 @@ export default class ImageConverterPlugin extends Plugin {
         // - FRONT:Keeps the cursor at the front by default (by doing nothing) when cursorLocation is "front"
         editor.replaceRange(formattedLink, cursor);
 
+        if (
+            this.settings.isImageAlignmentEnabled &&
+            this.settings.imageAlignment_defaultCenterOnInsert &&
+            this.ImageAlignmentManager &&
+            activeFile
+        ) {
+            const addedDefaultAlignment = await this.ImageAlignmentManager.ensureDefaultAlignment(
+                activeFile.path,
+                linkPath,
+                'center',
+                false
+            );
+
+            if (addedDefaultAlignment) {
+                window.setTimeout(() => {
+                    const currentFile = this.app.workspace.getActiveFile();
+                    if (currentFile?.path === activeFile.path) {
+                        this.ImageAlignmentManager?.applyAlignmentsToNote(activeFile.path);
+                    }
+                }, 0);
+            }
+        }
+
         // Use positive check for "back"
         // - We have to be carefull not to place it to the back 2 times.
         if (this.settings.dropPasteCursorLocation === "back") {

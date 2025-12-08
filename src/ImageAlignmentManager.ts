@@ -387,6 +387,34 @@ export class ImageAlignmentManager {
         return alignment;
     }
 
+    /**
+     * Set a default alignment only when no entry exists for this note+image.
+     * Returns true when a new cache entry was created.
+     */
+    public async ensureDefaultAlignment(
+        notePath: string,
+        imageSrc: string,
+        position: 'left' | 'center' | 'right' = 'center',
+        wrap = false
+    ): Promise<boolean> {
+        if (!notePath || !imageSrc) return false;
+
+        const normalizedSrc = this.getRelativePath(imageSrc);
+        if (this.getImageAlignment(notePath, normalizedSrc)) {
+            return false;
+        }
+
+        await this.saveImageAlignmentToCache(
+            notePath,
+            normalizedSrc,
+            position,
+            undefined,
+            undefined,
+            wrap
+        );
+        return true;
+    }
+
 
     public getRelativePath(imageSrc: string): string {
         // console.log("Original image SRC:", imageSrc);
