@@ -186,7 +186,7 @@ export interface ImageConverterSettings {
     };
 
     isImageAlignmentEnabled: boolean;
-    imageAlignment_defaultCenterOnInsert: boolean;
+    imageAlignment_defaultAlignment: 'none' | 'left' | 'center' | 'right';
     imageAlignment_cacheCleanupInterval: number;
     imageAlignment_cacheLocation: ".obsidian" | "plugin";
 
@@ -380,7 +380,7 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
     },
 
     isImageAlignmentEnabled: true,
-    imageAlignment_defaultCenterOnInsert: true,
+    imageAlignment_defaultAlignment: 'center',
     ["imageAlignment_cacheCleanupInterval"]: 3600000,
     ["imageAlignment_cacheLocation"]: 'plugin',
 
@@ -801,15 +801,21 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
         if (this.plugin.settings.isImageAlignmentEnabled) { // Conditionally render cleanup options
             new Setting(imageAlignmentSection)
-                .setName("Default center newly inserted images")
-                .setDesc("When enabled, images inserted via this plugin start with center alignment.")
-                .addToggle(toggle => toggle
-                    .setValue(this.plugin.settings.imageAlignment_defaultCenterOnInsert)
-                    .onChange(async (value) => {
-                        this.plugin.settings.imageAlignment_defaultCenterOnInsert = value;
-                        await this.plugin.saveSettings();
+                .setName("Default alignment for new images")
+                .setDesc("Choose the alignment tag to apply when an image has no saved alignment.")
+                .addDropdown(drop => {
+                    drop.addOptions({
+                        'none': 'None',
+                        'left': 'Left',
+                        'center': 'Center',
+                        'right': 'Right'
                     })
-                );
+                        .setValue(this.plugin.settings.imageAlignment_defaultAlignment)
+                        .onChange(async (value: 'none' | 'left' | 'center' | 'right') => {
+                            this.plugin.settings.imageAlignment_defaultAlignment = value;
+                            await this.plugin.saveSettings();
+                        });
+                });
 
             // --- Cache Location Setting ---
             new Setting(imageAlignmentSection)

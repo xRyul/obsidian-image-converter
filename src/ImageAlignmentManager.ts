@@ -216,16 +216,16 @@ export class ImageAlignmentManager {
             })
         );
 
-        // ----------------- THIS IS TOO EXPENSIVE TO RUN - AND WAS ONLY NEEDED to track ink removal which is anyway handled by cache cleanup
-        // this.eventRefs.push(
-        //     this.app.vault.on('modify', async (file) => {
-        //         if (file instanceof TFile && file.extension === 'md') {
-        //             console.count("Modifying")
-        //             const content = await this.app.vault.cachedRead(file); // Use cachedRead
-        //             this.debouncedValidateNoteCache(file.path, content); // Use debounced version
-        //         }
-        //     })
-        // );
+        this.eventRefs.push(
+            this.app.vault.on('modify', async (file) => {
+                if (!(file instanceof TFile) || file.extension !== 'md') return;
+                const defaultAlign = this.plugin.settings.imageAlignment_defaultAlignment;
+                const allowDefault = this.plugin.settings.isImageAlignmentEnabled && defaultAlign !== 'none';
+                if (!allowDefault) return;
+                const content = await this.app.vault.cachedRead(file); // Use cachedRead
+                this.debouncedValidateNoteCache(file.path, content); // Use debounced version
+            })
+        );
     }
 
     // setupImageObserver() {
@@ -394,7 +394,7 @@ export class ImageAlignmentManager {
     public async ensureDefaultAlignment(
         notePath: string,
         imageSrc: string,
-        position: 'left' | 'center' | 'right' = 'center',
+        position: 'left' | 'center' | 'right',
         wrap = false
     ): Promise<boolean> {
         if (!notePath || !imageSrc) return false;
@@ -489,35 +489,47 @@ export class ImageAlignmentManager {
         try {
             // console.log("applyAlignmentsToNote")
             await this.lock.acquire('applyAlignments', async () => {
-                const alignments = this.cache[notePath];
-                if (!alignments) return;
+                const defaultAlign = this.plugin.settings.imageAlignment_defaultAlignment;
+                const allowDefault = this.plugin.settings.isImageAlignmentEnabled && defaultAlign !== 'none';
 
-                // Only target images in the markdown content area
-                // const contentEl = document.querySelector('.cm-content');
-                // if (!contentEl) return;
-
-                const images = document.querySelectorAll('img');
+                const images = Array.from(document.querySelectorAll('img'));
                 // console.log(`Found ${images.length} content images`);
 
-                images.forEach((img) => {
-                    const src = img.getAttr('src');
-                    if (!src) return;
-
-                    // Convert SRC+NOTEPATH into hash
-                    const imageHash = this.getImageHash(notePath, src);
-                    // Check if hash is inside the chache file
-                    const positionData = alignments[imageHash];
-
-                    if (positionData) {
-                        this.imageAlignment.applyAlignmentToImage(
-                            img as HTMLImageElement,
-                            positionData
-                        );
-                    }
-                });
+                for (const img of images) {
+                    await this.applyAlignmentToSingleImage(img as HTMLImageElement, notePath, allowDefault, defaultAlign);
+                }
             });
         } catch (error) {
             console.error('Error in applyAlignmentsToNote:', error);
+        }
+    }
+
+    private async applyAlignmentToSingleImage(
+        img: HTMLImageElement,
+        notePath: string,
+        allowDefault: boolean,
+        defaultAlign: 'left' | 'center' | 'right' | 'none'
+    ) {
+        const src = img.getAttr('src');
+        if (!src) return;
+
+        const imageHash = this.getImageHash(notePath, src);
+        const alignments = this.cache[notePath];
+        const positionData = alignments ? alignments[imageHash] : undefined;
+
+        if (positionData) {
+            this.imageAlignment.applyAlignmentToImage(
+                img,
+                positionData
+            );
+        } else if (allowDefault && defaultAlign !== 'none') {
+            const created = await this.ensureDefaultAlignment(notePath, src, defaultAlign as 'left' | 'center' | 'right', false);
+            if (created) {
+                this.imageAlignment.applyAlignmentToImage(
+                    img,
+                    { position: defaultAlign as 'left' | 'center' | 'right', wrap: false }
+                );
+            }
         }
     }
 
@@ -581,11 +593,15 @@ export class ImageAlignmentManager {
             //     return;
             // }
 
-            // **Early exit if no cache for the note**
+            const defaultAlign = this.plugin.settings.imageAlignment_defaultAlignment;
+            const allowDefault = this.plugin.settings.isImageAlignmentEnabled && defaultAlign !== 'none';
+
+            // Ensure cache object exists if we may add defaults
             if (!this.cache[notePath]) {
-                // console.log(`No cache found for note: ${notePath}`);
-                // console.log("------------------------------------");
-                return;
+                if (!allowDefault) {
+                    return;
+                }
+                this.cache[notePath] = {};
             }
 
             // **Extract image links and exit early if none are found**
@@ -609,6 +625,24 @@ export class ImageAlignmentManager {
             // Convert image links to hashes
             const imageHashes = imageLinks.map(link => this.getImageHash(notePath, link));
             // console.log("Calculated image hashes:", imageHashes);
+
+            // Auto-add default alignment for new images
+            if (allowDefault) {
+                for (let i = 0; i < imageLinks.length; i++) {
+                    const link = imageLinks[i];
+                    const hash = imageHashes[i];
+                    if (!this.cache[notePath][hash]) {
+                        await this.saveImageAlignmentToCache(
+                            notePath,
+                            link,
+                            defaultAlign as 'left' | 'center' | 'right',
+                            undefined,
+                            undefined,
+                            false
+                        );
+                    }
+                }
+            }
 
             // Find cached images that are no longer in the note
             const imagesToRemove = cachedImages.filter(cachedImageHash => !imageHashes.includes(cachedImageHash));

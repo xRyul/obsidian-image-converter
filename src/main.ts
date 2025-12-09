@@ -1137,14 +1137,14 @@ export default class ImageConverterPlugin extends Plugin {
 
         if (
             this.settings.isImageAlignmentEnabled &&
-            this.settings.imageAlignment_defaultCenterOnInsert &&
+            this.settings.imageAlignment_defaultAlignment !== 'none' &&
             this.ImageAlignmentManager &&
             activeFile
         ) {
             const addedDefaultAlignment = await this.ImageAlignmentManager.ensureDefaultAlignment(
                 activeFile.path,
                 linkPath,
-                'center',
+                this.settings.imageAlignment_defaultAlignment as 'left' | 'center' | 'right',
                 false
             );
 
