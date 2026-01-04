@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { MarkdownView } from 'obsidian';
 import { LinkFormatter } from '../../../src/LinkFormatter';
 import type { LinkFormat, PathFormat } from '../../../src/LinkFormatSettings';
 import { fakeApp, fakeTFile, fakeVault } from '../../factories/obsidian';
@@ -217,5 +218,44 @@ describe('LinkFormatter — corpus coverage', () => {
     const out = await formatter.formatLink(vaultPath, 'markdown', 'relative', note as any, null);
     const filename = vaultPath.split('/').pop()!;
     expect(out).toBe(`![](${encodeSpacesOnly(`./${filename}`)})`);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Platform-specific (Phase 9: 25.6)
+// -----------------------------------------------------------------------------
+
+describe('LinkFormatter — Platform-specific (Phase 9)', () => {
+  it('25.6 Desktop-specific: getEditorMaxWidth reads CodeMirror .cm-line width when available', () => {
+    const file = fakeTFile({ path: 'img/p.png', name: 'p.png', extension: 'png' });
+    const app = fakeApp({ vault: fakeVault({ files: [file] }) as any }) as any;
+
+    // LinkFormatter.getEditorMaxWidth uses workspace.getMostRecentLeaf().view.editor.cm
+    const view = new (MarkdownView as any)();
+    const cmLine = { clientWidth: 420 } as any;
+    const querySelector = vi.fn(() => cmLine);
+    (view as any).editor = { cm: { contentDOM: { querySelector } } };
+    (app.workspace.getMostRecentLeaf as any) = vi.fn(() => ({ view }));
+
+    const formatter = new LinkFormatter(app as any);
+    const width = (formatter as any).getEditorMaxWidth();
+
+    expect(width).toBe(420);
+    expect(querySelector).toHaveBeenCalledWith('.cm-line');
+  });
+
+  it('25.6 Desktop-specific: getEditorMaxWidth falls back to 800 when cm-line is missing', () => {
+    const file = fakeTFile({ path: 'img/p.png', name: 'p.png', extension: 'png' });
+    const app = fakeApp({ vault: fakeVault({ files: [file] }) as any }) as any;
+
+    const view = new (MarkdownView as any)();
+    const querySelector = vi.fn(() => null);
+    (view as any).editor = { cm: { contentDOM: { querySelector } } };
+    (app.workspace.getMostRecentLeaf as any) = vi.fn(() => ({ view }));
+
+    const formatter = new LinkFormatter(app as any);
+    const width = (formatter as any).getEditorMaxWidth();
+
+    expect(width).toBe(800);
   });
 });

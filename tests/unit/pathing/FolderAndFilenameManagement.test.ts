@@ -434,6 +434,14 @@ describe('FolderAndFilenameManagement — Platform/Security (Phase 9)', () => {
     expect(out).toBe('output/name.png');
   });
 
+  it('26.6 Very long filenames: sanitizeFilename truncates base and preserves extension', () => {
+    const { ffm } = makeFFMGeneric();
+    const longBase = 'A'.repeat(400);
+    const out = ffm.sanitizeFilename(`${longBase}.png`);
+    expect(out.endsWith('.png')).toBe(true);
+    expect(out.length).toBeLessThanOrEqual(250 + '.png'.length);
+  });
+
   it('25.2 POSIX inputs: forward slashes preserved; leading/trailing slashes trimmed', async () => {
     installMomentStub();
     const { ffm } = makeFFMGeneric();

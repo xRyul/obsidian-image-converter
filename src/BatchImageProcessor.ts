@@ -117,54 +117,76 @@ export class BatchImageProcessor {
             for (const linkedFile of filesToProcess) {
                 imageCount++;
 
-                const imageData = await this.app.vault.readBinary(linkedFile);
-                const imageBlob = new Blob([imageData], { type: `image/${linkedFile.extension}` });
-
-                const processedImageData = await this.imageProcessor.processImage(
-                    imageBlob,
-                    outputFormat,
-                    quality,
-                    colorDepth,
-                    resizeMode as ResizeMode,
-                    desiredWidth,
-                    desiredHeight,
-                    desiredLength,
-                    enlargeOrReduce as EnlargeReduce,
-                    allowLargerFiles
-                );
-
-                // Construct the new file path based on conversion settings
+                // Capture paths up-front so we can safely revert if needed
+                const oldPath = linkedFile.path;
                 const newFileName = `${linkedFile.basename}.${outputFormat.toLowerCase()}`;
                 const newFilePath = linkedFile.path.replace(linkedFile.name, newFileName);
 
-                // Capture old path before any rename
-                const oldPath = linkedFile.path;
+                let didRename = false;
+                let didWrite = false;
 
-                // Rename the file (async operation, should be awaited)
-                if (oldPath !== newFilePath) {
-                    await this.app.fileManager.renameFile(linkedFile, newFilePath);
+                try {
+                    const imageData = await this.app.vault.readBinary(linkedFile);
+                    const imageBlob = new Blob([imageData], { type: `image/${linkedFile.extension}` });
+
+                    const processedImageData = await this.imageProcessor.processImage(
+                        imageBlob,
+                        outputFormat,
+                        quality,
+                        colorDepth,
+                        resizeMode as ResizeMode,
+                        desiredWidth,
+                        desiredHeight,
+                        desiredLength,
+                        enlargeOrReduce as EnlargeReduce,
+                        allowLargerFiles
+                    );
+
+                    // Rename first so the extension matches the processed bytes
+                    if (oldPath !== newFilePath) {
+                        await this.app.fileManager.renameFile(linkedFile, newFilePath);
+                        didRename = true;
+                    }
+
+                    const targetPath = didRename ? newFilePath : oldPath;
+                    const targetFile = this.app.vault.getAbstractFileByPath(targetPath) as TFile;
+
+                    if (!targetFile) {
+                        throw new Error(`Failed to find file after rename: ${targetPath}`);
+                    }
+
+                    await this.app.vault.modifyBinary(targetFile, processedImageData);
+                    didWrite = true;
+
+                    // Update links only if the file was renamed (best-effort; do not fail the run)
+                    if (didRename) {
+                        try {
+                            await this.updateLinksInNote(noteFile, oldPath, newFilePath);
+                        } catch (linkError) {
+                            console.error('Error updating links in note:', linkError);
+                            new Notice(`Failed to update links in note for "${linkedFile.name}". Check console for details.`);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error processing image in current note:', error);
+
+                    // If we renamed but did not successfully write, revert rename to avoid breaking existing links.
+                    if (didRename && !didWrite) {
+                        try {
+                            await this.app.fileManager.renameFile(linkedFile, oldPath);
+                        } catch (revertError) {
+                            console.error('Failed to revert rename after error:', revertError);
+                        }
+                    }
+
+                    const msg = error instanceof Error ? error.message : String(error);
+                    new Notice(`Error processing image "${linkedFile.name}": ${msg}`);
+                } finally {
+                    const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+                    statusBarItemEl.setText(
+                        `Processing image ${imageCount} of ${totalImages}, elapsed time: ${elapsedTime} seconds`
+                    );
                 }
-
-                // Get the renamed file using the new path
-                const renamedFile = this.app.vault.getAbstractFileByPath(newFilePath) as TFile;
-
-                if (!renamedFile) {
-                    console.error('Failed to find renamed file:', newFilePath);
-                    continue; // Skip to the next file if the rename failed
-                }
-
-                // Modify the file content with processed image data
-                await this.app.vault.modifyBinary(renamedFile, processedImageData);
-
-                // Update links only if the file was renamed
-                if (oldPath !== newFilePath) {
-                    await this.updateLinksInNote(noteFile, oldPath, newFilePath);
-                }
-
-                const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
-                statusBarItemEl.setText(
-                    `Processing image ${imageCount} of ${totalImages}, elapsed time: ${elapsedTime} seconds`
-                );
             }
 
             const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -275,51 +297,65 @@ export class BatchImageProcessor {
             for (const image of filesToProcess) {
                 imageCount++;
 
-                // Construct the new file path based on conversion settings
+                const oldPath = image.path;
                 const newFileName = `${image.basename}.${outputFormat.toLowerCase()}`;
                 const newFilePath = image.path.replace(image.name, newFileName);
 
-                const imageData = await this.app.vault.readBinary(image);
-                const imageBlob = new Blob([imageData], { type: `image/${image.extension}` });
+                let didRename = false;
+                let didWrite = false;
 
-                const processedImageData = await this.imageProcessor.processImage(
-                    imageBlob,
-                    outputFormat,
-                    quality,
-                    colorDepth,
-                    resizeMode as ResizeMode,
-                    desiredWidth,
-                    desiredHeight,
-                    desiredLength,
-                    enlargeOrReduce as EnlargeReduce,
-                    allowLargerFiles
-                );
+                try {
+                    const imageData = await this.app.vault.readBinary(image);
+                    const imageBlob = new Blob([imageData], { type: `image/${image.extension}` });
 
-                // Capture old path before any rename
-                const oldPath = image.path;
+                    const processedImageData = await this.imageProcessor.processImage(
+                        imageBlob,
+                        outputFormat,
+                        quality,
+                        colorDepth,
+                        resizeMode as ResizeMode,
+                        desiredWidth,
+                        desiredHeight,
+                        desiredLength,
+                        enlargeOrReduce as EnlargeReduce,
+                        allowLargerFiles
+                    );
 
-                // Rename the file if the format has changed
-                if (oldPath !== newFilePath) {
-                    await this.app.fileManager.renameFile(image, newFilePath);
+                    if (oldPath !== newFilePath) {
+                        await this.app.fileManager.renameFile(image, newFilePath);
+                        didRename = true;
+                    }
+
+                    const targetPath = didRename ? newFilePath : oldPath;
+                    const targetFile = this.app.vault.getAbstractFileByPath(targetPath) as TFile;
+
+                    if (!targetFile) {
+                        throw new Error(`Failed to find file after rename: ${targetPath}`);
+                    }
+
+                    await this.app.vault.modifyBinary(targetFile, processedImageData);
+                    didWrite = true;
+
+                    // No need to update links in notes when processing a whole folder (DIRECT mode)
+                } catch (error) {
+                    console.error('Error processing image in folder:', error);
+
+                    if (didRename && !didWrite) {
+                        try {
+                            await this.app.fileManager.renameFile(image, oldPath);
+                        } catch (revertError) {
+                            console.error('Failed to revert rename after error:', revertError);
+                        }
+                    }
+
+                    const msg = error instanceof Error ? error.message : String(error);
+                    new Notice(`Error processing image "${image.name}": ${msg}`);
+                } finally {
+                    const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+                    statusBarItemEl.setText(
+                        `Processing image ${imageCount} of ${totalImages}, elapsed time: ${elapsedTime} seconds`
+                    );
                 }
-
-                // Get the renamed file using the new path
-                const renamedFile = this.app.vault.getAbstractFileByPath(newFilePath) as TFile;
-
-                if (!renamedFile) {
-                    console.error('Failed to find renamed file:', newFilePath);
-                    continue; // Skip to the next file if the rename failed
-                }
-
-                // Modify the file content with processed image data
-                await this.app.vault.modifyBinary(renamedFile, processedImageData);
-
-                // No need to update links in notes when processing a whole folder (DIRECT mode)
-
-                const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
-                statusBarItemEl.setText(
-                    `Processing image ${imageCount} of ${totalImages}, elapsed time: ${elapsedTime} seconds`
-                );
             }
 
             const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -435,63 +471,89 @@ export class BatchImageProcessor {
             for (const image of filesToProcess) {
                 imageCount++;
 
-                const imageData = await this.app.vault.readBinary(image);
-                const imageBlob = new Blob([imageData], { type: `image/${image.extension}` });
-
-                const processedImageData = await this.imageProcessor.processImage(
-                    imageBlob,
-                    outputFormat,
-                    quality,
-                    colorDepth,
-                    resizeMode as ResizeMode,
-                    desiredWidth,
-                    desiredHeight,
-                    desiredLength,
-                    enlargeOrReduce as EnlargeReduce,
-                    allowLargerFiles
-                );
-
-                // Construct target path
+                const oldPath = image.path;
                 const targetName = `${image.basename}.${outputFormat.toLowerCase()}`;
                 let targetPath = image.path.replace(image.name, targetName);
 
-                // Resolve conflicts similar to vault-wide behavior
-                if (image.path !== targetPath && this.app.vault.getAbstractFileByPath(targetPath)) {
-                    targetPath = await this.folderAndFilenameManagement.handleNameConflicts(image.parent?.path || '', targetName);
-                }
+                let didRename = false;
+                let didWrite = false;
 
-                const oldPath = image.path;
+                try {
+                    const imageData = await this.app.vault.readBinary(image);
+                    const imageBlob = new Blob([imageData], { type: `image/${image.extension}` });
 
-                if (oldPath !== targetPath) {
-                    await this.app.fileManager.renameFile(image, targetPath);
-                }
+                    const processedImageData = await this.imageProcessor.processImage(
+                        imageBlob,
+                        outputFormat,
+                        quality,
+                        colorDepth,
+                        resizeMode as ResizeMode,
+                        desiredWidth,
+                        desiredHeight,
+                        desiredLength,
+                        enlargeOrReduce as EnlargeReduce,
+                        allowLargerFiles
+                    );
 
-                const renamedFile = this.app.vault.getAbstractFileByPath(targetPath) as TFile;
-                if (!renamedFile) {
-                    console.error('Failed to find renamed file:', targetPath);
-                    continue;
-                }
+                    // Resolve conflicts similar to vault-wide behavior
+                    if (image.path !== targetPath && this.app.vault.getAbstractFileByPath(targetPath)) {
+                        targetPath = await this.folderAndFilenameManagement.handleNameConflicts(image.parent?.path || '', targetName);
+                    }
 
-                await this.app.vault.modifyBinary(renamedFile, processedImageData);
+                    if (oldPath !== targetPath) {
+                        await this.app.fileManager.renameFile(image, targetPath);
+                        didRename = true;
+                    }
 
-                // Update links only in notes within this folder that referenced this image
-                if (oldPath !== targetPath) {
-                    const mdNotes = refsMd.get(oldPath);
-                    if (mdNotes) {
-                        for (const note of mdNotes) {
-                            await this.updateLinksInNote(note, oldPath, targetPath);
+                    const fileAfterRenamePath = didRename ? targetPath : oldPath;
+                    const targetFile = this.app.vault.getAbstractFileByPath(fileAfterRenamePath) as TFile;
+                    if (!targetFile) {
+                        throw new Error(`Failed to find file after rename: ${fileAfterRenamePath}`);
+                    }
+
+                    await this.app.vault.modifyBinary(targetFile, processedImageData);
+                    didWrite = true;
+
+                    // Update links only in notes within this folder that referenced this image
+                    if (didRename) {
+                        const mdNotes = refsMd.get(oldPath);
+                        if (mdNotes) {
+                            for (const note of mdNotes) {
+                                try {
+                                    await this.updateLinksInNote(note, oldPath, targetPath);
+                                } catch (linkErr) {
+                                    console.error('Error updating note links:', linkErr);
+                                }
+                            }
+                        }
+                        const canvasNotes = refsCanvas.get(oldPath);
+                        if (canvasNotes) {
+                            for (const canvas of canvasNotes) {
+                                try {
+                                    await this.updateCanvasFileLinks(canvas, oldPath, targetPath);
+                                } catch (linkErr) {
+                                    console.error('Error updating canvas links:', linkErr);
+                                }
+                            }
                         }
                     }
-                    const canvasNotes = refsCanvas.get(oldPath);
-                    if (canvasNotes) {
-                        for (const canvas of canvasNotes) {
-                            await this.updateCanvasFileLinks(canvas, oldPath, targetPath);
+                } catch (error) {
+                    console.error('Error processing linked image in folder:', error);
+
+                    if (didRename && !didWrite) {
+                        try {
+                            await this.app.fileManager.renameFile(image, oldPath);
+                        } catch (revertError) {
+                            console.error('Failed to revert rename after error:', revertError);
                         }
                     }
-                }
 
-                const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
-                statusBarItemEl.setText(`Processing image ${imageCount} of ${totalImages}, elapsed time: ${elapsedTime} seconds`);
+                    const msg = error instanceof Error ? error.message : String(error);
+                    new Notice(`Error processing image "${image.name}": ${msg}`);
+                } finally {
+                    const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+                    statusBarItemEl.setText(`Processing image ${imageCount} of ${totalImages}, elapsed time: ${elapsedTime} seconds`);
+                }
             }
 
             const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -611,67 +673,88 @@ export class BatchImageProcessor {
             for (const image of filesToProcess) {
                 imageCount++;
 
-                const imageData = await this.app.vault.readBinary(image);
-                const imageBlob = new Blob([imageData], {
-                    type: `image/${image.extension}`,
-                });
-
-                const processedImageData = await this.imageProcessor.processImage(
-                    imageBlob,
-                    outputFormat,
-                    quality,
-                    colorDepth,
-                    resizeMode as ResizeMode,
-                    desiredWidth,
-                    desiredHeight,
-                    desiredLength,
-                    enlargeOrReduce as EnlargeReduce,
-                    allowLargerFiles
-                );
-
-                // Construct the new file path based on conversion settings
-                const newFileName = `${image.basename}.${outputFormat.toLowerCase()}`;
-                let newFilePath = image.path.replace(image.name, newFileName);
-
-                // Check for conflicts and generate unique name if necessary using FolderAndFilenameManagement
-                if (
-                    image.path !== newFilePath &&
-                    this.app.vault.getAbstractFileByPath(newFilePath)
-                ) {
-                    newFilePath = await this.folderAndFilenameManagement.handleNameConflicts(
-                        image.parent?.path || "",
-                        newFileName
-                    );
-                }
-
-                // Capture old path before any rename
                 const oldPath = image.path;
 
-                // Rename the file if the format has changed
-                if (oldPath !== newFilePath) {
-                    await this.app.fileManager.renameFile(image, newFilePath);
+                let didRename = false;
+                let didWrite = false;
+
+                try {
+                    const imageData = await this.app.vault.readBinary(image);
+                    const imageBlob = new Blob([imageData], {
+                        type: `image/${image.extension}`,
+                    });
+
+                    const processedImageData = await this.imageProcessor.processImage(
+                        imageBlob,
+                        outputFormat,
+                        quality,
+                        colorDepth,
+                        resizeMode as ResizeMode,
+                        desiredWidth,
+                        desiredHeight,
+                        desiredLength,
+                        enlargeOrReduce as EnlargeReduce,
+                        allowLargerFiles
+                    );
+
+                    // Construct the new file path based on conversion settings
+                    const newFileName = `${image.basename}.${outputFormat.toLowerCase()}`;
+                    let newFilePath = image.path.replace(image.name, newFileName);
+
+                    // Check for conflicts and generate unique name if necessary using FolderAndFilenameManagement
+                    if (
+                        image.path !== newFilePath &&
+                        this.app.vault.getAbstractFileByPath(newFilePath)
+                    ) {
+                        newFilePath = await this.folderAndFilenameManagement.handleNameConflicts(
+                            image.parent?.path || "",
+                            newFileName
+                        );
+                    }
+
+                    if (oldPath !== newFilePath) {
+                        await this.app.fileManager.renameFile(image, newFilePath);
+                        didRename = true;
+                    }
+
+                    const fileAfterRenamePath = didRename ? newFilePath : oldPath;
+                    const targetFile = this.app.vault.getAbstractFileByPath(fileAfterRenamePath) as TFile;
+
+                    if (!targetFile) {
+                        throw new Error(`Failed to find file after rename: ${fileAfterRenamePath}`);
+                    }
+
+                    await this.app.vault.modifyBinary(targetFile, processedImageData);
+                    didWrite = true;
+
+                    // Update links in all notes to point to the renamed file (best-effort)
+                    if (didRename) {
+                        try {
+                            await this.updateLinksInAllNotes(oldPath, newFilePath);
+                        } catch (linkErr) {
+                            console.error('Error updating links in all notes:', linkErr);
+                            new Notice(`Failed to update links for "${image.name}". Check console for details.`);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error processing image in vault:', error);
+
+                    if (didRename && !didWrite) {
+                        try {
+                            await this.app.fileManager.renameFile(image, oldPath);
+                        } catch (revertError) {
+                            console.error('Failed to revert rename after error:', revertError);
+                        }
+                    }
+
+                    const msg = error instanceof Error ? error.message : String(error);
+                    new Notice(`Error processing image "${image.name}": ${msg}`);
+                } finally {
+                    const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+                    statusBarItemEl.setText(
+                        `Processing image ${imageCount} of ${totalImages}, elapsed time: ${elapsedTime} seconds`
+                    );
                 }
-
-                // Get the renamed file using the new path
-                const renamedFile = this.app.vault.getAbstractFileByPath(newFilePath) as TFile;
-
-                if (!renamedFile) {
-                    console.error("Failed to find renamed file:", newFilePath);
-                    continue; // Skip to the next file if the rename failed
-                }
-
-                // Modify the file content with processed image data
-                await this.app.vault.modifyBinary(renamedFile, processedImageData);
-
-                // Update links in all notes to point to the renamed file
-                if (oldPath !== newFilePath) {
-                    await this.updateLinksInAllNotes(oldPath, newFilePath);
-                }
-
-                const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
-                statusBarItemEl.setText(
-                    `Processing image ${imageCount} of ${totalImages}, elapsed time: ${elapsedTime} seconds`
-                );
             }
 
             const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);

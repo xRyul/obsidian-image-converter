@@ -296,46 +296,128 @@ describe('BatchImageProcessor — Progress, scope, and error behaviors', () => {
     // Act
     await bip.processImagesInNote(note1);
 
-    // Assert: rename attempted twice, modifyBinary only for the second image
-    expect(app.fileManager.renameFile).toHaveBeenCalledTimes(2);
+    // Assert: we hit the retrieval-failure path, skipped that file, and continued processing the rest
+    expect(failedOnce).toBe(true);
     expect(app.vault.modifyBinary).toHaveBeenCalledTimes(1);
+
+    const content = await app.vault.read(note1);
+    expect(content).toContain('images/a.png');
+    expect(content).toContain('images/b.webp');
+
+    // Ensure we didn't leave a broken link by keeping the original file name for the failed item
+    expect(app.vault.getAbstractFileByPath('images/a.png')).toBeTruthy();
+    expect(app.vault.getAbstractFileByPath('images/a.webp')).toBeNull();
+    expect(app.vault.getAbstractFileByPath('images/b.webp')).toBeTruthy();
   });
 
-  it('4.9 Given per-file exception, When thrown, Then outer catch aborts the run and shows Notice (no further processing)', async () => {
-    // Arrange: throw on first processImage
+  it('23.7 Per-file processing error: processImage throws -> skips that file and continues others', async () => {
+    // Arrange: throw on first processImage (simulate OOM/decoder error)
     imageProcessor.processImage.mockImplementationOnce(async () => {
-      throw new Error('boom');
+      throw new Error('OOM');
     });
+
     const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
     await app.vault.modify(note1, '![a](images/a.png) and ![b](images/b.jpg)');
 
     // Act
     await bip.processImagesInNote(note1);
 
-    // Assert: no renames performed, run aborted early
-    expect(app.fileManager.renameFile).not.toHaveBeenCalled();
+    // Assert: first image stays unchanged, second is processed
+    const content = await app.vault.read(note1);
+    expect(content).toContain('images/a.png');
+    expect(content).toContain('images/b.webp');
+
+    expect(app.vault.modifyBinary).toHaveBeenCalledTimes(1);
+    const renameTargets = (app.fileManager.renameFile as any).mock.calls.map((callArgs: any[]) => callArgs[1] as string);
+    expect(renameTargets).toEqual(['images/b.webp']);
   });
 
-  it('23.3 Permission denied on write: modifyBinary throws -> aborts run and logs error', async () => {
-    // Arrange a simple single-file case
-    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
-    (app.metadataCache as any).resolvedLinks[note1.path] = { [imgA.path]: 1 };
-    await app.vault.modify(note1, '![a](images/a.png)');
-
-    // Throw on binary write to simulate EACCES/ENOSPC
-    const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
-    (app.vault.modifyBinary as any) = vi.fn(async () => {
-      const err: any = new Error('EACCES: permission denied');
-      (err as any).code = 'EACCES';
-      throw err;
+  it('26.3 Extremely large image read failure: readBinary throws -> skips that file and continues others', async () => {
+    const originalReadBinary = app.vault.readBinary as any;
+    let first = true;
+    (app.vault.readBinary as any) = vi.fn(async (...args: any[]) => {
+      if (first) {
+        first = false;
+        throw new Error('OOM while reading');
+      }
+      return originalReadBinary(...args);
     });
 
-    // Act
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
+    await app.vault.modify(note1, '![a](images/a.png) and ![b](images/b.jpg)');
+
     await bip.processImagesInNote(note1);
 
-    // Assert: rename attempted prior to write, then error and abort
-    expect(app.fileManager.renameFile).toHaveBeenCalledTimes(1);
-    expect(consoleErr).toHaveBeenCalled();
+    const content = await app.vault.read(note1);
+    expect(content).toContain('images/a.png');
+    expect(content).toContain('images/b.webp');
+
+    expect(app.vault.modifyBinary).toHaveBeenCalledTimes(1);
+    const renameTargets = (app.fileManager.renameFile as any).mock.calls.map((callArgs: any[]) => callArgs[1] as string);
+    expect(renameTargets).toEqual(['images/b.webp']);
+  });
+
+  it('23.8 Long operations: processing awaits each image sequentially (no concurrency)', async () => {
+    let resolveFirst!: (buf: ArrayBuffer) => void;
+    const firstPromise = new Promise<ArrayBuffer>((resolve) => {
+      resolveFirst = resolve;
+    });
+
+    let signalFirstCalled!: () => void;
+    const firstCalled = new Promise<void>((resolve) => {
+      signalFirstCalled = resolve;
+    });
+
+    imageProcessor.processImage
+      .mockImplementationOnce(async () => {
+        signalFirstCalled();
+        return firstPromise;
+      })
+      .mockImplementationOnce(async () => new ArrayBuffer(4));
+
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
+    await app.vault.modify(note1, '![a](images/a.png) and ![b](images/b.jpg)');
+
+    const runPromise = bip.processImagesInNote(note1);
+
+    // Until the first promise resolves, the loop must not advance to the second image.
+    await firstCalled;
+    expect(imageProcessor.processImage).toHaveBeenCalledTimes(1);
+
+    resolveFirst(new ArrayBuffer(4));
+    await runPromise;
+
+    expect(imageProcessor.processImage).toHaveBeenCalledTimes(2);
+  });
+
+  it('23.3 Permission denied / disk full on write: modifyBinary throws -> skips that item and continues others', async () => {
+    const originalModifyBinary = app.vault.modifyBinary as any;
+    let first = true;
+
+    (app.vault.modifyBinary as any) = vi.fn(async (file: any, data: ArrayBuffer) => {
+      if (first) {
+        first = false;
+        const err: any = new Error('ENOSPC: no space left on device');
+        err.code = 'ENOSPC';
+        throw err;
+      }
+      return originalModifyBinary(file, data);
+    });
+
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
+    await app.vault.modify(note1, '![a](images/a.png) and ![b](images/b.jpg)');
+
+    await bip.processImagesInNote(note1);
+
+    // First image should remain with original link (rename reverted); second succeeds.
+    const content = await app.vault.read(note1);
+    expect(content).toContain('images/a.png');
+    expect(content).toContain('images/b.webp');
+
+    expect((app.vault.modifyBinary as any).mock.calls.length).toBe(2);
+    expect(app.vault.getAbstractFileByPath('images/a.png')).toBeTruthy();
+    expect(app.vault.getAbstractFileByPath('images/a.webp')).toBeNull();
+    expect(app.vault.getAbstractFileByPath('images/b.webp')).toBeTruthy();
   });
 
   it('23.1 External URLs are ignored: http/https image links do not trigger processing or writes', async () => {
