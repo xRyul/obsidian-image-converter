@@ -3,7 +3,7 @@ import ImageConverterPlugin from '../../../src/main';
 import { ImageCaptionManager } from '../../../src/ImageCaptionManager';
 import { fakeApp, fakePluginManifest } from '../../factories/obsidian';
 
-function setupEmbed(alt: string, src: string, inCallout = false) {
+function setupEmbed(alt: string, src: string, inCallout = false, presetEmbedAlt = !inCallout) {
   document.body.innerHTML = '';
   const container = document.createElement('div');
   container.className = 'markdown-preview-view';
@@ -11,6 +11,10 @@ function setupEmbed(alt: string, src: string, inCallout = false) {
   const embed = document.createElement('div');
   embed.className = 'internal-embed image-embed';
   embed.setAttribute('src', src);
+  if (presetEmbedAlt) {
+    // In Obsidian, the embed element often carries the caption via alt for non-callout renders.
+    embed.setAttribute('alt', alt);
+  }
   const img = document.createElement('img');
   img.setAttribute('alt', alt);
   embed.appendChild(img);
@@ -68,37 +72,42 @@ describe('ImageCaptionManager (integration)', () => {
     expect(embed.getAttribute('alt')).toBe('Wikilink Caption');
   });
 
-  it('Given non-empty alt, When refreshed, Then caption visible via enabled class (15.3) and DOM caption rendered below image', () => {
-    const { container, embed } = setupEmbed('Visible', 'imgs/pic.png');
+  it('Given non-empty alt, When refreshed, Then caption remains present via embed[alt] and enabled class (15.3)', () => {
+    // Arrange
+    const { container, embed, img } = setupEmbed('Visible', 'imgs/pic.png');
+
     const manager = new ImageCaptionManager(plugin);
+
+    // Act
     manager.refresh();
+
+    // Assert
     expect(document.body.classList.contains('image-captions-enabled')).toBe(true);
-    // In non-callout path, current impl may keep alt on <img>; visibility is via class.
-    expect(embed.getAttribute('alt') === 'Visible' || true).toBe(true);
-    // The :after content represents the caption; assert styling hook exists on embed and ordering below the image
-    const img = embed.querySelector('img')!;
+    expect(embed.getAttribute('alt')).toBe('Visible');
+    expect(img.getAttribute('alt')).toBe('Visible');
     expect(container.contains(img)).toBe(true);
-    // Style-based caption is represented by alt on embed; ensure present
-    expect(embed.hasAttribute('alt') || img.hasAttribute('alt')).toBe(true);
   });
 
-  it('Given multiple images with different alts, When refreshed, Then each retains its own caption (15.4)', () => {
+  it('Given multiple images with different captions, When refreshed, Then each retains its own embed[alt] caption (15.4)', () => {
+    // Arrange
     document.body.innerHTML = '';
     const container = document.createElement('div');
     container.className = 'markdown-preview-view';
 
     const e1 = document.createElement('div');
     e1.className = 'internal-embed image-embed';
-    e1.setAttribute('src','imgs/a.png');
+    e1.setAttribute('src', 'imgs/a.png');
+    e1.setAttribute('alt', 'A');
     const i1 = document.createElement('img');
-    i1.setAttribute('alt','A');
+    i1.setAttribute('alt', 'A');
     e1.appendChild(i1);
 
     const e2 = document.createElement('div');
     e2.className = 'internal-embed image-embed';
-    e2.setAttribute('src','imgs/b.png');
+    e2.setAttribute('src', 'imgs/b.png');
+    e2.setAttribute('alt', 'B');
     const i2 = document.createElement('img');
-    i2.setAttribute('alt','B');
+    i2.setAttribute('alt', 'B');
     e2.appendChild(i2);
 
     container.appendChild(e1);
@@ -106,10 +115,13 @@ describe('ImageCaptionManager (integration)', () => {
     document.body.appendChild(container);
 
     const manager = new ImageCaptionManager(plugin);
+
+    // Act
     manager.refresh();
 
-    expect(i1.getAttribute('alt')).toBe('A');
-    expect(i2.getAttribute('alt')).toBe('B');
+    // Assert
+    expect(e1.getAttribute('alt')).toBe('A');
+    expect(e2.getAttribute('alt')).toBe('B');
   });
 
   it('Given styling enabled, When refreshed, Then caption styles reflect configuration (15.5)', () => {
@@ -124,19 +136,24 @@ describe('ImageCaptionManager (integration)', () => {
     expect(embed.matches('.image-embed')).toBe(true);
   });
 
-  it('Given skipCaptionExtensions includes jpg/png, When refreshed, Then jpg embed alt remains unset (15.6) and supported formats otherwise show captions', () => {
-    plugin.settings.skipCaptionExtensions = 'jpg, png';
-    const { embed } = setupEmbed('Skip me', 'imgs/pic.jpg');
+  it('Given skipCaptionExtensions includes jpg, When refreshed, Then jpg captions are removed and other formats keep captions (15.6)', () => {
+    // Arrange
+    plugin.settings.skipCaptionExtensions = 'jpg';
+    const { embed, img } = setupEmbed('Skip me', 'imgs/pic.jpg');
 
     const manager = new ImageCaptionManager(plugin);
+
+    // Act
     manager.refresh();
 
+    // Assert
     expect(embed.getAttribute('alt')).toBeFalsy();
+    expect(img.getAttribute('alt')).toBeFalsy();
 
-    // Supported formats: png, webp, svg should not be suppressed unless in skip list
+    // Other formats not in the skip list keep embed[alt]
     const { embed: e2 } = setupEmbed('Yes', 'imgs/pic.png');
     manager.refresh();
-    expect(e2.getAttribute('alt') === 'Yes' || true).toBe(true);
+    expect(e2.getAttribute('alt')).toBe('Yes');
   });
 
   it('Given reading and live preview simulated, When refreshed twice, Then enabled class persists (15.8)', () => {

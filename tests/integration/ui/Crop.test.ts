@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Crop } from '../../../src/Crop';
 import { fakeApp, fakeTFile, fakeVault } from '../../factories/obsidian';
 
@@ -165,8 +165,9 @@ describe('Crop integration behaviors (21.1–21.10)', () => {
     expect(Math.abs(w2 / Math.max(h2,1) - 4/3) < 0.2).toBe(true);
   }, 20000);
 
-  it('21.6 Rotate/flip: Save uses rotated selection bounding box (not pre-rotation coords)', async () => {
-    const { crop } = openCropWithImage();
+  it('21.6 Rotate: Given a selection and 90° rotation, When saving, Then output uses the rotated selection bounding box dimensions', async () => {
+    // Arrange
+    const { crop, app } = openCropWithImage();
     crop.onOpen();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -174,26 +175,86 @@ describe('Crop integration behaviors (21.1–21.10)', () => {
     const container = root.querySelector('.crop-container') as HTMLDivElement;
     const originalImg = root.querySelector('.crop-original-image') as HTMLImageElement;
 
-    setRect(container, { left: 0, top: 0, width: 600, height: 400 });
-    setRect(originalImg, { left: 0, top: 0, width: 600, height: 400 });
+    // Use a 1:1 scale between DOM and natural pixels for easy math
+    Object.defineProperty(originalImg, 'naturalWidth', { value: 1000, configurable: true });
+    Object.defineProperty(originalImg, 'naturalHeight', { value: 500, configurable: true });
 
-    // draw
+    setRect(container, { left: 0, top: 0, width: 1000, height: 500 });
+    setRect(originalImg, { left: 0, top: 0, width: 1000, height: 500 });
+
+    // Draw a 100x50 selection
     originalImg.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, clientY: 100, bubbles: true }));
-    container.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, clientY: 200, bubbles: true }));
+    container.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, clientY: 150, bubbles: true }));
     container.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
 
-    // rotate 90
-    const rotateRight = root.querySelector('.rotate-container .transform-button:nth-child(2)') as HTMLButtonElement;
-    rotateRight.click();
+    const selection = root.querySelector('.selection-area') as HTMLDivElement;
+    setRect(selection, { left: 100, top: 100, width: 100, height: 50 });
+    Object.defineProperty(selection, 'offsetWidth', { value: 100, configurable: true });
+    Object.defineProperty(selection, 'offsetHeight', { value: 50, configurable: true });
 
-    // Ensure save does not throw
-    const saveBtn = root.querySelector('.crop-modal-buttons button:first-child') as HTMLButtonElement;
-    saveBtn.click();
-    expect(true).toBe(true);
+    // Rotate 90 degrees clockwise
+    (crop as any).currentRotation = 90;
+
+    // Track canvases created during save (original, rotated, final)
+    const createdCanvases: HTMLCanvasElement[] = [];
+    const realCreateElement = document.createElement.bind(document);
+    const createSpy = vi.spyOn(document, 'createElement').mockImplementation((tagName: any) => {
+      const el = realCreateElement(tagName);
+      if (String(tagName).toLowerCase() === 'canvas') {
+        createdCanvases.push(el as HTMLCanvasElement);
+      }
+      return el;
+    });
+
+    const ctxByCanvas = new WeakMap<HTMLCanvasElement, any>();
+
+    // Stub toBlob + getContext for deterministic save
+    const realToBlob = (HTMLCanvasElement.prototype as any).toBlob;
+    const realGetContext = (HTMLCanvasElement.prototype as any).getContext;
+
+    (HTMLCanvasElement.prototype as any).toBlob = function (cb: any, type?: string) {
+      const mime = typeof type === 'string' ? type : 'image/png';
+      cb(new Blob([new Uint8Array([1, 2, 3, 4])], { type: mime }));
+    };
+
+    (HTMLCanvasElement.prototype as any).getContext = function (_type: string) {
+      const ctx = {
+        drawImage: vi.fn(),
+        translate: vi.fn(),
+        rotate: vi.fn(),
+        scale: vi.fn(),
+        clearRect: vi.fn(),
+      };
+      ctxByCanvas.set(this as HTMLCanvasElement, ctx);
+      return ctx as any;
+    };
+
+    try {
+      // Act
+      await (crop as any).saveImage();
+
+      // Assert
+      expect((app.vault as any).modifyBinary).toHaveBeenCalled();
+      expect(createdCanvases.length).toBeGreaterThanOrEqual(3);
+
+      const finalCanvas = createdCanvases[2];
+      // 100x50 selection rotated 90° should produce a 50x100 bounding box
+      expect(finalCanvas.width).toBe(50);
+      expect(finalCanvas.height).toBe(100);
+
+      const finalCtx = ctxByCanvas.get(finalCanvas);
+      expect(finalCtx?.drawImage).toHaveBeenCalled();
+    } finally {
+      // Restore stubs
+      (HTMLCanvasElement.prototype as any).toBlob = realToBlob;
+      (HTMLCanvasElement.prototype as any).getContext = realGetContext;
+      createSpy.mockRestore();
+    }
   }, 20000);
 
-  it('21.7 Zoom mapping adjusts modal size and save path still valid', async () => {
-    const { crop } = openCropWithImage();
+  it('21.7 Zoom: Given wheel zoom, When zooming, Then UI updates and image transform includes scale, and Save still succeeds', async () => {
+    // Arrange
+    const { crop, app } = openCropWithImage();
     crop.onOpen();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -201,15 +262,49 @@ describe('Crop integration behaviors (21.1–21.10)', () => {
     const container = root.querySelector('.crop-container') as HTMLDivElement;
     const originalImg = root.querySelector('.crop-original-image') as HTMLImageElement;
 
-    setRect(container, { left: 0, top: 0, width: 600, height: 400 });
-    setRect(originalImg, { left: 0, top: 0, width: 600, height: 400 });
+    Object.defineProperty(originalImg, 'naturalWidth', { value: 1000, configurable: true });
+    Object.defineProperty(originalImg, 'naturalHeight', { value: 500, configurable: true });
 
-    // simulate wheel zoom
+    setRect(container, { left: 0, top: 0, width: 1000, height: 500 });
+    setRect(originalImg, { left: 0, top: 0, width: 1000, height: 500 });
+
+    const adjustSpy = vi.spyOn(crop as any, 'adjustModalSize');
+
+    // Act — zoom in one step via wheel
     container.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true }));
-    // Save should still not throw
-    const saveBtn = root.querySelector('.crop-modal-buttons button:first-child') as HTMLButtonElement;
-    saveBtn.click();
-    expect(true).toBe(true);
+
+    // Assert — UI and transform updated
+    const zoomValue = root.querySelector('.zoom-value') as HTMLElement;
+    expect(zoomValue?.textContent).toBe('110%');
+    expect(originalImg.style.transform).toContain('scale(1.1)');
+    expect(adjustSpy).toHaveBeenCalled();
+
+    // And Save still works (no crop selection)
+    const realToBlob = (HTMLCanvasElement.prototype as any).toBlob;
+    const realGetContext = (HTMLCanvasElement.prototype as any).getContext;
+
+    (HTMLCanvasElement.prototype as any).toBlob = function (cb: any, type?: string) {
+      const mime = typeof type === 'string' ? type : 'image/png';
+      cb(new Blob([new Uint8Array([9, 8, 7, 6])], { type: mime }));
+    };
+
+    (HTMLCanvasElement.prototype as any).getContext = function (_type: string) {
+      return {
+        drawImage: () => {},
+        translate: () => {},
+        rotate: () => {},
+        scale: () => {},
+        clearRect: () => {}
+      } as any;
+    };
+
+    try {
+      await (crop as any).saveImage();
+      expect((app.vault as any).modifyBinary).toHaveBeenCalled();
+    } finally {
+      (HTMLCanvasElement.prototype as any).toBlob = realToBlob;
+      (HTMLCanvasElement.prototype as any).getContext = realGetContext;
+    }
   }, 20000);
 
   it('21.8 Apply crop: modifyBinary is called when selection present', async () => {
@@ -311,7 +406,38 @@ describe('Crop integration behaviors (21.1–21.10)', () => {
     expect(spy).toHaveBeenCalled();
   });
 
-  it('21.10 Reset clears current selection and keeps modal open', async () => {
+  it('21.10 Cancel: Given modal open, When Cancel is clicked, Then it closes without writing', async () => {
+    // Arrange
+    const { crop, app } = openCropWithImage();
+    const openPromise = crop.onOpen();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const root = (crop as any).contentEl as HTMLElement;
+    const originalImg = root.querySelector('.crop-original-image') as HTMLImageElement;
+
+    // Ensure loadImage() can resolve so onOpen registers button listeners
+    Object.defineProperty(originalImg, 'naturalWidth', { value: 10, configurable: true });
+    Object.defineProperty(originalImg, 'naturalHeight', { value: 10, configurable: true });
+    Object.defineProperty(originalImg, 'clientWidth', { value: 10, configurable: true });
+    Object.defineProperty(originalImg, 'clientHeight', { value: 10, configurable: true });
+
+    // Resolve the internal promise
+    (originalImg as any).onload?.();
+    await openPromise;
+
+    const cancelBtn = root.querySelector('.crop-modal-buttons button:nth-child(2)') as HTMLButtonElement;
+    const writeSpy = vi.spyOn(app.vault as any, 'modifyBinary');
+    const closeSpy = vi.spyOn(crop as any, 'close');
+
+    // Act
+    cancelBtn.click();
+
+    // Assert
+    expect(closeSpy).toHaveBeenCalled();
+    expect(writeSpy).not.toHaveBeenCalled();
+  });
+
+  it('21.10 Reset/escape: Given selection exists, When Escape is pressed, Then selection clears and modal remains open', async () => {
     const { crop } = openCropWithImage();
     // Do not await onOpen; allow image load microtask to resolve
     crop.onOpen();

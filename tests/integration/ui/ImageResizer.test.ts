@@ -555,7 +555,8 @@ describe('ImageResizer lifecycle and wheel behaviors (13.15–13.16, 13.17–13.
     expect(parseInt(img.style.width || '0', 10)).toBeGreaterThan(0);
   });
 
-  it('13.22 Scroll-wheel with % width keeps percentage and clamps to [1..100]', () => {
+  it('13.22 Scroll-wheel percentage: Given an IMG with % width, When wheel-resizing, Then width stays in % and clamps to [1..100]', () => {
+    // Arrange
     const { resizer, plugin } = makeResizer({ viewMode: 'source', overrides: { isScrollResizeEnabled: true, scrollwheelModifier: 'None' } });
     const { container } = setupView();
     const img = addInternalImage(container);
@@ -567,18 +568,55 @@ describe('ImageResizer lifecycle and wheel behaviors (13.15–13.16, 13.17–13.
 
     (resizer as any).handleImageHover({ target: img, clientX: 5, clientY: 5 } as any);
 
+    // Act
     img.dispatchEvent(new WheelEvent('wheel', { deltaY: -10, bubbles: true, cancelable: true }));
 
+    // Assert
     const wStr = img.style.width || '';
     expect(wStr).not.toBe('50%');
-    if (wStr.endsWith('%')) {
-      const percent = parseFloat(wStr);
-      expect(percent).toBeGreaterThanOrEqual(1);
-      expect(percent).toBeLessThanOrEqual(100);
-    } else {
-      expect(wStr.endsWith('px')).toBe(true);
-      const px = parseInt(wStr, 10);
-      expect(px).toBeGreaterThan(0);
+    expect(wStr.endsWith('%')).toBe(true);
+
+    const percent = parseFloat(wStr);
+    expect(percent).toBeGreaterThanOrEqual(1);
+    expect(percent).toBeLessThanOrEqual(100);
+  });
+
+  it('13.22 Scroll-wheel video: Given an HTMLVideoElement with computed % width, When calculating new size, Then % math is used and clamps to [1..100]', () => {
+    // Arrange
+    const { resizer } = makeResizer({ viewMode: 'source', overrides: { isScrollResizeEnabled: true, scrollwheelModifier: 'None' } });
+
+    const video = document.createElement('video') as HTMLVideoElement;
+    // Provide stable dimensions for aspect ratio
+    Object.defineProperty(video, 'clientWidth', { value: 200, configurable: true });
+    Object.defineProperty(video, 'clientHeight', { value: 100, configurable: true });
+
+    const getComputedStyleSpy = vi
+      .spyOn(globalThis as any, 'getComputedStyle')
+      .mockReturnValue({ width: '50%' } as any);
+
+    try {
+      // Act
+      const evt = new WheelEvent('wheel', { deltaY: -10, bubbles: true, cancelable: true });
+      const { newWidth, newHeight } = (resizer as any).resizeImageScrollWheel(evt, video);
+
+      // Assert
+      expect(newWidth).toBe(55); // 50% * (1 + 0.1) rounded
+      expect(newHeight).toBe(28); // 55 / (200/100) rounded and min-clamped
+    } finally {
+      getComputedStyleSpy.mockRestore();
+    }
+
+    // Also validate clamping at 100%
+    const getComputedStyleSpy2 = vi
+      .spyOn(globalThis as any, 'getComputedStyle')
+      .mockReturnValue({ width: '100%' } as any);
+
+    try {
+      const evt = new WheelEvent('wheel', { deltaY: -10, bubbles: true, cancelable: true });
+      const { newWidth } = (resizer as any).resizeImageScrollWheel(evt, video);
+      expect(newWidth).toBe(100);
+    } finally {
+      getComputedStyleSpy2.mockRestore();
     }
   });
 
