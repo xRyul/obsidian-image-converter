@@ -25,7 +25,7 @@ function openCropWithImage(bytesLen = 32) {
   return { crop, app };
 }
 
-describe('Crop integration behaviors (21.1–21.10)', () => {
+describe('Crop integration behaviors (21.1–21.14)', () => {
   beforeEach(() => { document.body.innerHTML = ''; });
 
   it('21.1 Selection drawing: drag creates a selection rect with expected bounds', async () => {
@@ -471,5 +471,123 @@ describe('Crop integration behaviors (21.1–21.10)', () => {
     ).toBe(true);
     // modal still present
     expect(root.querySelector('.crop-container')).toBeTruthy();
+  });
+
+  it('21.11 MMB panning: Given image loaded, When middle mouse button pressed and dragged, Then image pans via translate transform', async () => {
+    // Arrange
+    const { crop } = openCropWithImage();
+    crop.onOpen();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const root = (crop as any).contentEl as HTMLElement;
+    const cropContainer = root.querySelector('.crop-container') as HTMLDivElement;
+    const originalImg = root.querySelector('.crop-original-image') as HTMLImageElement;
+
+    setRect(cropContainer, { left: 0, top: 0, width: 600, height: 400 });
+    setRect(originalImg, { left: 0, top: 0, width: 600, height: 400 });
+
+    // Act - press MMB (button=1) and drag
+    originalImg.dispatchEvent(new MouseEvent('mousedown', { button: 1, clientX: 200, clientY: 200, bubbles: true }));
+    cropContainer.dispatchEvent(new MouseEvent('mousemove', { clientX: 250, clientY: 220, bubbles: true }));
+    cropContainer.dispatchEvent(new MouseEvent('mouseup', { button: 1, bubbles: true }));
+
+    // Assert - image transform includes translate
+    expect(originalImg.style.transform).toContain('translate(50px, 20px)');
+    expect((crop as any).currentPanX).toBe(50);
+    expect((crop as any).currentPanY).toBe(20);
+  });
+
+  it('21.12 LMB draws selection (not pan): Given image loaded, When left mouse button pressed and dragged, Then selection area drawn without panning', async () => {
+    // Arrange
+    const { crop } = openCropWithImage();
+    crop.onOpen();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const root = (crop as any).contentEl as HTMLElement;
+    const cropContainer = root.querySelector('.crop-container') as HTMLDivElement;
+    const originalImg = root.querySelector('.crop-original-image') as HTMLImageElement;
+    const selection = root.querySelector('.selection-area') as HTMLDivElement;
+
+    setRect(cropContainer, { left: 0, top: 0, width: 600, height: 400 });
+    setRect(originalImg, { left: 0, top: 0, width: 600, height: 400 });
+
+    // Act - press LMB (button=0) and drag
+    originalImg.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: 100, clientY: 100, bubbles: true }));
+    cropContainer.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, clientY: 150, bubbles: true }));
+    cropContainer.dispatchEvent(new MouseEvent('mouseup', { button: 0, bubbles: true }));
+
+    // Assert - selection drawn, no panning
+    expect(selection.style.display).toBe('block');
+    expect(parseInt(selection.style.width || '0', 10)).toBe(100);
+    expect(parseInt(selection.style.height || '0', 10)).toBe(50);
+    expect((crop as any).currentPanX).toBe(0);
+    expect((crop as any).currentPanY).toBe(0);
+    expect(originalImg.style.transform).not.toContain('translate');
+  });
+
+  it('21.13 Pan reset on ESC/Reset: Given pan applied and selection exists, When Escape pressed, Then pan resets to 0,0', async () => {
+    // Arrange
+    const { crop } = openCropWithImage();
+    crop.onOpen();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const root = (crop as any).contentEl as HTMLElement;
+    const cropContainer = root.querySelector('.crop-container') as HTMLDivElement;
+    const originalImg = root.querySelector('.crop-original-image') as HTMLImageElement;
+
+    setRect(cropContainer, { left: 0, top: 0, width: 600, height: 400 });
+    setRect(originalImg, { left: 0, top: 0, width: 600, height: 400 });
+
+    // Pan via MMB
+    originalImg.dispatchEvent(new MouseEvent('mousedown', { button: 1, clientX: 200, clientY: 200, bubbles: true }));
+    cropContainer.dispatchEvent(new MouseEvent('mousemove', { clientX: 300, clientY: 250, bubbles: true }));
+    cropContainer.dispatchEvent(new MouseEvent('mouseup', { button: 1, bubbles: true }));
+
+    expect((crop as any).currentPanX).toBe(100);
+    expect((crop as any).currentPanY).toBe(50);
+
+    // Draw selection then reset via Escape
+    originalImg.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: 100, clientY: 100, bubbles: true }));
+    cropContainer.dispatchEvent(new MouseEvent('mousemove', { clientX: 150, clientY: 150, bubbles: true }));
+    cropContainer.dispatchEvent(new MouseEvent('mouseup', { button: 0, bubbles: true }));
+
+    // Act - press Escape
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    // Assert - pan reset
+    expect((crop as any).currentPanX).toBe(0);
+    expect((crop as any).currentPanY).toBe(0);
+    expect(originalImg.style.transform).not.toContain('translate');
+  });
+
+  it('21.14 Panning stops on mouseleave: Given panning in progress, When mouse leaves container, Then panning stops', async () => {
+    // Arrange
+    const { crop } = openCropWithImage();
+    crop.onOpen();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const root = (crop as any).contentEl as HTMLElement;
+    const cropContainer = root.querySelector('.crop-container') as HTMLDivElement;
+    const originalImg = root.querySelector('.crop-original-image') as HTMLImageElement;
+
+    setRect(cropContainer, { left: 0, top: 0, width: 600, height: 400 });
+    setRect(originalImg, { left: 0, top: 0, width: 600, height: 400 });
+
+    // Start panning
+    originalImg.dispatchEvent(new MouseEvent('mousedown', { button: 1, clientX: 200, clientY: 200, bubbles: true }));
+    cropContainer.dispatchEvent(new MouseEvent('mousemove', { clientX: 250, clientY: 220, bubbles: true }));
+
+    expect((crop as any).isPanning).toBe(true);
+
+    // Act - mouse leaves container
+    cropContainer.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+
+    // Assert - panning stopped
+    expect((crop as any).isPanning).toBe(false);
+
+    // Further mouse moves should not pan
+    const panXBefore = (crop as any).currentPanX;
+    cropContainer.dispatchEvent(new MouseEvent('mousemove', { clientX: 300, clientY: 300, bubbles: true }));
+    expect((crop as any).currentPanX).toBe(panXBefore);
   });
 });
