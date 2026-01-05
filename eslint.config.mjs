@@ -2,8 +2,10 @@ import js from "@eslint/js";
 import typescriptEslint from "@typescript-eslint/eslint-plugin";
 import tsParser from "@typescript-eslint/parser";
 import globals from "globals";
+import obsidianmd from "eslint-plugin-obsidianmd";
+import { defineConfig } from "eslint/config";
 
-export default [
+export default defineConfig([
 	// Ignore patterns (replaces .eslintignore)
 	{
 		ignores: [
@@ -62,6 +64,9 @@ export default [
 		],
 	},
 
+	// Obsidian-specific rules
+	...obsidianmd.configs.recommended,
+
 	// Base configuration for all JS/TS files
 	{
 		files: ["**/*.{js,mjs,cjs,ts,tsx}"],
@@ -69,6 +74,9 @@ export default [
 			parser: tsParser,
 			ecmaVersion: "latest",
 			sourceType: "module",
+			parserOptions: {
+				project: "./tsconfig.json",
+			},
 			globals: {
 				...globals.node,
 				...globals.browser,
@@ -225,4 +233,4 @@ export default [
 			],
 		},
 	},
-];
+]);
