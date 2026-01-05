@@ -2852,11 +2852,11 @@ export class ImageAnnotationModal extends Modal {
                     const blob: Blob | null = await new Promise<Blob | null>((resolve) => {
                         const anyCanvas = tempCanvas as any;
                         if (typeof anyCanvas.toBlob === 'function') {
-                            anyCanvas.toBlob((b: Blob | null) => resolve(b), mimeType, 1);
+                            anyCanvas.toBlob((result: Blob | null) => resolve(result), mimeType, 1);
                         } else {
                             try {
                                 const dataUrl = tempCanvas.toDataURL(mimeType, 1);
-                                fetch(dataUrl).then(r => r.blob()).then(resolve).catch(() => resolve(null));
+                                fetch(dataUrl).then(res => res.blob()).then(resolve).catch(() => resolve(null));
                             } catch {
                                 resolve(null);
                             }
@@ -2915,11 +2915,11 @@ export class ImageAnnotationModal extends Modal {
                         const blob: Blob | null = await new Promise<Blob | null>((resolve) => {
                             const anyCanvas = tempCanvas as any;
                             if (typeof anyCanvas.toBlob === 'function') {
-                                anyCanvas.toBlob((b: Blob | null) => resolve(b), mimeType, 1);
+                                anyCanvas.toBlob((result: Blob | null) => resolve(result), mimeType, 1);
                             } else {
                                 try {
                                     const dataUrl = tempCanvas.toDataURL(mimeType, 1);
-                                    fetch(dataUrl).then(r => r.blob()).then(resolve).catch(() => resolve(null));
+                                    fetch(dataUrl).then(res => res.blob()).then(resolve).catch(() => resolve(null));
                                 } catch {
                                     resolve(null);
                                 }
@@ -3291,16 +3291,3 @@ class ArrowBrush extends PencilBrush {
     }
 }
 
-// Helper function to convert base64 to ArrayBuffer
-function base64ToArrayBuffer(base64: string): ArrayBuffer {
-    const binary = atob(base64.split(',')[1]);
-    const { length } = binary;
-    const buffer = new ArrayBuffer(length);
-    const view = new Uint8Array(buffer);
-    
-    for (let i = 0; i < length; i++) {
-        view[i] = binary.charCodeAt(i);
-    }
-    
-    return buffer;
-}

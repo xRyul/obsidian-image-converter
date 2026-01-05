@@ -196,7 +196,7 @@ if (format === 'ORIGINAL') {
                             enlargeOrReduce,
                             allowLargerFiles
                         );
-                    } catch (e) {
+                    } catch {
                         // Fallback to original on failure
                         return file.arrayBuffer();
                     }
@@ -221,7 +221,7 @@ if (format === 'ORIGINAL') {
                             enlargeOrReduce,
                             allowLargerFiles
                         );
-                    } catch (e) {
+                    } catch {
                         // Fallback to original on failure
                         return file.arrayBuffer();
                     }
@@ -241,7 +241,7 @@ if (format === 'ORIGINAL') {
                             enlargeOrReduce,
                             allowLargerFiles
                         );
-                    } catch (unexpected) {
+                    } catch {
                         // Any unexpected error in pipeline -> return original, do not throw (1.31)
                         return file.arrayBuffer();
                     }
@@ -550,7 +550,7 @@ if (format === 'ORIGINAL') {
                     const errorMessage = `FFmpeg failed with code ${code}: ${errorData}`;
                     console.error(errorMessage);
                     // Clean up temp file on error
-                    try { fs.unlink(tempFilePath); } catch {}
+                    try { fs.unlink(tempFilePath); } catch { /* ignore cleanup errors */ }
                     reject(new Error(errorMessage));
                 }
             };
@@ -613,7 +613,7 @@ ffmpeg.on('error', (err: Error) => {
 
             // Safety timeout to avoid hanging tests in case mocks fail to emit expected events
             const safetyTimeout = setTimeout(() => {
-                try { ffmpeg?.kill?.('SIGKILL'); } catch {}
+                try { ffmpeg?.kill?.('SIGKILL'); } catch { /* ignore kill errors */ }
                 reject(new Error('FFmpeg process timed out'));
             }, 5000);
 
