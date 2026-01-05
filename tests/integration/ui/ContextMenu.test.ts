@@ -7,7 +7,7 @@ import { Menu, Platform } from 'obsidian';
 vi.mock('../../../src/ProcessSingleImageModal.ts', () => ({
   ProcessSingleImageModal: vi.fn().mockImplementation(() => ({ open: vi.fn() } as any))
 }));
-vi.mock('../../../src/ImageAnnotation.ts', () => ({
+vi.mock('../../../src/ImageAnnotation', () => ({
   ImageAnnotationModal: vi.fn().mockImplementation(() => ({ open: vi.fn() } as any))
 }));
 
@@ -142,7 +142,7 @@ expect(openSpy).toHaveBeenCalled();
       const file = fakeTFile({ path: 'imgs/pic.jpg', name: 'pic.jpg', extension: 'jpg' });
       ((app.vault as any).getFiles as any).mockReturnValue([file]);
 
-      const mod = await import('../../../src/ImageAnnotation.ts');
+      const mod = await import('../../../src/ImageAnnotation');
       const modalSpy = vi.spyOn(mod as any, 'ImageAnnotationModal');
       const ctx = new contextMenuCls(app as any, plugin, {} as any, {} as any);
       img.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
