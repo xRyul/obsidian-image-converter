@@ -826,14 +826,14 @@ export class BatchImageProcessor {
 
         // Skip files with extensions in the skip list
         if (skipFormats.includes(image.extension.toLowerCase())) {
-            console.log(`Skipping ${image.name}: Format ${image.extension} is in skip list`);
+        console.debug(`Skipping ${image.name}: Format ${image.extension} is in skip list`);
             return false;
         }
 
         // Skip images already in target format (or original format if disabled)
         if (skipImagesInTargetFormat &&
             image.extension === effectiveTargetFormat) {
-            console.log(`Skipping ${image.name}: Already in ${effectiveTargetFormat} format`);
+        console.debug(`Skipping ${image.name}: Already in ${effectiveTargetFormat} format`);
             return false;
         }
 
@@ -870,7 +870,7 @@ export class BatchImageProcessor {
 
         if (content !== newContent) {
             await this.app.vault.modify(noteFile, newContent);
-            console.log(`Links updated in ${noteFile.path}`);
+            console.debug(`Links updated in ${noteFile.path}`);
         }
     }
 

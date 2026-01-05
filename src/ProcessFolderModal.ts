@@ -523,17 +523,17 @@ export class ProcessFolderModal extends Modal {
 
         this.enlargeReduceSettings = new Setting(this.enlargeReduceDiv)
             .setClass("enlarge-reduce-setting")
-            .setName("Enlarge or Reduce ⓘ")
+            .setName("Enlarge or reduce ⓘ")
             .setDesc(
-                "Reduce and Enlarge: Adjusts all images. Reduce only: Shrinks larger images. Enlarge only: Enlarges smaller images."
+                "Reduce and enlarge: Adjusts all images. Reduce only: Shrinks larger images. Enlarge only: Enlarges smaller images."
             )
             .setTooltip(
-                "• Reduce and Enlarge: Adjusts all images to fit specified dimensions\n• Reduce only: Only shrinks images larger than target\n• Enlarge only: Only enlarges images smaller than target"
+                "• Reduce and enlarge: Adjusts all images to fit specified dimensions\n• Reduce only: Only shrinks images larger than target\n• Enlarge only: Only enlarges images smaller than target"
             )
             .addDropdown((dropdown) => {
                 dropdown
                     .addOptions({
-                        Always: "Reduce and Enlarge",
+                        Always: "Reduce and enlarge",
                         Reduce: "Reduce only",
                         Enlarge: "Enlarge only",
                     })
@@ -746,7 +746,7 @@ export class ProcessFolderModal extends Modal {
             }
         }
 
-        console.log("updateImageCounts:", {
+        console.debug("updateImageCounts:", {
             total,
             processed,
             skipped,
@@ -809,7 +809,7 @@ export class ProcessFolderModal extends Modal {
             }
         }
 
-        console.log(
+        console.debug(
             "Images found in folder",
             folder.path,
             ":",
@@ -823,7 +823,7 @@ export class ProcessFolderModal extends Modal {
     }
 
     async getImagesFromMarkdownFile(markdownFile: TFile): Promise<TFile[]> {
-        console.log("Getting images from Markdown file:", markdownFile.path);
+        console.debug("Getting images from Markdown file:", markdownFile.path);
         const images: TFile[] = [];
         const content = await this.app.vault.read(markdownFile);
         const { vault } = this.app;
@@ -860,7 +860,7 @@ export class ProcessFolderModal extends Modal {
                     linkedImageFile instanceof TFile &&
                     this.plugin.supportedImageFormats.isSupported(undefined, linkedImageFile.name)
                 ) {
-                    console.log(
+                    console.debug(
                         "Found relative linked image:",
                         linkedImageFile.path
                     );
@@ -869,7 +869,7 @@ export class ProcessFolderModal extends Modal {
             }
         }
 
-        console.log(
+        console.debug(
             "Images found in Markdown file:",
             images.map((file) => file.path)
         );
@@ -893,7 +893,7 @@ export class ProcessFolderModal extends Modal {
             imageNames.push(match[1]);
         }
 
-        console.log("Image names extracted from Markdown:", imageNames);
+        console.debug("Image names extracted from Markdown:", imageNames);
         return imageNames;
     }
 

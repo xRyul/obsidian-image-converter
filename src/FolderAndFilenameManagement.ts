@@ -636,7 +636,7 @@ export class FolderAndFilenameManagement {
 
             // 4. If direct resolution fails, consider it as a relative path from the current file
             const activeFile = this.app.workspace.getActiveFile();
-            console.log("activeFile:", activeFile)
+            console.debug("activeFile:", activeFile)
             if (activeFile) {
                 const parentFolder = activeFile.parent?.path || '';
                 const resolvedPath = normalizePath(path.join(parentFolder, srcAttribute));

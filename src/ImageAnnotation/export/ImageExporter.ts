@@ -280,7 +280,7 @@ export class ImageExporter {
                 }
             }
         } catch (e) {
-            console.log('toCanvasElement method failed, trying alternative...', e);
+            console.debug('toCanvasElement method failed, trying alternative...', e);
         }
         return null;
     }
@@ -312,7 +312,7 @@ export class ImageExporter {
 
             return dataUrlToArrayBuffer(dataUrl);
         } catch (e) {
-            console.log('toDataURL method failed, trying alternative...', e);
+            console.debug('toDataURL method failed, trying alternative...', e);
         }
         return null;
     }
@@ -359,7 +359,7 @@ export class ImageExporter {
                 }
             }
         } catch (e) {
-            console.log('Native canvas fallback failed', e);
+            console.debug('Native canvas fallback failed', e);
         }
         return null;
     }

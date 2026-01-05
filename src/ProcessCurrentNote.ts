@@ -135,15 +135,15 @@ export class ProcessCurrentNote extends Modal {
 
         // Resize Mode setting
         this.resizeModeSetting = new Setting(resizeContainer)
-            .setName('Resize Mode ⓘ')
+            .setName('Resize mode ⓘ')
             .setDesc('Choose how images should be resized. Note: Results are permanent.')
             .setTooltip('Fit: Maintains aspect ratio within dimensions\nFill: Exactly matches dimensions\nLongest Edge: Limits the longest side\nShortest Edge: Limits the shortest side\nWidth/Height: Constrains single dimension')
             .addDropdown(dropdown =>
                 dropdown
                     .addOptions({
                         None: 'None',
-                        LongestEdge: 'Longest Edge',
-                        ShortestEdge: 'Shortest Edge',
+                        LongestEdge: 'Longest edge',
+                        ShortestEdge: 'Shortest edge',
                         Width: 'Width',
                         Height: 'Height',
                         Fit: 'Fit',
@@ -167,7 +167,7 @@ export class ProcessCurrentNote extends Modal {
 
         // Skip formats setting
         this.skipFormatsSetting = new Setting(skipContainer)
-            .setName('Skip File Formats ⓘ')
+            .setName('Skip file formats ⓘ')
             .setTooltip('Comma-separated list of file formats to skip (e.g., tif,tiff,heic). Leave empty to process all formats.')
             .addText(text =>
                 text
@@ -243,13 +243,13 @@ export class ProcessCurrentNote extends Modal {
 
         this.enlargeReduceSettings = new Setting(this.enlargeReduceDiv)
             .setClass('enlarge-reduce-setting')
-            .setName('Enlarge or Reduce ⓘ')
+            .setName('Enlarge or reduce ⓘ')
             .setDesc('Controls how images are adjusted relative to target size:')
             .setTooltip('• Reduce and Enlarge: Adjusts all images to fit specified dimensions\n• Reduce only: Only shrinks images larger than target\n• Enlarge only: Only enlarges images smaller than target')
             .addDropdown((dropdown) => {
                 dropdown
                     .addOptions({
-                        Always: 'Reduce and Enlarge',
+                        Always: 'Reduce and enlarge',
                         Reduce: 'Reduce only',
                         Enlarge: 'Enlarge only',
                     })

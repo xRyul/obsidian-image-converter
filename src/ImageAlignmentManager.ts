@@ -597,7 +597,7 @@ export class ImageAlignmentManager {
 
 	public async cleanCache() {
 		await this.lock.acquire("cacheCleanup", async () => {
-			console.time("Cache cleanup time");
+			const cleanupStart = Date.now();
 			const newCache: ImageAlignmentCache = {};
 
 			for (const notePath in this.cache) {
@@ -647,8 +647,8 @@ export class ImageAlignmentManager {
 
 			this.cache = newCache;
 			await this.saveCache();
-			console.timeEnd("Cache cleanup time");
-			console.log("Cache cleaned:", this.cache);
+			console.debug(`Cache cleanup time: ${Date.now() - cleanupStart}ms`);
+			console.debug("Cache cleaned:", this.cache);
 		});
 	}
 

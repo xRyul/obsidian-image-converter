@@ -154,8 +154,8 @@ export class ProcessAllVaultModal extends Modal {
                         None: "None",
                         Fit: "Fit",
                         Fill: "Fill",
-                        LongestEdge: "Longest Edge",
-                        ShortestEdge: "Shortest Edge",
+                        LongestEdge: "Longest edge",
+                        ShortestEdge: "Shortest edge",
                         Width: "Width",
                         Height: "Height",
                     })
@@ -263,7 +263,7 @@ export class ProcessAllVaultModal extends Modal {
 
         this.enlargeReduceSettings = new Setting(this.enlargeReduceDiv)
             .setClass("enlarge-reduce-setting")
-            .setName("Enlarge or Reduce ⓘ")
+            .setName("Enlarge or reduce ⓘ")
             .setDesc(
                 "Reduce and Enlarge: Adjusts all images. Reduce only: Shrinks larger images. Enlarge only: Enlarges smaller images."
             )
@@ -273,7 +273,7 @@ export class ProcessAllVaultModal extends Modal {
             .addDropdown((dropdown) => {
                 dropdown
                     .addOptions({
-                        Always: "Reduce and Enlarge",
+                        Always: "Reduce and enlarge",
                         Reduce: "Reduce only",
                         Enlarge: "Enlarge only",
                     })
