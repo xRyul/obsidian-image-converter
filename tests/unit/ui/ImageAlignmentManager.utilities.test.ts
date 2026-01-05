@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import ImageConverterPlugin from '../../../src/main';
 import { ImageAlignmentManager } from '../../../src/ImageAlignmentManager';
 import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
@@ -22,9 +22,9 @@ describe('ImageAlignmentManager utilities (12.10–12.12)', () => {
     const note = fakeTFile({ path: 'Notes/n1.md', name: 'n1.md', extension: 'md' });
     const vault = fakeVault({ files: [note] });
     app = fakeApp({ vault });
-    plugin = new ImageConverterPlugin(app as any);
+    plugin = new ImageConverterPlugin(app as any, { id: 'image-converter', dir: '/plugins/image-converter' } as any);
     plugin.manifest = { id: 'image-converter', dir: '/plugins/image-converter' } as any;
-    plugin.settings = { isImageAlignmentEnabled: true, imageAlignment_cacheLocation: 'plugin', imageAlignment_cacheCleanupInterval: 0 } as any;
+    plugin.settings = { isImageAlignmentEnabled: true, imageAlignmentCacheLocation: 'plugin', imageAlignmentCacheCleanupInterval: 0 } as any;
     supported = new SupportedImageFormats(app as any);
     manager = new ImageAlignmentManager(app as any, plugin, supported);
     await manager.loadCache();
@@ -68,23 +68,27 @@ describe('ImageAlignmentManager utilities (12.10–12.12)', () => {
   it('12.12 getRelativePath: external returns as-is; file:/// under base normalizes and hashing treats equivalent paths equally', async () => {
     // Install a FileSystemAdapter with a known base path so instanceof checks pass
     const basePath = 'C:/Vaults/MyVault';
-    (app.vault as any).adapter = new FileSystemAdapter(basePath.replace(/\\/g, '/')) as any;
+    // Create a mock FileSystemAdapter-like object
+    const mockAdapter = Object.create(FileSystemAdapter.prototype);
+    mockAdapter.getBasePath = () => basePath;
+    (app.vault as any).adapter = mockAdapter;
 
     // External http(s)
     expect(manager.getRelativePath('https://example.com/img.png')).toBe('https://example.com/img.png');
 
     // file:/// path within base -> normalize to vault-relative
-    const fileUrl = 'file:///' + encodeURIComponent(basePath.replace(/\\/g, '/') + '/imgs/p.png');
+    const normalizedBase = basePath.replace(/\\/g, '/');
+    const fileUrl = `file:///${encodeURIComponent(`${normalizedBase}/imgs/p.png`)}`;
     const relFromFile = manager.getRelativePath(fileUrl);
     expect(relFromFile.endsWith('imgs/p.png')).toBe(true);
 
     // app:// path under base -> normalize similarly
-    const appUrl = 'app://local/' + encodeURIComponent(basePath.replace(/\\/g, '/')) + '/imgs/app-based.png';
+    const appUrl = `app://local/${encodeURIComponent(normalizedBase)}/imgs/app-based.png`;
     const relFromApp = manager.getRelativePath(appUrl);
     expect(relFromApp.endsWith('imgs/app-based.png')).toBe(true);
 
     // Non-matching file:/// path (outside base) should return original
-    const outsideFileUrl = 'file:///' + encodeURIComponent('D:/Elsewhere/other.png');
+    const outsideFileUrl = `file:///${encodeURIComponent('D:/Elsewhere/other.png')}`;
     expect(manager.getRelativePath(outsideFileUrl)).toBe(outsideFileUrl);
   });
 });

@@ -186,9 +186,9 @@ export interface ImageConverterSettings {
     };
 
     isImageAlignmentEnabled: boolean;
-    imageAlignment_defaultAlignment: 'none' | 'left' | 'center' | 'right';
-    imageAlignment_cacheCleanupInterval: number;
-    imageAlignment_cacheLocation: ".obsidian" | "plugin";
+    imageAlignmentDefaultAlignment: 'none' | 'left' | 'center' | 'right';
+    imageAlignmentCacheCleanupInterval: number;
+    imageAlignmentCacheLocation: ".obsidian" | "plugin";
 
     isDragResizeEnabled: boolean;
     isDragAspectRatioLocked: boolean;
@@ -380,9 +380,9 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
     },
 
     isImageAlignmentEnabled: true,
-    imageAlignment_defaultAlignment: 'center',
-    ["imageAlignment_cacheCleanupInterval"]: 3600000,
-    ["imageAlignment_cacheLocation"]: 'plugin',
+    imageAlignmentDefaultAlignment: 'none',
+    imageAlignmentCacheCleanupInterval: 3600000,
+    imageAlignmentCacheLocation: 'plugin',
 
     isDragResizeEnabled: true,
     isScrollResizeEnabled: true,
@@ -802,20 +802,20 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         if (this.plugin.settings.isImageAlignmentEnabled) { // Conditionally render cleanup options
             new Setting(imageAlignmentSection)
                 .setName("Default alignment for new images")
-                .setDesc("Choose the alignment tag to apply when an image has no saved alignment.")
-                .addDropdown(drop => {
-                    drop.addOptions({
+                .setDesc("Automatically apply this alignment when inserting new images. Set to 'None' to disable.")
+                .addDropdown(dropdown => dropdown
+                    .addOptions({
                         'none': 'None',
                         'left': 'Left',
                         'center': 'Center',
                         'right': 'Right'
                     })
-                        .setValue(this.plugin.settings.imageAlignment_defaultAlignment)
-                        .onChange(async (value: 'none' | 'left' | 'center' | 'right') => {
-                            this.plugin.settings.imageAlignment_defaultAlignment = value;
-                            await this.plugin.saveSettings();
-                        });
-                });
+                    .setValue(this.plugin.settings.imageAlignmentDefaultAlignment)
+                    .onChange(async (value: 'none' | 'left' | 'center' | 'right') => {
+                        this.plugin.settings.imageAlignmentDefaultAlignment = value;
+                        await this.plugin.saveSettings();
+                    })
+                );
 
             // --- Cache Location Setting ---
             new Setting(imageAlignmentSection)
@@ -833,9 +833,9 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         [".obsidian"]: "Within .obsidian folder (syncable)",
                         "plugin": "Within plugin folder (not syncable)",
                     })
-                    .setValue(this.plugin.settings.imageAlignment_cacheLocation)
+                    .setValue(this.plugin.settings.imageAlignmentCacheLocation)
                     .onChange(async (value: ".obsidian" | "plugin") => {
-                        this.plugin.settings.imageAlignment_cacheLocation = value;
+                        this.plugin.settings.imageAlignmentCacheLocation = value;
                         await this.plugin.saveSettings();
                         this.plugin.ImageAlignmentManager?.updateCacheFilePath();
                         this.plugin.ImageAlignmentManager?.loadCache();
@@ -849,11 +849,11 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 )
                 .addSlider(slider => slider
                     .setLimits(0, 120, 5) // Min: 0, Max: 120, Step: 5 (minutes)
-                    .setValue(this.plugin.settings.imageAlignment_cacheCleanupInterval / (60 * 1000))
+                    .setValue(this.plugin.settings.imageAlignmentCacheCleanupInterval / (60 * 1000))
                     .setDynamicTooltip()
                     .onChange(async (value) => {
                         const minutes = value;
-                        this.plugin.settings.imageAlignment_cacheCleanupInterval = minutes * 60 * 1000;
+                        this.plugin.settings.imageAlignmentCacheCleanupInterval = minutes * 60 * 1000;
                         await this.plugin.saveSettings();
                         this.plugin.ImageAlignmentManager?.scheduleCacheCleanup();
                     })

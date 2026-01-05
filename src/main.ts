@@ -1135,29 +1135,6 @@ export default class ImageConverterPlugin extends Plugin {
         // - FRONT:Keeps the cursor at the front by default (by doing nothing) when cursorLocation is "front"
         editor.replaceRange(formattedLink, cursor);
 
-        if (
-            this.settings.isImageAlignmentEnabled &&
-            this.settings.imageAlignment_defaultAlignment !== 'none' &&
-            this.ImageAlignmentManager &&
-            activeFile
-        ) {
-            const addedDefaultAlignment = await this.ImageAlignmentManager.ensureDefaultAlignment(
-                activeFile.path,
-                linkPath,
-                this.settings.imageAlignment_defaultAlignment as 'left' | 'center' | 'right',
-                false
-            );
-
-            if (addedDefaultAlignment) {
-                window.setTimeout(() => {
-                    const currentFile = this.app.workspace.getActiveFile();
-                    if (currentFile?.path === activeFile.path) {
-                        this.ImageAlignmentManager?.applyAlignmentsToNote(activeFile.path);
-                    }
-                }, 0);
-            }
-        }
-
         // Use positive check for "back"
         // - We have to be carefull not to place it to the back 2 times.
         if (this.settings.dropPasteCursorLocation === "back") {
@@ -1166,7 +1143,32 @@ export default class ImageConverterPlugin extends Plugin {
                 ch: cursor.ch + formattedLink.length,
             });
         }
-        
+
+        // Apply default alignment if enabled
+        if (
+            this.settings.isImageAlignmentEnabled &&
+            this.settings.imageAlignmentDefaultAlignment &&
+            this.settings.imageAlignmentDefaultAlignment !== 'none' &&
+            activeFile &&
+            this.ImageAlignmentManager
+        ) {
+            const defaultAlign = this.settings.imageAlignmentDefaultAlignment;
+            const alignmentAdded = await this.ImageAlignmentManager.ensureDefaultAlignment(
+                activeFile.path,
+                linkPath,
+                defaultAlign
+            );
+
+            // If alignment was added, refresh the view to apply it
+            if (alignmentAdded) {
+                window.setTimeout(() => {
+                    const currentFile = this.app.workspace.getActiveFile();
+                    if (currentFile?.path === activeFile.path) {
+                        this.ImageAlignmentManager?.applyAlignmentsToNote(activeFile.path);
+                    }
+                }, 0);
+            }
+        }
     }
 
     private formatFileSize(bytes: number): string {
