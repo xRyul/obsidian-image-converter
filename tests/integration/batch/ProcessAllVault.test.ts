@@ -120,6 +120,53 @@ describe('BatchImageProcessor — Vault-wide orchestration', () => {
     expect(folderAndFilenameManagement.handleNameConflicts).toHaveBeenCalled();
   });
 
+  it('4.12 Given convertTo=disabled (ORIGINAL), When processing, Then files are NOT renamed', async () => {
+    // Fresh isolated environment with convertTo=disabled
+    const noteFile = fakeTFile({ path: 'notes/test.md' });
+    const pngImage = fakeTFile({ path: 'images/photo.png' });
+    const jpgImage = fakeTFile({ path: 'images/picture.jpg' });
+    const vaultIso = fakeVault({ files: [noteFile, pngImage, jpgImage] }) as any;
+    const appIso = fakeApp({
+      vault: vaultIso,
+      metadataCache: { resolvedLinks: { [noteFile.path]: { [pngImage.path]: 1, [jpgImage.path]: 1 } } } as any
+    }) as any;
+    appIso.fileManager = { renameFile: vi.fn(async (file: any, newPath: string) => { await appIso.vault.rename(file, newPath); }) };
+
+    // convertTo=disabled means keep original format - set ALL required settings explicitly
+    const pluginIso = makePluginStub({
+      settings: {
+        ProcessAllVaultconvertTo: 'disabled',
+        ProcessAllVaultquality: 0.8, // compression applied (not 1, so processing should occur)
+        ProcessAllVaultResizeModalresizeMode: 'None',
+        ProcessAllVaultResizeModaldesiredWidth: 0,
+        ProcessAllVaultResizeModaldesiredHeight: 0,
+        ProcessAllVaultResizeModaldesiredLength: 0,
+        ProcessAllVaultEnlargeOrReduce: 'Always',
+        allowLargerFiles: true,
+        ProcessAllVaultSkipFormats: '',
+        ProcessAllVaultskipImagesInTargetFormat: false // Important: don't skip images in their own format
+      }
+    });
+    const imgIso = { processImage: vi.fn(async (_blob: Blob) => new ArrayBuffer(4)) };
+    const ffmIso = { handleNameConflicts: vi.fn(async (_dir: string, name: string) => name) };
+    const bipIso = new BatchImageProcessor(appIso as any, pluginIso as any, imgIso as any, ffmIso as any);
+
+    await bipIso.processAllVaultImages();
+
+    // Images should be processed (compression applied)
+    expect(imgIso.processImage).toHaveBeenCalled();
+
+    // But NO renames should have occurred - files keep their original extensions
+    expect(appIso.fileManager.renameFile).not.toHaveBeenCalled();
+
+    // Verify the files still exist with original names
+    expect(appIso.vault.getAbstractFileByPath('images/photo.png')).toBeTruthy();
+    expect(appIso.vault.getAbstractFileByPath('images/picture.jpg')).toBeTruthy();
+    // And NOT renamed to .original
+    expect(appIso.vault.getAbstractFileByPath('images/photo.original')).toBeFalsy();
+    expect(appIso.vault.getAbstractFileByPath('images/picture.original')).toBeFalsy();
+  });
+
   it('4.10 Skip target format (vault): when convertTo=webp and skipImagesInTargetFormat=true, webp files are skipped', async () => {
     // Fresh, isolated environment to avoid mutated TFile state across tests
     const noteFile = fakeTFile({ path: 'notes/m.md' });

@@ -119,8 +119,9 @@ export class BatchImageProcessor {
 
                 // Capture paths up-front so we can safely revert if needed
                 const oldPath = linkedFile.path;
-                const newFileName = `${linkedFile.basename}.${outputFormat.toLowerCase()}`;
-                const newFilePath = linkedFile.path.replace(linkedFile.name, newFileName);
+                // When outputFormat is ORIGINAL, keep the original filename (no rename)
+                const newFileName = outputFormat === 'ORIGINAL' ? linkedFile.name : `${linkedFile.basename}.${outputFormat.toLowerCase()}`;
+                const newFilePath = outputFormat === 'ORIGINAL' ? linkedFile.path : linkedFile.path.replace(linkedFile.name, newFileName);
 
                 let didRename = false;
                 let didWrite = false;
@@ -298,8 +299,9 @@ export class BatchImageProcessor {
                 imageCount++;
 
                 const oldPath = image.path;
-                const newFileName = `${image.basename}.${outputFormat.toLowerCase()}`;
-                const newFilePath = image.path.replace(image.name, newFileName);
+                // When outputFormat is ORIGINAL, keep the original filename (no rename)
+                const newFileName = outputFormat === 'ORIGINAL' ? image.name : `${image.basename}.${outputFormat.toLowerCase()}`;
+                const newFilePath = outputFormat === 'ORIGINAL' ? image.path : image.path.replace(image.name, newFileName);
 
                 let didRename = false;
                 let didWrite = false;
@@ -472,8 +474,9 @@ export class BatchImageProcessor {
                 imageCount++;
 
                 const oldPath = image.path;
-                const targetName = `${image.basename}.${outputFormat.toLowerCase()}`;
-                let targetPath = image.path.replace(image.name, targetName);
+                // When outputFormat is ORIGINAL, keep the original filename (no rename)
+                const targetName = outputFormat === 'ORIGINAL' ? image.name : `${image.basename}.${outputFormat.toLowerCase()}`;
+                let targetPath = outputFormat === 'ORIGINAL' ? image.path : image.path.replace(image.name, targetName);
 
                 let didRename = false;
                 let didWrite = false;
@@ -698,8 +701,9 @@ export class BatchImageProcessor {
                     );
 
                     // Construct the new file path based on conversion settings
-                    const newFileName = `${image.basename}.${outputFormat.toLowerCase()}`;
-                    let newFilePath = image.path.replace(image.name, newFileName);
+                    // When outputFormat is ORIGINAL, keep the original filename (no rename)
+                    const newFileName = outputFormat === 'ORIGINAL' ? image.name : `${image.basename}.${outputFormat.toLowerCase()}`;
+                    let newFilePath = outputFormat === 'ORIGINAL' ? image.path : image.path.replace(image.name, newFileName);
 
                     // Check for conflicts and generate unique name if necessary using FolderAndFilenameManagement
                     if (
