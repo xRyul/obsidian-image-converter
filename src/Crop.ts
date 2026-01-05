@@ -43,6 +43,12 @@ export class Crop extends Modal {
 	private readonly MAX_ZOOM = 5;
 	private readonly ZOOM_STEP = 0.1;
 
+	private isPanning = false;
+	private panStartX = 0;
+	private panStartY = 0;
+	private currentPanX = 0;
+	private currentPanY = 0;
+
 	constructor(app: App, imageFile: TFile) {
 		super(app);
 		this.imageFile = imageFile;
@@ -51,40 +57,72 @@ export class Crop extends Modal {
 	}
 
 	private setupEventListeners() {
-        // Mouse down - start drawing selection
         this.componentContainer.registerDomEvent(this.cropContainer, 'mousedown', (e: MouseEvent) => {
             if (e.target === this.originalImage) {
-                this.isDrawing = true;
-                const rect = this.cropContainer.getBoundingClientRect();
-                this.startX = e.clientX - rect.left;
-                this.startY = e.clientY - rect.top;
+                // Middle button - panning
+                if (e.button === 1) {
+                    e.preventDefault();
+                    this.isPanning = true;
+                    this.panStartX = e.clientX;
+                    this.panStartY = e.clientY;
+                    return;
+                }
                 
-                this.selectionArea.style.display = 'block';
-                this.selectionArea.style.left = `${this.startX}px`;
-                this.selectionArea.style.top = `${this.startY}px`;
-                this.selectionArea.style.width = '0';
-                this.selectionArea.style.height = '0';
+                // Left button - start drawing selection
+                if (e.button === 0) {
+                    this.isDrawing = true;
+                    const rect = this.cropContainer.getBoundingClientRect();
+                    this.startX = e.clientX - rect.left;
+                    this.startY = e.clientY - rect.top;
+                    
+                    this.selectionArea.style.display = 'block';
+                    this.selectionArea.style.left = `${this.startX}px`;
+                    this.selectionArea.style.top = `${this.startY}px`;
+                    this.selectionArea.style.width = '0';
+                    this.selectionArea.style.height = '0';
+                }
             }
         });
 
-        // Mouse move - update selection size
+        // Mouse move - update selection size or pan image
         this.componentContainer.registerDomEvent(this.cropContainer, 'mousemove', (e: MouseEvent) => {
-            if (!this.isDrawing) return;
-            const rect = this.cropContainer.getBoundingClientRect();
-            const currentX = e.clientX - rect.left;
-            const currentY = e.clientY - rect.top;
-            this.updateSelectionSize(currentX, currentY);
+            if (this.isPanning) {
+                // Image panning
+                e.preventDefault();
+                const deltaX = e.clientX - this.panStartX;
+                const deltaY = e.clientY - this.panStartY;
+                this.currentPanX += deltaX;
+                this.currentPanY += deltaY;
+                this.panStartX = e.clientX;
+                this.panStartY = e.clientY;
+                this.applyTransforms();
+            }
+            else if (this.isDrawing) {
+                // Change selection size area
+                const rect = this.cropContainer.getBoundingClientRect();
+                const currentX = e.clientX - rect.left;
+                const currentY = e.clientY - rect.top;
+                this.updateSelectionSize(currentX, currentY);
+            }
         });
 
         // Mouse up - finish drawing selection
         this.componentContainer.registerDomEvent(this.cropContainer, 'mouseup', (e: MouseEvent) => {
-            this.isDrawing = false;
-            this.makeSelectionMovable();
+            // Middle button - stop panning
+            if (e.button === 1 && this.isPanning) {
+                this.isPanning = false;
+            }
+            // Left button - finish drawing selection
+            else if (e.button === 0 && this.isDrawing) {
+                this.isDrawing = false;
+                this.makeSelectionMovable();
+            }
         });
 
         // Prevent selection from getting stuck if mouse leaves the container
         this.componentContainer.registerDomEvent(this.cropContainer, 'mouseleave', (e: MouseEvent) => {
             this.isDrawing = false;
+            this.isPanning = false;
         });
     }
 
@@ -248,6 +286,8 @@ export class Crop extends Modal {
         return new Promise<void>((resolve, reject) => {
             this.originalImage.onload = () => {
 				this.adjustModalSize();
+				this.currentPanX = 0;
+				this.currentPanY = 0;
 
                 // Calculate scaling factors
                 this.imageScale.x = this.originalImage.naturalWidth / this.originalImage.clientWidth;
@@ -450,6 +490,11 @@ export class Crop extends Modal {
 	private applyTransforms() {
 		const transforms: string[] = [];
 		
+		// Add panning
+		if (this.currentPanX !== 0 || this.currentPanY !== 0) {
+			transforms.push(`translate(${this.currentPanX}px, ${this.currentPanY}px)`);
+		}
+
 		// Add zoom
 		if (this.zoom !== 1) {
 			transforms.push(`scale(${this.zoom})`);
@@ -728,6 +773,9 @@ export class Crop extends Modal {
         this.selectionArea.style.display = 'none';
         this.selectionArea.style.width = '0';
         this.selectionArea.style.height = '0';
+		this.currentPanX = 0;
+        this.currentPanY = 0;
+        this.applyTransforms();
     }
 
 	async saveImage() {
