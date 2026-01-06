@@ -2,6 +2,11 @@ import { Canvas, Pattern, IText } from 'fabric';
 import { Component } from 'obsidian';
 import { BackgroundType, BACKGROUND_OPTIONS } from '../types';
 
+const HIDDEN_CLASS = 'background-dropdown-hidden';
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const SVG_VIEWBOX = '0 0 100 100';
+const SVG_SIZE = '20';
+
 export class BackgroundManager {
     private backgroundDropdown: HTMLElement | null = null;
     private currentBackground: BackgroundType = 'transparent';
@@ -11,31 +16,29 @@ export class BackgroundManager {
         private componentContainer: Component
     ) {}
 
-    createBackgroundControls(container: HTMLElement, _buttonComponent: any): void {
+    /**
+     * Creates the background selection dropdown UI.
+     * @param container - The container element to append the dropdown to
+     * @param _buttonComponent - Kept for backward compatibility with existing callers; intentionally unused
+     */
+    createBackgroundControls(container: HTMLElement, _buttonComponent?: unknown): void {
         this.backgroundDropdown = container.createDiv('background-dropdown');
-        this.backgroundDropdown.style.display = 'none';
+        this.backgroundDropdown.addClass(HIDDEN_CLASS);
 
         BACKGROUND_OPTIONS.forEach(option => {
             const item = this.backgroundDropdown!.createDiv('background-option');
 
             switch (option) {
                 case 'transparent': {
-                    item.createDiv('option-icon').innerHTML = `<svg viewBox="0 0 100 100" width="20" height="20">
-                        <rect x="0" y="0" width="50" height="50" fill="#ccc"/>
-                        <rect x="50" y="50" width="50" height="50" fill="#ccc"/>
-                    </svg>`;
+                    this.createTransparentIcon(item.createDiv('option-icon'));
                     break;
                 }
                 case 'grid': {
-                    item.createDiv('option-icon').innerHTML = `<svg viewBox="0 0 100 100" width="20" height="20">
-                        <path d="M0 0 L100 0 M0 50 L100 50 M50 0 L50 100" stroke="#000" stroke-width="10"/>
-                    </svg>`;
+                    this.createGridIcon(item.createDiv('option-icon'));
                     break;
                 }
                 case 'dots': {
-                    item.createDiv('option-icon').innerHTML = `<svg viewBox="0 0 100 100" width="20" height="20">
-                        <circle cx="50" cy="50" r="10"/>
-                    </svg>`;
+                    this.createDotsIcon(item.createDiv('option-icon'));
                     break;
                 }
                 default: {
@@ -62,6 +65,60 @@ export class BackgroundManager {
         this.componentContainer.registerDomEvent(document, 'click', () => {
             this.hideBackgroundDropdown();
         });
+    }
+
+    private createSvgElement(): SVGSVGElement {
+        const svg = document.createElementNS(SVG_NS, 'svg');
+        svg.setAttribute('viewBox', SVG_VIEWBOX);
+        svg.setAttribute('width', SVG_SIZE);
+        svg.setAttribute('height', SVG_SIZE);
+        return svg;
+    }
+
+    private createTransparentIcon(container: HTMLElement): void {
+        const svg = this.createSvgElement();
+
+        const rect1 = document.createElementNS(SVG_NS, 'rect');
+        rect1.setAttribute('x', '0');
+        rect1.setAttribute('y', '0');
+        rect1.setAttribute('width', '50');
+        rect1.setAttribute('height', '50');
+        rect1.setAttribute('fill', '#ccc');
+        svg.appendChild(rect1);
+
+        const rect2 = document.createElementNS(SVG_NS, 'rect');
+        rect2.setAttribute('x', '50');
+        rect2.setAttribute('y', '50');
+        rect2.setAttribute('width', '50');
+        rect2.setAttribute('height', '50');
+        rect2.setAttribute('fill', '#ccc');
+        svg.appendChild(rect2);
+
+        container.appendChild(svg);
+    }
+
+    private createGridIcon(container: HTMLElement): void {
+        const svg = this.createSvgElement();
+
+        const path = document.createElementNS(SVG_NS, 'path');
+        path.setAttribute('d', 'M0 0 L100 0 M0 50 L100 50 M50 0 L50 100');
+        path.setAttribute('stroke', '#000');
+        path.setAttribute('stroke-width', '10');
+        svg.appendChild(path);
+
+        container.appendChild(svg);
+    }
+
+    private createDotsIcon(container: HTMLElement): void {
+        const svg = this.createSvgElement();
+
+        const circle = document.createElementNS(SVG_NS, 'circle');
+        circle.setAttribute('cx', '50');
+        circle.setAttribute('cy', '50');
+        circle.setAttribute('r', '10');
+        svg.appendChild(circle);
+
+        container.appendChild(svg);
     }
 
     createBackgroundPattern(type: BackgroundType): string | Pattern {
@@ -106,11 +163,12 @@ export class BackgroundManager {
     toggleBackgroundDropdown(buttonEl: HTMLElement): void {
         if (!this.backgroundDropdown) return;
 
-        if (this.backgroundDropdown.style.display === 'none') {
+        const isHidden = this.backgroundDropdown.hasClass(HIDDEN_CLASS);
+        if (isHidden) {
             const rect = buttonEl.getBoundingClientRect();
             this.backgroundDropdown.style.top = `${rect.bottom + 5}px`;
             this.backgroundDropdown.style.left = `${rect.left}px`;
-            this.backgroundDropdown.style.display = 'block';
+            this.backgroundDropdown.removeClass(HIDDEN_CLASS);
         } else {
             this.hideBackgroundDropdown();
         }
@@ -118,7 +176,7 @@ export class BackgroundManager {
 
     hideBackgroundDropdown(): void {
         if (this.backgroundDropdown) {
-            this.backgroundDropdown.style.display = 'none';
+            this.backgroundDropdown.addClass(HIDDEN_CLASS);
         }
     }
 

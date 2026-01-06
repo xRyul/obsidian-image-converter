@@ -1557,8 +1557,13 @@ html[data-theme='dark'] {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     padding: 4px;
     width: 54px;
+}
 
-    .background-option {
+.image-converter-annotation-tool-image-annotation-modal .background-dropdown.background-dropdown-hidden {
+    display: none;
+}
+
+.image-converter-annotation-tool-image-annotation-modal .background-dropdown .background-option {
         display: flex;
         align-items: center;
         padding: 6px 8px;

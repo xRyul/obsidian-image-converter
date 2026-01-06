@@ -271,7 +271,7 @@ export class ImageAnnotationModal extends Modal {
         // Setup background controls
         const utilityGroup = this.modalEl.querySelector('.annotation-toolbar-group:last-child');
         if (utilityGroup) {
-            this.backgroundManager.createBackgroundControls(utilityGroup as HTMLElement, null);
+            this.backgroundManager.createBackgroundControls(utilityGroup as HTMLElement);
         }
 
         this.registerHotkeys();
