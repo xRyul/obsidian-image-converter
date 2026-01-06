@@ -8,6 +8,18 @@ import {
 } from './ImageProcessor';
 import { FolderAndFilenameManagement } from "./FolderAndFilenameManagement";
 
+/** Represents a node in an Obsidian canvas file. */
+interface CanvasNode {
+    type?: string;
+    file?: string;
+    children?: CanvasNode[];
+}
+
+/** Represents parsed Obsidian canvas file data. */
+interface CanvasData {
+    nodes?: CanvasNode[];
+}
+
 
 export class BatchImageProcessor {
     constructor(
@@ -16,6 +28,23 @@ export class BatchImageProcessor {
         private imageProcessor: ImageProcessor,
         private folderAndFilenameManagement: FolderAndFilenameManagement
     ) { }
+
+    /** Extracts a human-readable message from an error of unknown type. */
+    private getErrorMessage(error: unknown): string {
+        return error instanceof Error ? error.message : String(error);
+    }
+
+    /**
+     * Retrieves a TFile by path, throwing if not found or not a file.
+     * @throws Error if the path does not resolve to a TFile.
+     */
+    private getFileOrThrow(path: string): TFile {
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (!(file instanceof TFile)) {
+            throw new Error(`Failed to find file: ${path}`);
+        }
+        return file;
+    }
     
     async processImagesInNote(noteFile: TFile): Promise<void> {
 
@@ -150,11 +179,7 @@ export class BatchImageProcessor {
                     }
 
                     const targetPath = didRename ? newFilePath : oldPath;
-                    const targetFile = this.app.vault.getAbstractFileByPath(targetPath);
-
-                    if (!(targetFile instanceof TFile)) {
-                        throw new Error(`Failed to find file after rename: ${targetPath}`);
-                    }
+                    const targetFile = this.getFileOrThrow(targetPath);
 
                     await this.app.vault.modifyBinary(targetFile, processedImageData);
                     didWrite = true;
@@ -180,8 +205,7 @@ export class BatchImageProcessor {
                         }
                     }
 
-                    const msg = error instanceof Error ? error.message : String(error);
-                    new Notice(`Error processing image "${linkedFile.name}": ${msg}`);
+                    new Notice(`Error processing image "${linkedFile.name}": ${this.getErrorMessage(error)}`);
                 } finally {
                     const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
                     statusBarItemEl.setText(
@@ -198,7 +222,7 @@ export class BatchImageProcessor {
 
         } catch (error) {
             console.error('Error processing images in current note:', error);
-            new Notice(`Error processing images: ${error.message}`);
+            new Notice(`Error processing images: ${this.getErrorMessage(error)}`);
         }
     }
 
@@ -206,10 +230,10 @@ export class BatchImageProcessor {
 
     private async getImageFilesFromCanvas(canvasFile: TFile): Promise<TFile[]> {
         const canvasContent = await this.app.vault.read(canvasFile);
-        const canvasData = JSON.parse(canvasContent);
+        const canvasData = JSON.parse(canvasContent) as CanvasData;
         const linkedFiles: TFile[] = [];
 
-        const getImagesFromNodes = (nodes: unknown[]): void => {
+        const getImagesFromNodes = (nodes: CanvasNode[]): void => {
             for (const node of nodes) {
                 if (node.type === 'file' && node.file) {
                     const file = this.app.vault.getAbstractFileByPath(node.file);
@@ -329,11 +353,7 @@ export class BatchImageProcessor {
                     }
 
                     const targetPath = didRename ? newFilePath : oldPath;
-                    const targetFile = this.app.vault.getAbstractFileByPath(targetPath) as TFile;
-
-                    if (!targetFile) {
-                        throw new Error(`Failed to find file after rename: ${targetPath}`);
-                    }
+                    const targetFile = this.getFileOrThrow(targetPath);
 
                     await this.app.vault.modifyBinary(targetFile, processedImageData);
                     didWrite = true;
@@ -350,8 +370,7 @@ export class BatchImageProcessor {
                         }
                     }
 
-                    const msg = error instanceof Error ? error.message : String(error);
-                    new Notice(`Error processing image "${image.name}": ${msg}`);
+                    new Notice(`Error processing image "${image.name}": ${this.getErrorMessage(error)}`);
                 } finally {
                     const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
                     statusBarItemEl.setText(
@@ -368,7 +387,7 @@ export class BatchImageProcessor {
 
         } catch (error) {
             console.error('Error processing images in folder:', error);
-            new Notice(`Error processing images: ${error.message}`);
+            new Notice(`Error processing images: ${this.getErrorMessage(error)}`);
         }
     }
 
@@ -509,10 +528,7 @@ export class BatchImageProcessor {
                     }
 
                     const fileAfterRenamePath = didRename ? targetPath : oldPath;
-                    const targetFile = this.app.vault.getAbstractFileByPath(fileAfterRenamePath) as TFile;
-                    if (!targetFile) {
-                        throw new Error(`Failed to find file after rename: ${fileAfterRenamePath}`);
-                    }
+                    const targetFile = this.getFileOrThrow(fileAfterRenamePath);
 
                     await this.app.vault.modifyBinary(targetFile, processedImageData);
                     didWrite = true;
@@ -551,8 +567,7 @@ export class BatchImageProcessor {
                         }
                     }
 
-                    const msg = error instanceof Error ? error.message : String(error);
-                    new Notice(`Error processing image "${image.name}": ${msg}`);
+                    new Notice(`Error processing image "${image.name}": ${this.getErrorMessage(error)}`);
                 } finally {
                     const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
                     statusBarItemEl.setText(`Processing image ${imageCount} of ${totalImages}, elapsed time: ${elapsedTime} seconds`);
@@ -564,7 +579,7 @@ export class BatchImageProcessor {
             window.setTimeout(() => { statusBarItemEl.remove(); }, 5000);
         } catch (error) {
             console.error('Error processing linked images in folder:', error);
-            new Notice(`Error processing images: ${error.message}`);
+            new Notice(`Error processing images: ${this.getErrorMessage(error)}`);
         }
     }
 
@@ -647,9 +662,9 @@ export class BatchImageProcessor {
             // Early return with appropriate message if no processing is needed
             if (allImagesSkippable && noCompression && noResize) {
                 if (isKeepOriginalFormat) {
-                    new Notice('No processing needed: All vault images are either in skip list or kept in original format with no compression or resizing.');
+                    new Notice('No processing needed: all vault images are either in skip list or kept in original format with no compression or resizing.');
                 } else {
-                    new Notice(`No processing needed: All vault images are either in skip list or already in ${targetFormat.toUpperCase()} format with no compression or resizing.`);
+                    new Notice(`No processing needed: all vault images are either in skip list or already in ${targetFormat.toUpperCase()} format with no compression or resizing.`);
                 }
                 return;
             }
@@ -722,11 +737,7 @@ export class BatchImageProcessor {
                     }
 
                     const fileAfterRenamePath = didRename ? newFilePath : oldPath;
-                    const targetFile = this.app.vault.getAbstractFileByPath(fileAfterRenamePath) as TFile;
-
-                    if (!targetFile) {
-                        throw new Error(`Failed to find file after rename: ${fileAfterRenamePath}`);
-                    }
+                    const targetFile = this.getFileOrThrow(fileAfterRenamePath);
 
                     await this.app.vault.modifyBinary(targetFile, processedImageData);
                     didWrite = true;
@@ -751,8 +762,7 @@ export class BatchImageProcessor {
                         }
                     }
 
-                    const msg = error instanceof Error ? error.message : String(error);
-                    new Notice(`Error processing image "${image.name}": ${msg}`);
+                    new Notice(`Error processing image "${image.name}": ${this.getErrorMessage(error)}`);
                 } finally {
                     const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
                     statusBarItemEl.setText(
@@ -770,7 +780,7 @@ export class BatchImageProcessor {
             }, 5000);
         } catch (error) {
             console.error("Error processing images:", error);
-            new Notice(`Error processing images: ${error.message}`);
+            new Notice(`Error processing images: ${this.getErrorMessage(error)}`);
         }
     }
 
@@ -806,7 +816,7 @@ export class BatchImageProcessor {
     async getImagesFromCanvas(file: TFile): Promise<string[]> {
         const images: string[] = [];
         const content = await this.app.vault.read(file);
-        const canvasData = JSON.parse(content);
+        const canvasData = JSON.parse(content) as CanvasData;
 
         if (canvasData.nodes && Array.isArray(canvasData.nodes)) {
             for (const node of canvasData.nodes) {
@@ -885,9 +895,13 @@ export class BatchImageProcessor {
     ) {
             try {
                 const content = await this.app.vault.read(canvasFile);
-                const canvasData = JSON.parse(content);
+                const canvasData = JSON.parse(content) as CanvasData;
     
-                const updateNodePaths = (nodes: unknown[]) => {
+                /**
+                 * Recursively updates file paths in canvas nodes.
+                 * @mutates nodes - Modifies node.file properties in place.
+                 */
+                const updateNodePaths = (nodes: CanvasNode[]): void => {
                     for (const node of nodes) {
                         if (node.type === 'file' && node.file === oldPath) {
                             node.file = newPath;
