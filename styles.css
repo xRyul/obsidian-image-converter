@@ -310,6 +310,10 @@ html[data-theme='dark'] {
     margin-top: 1em;
 }
 
+.image-converter-confirm-detail {
+    margin-bottom: 0.25em;
+}
+
 /* --------- GLOBAL PRESET ------------------------------ */
 .image-converter-global-preset-container {
     display: flex;
