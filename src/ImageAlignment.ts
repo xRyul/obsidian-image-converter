@@ -61,7 +61,7 @@ export class ImageAlignment extends Component {
                 .addItem((subItem) => {
                     const currentAlignment = this.getCurrentImageAlignment(img);
                     subItem
-                        .setTitle('Wrap Text')
+                        .setTitle('Wrap text')
                         .setChecked(currentAlignment.wrap)
                         .onClick(async () => {
                             // Default to left alignment if no alignment is set
