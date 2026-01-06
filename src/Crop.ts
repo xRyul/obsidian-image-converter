@@ -75,11 +75,13 @@ export class Crop extends Modal {
                     this.startX = e.clientX - rect.left;
                     this.startY = e.clientY - rect.top;
                     
-                    this.selectionArea.style.display = 'block';
-                    this.selectionArea.style.left = `${this.startX}px`;
-                    this.selectionArea.style.top = `${this.startY}px`;
-                    this.selectionArea.style.width = '0';
-                    this.selectionArea.style.height = '0';
+                    this.selectionArea.setCssStyles({
+                        display: 'block',
+                        left: `${this.startX}px`,
+                        top: `${this.startY}px`,
+                        width: '0',
+                        height: '0'
+                    });
                 }
             }
         });
@@ -126,6 +128,7 @@ export class Crop extends Modal {
         });
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises -- Modal.onOpen() expects void but async is needed for image loading
     async onOpen() {
 		const { contentEl } = this;
 		contentEl.empty();
@@ -143,7 +146,7 @@ export class Crop extends Modal {
 			
 		// Create selection area
 		this.selectionArea = this.cropContainer.createDiv('selection-area');
-		this.selectionArea.style.display = 'none';
+		this.selectionArea.setCssStyles({ display: 'none' });
 	
 		// Register events early so drawing works even before image load completes
 		this.setupEventListeners();
@@ -345,11 +348,13 @@ export class Crop extends Modal {
 		modalHeight = Math.max(this.MIN_HEIGHT, modalHeight);
 	
 		// Apply styles
-		modalElement.style.width = `${modalWidth}px`;
-		modalElement.style.height = `${modalHeight}px`;
-		modalElement.style.top = '50%';
-		modalElement.style.left = '50%';
-		modalElement.style.transform = 'translate(-50%, -50%)';
+		modalElement.setCssStyles({
+			width: `${modalWidth}px`,
+			height: `${modalHeight}px`,
+			top: '50%',
+			left: '50%',
+			transform: 'translate(-50%, -50%)'
+		});
 	}
 
    // Flip/ Rotate 
@@ -359,16 +364,16 @@ export class Crop extends Modal {
 		// Rotation controls
 		const rotateContainer = transformControls.createDiv({ cls: 'rotate-container' });
 		
-		const rotateLeftBtn = rotateContainer.createEl('button', {
+    const rotateLeftBtn = rotateContainer.createEl('button', {
 			cls: 'transform-button',
 			text: '↺',
-			attr: { title: '90° Counter Clockwise' }
+			attr: { title: '90° counter clockwise' }
 		});
 		
 		const rotateRightBtn = rotateContainer.createEl('button', {
 			cls: 'transform-button',
 			text: '↻',
-			attr: { title: '90° Clockwise' }
+			attr: { title: '90° clockwise' }
 		});
 		
 		// Flip controls
@@ -377,13 +382,13 @@ export class Crop extends Modal {
 		const flipHorizontalBtn = flipContainer.createEl('button', {
 			cls: 'transform-button',
 			text: '↔',
-			attr: { title: 'Flip Horizontally' }
+			attr: { title: 'Flip horizontally' }
 		});
 		
 		const flipVerticalBtn = flipContainer.createEl('button', {
 			cls: 'transform-button',
 			text: '↕',
-			attr: { title: 'Flip Vertically' }
+			attr: { title: 'Flip vertically' }
 		});
 		
 		// Add event listeners
@@ -513,7 +518,7 @@ export class Crop extends Modal {
 			transforms.push('scaleY(-1)');
 		}
 		
-		this.originalImage.style.transform = transforms.join(' ');
+		this.originalImage.setCssStyles({ transform: transforms.join(' ') });
 		
 		// Adjust container size if needed
 		if (Math.abs(this.currentRotation) === 90 || 
@@ -543,7 +548,7 @@ export class Crop extends Modal {
 			dragStartX = e.clientX;
 			dragStartY = e.clientY;
 			
-			this.selectionArea.style.cursor = 'move';
+			this.selectionArea.setCssStyles({ cursor: 'move' });
 		});
 	
 		this.componentContainer.registerDomEvent(document, 'mousemove', (e: MouseEvent) => {
@@ -566,13 +571,15 @@ export class Crop extends Modal {
 			newTop = Math.max(0, Math.min(newTop, containerRect.height - selectionRect.height));
 	
 			// Apply new position
-			this.selectionArea.style.left = `${newLeft}px`;
-			this.selectionArea.style.top = `${newTop}px`;
+			this.selectionArea.setCssStyles({
+				left: `${newLeft}px`,
+				top: `${newTop}px`
+			});
 		});
 	
 		this.componentContainer.registerDomEvent(document, 'mouseup', (e: MouseEvent) => {
 			isDragging = false;
-			this.selectionArea.style.cursor = 'move';
+			this.selectionArea.setCssStyles({ cursor: 'move' });
 		});
 	}
 
@@ -597,19 +604,27 @@ export class Crop extends Modal {
 
 		// Handle negative dimensions (drawing from right to left or bottom to top)
 		if (width < 0) {
-			this.selectionArea.style.left = `${this.startX + width}px`;
-			this.selectionArea.style.width = `${Math.abs(width)}px`;
+			this.selectionArea.setCssStyles({
+				left: `${this.startX + width}px`,
+				width: `${Math.abs(width)}px`
+			});
 		} else {
-			this.selectionArea.style.left = `${this.startX}px`;
-			this.selectionArea.style.width = `${width}px`;
+			this.selectionArea.setCssStyles({
+				left: `${this.startX}px`,
+				width: `${width}px`
+			});
 		}
 
 		if (height < 0) {
-			this.selectionArea.style.top = `${this.startY + height}px`;
-			this.selectionArea.style.height = `${Math.abs(height)}px`;
+			this.selectionArea.setCssStyles({
+				top: `${this.startY + height}px`,
+				height: `${Math.abs(height)}px`
+			});
 		} else {
-			this.selectionArea.style.top = `${this.startY}px`;
-			this.selectionArea.style.height = `${height}px`;
+			this.selectionArea.setCssStyles({
+				top: `${this.startY}px`,
+				height: `${height}px`
+			});
 		}
 	}
 
@@ -623,11 +638,11 @@ export class Crop extends Modal {
 		if (currentWidth / currentHeight > this.currentAspectRatio) {
 			// Adjust width to match height * ratio
 			const newWidth = currentHeight * this.currentAspectRatio;
-			this.selectionArea.style.width = `${newWidth}px`;
+			this.selectionArea.setCssStyles({ width: `${newWidth}px` });
 		} else {
 			// Adjust height to match width / ratio
 			const newHeight = currentWidth / this.currentAspectRatio;
-			this.selectionArea.style.height = `${newHeight}px`;
+			this.selectionArea.setCssStyles({ height: `${newHeight}px` });
 		}
 	}
 
@@ -756,10 +771,12 @@ export class Crop extends Modal {
 			newTop = Math.max(0, Math.min(newTop, containerRect.height - newHeight));
 	
 			// Apply new dimensions
-			this.selectionArea.style.width = `${newWidth}px`;
-			this.selectionArea.style.height = `${newHeight}px`;
-			this.selectionArea.style.left = `${newLeft}px`;
-			this.selectionArea.style.top = `${newTop}px`;
+			this.selectionArea.setCssStyles({
+				width: `${newWidth}px`,
+				height: `${newHeight}px`,
+				left: `${newLeft}px`,
+				top: `${newTop}px`
+			});
 		});
 	
 		this.componentContainer.registerDomEvent(document, 'mouseup', (e: MouseEvent) => {
@@ -770,9 +787,11 @@ export class Crop extends Modal {
 
 
     private resetSelection() {
-        this.selectionArea.style.display = 'none';
-        this.selectionArea.style.width = '0';
-        this.selectionArea.style.height = '0';
+        this.selectionArea.setCssStyles({
+            display: 'none',
+            width: '0',
+            height: '0'
+        });
 		this.currentPanX = 0;
         this.currentPanY = 0;
         this.applyTransforms();
@@ -940,9 +959,10 @@ export class Crop extends Modal {
 	
 			this.close();
 	
-		} catch (error) {
+	} catch (error) {
 			console.error('Save error:', error);
-			new Notice(`Error saving image: ${error.message}`);
+			const message = error instanceof Error ? error.message : String(error);
+			new Notice(`Error saving image: ${message}`);
 		}
 	}
 
