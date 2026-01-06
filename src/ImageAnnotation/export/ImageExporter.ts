@@ -1,5 +1,5 @@
 import { App, Notice, TFile, MarkdownView } from 'obsidian';
-import { Canvas, FabricImage, ImageFormat } from 'fabric';
+import { Canvas, FabricImage, ImageFormat, type TMat2D } from 'fabric';
 import { ExtendedImageFormat } from '../types';
 import mime from '../../mime.min.js';
 
@@ -19,6 +19,44 @@ function dataUrlToArrayBuffer(dataUrl: string): ArrayBuffer {
     }
 }
 
+function readImageLikeSize(source: unknown): { width: number; height: number } | null {
+    if (!source || typeof source !== 'object') return null;
+
+    const maybe = source as {
+        naturalWidth?: unknown;
+        naturalHeight?: unknown;
+        width?: unknown;
+        height?: unknown;
+    };
+
+    const width = (typeof maybe.naturalWidth === 'number' && maybe.naturalWidth > 0)
+        ? maybe.naturalWidth
+        : (typeof maybe.width === 'number' ? maybe.width : 0);
+
+    const height = (typeof maybe.naturalHeight === 'number' && maybe.naturalHeight > 0)
+        ? maybe.naturalHeight
+        : (typeof maybe.height === 'number' ? maybe.height : 0);
+
+    if (width > 0 && height > 0) return { width, height };
+    return null;
+}
+
+function getFabricImageElement(image: unknown): unknown {
+    if (!image || typeof image !== 'object') return null;
+
+    const maybe = image as { getElement?: unknown; img?: unknown };
+
+    if (typeof maybe.getElement === 'function') {
+        try {
+            return (maybe.getElement as () => unknown)();
+        } catch {
+            // ignore
+        }
+    }
+
+    return maybe.img ?? null;
+}
+
 export class ImageExporter {
     constructor(private app: App) {}
 
@@ -29,8 +67,12 @@ export class ImageExporter {
             const originalStacking = canvas.preserveObjectStacking;
             canvas.preserveObjectStacking = false;
 
-            const mimeType = mime.getType(file.name) || `image/${file.extension}`;
-            if (!mimeType) throw new Error('Unable to determine file type');
+            const detectedMime = mime.getType(file.name);
+            const fallbackMime = file.extension ? `image/${file.extension}` : '';
+            const mimeType = detectedMime || fallbackMime;
+            if (!mimeType) {
+                throw new Error(`Unable to determine MIME type for file: ${file.name}`);
+            }
 
             let exportFormat: ExtendedImageFormat = 'png';
             if (mimeType === 'image/jpeg' || mimeType === 'image/jpg') {
@@ -54,21 +96,20 @@ export class ImageExporter {
             const bounds = this.calculateBounds(canvas, backgroundImage);
             const { minX, minY, finalWidth, finalHeight, scaleToOriginal } = bounds;
 
-            const currentVPT = (Array.isArray((canvas as any).viewportTransform)
-                ? [...(canvas as any).viewportTransform]
-                : [1, 0, 0, 1, 0, 0]) as [number, number, number, number, number, number];
+            const currentVPT = (Array.isArray(canvas.viewportTransform)
+                ? [...canvas.viewportTransform]
+                : [1, 0, 0, 1, 0, 0]) as TMat2D;
 
-            canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
-            if (typeof (canvas as any).setZoom === 'function') {
+            canvas.setViewportTransform([1, 0, 0, 1, 0, 0] as TMat2D);
+            if (typeof canvas.setZoom === 'function') {
                 canvas.setZoom(1);
             }
 
             objects.forEach(obj => {
-                const anyObj = obj as any;
-                if (typeof anyObj.setCoords === 'function') {
-                    anyObj.setCoords();
+                if (typeof obj.setCoords === 'function') {
+                    obj.setCoords();
                 }
-                anyObj.visible = true;
+                obj.visible = true;
             });
 
             canvas.renderAll();
@@ -136,21 +177,21 @@ export class ImageExporter {
             originalHeight = backgroundImage.height ?? 0;
 
             if (!originalWidth || !originalHeight) {
-                const bi = backgroundImage as any;
-                const imgEl = (bi && bi.img) as HTMLImageElement | undefined;
+                const imageEl = getFabricImageElement(backgroundImage);
+                const size = readImageLikeSize(imageEl);
                 const nativeCanvas = canvas.getElement?.();
-                originalWidth = imgEl?.naturalWidth ?? imgEl?.width ?? nativeCanvas?.width ?? 0;
-                originalHeight = imgEl?.naturalHeight ?? imgEl?.height ?? nativeCanvas?.height ?? 0;
+
+                originalWidth = size?.width ?? nativeCanvas?.width ?? 0;
+                originalHeight = size?.height ?? nativeCanvas?.height ?? 0;
             }
 
-            const bi = backgroundImage as any;
-            const sx = (backgroundImage as any).scaleX ?? bi?.opts?.scaleX ?? 1;
-            const sy = (backgroundImage as any).scaleY ?? bi?.opts?.scaleY ?? 1;
+            const sx = backgroundImage.scaleX ?? 1;
+            const sy = backgroundImage.scaleY ?? 1;
             scale = { x: sx, y: sy };
             const displayWidth = originalWidth * scale.x;
             const displayHeight = originalHeight * scale.y;
-            const left = (backgroundImage as any).left ?? 0;
-            const top = (backgroundImage as any).top ?? 0;
+            const left = backgroundImage.left ?? 0;
+            const top = backgroundImage.top ?? 0;
             bgLeft = left;
             bgTop = top;
             bgRight = left + displayWidth;
@@ -170,18 +211,17 @@ export class ImageExporter {
         const annotations = objects.filter(obj => obj !== backgroundImage);
         if (annotations.length > 0) {
             annotations.forEach(obj => {
-                const anyObj = obj as any;
-                if (anyObj && anyObj.visible === false) return;
+                if (obj && obj.visible === false) return;
 
-                let objBounds: any = null;
+                let objBounds: { left: number; top: number; width: number; height: number } | null = null;
                 try {
-                    if (typeof anyObj.getBoundingRect === 'function') {
-                        objBounds = anyObj.getBoundingRect();
+                    if (typeof obj.getBoundingRect === 'function') {
+                        objBounds = obj.getBoundingRect();
                     } else {
-                        const left = Number(anyObj.left ?? 0);
-                        const top = Number(anyObj.top ?? 0);
-                        const width = Number(anyObj.width ?? 0) * Number(anyObj.scaleX ?? 1);
-                        const height = Number(anyObj.height ?? 0) * Number(anyObj.scaleY ?? 1);
+                        const left = Number(obj.left ?? 0);
+                        const top = Number(obj.top ?? 0);
+                        const width = Number(obj.width ?? 0) * Number(obj.scaleX ?? 1);
+                        const height = Number(obj.height ?? 0) * Number(obj.scaleY ?? 1);
                         objBounds = { left, top, width, height };
                     }
                 } catch {
@@ -232,6 +272,24 @@ export class ImageExporter {
         return { minX, minY, finalWidth, finalHeight, scaleToOriginal };
     }
 
+    private async canvasElementToArrayBuffer(canvasElement: HTMLCanvasElement, mimeType: string): Promise<ArrayBuffer | null> {
+        if (typeof canvasElement.toBlob === 'function') {
+            const blob: Blob | null = await new Promise<Blob | null>((resolve) => {
+                canvasElement.toBlob((result: Blob | null) => resolve(result), mimeType, 1);
+            });
+
+            if (blob) {
+                return blob.arrayBuffer();
+            }
+        }
+
+        // Fallback when toBlob isn't available (e.g. in some test/DOM environments)
+        // Avoids using fetch/requestUrl since this is a local data URL.
+        const dataUrl = canvasElement.toDataURL(mimeType, 1);
+        if (!dataUrl || dataUrl === 'data:,') return null;
+        return dataUrlToArrayBuffer(dataUrl);
+    }
+
     private async exportViaToBlob(
         canvas: Canvas,
         minX: number,
@@ -261,23 +319,7 @@ export class ImageExporter {
                     tempCanvas.height
                 );
 
-                const blob: Blob | null = await new Promise<Blob | null>((resolve) => {
-                    const anyCanvas = tempCanvas as any;
-                    if (typeof anyCanvas.toBlob === 'function') {
-                        anyCanvas.toBlob((result: Blob | null) => resolve(result), mimeType, 1);
-                    } else {
-                        try {
-                            const dataUrl = tempCanvas.toDataURL(mimeType, 1);
-                            fetch(dataUrl).then(res => res.blob()).then(resolve).catch(() => resolve(null));
-                        } catch {
-                            resolve(null);
-                        }
-                    }
-                });
-
-                if (blob) {
-                    return await blob.arrayBuffer();
-                }
+                return await this.canvasElementToArrayBuffer(tempCanvas, mimeType);
             }
         } catch (e) {
             console.debug('toCanvasElement method failed, trying alternative...', e);
@@ -340,23 +382,7 @@ export class ImageExporter {
                     0, 0, tempCanvas.width, tempCanvas.height
                 );
 
-                const blob: Blob | null = await new Promise<Blob | null>((resolve) => {
-                    const anyCanvas = tempCanvas as any;
-                    if (typeof anyCanvas.toBlob === 'function') {
-                        anyCanvas.toBlob((result: Blob | null) => resolve(result), mimeType, 1);
-                    } else {
-                        try {
-                            const dataUrl = tempCanvas.toDataURL(mimeType, 1);
-                            fetch(dataUrl).then(res => res.blob()).then(resolve).catch(() => resolve(null));
-                        } catch {
-                            resolve(null);
-                        }
-                    }
-                });
-
-                if (blob) {
-                    return await blob.arrayBuffer();
-                }
+                return await this.canvasElementToArrayBuffer(tempCanvas, mimeType);
             }
         } catch (e) {
             console.debug('Native canvas fallback failed', e);

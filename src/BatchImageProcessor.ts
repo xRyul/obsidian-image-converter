@@ -81,7 +81,7 @@ export class BatchImageProcessor {
             // Early return with appropriate message if no processing is needed
             if (allImagesSkippable && noCompression && noResize) {
                 if (isKeepOriginalFormat) {
-                    new Notice('No processing needed: All images are either in skip list or kept in original format with no compression or resizing.');
+                    new Notice('No processing needed: all images are either in skip list or kept in original format with no compression or resizing.');
                 } else {
                     new Notice(`No processing needed: All images are either in skip list or already in ${targetFormat.toUpperCase()} format with no compression or resizing.`);
                 }
@@ -90,7 +90,7 @@ export class BatchImageProcessor {
 
             // Early return if no processing is needed
             if (isKeepOriginalFormat && noCompression && noResize) {
-                new Notice('No processing needed: Original format selected with no compression or resizing.');
+                new Notice('No processing needed: original format selected with no compression or resizing.');
                 return;
             }
 
@@ -150,9 +150,9 @@ export class BatchImageProcessor {
                     }
 
                     const targetPath = didRename ? newFilePath : oldPath;
-                    const targetFile = this.app.vault.getAbstractFileByPath(targetPath) as TFile;
+                    const targetFile = this.app.vault.getAbstractFileByPath(targetPath);
 
-                    if (!targetFile) {
+                    if (!(targetFile instanceof TFile)) {
                         throw new Error(`Failed to find file after rename: ${targetPath}`);
                     }
 
@@ -209,7 +209,7 @@ export class BatchImageProcessor {
         const canvasData = JSON.parse(canvasContent);
         const linkedFiles: TFile[] = [];
 
-        const getImagesFromNodes = (nodes: any[]): void => {
+        const getImagesFromNodes = (nodes: unknown[]): void => {
             for (const node of nodes) {
                 if (node.type === 'file' && node.file) {
                     const file = this.app.vault.getAbstractFileByPath(node.file);
@@ -245,7 +245,7 @@ export class BatchImageProcessor {
         try {
             const folder = this.app.vault.getAbstractFileByPath(folderPath);
             if (!(folder instanceof TFolder)) {
-                new Notice('Error: Invalid folder path.');
+                new Notice('Error: invalid folder path.');
                 return;
             }
 
@@ -376,7 +376,7 @@ export class BatchImageProcessor {
         try {
             const folder = this.app.vault.getAbstractFileByPath(folderPath);
             if (!(folder instanceof TFolder)) {
-                new Notice('Error: Invalid folder path.');
+                new Notice('Error: invalid folder path.');
                 return;
             }
 
@@ -887,7 +887,7 @@ export class BatchImageProcessor {
                 const content = await this.app.vault.read(canvasFile);
                 const canvasData = JSON.parse(content);
     
-                const updateNodePaths = (nodes: any[]) => {
+                const updateNodePaths = (nodes: unknown[]) => {
                     for (const node of nodes) {
                         if (node.type === 'file' && node.file === oldPath) {
                             node.file = newPath;
