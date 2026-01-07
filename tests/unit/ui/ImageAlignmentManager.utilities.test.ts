@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import ImageConverterPlugin from '../../../src/main';
 import { ImageAlignmentManager } from '../../../src/ImageAlignmentManager';
 import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
@@ -6,10 +6,12 @@ import { fakeApp, fakeTFile, fakeVault } from '../../factories/obsidian';
 import { FileSystemAdapter } from 'obsidian';
 
 /**
- * Utilities: 12.10 [U], 12.11 [U], 12.12 [U]
+ * Utilities: 12.10 [U], 12.11 [U], 12.12 [U], 12.19 [U], 12.20 [U]
  * - validateNoteCache removes orphaned image hashes and deletes empty note entries
  * - getImageHash stability across runs after getRelativePath normalization
  * - getRelativePath handling of external/app:// and file:/// URIs
+ * - loadCache JSON validation: validates object shape before assignment
+ * - loadCache corrupt JSON: resets cache to empty and logs error
  */
 
 describe('ImageAlignmentManager utilities (12.10–12.12)', () => {
@@ -90,5 +92,160 @@ describe('ImageAlignmentManager utilities (12.10–12.12)', () => {
     // Non-matching file:/// path (outside base) should return original
     const outsideFileUrl = `file:///${encodeURIComponent('D:/Elsewhere/other.png')}`;
     expect(manager.getRelativePath(outsideFileUrl)).toBe(outsideFileUrl);
+  });
+});
+
+describe('ImageAlignmentManager loadCache validation (12.19–12.20)', () => {
+  let app: any;
+  let plugin: any;
+  let supported: SupportedImageFormats;
+
+  beforeEach(() => {
+    const note = fakeTFile({ path: 'Notes/n1.md', name: 'n1.md', extension: 'md' });
+    const vault = fakeVault({ files: [note] });
+    app = fakeApp({ vault });
+    plugin = new ImageConverterPlugin(app as any, { id: 'image-converter', dir: '/plugins/image-converter' } as any);
+    plugin.manifest = { id: 'image-converter', dir: '/plugins/image-converter' } as any;
+    plugin.settings = { isImageAlignmentEnabled: true, imageAlignmentCacheLocation: 'plugin', imageAlignmentCacheCleanupInterval: 0 } as any;
+    supported = new SupportedImageFormats(app as any);
+  });
+
+  it('12.19 loadCache JSON validation: non-object values (array, string, number, null) keep cache empty', async () => {
+    // Test with array JSON
+    (app.vault.adapter.exists as any).mockResolvedValue(true);
+    (app.vault.adapter.read as any).mockResolvedValue('["not", "an", "object"]');
+
+    const manager = new ImageAlignmentManager(app as any, plugin, supported);
+    await manager.loadCache();
+    expect(manager.getCache()).toEqual({});
+
+    // Test with string JSON
+    (app.vault.adapter.read as any).mockResolvedValue('"just a string"');
+    const manager2 = new ImageAlignmentManager(app as any, plugin, supported);
+    await manager2.loadCache();
+    expect(manager2.getCache()).toEqual({});
+
+    // Test with number JSON
+    (app.vault.adapter.read as any).mockResolvedValue('12345');
+    const manager3 = new ImageAlignmentManager(app as any, plugin, supported);
+    await manager3.loadCache();
+    expect(manager3.getCache()).toEqual({});
+
+    // Test with null JSON
+    (app.vault.adapter.read as any).mockResolvedValue('null');
+    const manager4 = new ImageAlignmentManager(app as any, plugin, supported);
+    await manager4.loadCache();
+    expect(manager4.getCache()).toEqual({});
+  });
+
+  it('12.19 loadCache JSON validation: valid object is assigned to cache', async () => {
+    const validCache = {
+      'Notes/n1.md': {
+        'abc123': { position: 'left', width: '100px', height: '50px', wrap: false }
+      }
+    };
+    (app.vault.adapter.exists as any).mockResolvedValue(true);
+    (app.vault.adapter.read as any).mockResolvedValue(JSON.stringify(validCache));
+
+    const manager = new ImageAlignmentManager(app as any, plugin, supported);
+    await manager.loadCache();
+    expect(manager.getCache()).toEqual(validCache);
+  });
+
+  it('12.20 loadCache corrupt JSON: when JSON.parse throws, cache reset to empty and error logged', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    
+    (app.vault.adapter.exists as any).mockResolvedValue(true);
+    (app.vault.adapter.read as any).mockResolvedValue('{ invalid json without closing brace');
+
+    const manager = new ImageAlignmentManager(app as any, plugin, supported);
+    await manager.loadCache();
+    
+    // Cache should be reset to empty object
+    expect(manager.getCache()).toEqual({});
+    
+    // Error should have been logged
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'Error loading image alignment cache:',
+      expect.any(Error)
+    );
+    
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('12.20 loadCache: when cache file does not exist, cache remains empty', async () => {
+    (app.vault.adapter.exists as any).mockResolvedValue(false);
+
+    const manager = new ImageAlignmentManager(app as any, plugin, supported);
+    await manager.loadCache();
+    expect(manager.getCache()).toEqual({});
+  });
+});
+
+describe('ImageAlignmentManager updateCacheFilePath (12.24)', () => {
+  let plugin: any;
+  let supported: SupportedImageFormats;
+
+  beforeEach(() => {
+    plugin = new ImageConverterPlugin({} as any, { id: 'image-converter', dir: '/plugins/image-converter' } as any);
+    plugin.manifest = { id: 'image-converter', dir: '/plugins/image-converter' } as any;
+    plugin.settings = { isImageAlignmentEnabled: true, imageAlignmentCacheLocation: '.obsidian', imageAlignmentCacheCleanupInterval: 0 } as any;
+  });
+
+  it('12.24 updateCacheFilePath with .obsidian location: uses configDir for cache path', async () => {
+    // Create vault with valid configDir
+    const note = fakeTFile({ path: 'Notes/n1.md', name: 'n1.md', extension: 'md' });
+    const vault = fakeVault({ files: [note], configDir: '.obsidian' });
+    const app = fakeApp({ vault });
+    
+    supported = new SupportedImageFormats(app as any);
+    const manager = new ImageAlignmentManager(app as any, plugin, supported);
+    
+    // Set cache location to .obsidian to use configDir
+    plugin.settings.imageAlignmentCacheLocation = '.obsidian';
+    
+    // Call updateCacheFilePath
+    manager.updateCacheFilePath();
+    
+    // With .obsidian location, path uses configDir
+    expect((manager as any).cacheFilePath).toBe('.obsidian/image-converter-image-alignments.json');
+  });
+
+  it('12.24 updateCacheFilePath with custom configDir: uses custom configDir value', async () => {
+    // Obsidian allows custom config directories (e.g., ".config" instead of ".obsidian")
+    const note = fakeTFile({ path: 'Notes/n1.md', name: 'n1.md', extension: 'md' });
+    const vault = fakeVault({ files: [note], configDir: '.config' });
+    const app = fakeApp({ vault });
+    
+    supported = new SupportedImageFormats(app as any);
+    const manager = new ImageAlignmentManager(app as any, plugin, supported);
+    
+    // Set cache location to .obsidian to use configDir
+    plugin.settings.imageAlignmentCacheLocation = '.obsidian';
+    
+    // Call updateCacheFilePath
+    manager.updateCacheFilePath();
+    
+    // Path should use actual configDir value, not hardcoded .obsidian
+    expect((manager as any).cacheFilePath).toBe('.config/image-converter-image-alignments.json');
+  });
+
+  it('12.24 updateCacheFilePath with plugin location: uses pluginDir for cache path', async () => {
+    // Create vault with valid configDir
+    const note = fakeTFile({ path: 'Notes/n1.md', name: 'n1.md', extension: 'md' });
+    const vault = fakeVault({ files: [note], configDir: '.obsidian' });
+    const app = fakeApp({ vault });
+    
+    supported = new SupportedImageFormats(app as any);
+    const manager = new ImageAlignmentManager(app as any, plugin, supported);
+    
+    // Set cache location to plugin folder
+    plugin.settings.imageAlignmentCacheLocation = 'plugin';
+    
+    // Call updateCacheFilePath
+    manager.updateCacheFilePath();
+    
+    // With plugin location, path uses pluginDir
+    expect((manager as any).cacheFilePath).toBe('/plugins/image-converter/image-converter-image-alignments.json');
   });
 });

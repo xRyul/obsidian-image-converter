@@ -2,7 +2,7 @@
 export class AsyncLock {
     private locks: Map<string, Promise<void>> = new Map();
 
-    async acquire(key: string, fn: () => Promise<void>) {
+    async acquire<T>(key: string, fn: () => Promise<T>): Promise<T> {
         const release = await this.acquireLock(key);
         try {
             return await fn();

@@ -19,6 +19,7 @@ export default defineConfig([
 
 			// Configuration files that don't need linting
 			"esbuild.config.mjs",
+			"eslint.config.mjs",
 			".eslintrc",
 			".eslintrc.*",
 
@@ -75,7 +76,7 @@ export default defineConfig([
 			ecmaVersion: "latest",
 			sourceType: "module",
 			parserOptions: {
-				project: "./tsconfig.json",
+				project: "./tsconfig.eslint.json",
 			},
 			globals: {
 				...globals.node,

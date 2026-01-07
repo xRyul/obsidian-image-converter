@@ -56,10 +56,13 @@ export class ImageAlignmentManager {
 
 		this.imageAlignment = new ImageAlignment(this.app, this.plugin, this);
 		this.debouncedValidateNoteCache = debounce(
-			this.validateNoteCache.bind(this),
+			this.validateNoteCache.bind(this) as (
+				notePath: string,
+				noteContent: string
+			) => Promise<void>,
 			300,
 			true
-		) as Debouncer<[notePath: string, noteContent: string], Promise<void>>;
+		);
 	}
 
 	public async initialize() {
@@ -71,7 +74,9 @@ export class ImageAlignmentManager {
 		// Apply alignments immediately
 		const currentFile = this.app.workspace.getActiveFile();
 		if (currentFile) {
-			this.applyAlignmentsToNote(currentFile.path);
+			this.applyAlignmentsToNote(currentFile.path).catch((error) => {
+				console.error("Failed to apply alignments:", error);
+			});
 		}
 	}
 
@@ -86,9 +91,10 @@ export class ImageAlignmentManager {
 
 	public updateCacheFilePath() {
 		const cacheLocation = this.plugin.settings.imageAlignmentCacheLocation;
+		const { configDir } = this.app.vault;
+		// eslint-disable-next-line obsidianmd/hardcoded-config-path -- Setting value comparison (not a hardcoded path)
 		if (cacheLocation === ".obsidian") {
-			this.cacheFilePath =
-				".obsidian/image-converter-image-alignments.json";
+			this.cacheFilePath = `${configDir}/image-converter-image-alignments.json`;
 		} else {
 			// It has to be "plugin" now
 			this.cacheFilePath = `${this.pluginDir}/image-converter-image-alignments.json`;
@@ -96,12 +102,12 @@ export class ImageAlignmentManager {
 	}
 
 	private getPluginDir(): string {
-		const pluginMainFile = (this.plugin as any).manifest.dir;
-		if (!pluginMainFile) {
+		const pluginDir = this.plugin.manifest.dir;
+		if (!pluginDir) {
 			console.error("Could not determine plugin directory");
 			return "";
 		}
-		return pluginMainFile;
+		return pluginDir;
 	}
 
 	public getCache(): ImageAlignmentCache {
@@ -117,7 +123,10 @@ export class ImageAlignmentManager {
 			// Use this.cacheFilePath instead of the hardcoded path
 			if (await adapter.exists(this.cacheFilePath)) {
 				const data = await adapter.read(this.cacheFilePath);
-				this.cache = JSON.parse(data);
+				const parsed: unknown = JSON.parse(data);
+				if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+					this.cache = parsed as ImageAlignmentCache;
+				}
 			}
 		} catch (error) {
 			console.error("Error loading image alignment cache:", error);
@@ -177,7 +186,7 @@ export class ImageAlignmentManager {
 			this.app.vault.on("delete", async (file) => {
 				if (file instanceof TFile) {
 					if (file.extension === "md") {
-						await this.removeNoteFromCache(file.path);
+						this.removeNoteFromCache(file.path);
 					} else if (
 						this.supportedImageFormats.isSupported(
 							undefined,
@@ -204,7 +213,7 @@ export class ImageAlignmentManager {
 						const content = await this.app.vault.cachedRead(
 							activeFile
 						);
-						this.validateNoteCache(activeFile.path, content);
+						void this.validateNoteCache(activeFile.path, content);
 					}
 				}
 			})
@@ -253,7 +262,7 @@ export class ImageAlignmentManager {
 						const content = await this.app.vault.cachedRead(
 							activeFile
 						);
-						this.validateNoteCache(activeFile.path, content);
+						void this.validateNoteCache(activeFile.path, content);
 					}
 				}
 			})
@@ -348,6 +357,21 @@ export class ImageAlignmentManager {
 	//     return editorElement.contains(img);
 	// }
 
+	/**
+	 * Internal helper to mutate cache - caller MUST hold the lock.
+	 * Does not persist to disk; caller should call saveCache() after.
+	 */
+	private setAlignmentInCacheInternal(
+		notePath: string,
+		imageHash: string,
+		data: ImagePositionData
+	): void {
+		if (!this.cache[notePath]) {
+			this.cache[notePath] = {};
+		}
+		this.cache[notePath][imageHash] = data;
+	}
+
 	public async saveImageAlignmentToCache(
 		notePath: string,
 		imageSrc: string,
@@ -358,35 +382,16 @@ export class ImageAlignmentManager {
 	) {
 		try {
 			await this.lock.acquire("cacheOperation", async () => {
-				// Skip cache updates during active scrolling
-				// if (this.imageResizer.resizeState.isScrolling) {
-				//     return;
-				// }
-
-				// Normalize imageSrc to a relative path
 				const relativeImageSrc = this.getRelativePath(imageSrc);
-
-				// console.log("saveImageAlignmentToCache DETAILS:");
-				// console.log("- Note Path:", notePath);
-				// console.log("- Original Image Src:", imageSrc);
-				// console.log("- Relative Image Src:", relativeImageSrc);
-
-				// Use the normalized relative path for hash generation
 				const imageHash = this.getImageHash(notePath, relativeImageSrc);
-				// console.log("Calculated Image Hash:", imageHash);
 
-				if (!this.cache[notePath]) {
-					this.cache[notePath] = {};
-				}
-
-				this.cache[notePath][imageHash] = {
+				this.setAlignmentInCacheInternal(notePath, imageHash, {
 					position,
 					width: width || "",
-					height: height || "", // Store height
+					height: height || "",
 					wrap,
-				};
+				});
 
-				// console.log("Updated Cache:", this.cache);
 				await this.saveCache();
 			});
 		} catch (error) {
@@ -446,21 +451,24 @@ export class ImageAlignmentManager {
 
 		const normalizedSrc = this.getRelativePath(imageSrc);
 
-		// Check if alignment already exists for this image
-		if (this.getImageAlignment(notePath, normalizedSrc)) {
-			return false;
-		}
+		// Use lock to prevent TOCTOU race between check and save
+		return await this.lock.acquire("cacheOperation", async () => {
+			// Check inside lock to avoid race condition
+			if (this.getImageAlignment(notePath, normalizedSrc)) {
+				return false;
+			}
 
-		// Save the default alignment to cache
-		await this.saveImageAlignmentToCache(
-			notePath,
-			normalizedSrc,
-			position,
-			undefined,
-			undefined,
-			wrap
-		);
-		return true;
+			const imageHash = this.getImageHash(notePath, normalizedSrc);
+			this.setAlignmentInCacheInternal(notePath, imageHash, {
+				position,
+				width: "",
+				height: "",
+				wrap,
+			});
+
+			await this.saveCache();
+			return true;
+		});
 	}
 
 	public getRelativePath(imageSrc: string): string {
@@ -551,7 +559,7 @@ export class ImageAlignmentManager {
 
 				for (const img of images) {
 					await this.applyAlignmentToSingleImage(
-						img as HTMLImageElement,
+						img,
 						notePath,
 						allowDefault,
 						defaultAlignment
@@ -583,12 +591,12 @@ export class ImageAlignmentManager {
 			const created = await this.ensureDefaultAlignment(
 				notePath,
 				src,
-				defaultAlign as "left" | "center" | "right",
+				defaultAlign,
 				false
 			);
 			if (created) {
 				this.imageAlignment.applyAlignmentToImage(img, {
-					position: defaultAlign as "left" | "center" | "right",
+					position: defaultAlign,
 					wrap: false,
 				});
 			}
@@ -768,11 +776,17 @@ export class ImageAlignmentManager {
 	}
 
 	// Add method to remove cache for specific note
-	public async removeNoteFromCache(notePath: string) {
-		if (this.cache[notePath]) {
-			delete this.cache[notePath];
-			await this.saveCache();
-		}
+	public removeNoteFromCache(notePath: string): void {
+		void this.lock
+			.acquire("cacheOperation", async () => {
+				if (this.cache[notePath]) {
+					delete this.cache[notePath];
+					await this.saveCache();
+				}
+			})
+			.catch((error) => {
+				console.error("Failed to remove note from cache:", error);
+			});
 	}
 
 	scheduleCacheCleanup() {

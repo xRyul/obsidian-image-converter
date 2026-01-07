@@ -482,4 +482,186 @@ describe('ImageAlignmentManager (integration-lite) — 12.x behaviors', () => {
       expect(manager.getCache()[notePath][hashNew].position).toBe('right');
     });
   });
+
+  // ========== 12.21 saveCache pluginDir guard ==========
+  describe('12.21 saveCache pluginDir guard', () => {
+    it('12.21 saveCache: when pluginDir is empty, returns early without writing', async () => {
+      // Spy on console.error BEFORE creating the manager to capture all errors
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      
+      // Create a manager with an empty pluginDir by mocking manifest.dir as undefined
+      const note = fakeTFile({ path: 'Notes/n1.md', name: 'n1.md', extension: 'md' });
+      const vault = fakeVault({ files: [note] });
+      const testApp = fakeApp({ vault });
+      const testPlugin = new ImageConverterPlugin(testApp as any, { id: 'image-converter', dir: undefined } as any);
+      testPlugin.manifest = { id: 'image-converter', dir: undefined } as any;
+      testPlugin.settings = {
+        isImageAlignmentEnabled: true,
+        imageAlignmentDefaultAlignment: 'none',
+        imageAlignmentCacheLocation: 'plugin',
+        imageAlignmentCacheCleanupInterval: 0,
+      } as any;
+      
+      const testSupported = new SupportedImageFormats(testApp as any);
+      const testManager = new ImageAlignmentManager(testApp as any, testPlugin, testSupported);
+      
+      // Verify console.error was called during construction (when getPluginDir fails)
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Could not determine plugin directory');
+      
+      const writeSpy = vi.spyOn((testApp.vault as any).adapter, 'write');
+      
+      // Manually set some cache data
+      (testManager as any).cache = { 'Notes/n1.md': { 'hash123': { position: 'left', wrap: false } } };
+      
+      // Try to save - should return early because pluginDir is empty
+      await testManager.saveCache();
+      
+      // Verify that write was NOT called due to empty pluginDir guard
+      expect(writeSpy).not.toHaveBeenCalled();
+      
+      // Verify console.error was also called during saveCache (Plugin directory not found)
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Plugin directory not found');
+      
+      consoleErrorSpy.mockRestore();
+    });
+  });
+
+  // ========== 12.22 initialize error handling ==========
+  describe('12.22 initialize error handling', () => {
+    it('12.22 when applyAlignmentsToNote throws, error is caught and logged, initialization completes', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      
+      const note = fakeTFile({ path: 'Notes/n1.md', name: 'n1.md', extension: 'md' });
+      const vault = fakeVault({ files: [note] });
+      const testApp = fakeApp({ vault });
+      
+      // Mock getActiveFile to return a file so applyAlignmentsToNote will be called
+      (testApp.workspace!.getActiveFile as any) = vi.fn(() => note);
+      
+      const testPlugin = new ImageConverterPlugin(testApp as any, { id: 'image-converter', dir: '/plugins/image-converter' } as any);
+      testPlugin.manifest = { id: 'image-converter', dir: '/plugins/image-converter' } as any;
+      testPlugin.settings = {
+        isImageAlignmentEnabled: true,
+        imageAlignmentDefaultAlignment: 'none',
+        imageAlignmentCacheLocation: 'plugin',
+        imageAlignmentCacheCleanupInterval: 0,
+      } as any;
+      
+      const testSupported = new SupportedImageFormats(testApp as any);
+      const testManager = new ImageAlignmentManager(testApp as any, testPlugin, testSupported);
+      
+      // Mock applyAlignmentsToNote to throw an error
+      const testError = new Error('Test alignment error');
+      vi.spyOn(testManager, 'applyAlignmentsToNote').mockRejectedValue(testError);
+      
+      // initialize() should complete without throwing due to .catch() pattern
+      await expect(testManager.initialize()).resolves.toBeUndefined();
+      
+      // Give the promise a chance to settle and log
+      await new Promise(resolve => setTimeout(resolve, 10));
+      
+      // Verify the error was logged
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to apply alignments:', testError);
+      
+      consoleErrorSpy.mockRestore();
+    });
+  });
+
+  // ========== 12.23 event handler error handling ==========
+  describe('12.23 event handler error handling', () => {
+    it('12.23 when validateNoteCache throws during delete event, error does not propagate (void pattern)', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      
+      const note = fakeTFile({ path: 'Notes/n1.md', name: 'n1.md', extension: 'md' });
+      const imgFile = fakeTFile({ path: 'imgs/pic.png', name: 'pic.png', extension: 'png' });
+      const vault = fakeVault({ files: [note, imgFile] });
+      const testApp = fakeApp({ vault });
+      
+      // Setup getActiveFile to return note for validation
+      (testApp.workspace!.getActiveFile as any) = vi.fn(() => note);
+      // Setup cachedRead to return content
+      (testApp.vault as any).cachedRead = vi.fn().mockResolvedValue('![](imgs/pic.png)');
+      
+      const testPlugin = new ImageConverterPlugin(testApp as any, { id: 'image-converter', dir: '/plugins/image-converter' } as any);
+      testPlugin.manifest = { id: 'image-converter', dir: '/plugins/image-converter' } as any;
+      testPlugin.settings = {
+        isImageAlignmentEnabled: true,
+        imageAlignmentDefaultAlignment: 'none',
+        imageAlignmentCacheLocation: 'plugin',
+        imageAlignmentCacheCleanupInterval: 0,
+      } as any;
+      
+      const testSupported = new SupportedImageFormats(testApp as any);
+      const testManager = new ImageAlignmentManager(testApp as any, testPlugin, testSupported);
+      await testManager.loadCache();
+      
+      // Initialize to register events
+      await testManager.initialize();
+      
+      // Mock validateNoteCache to throw an error
+      const testError = new Error('Validation error');
+      vi.spyOn(testManager, 'validateNoteCache').mockRejectedValue(testError);
+      
+      // Get the delete handler that was registered
+      const onMock = (testApp.vault as any).on as any;
+      const deleteCall = onMock.mock.calls.find((callArgs: any[]) => callArgs[0] === 'delete');
+      expect(deleteCall).toBeTruthy();
+      const deleteHandler = deleteCall[1] as (file: any) => Promise<void> | void;
+      
+      // Calling delete handler should NOT throw even though validateNoteCache throws
+      // The void pattern means the promise rejection is intentionally ignored
+      await expect(deleteHandler(imgFile)).resolves.toBeUndefined();
+      
+      consoleErrorSpy.mockRestore();
+    });
+
+    it('12.23 when validateNoteCache throws during rename event, error does not propagate (void pattern)', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      
+      const note = fakeTFile({ path: 'Notes/n1.md', name: 'n1.md', extension: 'md' });
+      const imgFile = fakeTFile({ path: 'imgs/pic.png', name: 'pic.png', extension: 'png' });
+      const vault = fakeVault({ files: [note, imgFile] });
+      const testApp = fakeApp({ vault });
+      
+      // Setup getActiveFile to return note for validation
+      (testApp.workspace!.getActiveFile as any) = vi.fn(() => note);
+      // Setup cachedRead to return content
+      (testApp.vault as any).cachedRead = vi.fn().mockResolvedValue('![](imgs/pic.png)');
+      
+      const testPlugin = new ImageConverterPlugin(testApp as any, { id: 'image-converter', dir: '/plugins/image-converter' } as any);
+      testPlugin.manifest = { id: 'image-converter', dir: '/plugins/image-converter' } as any;
+      testPlugin.settings = {
+        isImageAlignmentEnabled: true,
+        imageAlignmentDefaultAlignment: 'none',
+        imageAlignmentCacheLocation: 'plugin',
+        imageAlignmentCacheCleanupInterval: 0,
+      } as any;
+      
+      const testSupported = new SupportedImageFormats(testApp as any);
+      const testManager = new ImageAlignmentManager(testApp as any, testPlugin, testSupported);
+      await testManager.loadCache();
+      
+      // Initialize to register events
+      await testManager.initialize();
+      
+      // Mock validateNoteCache to throw an error
+      const testError = new Error('Validation error');
+      vi.spyOn(testManager, 'validateNoteCache').mockRejectedValue(testError);
+      
+      // Get the rename handler that was registered
+      const onMock = (testApp.vault as any).on as any;
+      const renameCall = onMock.mock.calls.find((callArgs: any[]) => callArgs[0] === 'rename');
+      expect(renameCall).toBeTruthy();
+      const renameHandler = renameCall[1] as (file: any, oldPath: string) => Promise<void> | void;
+      
+      // Calling rename handler should NOT throw even though validateNoteCache throws
+      const oldPath = imgFile.path;
+      imgFile.path = 'imgs/pic-renamed.png';
+      imgFile.name = 'pic-renamed.png';
+      
+      await expect(renameHandler(imgFile, oldPath)).resolves.toBeUndefined();
+      
+      consoleErrorSpy.mockRestore();
+    });
+  });
 });

@@ -1,0 +1,19 @@
+// Separate tsconfig for ESLint's @typescript-eslint/parser.
+// The main tsconfig.json excludes test files, but ESLint needs them in the project
+// to enable type-aware linting rules (like naming-convention). This config extends
+// the main one but includes tests/**/*.ts so ESLint can lint everything.
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.d.ts",
+    "tests/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "build",
+    "**/*.js",
+    "main.js",
+    "scripts"
+  ]
+}

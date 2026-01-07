@@ -113,6 +113,13 @@ export function fakeTFolder(options: {
 /**
  * Create a mock Vault object with common methods
  * @param options - Configuration for vault behavior
+ * @param options.files - Initial files in the vault
+ * @param options.folders - Initial folders in the vault
+ * @param options.fileContents - Map of file paths to text content
+ * @param options.binaryContents - Map of file paths to binary content
+ * @param options.vaultName - Name of the vault (default: 'TestVault')
+ * @param options.attachmentFolderPath - Path for attachments (default: 'attachments')
+ * @param options.configDir - Obsidian config directory path (default: '.obsidian')
  * @returns Mock Vault
  */
 export function fakeVault(options: {
@@ -122,6 +129,7 @@ export function fakeVault(options: {
   binaryContents?: Map<string, ArrayBuffer>;
   vaultName?: string;
   attachmentFolderPath?: string; // for getConfig('attachmentFolderPath')
+  configDir?: string; // Obsidian's config directory (default: .obsidian)
 } = {}): Partial<Vault> {
   const files = options.files ?? [];
   const folders = options.folders ?? [];
@@ -129,6 +137,7 @@ export function fakeVault(options: {
   const binaryContents = options.binaryContents ?? new Map();
   const vaultName = options.vaultName ?? 'TestVault';
   const attachmentFolderPath = options.attachmentFolderPath ?? 'attachments';
+  const configDir = options.configDir ?? '.obsidian';
   const rootFolder = fakeTFolder({ path: '/', name: '/' });
   
   return {
@@ -288,7 +297,7 @@ export function fakeVault(options: {
     }),
     
     // Config
-    configDir: '/.obsidian',
+    configDir,
     
     // Events (simplified)
     on: vi.fn(),
