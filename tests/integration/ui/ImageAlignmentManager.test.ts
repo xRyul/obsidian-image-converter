@@ -76,11 +76,19 @@ describe('ImageAlignmentManager (integration-lite) — 12.x behaviors', () => {
       expect(manager.getCache()[note][hash].position).toBe('left');
       expect(img.classList.contains('image-position-left')).toBe(true);
 
-      // Second click on the same should toggle to none
+      // Second click on the same should toggle to none (saves position='none' to block default reapplication)
+      // Note: Disk persistence is verified separately in test 12.4
       await alignment.updateImageAlignment(img as HTMLImageElement, { align: 'none', wrap: false });
       await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(manager.getCache()[note]?.[hash]).toBeUndefined();
+      expect(manager.getCache()[note][hash].position).toBe('none');
+      expect(manager.getCache()[note][hash].wrap).toBe(false);
       expect(img.classList.contains('image-position-left')).toBe(false);
+
+      // Verify position='none' blocks default reapplication
+      plugin.settings.imageAlignmentDefaultAlignment = 'center';
+      await manager.applyAlignmentsToNote(note);
+      expect(img.classList.contains('image-position-center')).toBe(false);
+      expect(img.classList.contains('image-converter-aligned')).toBe(false);
     });
 
     it('12.1.b selecting center/right applies classes and persists; align=none removes them', async () => {
@@ -107,13 +115,19 @@ describe('ImageAlignmentManager (integration-lite) — 12.x behaviors', () => {
       expect(img.classList.contains('image-position-right')).toBe(true);
       expect(img.classList.contains('image-wrap')).toBe(true);
 
-      // None -> removes entry and classes
+      // None -> saves position='none' (to block default reapplication) and removes CSS classes
       await alignment.updateImageAlignment(img as HTMLImageElement, { align: 'none', wrap: false });
       await new Promise(resolve => setTimeout(resolve, 0));
-      expect(manager.getCache()[note]?.[hash]).toBeUndefined();
+      expect(manager.getCache()[note][hash].position).toBe('none');
       await new Promise(resolve => setTimeout(resolve, 0));
       expect(img.classList.contains('image-position-right')).toBe(false);
       expect(img.classList.contains('image-wrap')).toBe(false);
+
+      // Verify position='none' blocks default reapplication
+      plugin.settings.imageAlignmentDefaultAlignment = 'left';
+      await manager.applyAlignmentsToNote(note);
+      expect(img.classList.contains('image-position-left')).toBe(false);
+      expect(img.classList.contains('image-converter-aligned')).toBe(false);
     });
   });
 
@@ -662,6 +676,249 @@ describe('ImageAlignmentManager (integration-lite) — 12.x behaviors', () => {
       await expect(renameHandler(imgFile, oldPath)).resolves.toBeUndefined();
       
       consoleErrorSpy.mockRestore();
+    });
+  });
+
+  // ========== 12.25-12.28 Rapid alignment changes and race condition tests ==========
+  describe('12.25-12.28 Rapid alignment changes', () => {
+    it('12.25 rapid toggle-off: getCurrentImageAlignment returns none immediately after toggle-off', async () => {
+      const note = 'Notes/n1.md';
+      const src = 'imgs/pic.png';
+      const { img } = setupDomWithImage(src);
+      (app.workspace.getActiveFile as any) = vi.fn(() => fakeTFile({ path: note }));
+
+      const alignment = new ImageAlignment(app as any, plugin, manager);
+      plugin.ImageAlignmentManager = manager;
+
+      // Set alignment to center
+      await alignment.updateImageAlignment(img as HTMLImageElement, { align: 'center', wrap: false });
+      
+      // Verify it's set
+      let current = alignment.getCurrentImageAlignment(img as HTMLImageElement);
+      expect(current.align).toBe('center');
+
+      // Toggle off immediately (don't await - simulates fire-and-forget behavior)
+      alignment.updateImageAlignment(img as HTMLImageElement, { align: 'none', wrap: false });
+      
+      // getCurrentImageAlignment should return 'none' immediately without waiting for disk save
+      current = alignment.getCurrentImageAlignment(img as HTMLImageElement);
+      expect(current.align).toBe('none');
+    });
+
+    it('12.26 rapid sequential changes: final state reflected in getCurrentImageAlignment', async () => {
+      const note = 'Notes/n1.md';
+      const src = 'imgs/pic.png';
+      const { img } = setupDomWithImage(src);
+      (app.workspace.getActiveFile as any) = vi.fn(() => fakeTFile({ path: note }));
+
+      const alignment = new ImageAlignment(app as any, plugin, manager);
+      plugin.ImageAlignmentManager = manager;
+
+      // Rapid sequential changes without awaiting (simulates user clicking quickly)
+      alignment.updateImageAlignment(img as HTMLImageElement, { align: 'left', wrap: false });
+      alignment.updateImageAlignment(img as HTMLImageElement, { align: 'center', wrap: false });
+      alignment.updateImageAlignment(img as HTMLImageElement, { align: 'right', wrap: true });
+      
+      // Final state should be reflected immediately
+      const current = alignment.getCurrentImageAlignment(img as HTMLImageElement);
+      expect(current.align).toBe('right');
+      expect(current.wrap).toBe(true);
+      
+      // Also verify CSS classes match
+      expect(img.classList.contains('image-position-right')).toBe(true);
+      expect(img.classList.contains('image-wrap')).toBe(true);
+    });
+
+    it('12.27 toggle-off consistency: CSS and cache both reflect none in same tick', async () => {
+      const note = 'Notes/n1.md';
+      const src = 'imgs/pic.png';
+      const { img } = setupDomWithImage(src);
+      (app.workspace.getActiveFile as any) = vi.fn(() => fakeTFile({ path: note }));
+
+      const alignment = new ImageAlignment(app as any, plugin, manager);
+      plugin.ImageAlignmentManager = manager;
+
+      // Set alignment first
+      await alignment.updateImageAlignment(img as HTMLImageElement, { align: 'center', wrap: false });
+      expect(img.classList.contains('image-position-center')).toBe(true);
+      
+      // Toggle off - CSS should be removed and getCurrentImageAlignment should return none
+      alignment.updateImageAlignment(img as HTMLImageElement, { align: 'none', wrap: false });
+      
+      // Both should be consistent in the same tick
+      expect(img.classList.contains('image-position-center')).toBe(false);
+      expect(img.classList.contains('image-converter-aligned')).toBe(false);
+      
+      const current = alignment.getCurrentImageAlignment(img as HTMLImageElement);
+      expect(current.align).toBe('none');
+    });
+
+    it('12.28 in-memory cache update is synchronous: getCache reflects new value before lock acquired', async () => {
+      const note = 'Notes/n1.md';
+      const src = 'imgs/pic.png';
+      
+      // Don't await - call and immediately check cache
+      manager.saveImageAlignmentToCache(note, src, 'left', '100px', '50px', false);
+      
+      // Cache should be updated synchronously (before disk save completes)
+      const hash = manager.getImageHash(note, src);
+      expect(manager.getCache()[note]).toBeDefined();
+      expect(manager.getCache()[note][hash]).toBeDefined();
+      expect(manager.getCache()[note][hash].position).toBe('left');
+      
+      // Now test removal
+      manager.removeImageFromCache(note, src);
+      
+      // Cache entry should be removed synchronously
+      expect(manager.getCache()[note]?.[hash]).toBeUndefined();
+    });
+
+    it('12.28.b rapid-fire saves demonstrate last-write-wins behavior', async () => {
+      const note = 'Notes/n1.md';
+      const src = 'imgs/pic.png';
+      
+      // Rapid-fire saves without awaiting - simulates rapid user clicks
+      manager.saveImageAlignmentToCache(note, src, 'left', '100px', '50px', false);
+      manager.saveImageAlignmentToCache(note, src, 'center', '120px', '60px', true);
+      manager.saveImageAlignmentToCache(note, src, 'right', '140px', '70px', false);
+      
+      // Cache should reflect the LAST call's values (last-write-wins)
+      const hash = manager.getImageHash(note, src);
+      expect(manager.getCache()[note][hash].position).toBe('right');
+      expect(manager.getCache()[note][hash].width).toBe('140px');
+      expect(manager.getCache()[note][hash].height).toBe('70px');
+      expect(manager.getCache()[note][hash].wrap).toBe(false);
+    });
+  });
+
+  // ========== 12.29-12.30 Bug regression tests with default alignment enabled ==========
+  describe('12.29-12.30 Bug regression tests (default alignment enabled)', () => {
+    it('12.29 Bug 1 regression: toggle-off persists after applyAlignmentsToNote when default enabled', async () => {
+      const note = 'Notes/n1.md';
+      const src = 'imgs/pic.png';
+      const { img } = setupDomWithImage(src);
+      (app.workspace.getActiveFile as any) = vi.fn(() => fakeTFile({ path: note }));
+
+      // Enable default alignment (this is the key difference from other tests)
+      plugin.settings.imageAlignmentDefaultAlignment = 'center';
+
+      const alignment = new ImageAlignment(app as any, plugin, manager);
+      plugin.ImageAlignmentManager = manager;
+
+      // Set alignment to center
+      await alignment.updateImageAlignment(img as HTMLImageElement, { align: 'center', wrap: false });
+      expect(alignment.getCurrentImageAlignment(img as HTMLImageElement).align).toBe('center');
+
+      // Toggle off to none
+      await alignment.updateImageAlignment(img as HTMLImageElement, { align: 'none', wrap: false });
+      expect(alignment.getCurrentImageAlignment(img as HTMLImageElement).align).toBe('none');
+
+      // Simulate layout-change by calling applyAlignmentsToNote
+      await manager.applyAlignmentsToNote(note);
+
+      // BUG 1 CHECK: alignment should still be 'none', NOT 'center' (the default)
+      // Before fix: would return 'center' because cache entry was deleted and default reapplied
+      // After fix: returns 'none' because cache entry with position='none' blocks default
+      const finalAlignment = alignment.getCurrentImageAlignment(img as HTMLImageElement);
+      expect(finalAlignment.align).toBe('none');
+    });
+
+    it('12.30 Bug 2 regression: CSS state preserved after applyAlignmentsToNote when default enabled', async () => {
+      const note = 'Notes/n1.md';
+      const src = 'imgs/pic.png';
+      const { img } = setupDomWithImage(src);
+      (app.workspace.getActiveFile as any) = vi.fn(() => fakeTFile({ path: note }));
+
+      // Enable default alignment
+      plugin.settings.imageAlignmentDefaultAlignment = 'center';
+
+      const alignment = new ImageAlignment(app as any, plugin, manager);
+      plugin.ImageAlignmentManager = manager;
+
+      // Set alignment to left first
+      await alignment.updateImageAlignment(img as HTMLImageElement, { align: 'left', wrap: false });
+      expect(img.classList.contains('image-position-left')).toBe(true);
+
+      // Toggle off to none
+      await alignment.updateImageAlignment(img as HTMLImageElement, { align: 'none', wrap: false });
+      expect(img.classList.contains('image-position-left')).toBe(false);
+      expect(img.classList.contains('image-position-center')).toBe(false);
+
+      // Simulate layout-change (e.g., view mode switch)
+      await manager.applyAlignmentsToNote(note);
+
+      // BUG 2 CHECK: image should have NO alignment classes
+      // Before fix: would have 'image-position-center' from default reapplication
+      // After fix: no alignment classes because position='none' is preserved
+      expect(img.classList.contains('image-position-left')).toBe(false);
+      expect(img.classList.contains('image-position-center')).toBe(false);
+      expect(img.classList.contains('image-position-right')).toBe(false);
+      expect(img.classList.contains('image-converter-aligned')).toBe(false);
+    });
+  });
+
+  // ========== 12.31 Stale DOM reference after view mode switch ==========
+  describe('12.31 Stale DOM reference after view mode switch', () => {
+    it('12.31.a alignment change with stale img reference after DOM re-render', async () => {
+      const note = 'Notes/n1.md';
+      const src = 'imgs/pic.png';
+      
+      // Step 1: Set up initial DOM and set alignment to center
+      const { img: oldImg } = setupDomWithImage(src);
+      (app.workspace.getActiveFile as any) = vi.fn(() => fakeTFile({ path: note }));
+
+      const alignment = new ImageAlignment(app as any, plugin, manager);
+      plugin.ImageAlignmentManager = manager;
+
+      await alignment.updateImageAlignment(oldImg as HTMLImageElement, { align: 'center', wrap: false });
+      expect(oldImg.classList.contains('image-position-center')).toBe(true);
+
+      // Step 2: Simulate view mode switch - DOM is re-created (new img element)
+      const { img: newImg } = setupDomWithImage(src);
+      await manager.applyAlignmentsToNote(note);
+      expect(newImg.classList.contains('image-position-center')).toBe(true);
+
+      // Step 3: User changes alignment using OLD img reference (stale context menu)
+      await alignment.updateImageAlignment(oldImg as HTMLImageElement, { align: 'left', wrap: false });
+      
+      // Cache should be updated correctly
+      const hash = manager.getImageHash(note, src);
+      expect(manager.getCache()[note][hash].position).toBe('left');
+
+      // Wait for debounced re-application (50ms debounce + buffer for async lock)
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // BUG CHECK: NEW img element should have 'left' alignment
+      // This will FAIL if CSS was only applied to the stale oldImg
+      expect(newImg.classList.contains('image-position-left')).toBe(true);
+      expect(newImg.classList.contains('image-position-center')).toBe(false);
+    });
+
+    it('12.31.b quick succession with fresh DOM reference works correctly', async () => {
+      const note = 'Notes/n1.md';
+      const src = 'imgs/pic.png';
+      
+      // Set up and set alignment
+      let { img } = setupDomWithImage(src);
+      (app.workspace.getActiveFile as any) = vi.fn(() => fakeTFile({ path: note }));
+
+      const alignment = new ImageAlignment(app as any, plugin, manager);
+      plugin.ImageAlignmentManager = manager;
+
+      await alignment.updateImageAlignment(img as HTMLImageElement, { align: 'center', wrap: false });
+
+      // Simulate view mode switch - recreate DOM and get FRESH reference
+      const result = setupDomWithImage(src);
+      img = result.img;
+      await manager.applyAlignmentsToNote(note);
+
+      // Quick succession with FRESH reference should work
+      await alignment.updateImageAlignment(img as HTMLImageElement, { align: 'right', wrap: false });
+      expect(img.classList.contains('image-position-right')).toBe(true);
+
+      await alignment.updateImageAlignment(img as HTMLImageElement, { align: 'left', wrap: false });
+      expect(img.classList.contains('image-position-left')).toBe(true);
+      expect(img.classList.contains('image-position-right')).toBe(false);
     });
   });
 });

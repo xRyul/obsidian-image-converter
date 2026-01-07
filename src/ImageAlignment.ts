@@ -8,12 +8,46 @@ export interface ImageAlignmentOptions {
 }
 
 export class ImageAlignment extends Component {
+    // Pending re-application timeout to handle stale DOM references
+    private reapplyTimeout: ReturnType<typeof setTimeout> | null = null;
 
     constructor(
         private app: App,
         private plugin: ImageConverterPlugin,
         private imageAlignmentManager: ImageAlignmentManager
-    ) { super(); }
+    ) {
+        super();
+    }
+
+    onunload(): void {
+        if (this.reapplyTimeout) {
+            clearTimeout(this.reapplyTimeout);
+            this.reapplyTimeout = null;
+        }
+    }
+
+    /**
+     * Schedule re-application of alignments to handle stale DOM references.
+     * 
+     * Why this approach vs alternatives:
+     * - MutationObserver: Was previously used but disabled due to performance overhead
+     * - View-mode-change events: Don't capture all DOM recreation scenarios
+     * - Fresh DOM refs in context menu: Not possible as menu captures ref at creation time
+     * 
+     * This debounced approach ensures current DOM elements get correct alignment
+     * from cache even when context menu holds a stale reference to a detached element.
+     */
+    private scheduleReapply(notePath: string): void {
+        if (this.reapplyTimeout) {
+            clearTimeout(this.reapplyTimeout);
+        }
+        this.reapplyTimeout = setTimeout(() => {
+            this.reapplyTimeout = null;
+            this.imageAlignmentManager
+                .applyAlignmentsToNote(notePath)
+                .catch((err) => console.error('Failed to reapply alignments:', err));
+        }, 50);
+    }
 
     /**
      * Adds image alignment options to the context menu.
@@ -174,19 +208,35 @@ export class ImageAlignment extends Component {
 
 
         if (options.align === 'none') {
-            // Use the hash for removal
-            void this.plugin.ImageAlignmentManager!.removeImageFromCache(activeFile.path, relativeSrc);
+            // IMPORTANT: Save position='none' instead of removing the cache entry.
+            // This is necessary to prevent default alignment from being reapplied on layout-change.
+            // Without this entry, applyAlignmentsToNote() would see "no cache" and apply defaults.
+            // Cache cleanup only removes entries for deleted images, not based on position value,
+            // so 'none' entries persist until the image is removed from the note or vault.
+            this.plugin.ImageAlignmentManager!.saveImageAlignmentToCache(
+                activeFile.path,
+                relativeSrc,
+                'none',
+                img.style.width,
+                img.style.height,
+                false
+            ).catch(err => console.error('Failed to save alignment:', err));
         } else {
             // Use the hash for saving
-            void this.plugin.ImageAlignmentManager!.saveImageAlignmentToCache(
+            this.plugin.ImageAlignmentManager!.saveImageAlignmentToCache(
                 activeFile.path,
                 relativeSrc,  // Use normalized src
                 options.align,
                 img.style.width,
                 img.style.height,
                 options.wrap
-            );
+            ).catch(err => console.error('Failed to save alignment:', err));
         }
+
+        // Always schedule re-apply after cache updates to ensure all DOM elements stay in sync.
+        // When view mode switches, DOM is recreated and context menu may hold stale img reference.
+        // The debounced reapply ensures current DOM elements receive alignment from cache.
+        this.scheduleReapply(activeFile.path);
     }
 
     /**

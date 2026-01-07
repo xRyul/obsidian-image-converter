@@ -358,8 +358,8 @@ export class ImageAlignmentManager {
 	// }
 
 	/**
-	 * Internal helper to mutate cache - caller MUST hold the lock.
-	 * Does not persist to disk; caller should call saveCache() after.
+	 * Internal helper to mutate cache synchronously.
+	 * Used by public methods which handle disk persistence via lock.
 	 */
 	private setAlignmentInCacheInternal(
 		notePath: string,
@@ -372,6 +372,25 @@ export class ImageAlignmentManager {
 		this.cache[notePath][imageHash] = data;
 	}
 
+	/**
+	 * Internal helper to remove image from cache synchronously.
+	 * Used by public methods which handle disk persistence via lock.
+	 */
+	private removeImageFromCacheInternal(
+		notePath: string,
+		imageHash: string
+	): boolean {
+		if (this.cache[notePath] && this.cache[notePath][imageHash]) {
+			delete this.cache[notePath][imageHash];
+			// Remove note entry if it has no images
+			if (Object.keys(this.cache[notePath]).length === 0) {
+				delete this.cache[notePath];
+			}
+			return true;
+		}
+		return false;
+	}
+
 	public async saveImageAlignmentToCache(
 		notePath: string,
 		imageSrc: string,
@@ -380,18 +399,26 @@ export class ImageAlignmentManager {
 		height?: string,
 		wrap = false
 	) {
+		// Update in-memory cache SYNCHRONOUSLY (outside lock) for immediate UI consistency.
+		// This is intentional: rapid alignment changes need instant cache reads without
+		// waiting for disk I/O. The lock only serializes disk writes, not memory updates.
+		// Race between concurrent calls is acceptable here because:
+		// 1. Each call overwrites the entire entry (no partial updates)
+		// 2. Last-write-wins semantics match user intent (final click wins)
+		// 3. Disk save always writes current in-memory state at time of write
+		// 4. Serialized disk writes ensure no file corruption; final disk state = final memory state
+		const relativeImageSrc = this.getRelativePath(imageSrc);
+		const imageHash = this.getImageHash(notePath, relativeImageSrc);
+		this.setAlignmentInCacheInternal(notePath, imageHash, {
+			position,
+			width: width || "",
+			height: height || "",
+			wrap,
+		});
+
+		// Queue disk save inside lock (serialized for file safety)
 		try {
 			await this.lock.acquire("cacheOperation", async () => {
-				const relativeImageSrc = this.getRelativePath(imageSrc);
-				const imageHash = this.getImageHash(notePath, relativeImageSrc);
-
-				this.setAlignmentInCacheInternal(notePath, imageHash, {
-					position,
-					width: width || "",
-					height: height || "",
-					wrap,
-				});
-
 				await this.saveCache();
 			});
 		} catch (error) {
@@ -585,9 +612,13 @@ export class ImageAlignmentManager {
 		const positionData = alignments ? alignments[imageHash] : undefined;
 
 		if (positionData) {
+			// Cache entry exists - apply it (including position='none' which removes CSS classes)
+			// Note: position='none' is explicitly saved when user toggles off alignment,
+			// so we apply it to ensure CSS classes are removed. This also blocks the
+			// else-if branch below from applying defaults.
 			this.imageAlignment.applyAlignmentToImage(img, positionData);
 		} else if (allowDefault && defaultAlign !== "none") {
-			// Apply default alignment directly when no cache entry exists
+			// No cache entry exists - apply default alignment if enabled
 			const created = await this.ensureDefaultAlignment(
 				notePath,
 				src,
@@ -754,25 +785,18 @@ export class ImageAlignmentManager {
 
 	// Add method to remove cache for specific image
 	public async removeImageFromCache(notePath: string, imageSrc: string) {
-		await this.lock.acquire("cacheOperation", async () => {
-			// Normalize imageSrc to a relative path
-			const relativeImageSrc = this.getRelativePath(imageSrc);
-			// Use the normalized relative path for hash generation
-			const imageHash = this.getImageHash(notePath, relativeImageSrc);
-			if (this.cache[notePath] && this.cache[notePath][imageHash]) {
-				// console.log(`Removing image with hash ${imageHash} from note ${notePath}`);
-				delete this.cache[notePath][imageHash];
+		// Remove from in-memory cache SYNCHRONOUSLY (outside lock) for immediate UI consistency.
+		// Same rationale as saveImageAlignmentToCache - see comments there.
+		const relativeImageSrc = this.getRelativePath(imageSrc);
+		const imageHash = this.getImageHash(notePath, relativeImageSrc);
+		const wasRemoved = this.removeImageFromCacheInternal(notePath, imageHash);
 
-				// Remove note entry if it has no images
-				if (Object.keys(this.cache[notePath]).length === 0) {
-					delete this.cache[notePath];
-				}
-
+		// Only queue disk save if something was actually removed
+		if (wasRemoved) {
+			await this.lock.acquire("cacheOperation", async () => {
 				await this.saveCache();
-			} else {
-				// console.log(`Image with hash ${imageHash} not found in note ${notePath}`);
-			}
-		});
+			});
+		}
 	}
 
 	// Add method to remove cache for specific note
