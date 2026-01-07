@@ -21,6 +21,7 @@ import { VariableProcessor, VariableContext } from "./VariableProcessor";
 import { ImageAnnotationModal } from "./ImageAnnotation";
 import { Crop } from "./Crop";
 import { ProcessSingleImageModal } from "./ProcessSingleImageModal";
+import { getVaultConfigBoolean } from "./utils/vaultConfig";
 
 interface ImageMatch {
 	lineNumber: number;
@@ -30,13 +31,6 @@ interface ImageMatch {
 
 /** Internal Obsidian Menu type with hide method (not in public API) */
 type MenuWithHide = Menu & { hide?: () => void };
-
-/**
- * Internal Obsidian Vault type with getConfig method.
- * Obsidian's Vault class has internal configuration methods not exposed in the public API.
- * This type is needed to access settings like "nativeMenus" which controls context menu behavior.
- */
-type VaultWithConfig = { getConfig: (key: string) => unknown };
 
 /** Internal MarkdownView type with file property (not in public API) */
 type MarkdownViewWithFile = MarkdownView & { file?: TFile | null };
@@ -78,11 +72,9 @@ export class ContextMenu extends Component {
 
 	/**
 	 * Gets the native menus config from the vault.
-	 * Uses double cast (as unknown as VaultWithConfig) because Vault's getConfig
-	 * is an internal API not in the public type definitions.
 	 */
 	private isNativeMenusEnabled(): boolean {
-		return !!(this.app.vault as unknown as VaultWithConfig).getConfig("nativeMenus");
+		return getVaultConfigBoolean(this.app, "nativeMenus");
 	}
 
 	/**

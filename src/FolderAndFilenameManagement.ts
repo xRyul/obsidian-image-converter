@@ -1,5 +1,6 @@
 // FolderAndFilenameManagement.ts
 import { TFile, TFolder, App, normalizePath, Notice, FileSystemAdapter } from "obsidian";
+// eslint-disable-next-line import/no-nodejs-modules -- Required for path manipulation; Obsidian runs on Electron with Node.js support
 import * as path from 'path';
 import {
     ImageConverterSettings,
@@ -9,6 +10,7 @@ import {
 } from "./ImageConverterSettings";
 import { VariableProcessor, VariableContext } from "./VariableProcessor";
 import { SupportedImageFormats } from "./SupportedImageFormats";
+import { getVaultConfigString } from "./utils/vaultConfig";
 
 export class FolderAndFilenameManagement {
     constructor(
@@ -234,7 +236,7 @@ export class FolderAndFilenameManagement {
                     }
                 } else {
                     // Folder exists (exact case), check and correct case if needed (original logic)
-                    const existingFolder = await this.app.vault.getAbstractFileByPath(currentPath);
+                    const existingFolder = this.app.vault.getAbstractFileByPath(currentPath);
                     if (existingFolder && existingFolder.name !== folder) {
                         const newPath = `${currentPath.substring(0, currentPath.lastIndexOf('/'))}/${existingFolder.name}`;
                         if (await this.app.vault.adapter.exists(newPath)) {
@@ -250,16 +252,13 @@ export class FolderAndFilenameManagement {
     }
 
     private getDefaultAttachmentFolderPath(activeFile: TFile): string {
-        // @ts-ignore
-        const configuredPath = this.app.vault.getConfig(
-            "attachmentFolderPath"
-        );
-        if (configuredPath.startsWith("./")) {
+        const attachmentPath = getVaultConfigString(this.app, "attachmentFolderPath");
+        if (attachmentPath.startsWith("./")) {
             return activeFile.parent?.path
-                ? normalizePath(`${activeFile.parent.path}/${configuredPath.substring(2)}`)
-                : configuredPath.substring(2);
+                ? normalizePath(`${activeFile.parent.path}/${attachmentPath.substring(2)}`)
+                : attachmentPath.substring(2);
         }
-        return normalizePath(configuredPath);
+        return normalizePath(attachmentPath);
     }
 
     // Handle filename conflicts by adding a number suffix
@@ -684,11 +683,12 @@ export class FolderAndFilenameManagement {
                 await this.app.fileManager.renameFile(tempFile, newPath);
                 return true; // Indicate success
             }
-            new Notice(`Error: Temporary file not found after renaming.`);
+            new Notice("Error: temporary file not found after renaming.");
             return false; // Indicate failure
         } catch (error) {
             console.error('Error during safe rename:', error);
-            new Notice(`Error renaming file: ${error.message}`);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            new Notice(`Error renaming file: ${errorMessage}`);
             return false; // Indicate failure
         }
     }
