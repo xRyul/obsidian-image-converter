@@ -140,6 +140,9 @@ beforeEach(() => {
   if (!proto.setCssStyles) {
     proto.setCssStyles = function (styles: Record<string, string>) { Object.assign(this.style, styles); return this; };
   }
+  if (!proto.detach) {
+    proto.detach = function () { this.remove(); };
+  }
   if (!proto.createDiv) {
     proto.createDiv = function (clsOrOpts?: string | { cls?: string; text?: string }) {
       const el = document.createElement('div');

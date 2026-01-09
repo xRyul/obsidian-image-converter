@@ -65,6 +65,15 @@ export class ImageResizer extends Component {
     private cachedEditorMaxWidth: number | null = null;
     private linkFormatter: LinkFormatter;
 
+    /**
+     * Logs errors from async operations that are intentionally not awaited.
+     * Used for fire-and-forget async calls where we want error visibility without blocking.
+     */
+    private logAsyncError(context: string) {
+        return (error: unknown) => {
+            console.error(`${context}:`, error);
+        };
+    }
 
     constructor(private plugin: ImageConverterPlugin) {
         super();
@@ -76,7 +85,8 @@ export class ImageResizer extends Component {
                 newHeight: number,
                 currentHandle: string | null
             ) => {
-                this.updateMarkdownLink(image, newWidth, newHeight, currentHandle);
+                this.updateMarkdownLink(image, newWidth, newHeight, currentHandle)
+                    .catch(this.logAsyncError("Failed to update markdown link after image resize"));
             },
             100
 
@@ -100,8 +110,7 @@ export class ImageResizer extends Component {
 
         // Reset old scope (if any) to avoid duplicate listeners across layout changes
         if (this.viewScope) {
-            // Use onunload for compatibility with test mocks
-            (this.viewScope as any).onunload?.();
+            this.viewScope.unload();
             this.viewScope = null;
         }
 
@@ -183,10 +192,10 @@ export class ImageResizer extends Component {
      */
     private getCachedEditorMaxWidth(): number {
         if (this.cachedEditorMaxWidth === null) {
-            // Use LinkFormatter's getEditorMaxWidth method
-            this.cachedEditorMaxWidth = (this.linkFormatter as any).getEditorMaxWidth();
+            // LinkFormatter.getEditorMaxWidth() returns 800 as fallback for invalid/missing values
+            this.cachedEditorMaxWidth = this.linkFormatter.getEditorMaxWidth();
         }
-        return this.cachedEditorMaxWidth!; // Non-null assertion since we just set it above
+        return this.cachedEditorMaxWidth;
     }
 
     // onActiveLeafChange(markdownView: MarkdownView) {
@@ -212,12 +221,12 @@ export class ImageResizer extends Component {
         this.viewScope.registerDomEvent(this.markdownView.containerEl, 'mouseover', this.handleImageHover);
 
         // 2. Drag Handling: Mouse down, move, up events for handles
-        this.viewScope.registerDomEvent(document as any, 'mousedown', this.handleMouseDown);
-        this.viewScope.registerDomEvent(document as any, 'mousemove', this.handleMouseMove);
-        this.viewScope.registerDomEvent(document as any, 'mouseup', this.handleMouseUp);
+        this.viewScope.registerDomEvent(document, 'mousedown', this.handleMouseDown);
+        this.viewScope.registerDomEvent(document, 'mousemove', this.handleMouseMove);
+        this.viewScope.registerDomEvent(document, 'mouseup', this.handleMouseUp);
 
-        // 3. Register mousewheel event for resizing
-        this.viewScope.registerDomEvent(this.markdownView.containerEl, 'wheel', this.handleMouseWheel as any, { passive: false });
+        // 3. Register mousewheel event for resizing (arrow function already preserves `this`)
+        this.viewScope.registerDomEvent(this.markdownView.containerEl, 'wheel', this.handleMouseWheel, { passive: false });
 
     }
 
@@ -334,18 +343,18 @@ export class ImageResizer extends Component {
         // Update cursor style based on proximity to edges
         if (isNearTopEdge || isNearBottomEdge || isNearLeftEdge || isNearRightEdge) {
             if ((isNearTopEdge && isNearLeftEdge) || (isNearBottomEdge && isNearRightEdge)) {
-                imageTarget.style.cursor = 'nwse-resize'; // Diagonal resize (top-left or bottom-right)
+                imageTarget.setCssStyles({ cursor: 'nwse-resize' }); // Diagonal resize (top-left or bottom-right)
             } else if ((isNearTopEdge && isNearRightEdge) || (isNearBottomEdge && isNearLeftEdge)) {
-                imageTarget.style.cursor = 'nesw-resize'; // Diagonal resize (top-right or bottom-left)
+                imageTarget.setCssStyles({ cursor: 'nesw-resize' }); // Diagonal resize (top-right or bottom-left)
             } else if (isNearTopEdge || isNearBottomEdge) {
-                imageTarget.style.cursor = 'ns-resize'; // Vertical resize
+                imageTarget.setCssStyles({ cursor: 'ns-resize' }); // Vertical resize
             } else if (isNearLeftEdge || isNearRightEdge) {
-                imageTarget.style.cursor = 'ew-resize'; // Horizontal resize
+                imageTarget.setCssStyles({ cursor: 'ew-resize' }); // Horizontal resize
             } else {
-                imageTarget.style.cursor = 'se-resize'; // Default (bottom-right corner)
+                imageTarget.setCssStyles({ cursor: 'se-resize' }); // Default (bottom-right corner)
             }
         } else {
-            imageTarget.style.cursor = 'default'; // Cursor outside the edge
+            imageTarget.setCssStyles({ cursor: 'default' }); // Cursor outside the edge
         }
     }
 
@@ -378,9 +387,10 @@ export class ImageResizer extends Component {
             }
 
 
-            handleContainer.parentNode?.insertBefore(this.activeImage, handleContainer);
-            if ((handleContainer as any).detach) {
-                (handleContainer as any).detach();
+        handleContainer.parentNode?.insertBefore(this.activeImage, handleContainer);
+            // Use Obsidian's detach() if available, otherwise fall back to standard remove()
+            if (typeof handleContainer.detach === 'function') {
+                handleContainer.detach();
             } else {
                 handleContainer.remove();
             }
@@ -389,7 +399,7 @@ export class ImageResizer extends Component {
 
         if (this.activeImage.hasClass("image-resize-border")) {
             this.activeImage.removeClass("image-resize-border");
-            this.activeImage.style.cursor = 'default';
+            this.activeImage.setCssStyles({ cursor: 'default' });
         }
 
         this.activeImage = null;
@@ -700,7 +710,8 @@ export class ImageResizer extends Component {
         const finalHeight = Number.isFinite(heightStyle) && heightStyle > 0 ? heightStyle : Math.round(this.initialHeight);
 
         // Update the markdown link with the final dimensions
-        this.updateMarkdownLink(this.activeImage, finalWidth, finalHeight, this.currentHandle);
+        this.updateMarkdownLink(this.activeImage, finalWidth, finalHeight, this.currentHandle)
+            .catch(this.logAsyncError("Failed to update markdown link on resize completion"));
 
         // Mark flags
         this.resizeState.isDragging = false;
@@ -808,8 +819,8 @@ export class ImageResizer extends Component {
         );
 
         // Buffer the dimensions (only if needed for later use, e.g., debouncing and alignment is enabled)
-        if (isAlignmentEnabled) {
-            this.resizeBuffer[imageHash!] = { // Use imageHash! only if isAlignmentEnabled is true
+        if (isAlignmentEnabled && imageHash) {
+            this.resizeBuffer[imageHash] = {
                 width: newWidth,
                 height: newHeight,
             };
@@ -1490,8 +1501,9 @@ export class ImageResizer extends Component {
  * @param newHeight The new height of the image.
  */
     private saveDimensionsToCache = async (image: HTMLImageElement, newWidth: number, newHeight: number) => {
-        // Update markdown link
-        this.updateMarkdownLink(image, newWidth, newHeight, null);
+        // Update markdown link (fire-and-forget since this is debounced)
+        this.updateMarkdownLink(image, newWidth, newHeight, null)
+            .catch(this.logAsyncError("Failed to update markdown link from cache save"));
 
         // Save to cache using the buffered dimensions
         const activeFile = this.plugin.app.workspace.getActiveFile();
@@ -1532,7 +1544,7 @@ export class ImageResizer extends Component {
      * @param limit - The time limit in milliseconds.
      * @returns A throttled version of the function.
      */
-    private throttle<T extends (...args: any[]) => void>(
+    private throttle<T extends (...args: unknown[]) => void>(
         func: T,
         limit: number
     ): (...args: Parameters<T>) => void {

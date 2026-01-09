@@ -434,6 +434,7 @@ export const Platform = {
 export class Component {
   private disposables: Array<() => void> = [];
   load() { /* no-op for tests */ }
+  unload() { this.onunload(); }
   register(cb?: () => void) {
     if (cb) this.disposables.push(cb);
   }

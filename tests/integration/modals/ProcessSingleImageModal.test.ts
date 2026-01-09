@@ -647,4 +647,55 @@ const [crfSlider] = sliders;
     const preview = ((modal as any).contentEl as HTMLElement).querySelector('.preview-image-container') as HTMLElement;
     expect(preview.style.maxHeight).toBe('400px');
   });
+
+  it('7.15 Process action view refresh failure: given refreshActiveNote throws, then fallback Notice shown and processing completes', async () => {
+    const plugin = await makePlugin(app);
+    (plugin as any).imageProcessor = { processImage: vi.fn(async () => new ArrayBuffer(8)) };
+    (plugin as any).folderAndFilenameManagement = {
+      combinePath: (dir: string, name: string) => (dir ? `${dir}/${name}` : name),
+      shouldSkipConversion: () => false
+    };
+    (plugin as any).getPresetByName = vi.fn(() => null);
+    (plugin as any).showSizeComparisonNotification = vi.fn();
+
+    // Prepare workspace editor
+    (app as any).workspace.getActiveViewOfType = vi.fn(() => ({
+      file: img,
+      editor: {
+        getValue: () => 'Before ![[a.png]] After',
+        setValue: vi.fn(),
+      }
+    }));
+
+    // FileManager
+    (app as any).fileManager = {
+      renameFile: vi.fn(async (file: any, newPath: string) => { await (app as any).vault.rename(file, newPath); })
+    };
+
+    const modal = new ProcessSingleImageModal(app, plugin as any, img);
+    await modal.onOpen();
+
+    // Set outputFormat to trigger actual processing (default "NONE" + "None" resize returns early)
+    (modal as any).modalSettings.outputFormat = 'WEBP';
+
+    // Make refreshActiveNote throw an error
+    vi.spyOn(modal as any, 'refreshActiveNote').mockRejectedValue(new Error('View refresh failed'));
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(modal as any, 'close');
+
+    // Process image
+    await (modal as any).processImage();
+
+    // Verify error was logged
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'Error refreshing active note after image processing:',
+      expect.any(Error)
+    );
+
+    // Verify processing still completed and modal closed
+    expect((plugin as any).imageProcessor.processImage).toHaveBeenCalled();
+    expect((modal as any).close).toHaveBeenCalled();
+
+    consoleErrorSpy.mockRestore();
+  });
 });

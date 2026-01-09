@@ -341,6 +341,37 @@ describe('ProcessFolderModal UI flows (Phase 7: 8.1–8.12 subset)', () => {
     expect(Number.isFinite(totalAfter)).toBe(true);
   });
 
+  it('8.13 Malformed canvas file handling: given invalid JSON, when getImagesFromCanvasFile called, then returns empty array and logs warning', async () => {
+    // Create a canvas file with invalid JSON content
+    const imagesFolder = fakeTFolder({ path: 'images', name: 'images' });
+    const malformedCanvas = fakeTFile({ path: 'images/broken.canvas', extension: 'canvas', name: 'broken.canvas' });
+    const vault = fakeVault({ files: [imagesFolder as any, malformedCanvas], folders: [imagesFolder as any] }) as any;
+
+    // Set up malformed JSON content
+    await (vault as any).modify(malformedCanvas, '{ invalid json content without closing brace');
+
+    const app2 = fakeApp({ vault, metadataCache: { resolvedLinks: {} as any } }) as any;
+    const plugin = await makePlugin(app2 as any);
+    (plugin as any).supportedImageFormats = { isSupported: vi.fn((_m?: string, name?: string) => /\.(png|jpg|jpeg|webp)$/i.test(name || '')) };
+    const processor = { processImagesInFolder: vi.fn() } as unknown as BatchImageProcessor;
+    const modal = new ProcessFolderModal(app2 as any, plugin as any, imagesFolder.path, processor);
+
+    // Spy on console.warn
+    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // Call getImagesFromCanvasFile directly
+    const images = await (modal as any).getImagesFromCanvasFile(malformedCanvas);
+
+    // Should return empty array and log warning
+    expect(images).toEqual([]);
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      `Failed to parse canvas file: ${malformedCanvas.path}`,
+      expect.any(Error)
+    );
+
+    consoleWarnSpy.mockRestore();
+  });
+
   it('8.9/8.10 Skip target format state/action reflected to counts and used on processing', async () => {
     const plugin = await makePlugin(app);
     (plugin as any).supportedImageFormats = { isSupported: vi.fn((_mime?: string, name?: string) => /\.(png|jpg|jpeg|webp)$/i.test(name || '')) };

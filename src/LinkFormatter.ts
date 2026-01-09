@@ -452,7 +452,7 @@ export class LinkFormatter {
          * @returns {number} The maximum width available for content in the editor (width of a `cm-line`),
          *                   or 800 as a default if the width cannot be determined.
          */
-    private getEditorMaxWidth(): number {
+    public getEditorMaxWidth(): number {
 
         // -------------------- OPTION 1. ------------------------- 
         // FULL WIDTH OF WHOLE EDITOR ARE

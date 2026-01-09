@@ -826,3 +826,91 @@ describe('ImageResizer undo/redo after live updates (13.11)', () => {
     expect(redone.includes('![|100x100](imgs/pic.jpg)')).toBe(false);
   });
 });
+
+// 13.25 — Async error handling for updateMarkdownLink
+describe('ImageResizer async error handling (13.25)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('13.25 Given updateMarkdownLink rejects during drag-resize completion, Then error is logged and resize completes without unhandled rejection', async () => {
+    const { resizer } = makeResizer({ viewMode: 'source' });
+    const { container } = setupView();
+    const img = addInternalImage(container);
+
+    // Make updateMarkdownLink reject
+    const mockError = new Error('Editor unavailable');
+    vi.spyOn(resizer as any, 'updateMarkdownLink').mockRejectedValue(mockError);
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    // Perform resize
+    (resizer as any).handleImageHover({ target: img } as any);
+    const wrapper = (img as any).matchParent('.image-resize-container')!;
+    const se = wrapper.querySelector('.image-resize-handle-se') as HTMLElement;
+
+    se.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    document.dispatchEvent(new MouseEvent('mousemove', { clientX: 40, clientY: 30, bubbles: true }));
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+
+    // Allow promises to settle
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Verify error was logged via logAsyncError pattern
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to update markdown link'),
+      mockError
+    );
+
+    // Verify visual dimensions were still applied (resize completed)
+    expect(parseInt(img.style.width || '0', 10)).toBeGreaterThan(0);
+    expect(parseInt(img.style.height || '0', 10)).toBeGreaterThan(0);
+
+    consoleErrorSpy.mockRestore();
+  });
+});
+
+// 13.26 — resizeBuffer null guard for falsy imageHash
+describe('ImageResizer resizeBuffer null guard (13.26)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('13.26 Given alignment enabled but imageHash is falsy, When scroll-wheel resize occurs, Then resizeBuffer is not written with undefined key', () => {
+    const { resizer, plugin } = makeResizer({
+      viewMode: 'source',
+      overrides: {
+        isScrollResizeEnabled: true,
+        scrollwheelModifier: 'None',
+        isImageAlignmentEnabled: true
+      }
+    });
+    const { container } = setupView();
+    const img = addInternalImage(container);
+
+    // Mock ImageAlignmentManager to return null/undefined for getImageHash
+    (plugin as any).ImageAlignmentManager = {
+      getImageHash: vi.fn(() => null), // Simulate falsy hash
+      getImageAlignment: vi.fn(() => null),
+      saveImageAlignmentToCache: vi.fn()
+    };
+
+    // Clear resizeBuffer before test
+    (resizer as any).resizeBuffer = {};
+
+    // Hover to set up image
+    (resizer as any).handleImageHover({ target: img, clientX: 5, clientY: 5 } as any);
+
+    // Trigger scroll resize
+    img.dispatchEvent(new WheelEvent('wheel', { deltaY: -10, bubbles: true, cancelable: true }));
+
+    // Verify resizeBuffer does NOT have undefined or null as a key
+    const bufferKeys = Object.keys((resizer as any).resizeBuffer);
+    expect(bufferKeys).not.toContain('undefined');
+    expect(bufferKeys).not.toContain('null');
+    expect(bufferKeys.length).toBe(0); // Should be empty since hash is null
+
+    // Verify resize still happened visually
+    expect(img.style.width).toBeTruthy();
+  });
+});
