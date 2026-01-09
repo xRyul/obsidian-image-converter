@@ -74,7 +74,7 @@ export class ProcessAllVaultModal extends Modal {
             text: "Convert, compress and resize all images",
         });
         headerContainer.createEl("h6", {
-            text: "in the Vault",
+            text: "In the vault",
             cls: "modal-subtitle",
         });
     }
@@ -82,7 +82,8 @@ export class ProcessAllVaultModal extends Modal {
     private createWarningMessage(contentEl: HTMLElement) {
         contentEl.createEl("p", {
             cls: "modal-warning",
-            text: "⚠️ This will modify all images in the Vault. Please ensure you have backups.",
+            // eslint-disable-next-line obsidianmd/ui/sentence-case -- Warning icon improves visibility
+            text: "⚠️ This will modify all images in the vault. Please ensure you have backups.",
         });
     }
 
@@ -90,7 +91,7 @@ export class ProcessAllVaultModal extends Modal {
         new Setting(contentEl)
             .setName("Convert to ⓘ")
             .setDesc(
-                "Choose output format. 'Same as original' applies compression/resizing to current format."
+                "Choose output format. Same as original applies compression/resizing to current format"
             )
             .setTooltip(
                 "Same as original: preserves current format while applying compression/resizing"
@@ -114,7 +115,7 @@ export class ProcessAllVaultModal extends Modal {
             .setName("Quality ⓘ")
             .setDesc("Compression level (0-100)")
             .setTooltip(
-                "100: No compression (original quality)\n75: Recommended (good balance)\n0-50: High compression (lower quality)"
+                "100: no compression (original quality)\n75: recommended (good balance)\n0-50: high compression (lower quality)"
             )
             .addText((text) => {
                 text
@@ -143,10 +144,11 @@ export class ProcessAllVaultModal extends Modal {
         new Setting(contentEl)
             .setName("Resize mode ⓘ")
             .setDesc(
-                "Choose how images should be resized. Note: Results are permanent."
+                "Choose how images should be resized. Note: results are permanent"
             )
             .setTooltip(
-                "Fit: Maintains aspect ratio within dimensions\nFill: Exactly matches dimensions\nLongest Edge: Limits the longest side\nShortest Edge: Limits the shortest side\nWidth/Height: Constrains single dimension"
+                // eslint-disable-next-line obsidianmd/ui/sentence-case -- Structured tooltip format
+                "Fit: Maintains aspect ratio within dimensions\nFill: Exactly matches dimensions\nLongest edge: Limits the longest side\nShortest edge: Limits the shortest side\nWidth/Height: Constrains single dimension"
             )
             .addDropdown((dropdown) => {
                 dropdown
@@ -185,14 +187,17 @@ export class ProcessAllVaultModal extends Modal {
         new Setting(contentEl)
             .setName("Skip formats ⓘ")
             .setDesc(
-                "Comma-separated list (no dots or spaces, e.g., png,gif)."
+                // eslint-disable-next-line obsidianmd/ui/sentence-case -- Example format aids clarity
+                "Comma-separated list (no dots or spaces). Example: png,gif"
             )
             .setTooltip(
                 "Comma-separated list of file formats to skip (e.g., tif,tiff,heic). Leave empty to process all formats."
             )
             .addText((text) => {
-                text
-                    .setPlaceholder("png,gif")
+                text.setPlaceholder(
+                    // eslint-disable-next-line obsidianmd/ui/sentence-case -- Example format
+                    "Example: png,gif"
+                )
                     .setValue(this.plugin.settings.ProcessAllVaultSkipFormats)
                     .onChange(async (value) => {
                         this.plugin.settings.ProcessAllVaultSkipFormats = value;
@@ -226,7 +231,7 @@ export class ProcessAllVaultModal extends Modal {
             cls: "button-container",
         });
         new ButtonComponent(buttonContainer)
-            .setButtonText("Process All Images")
+            .setButtonText("Process all images")
             .setCta()
             .onClick(async () => {
                 this.close();
@@ -265,10 +270,11 @@ export class ProcessAllVaultModal extends Modal {
             .setClass("enlarge-reduce-setting")
             .setName("Enlarge or reduce ⓘ")
             .setDesc(
-                "Reduce and Enlarge: Adjusts all images. Reduce only: Shrinks larger images. Enlarge only: Enlarges smaller images."
+                "Reduce and enlarge: adjusts all images. Reduce only: shrinks larger images. Enlarge only: enlarges smaller images"
             )
             .setTooltip(
-                "• Reduce and Enlarge: Adjusts all images to fit specified dimensions\n• Reduce only: Only shrinks images larger than target\n• Enlarge only: Only enlarges images smaller than target"
+                // eslint-disable-next-line obsidianmd/ui/sentence-case -- Bullet list format
+                "• Reduce and enlarge: Adjusts all images to fit specified dimensions\n• Reduce only: Only shrinks images larger than target\n• Enlarge only: Only enlarges images smaller than target"
             )
             .addDropdown((dropdown) => {
                 dropdown

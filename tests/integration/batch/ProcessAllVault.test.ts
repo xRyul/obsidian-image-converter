@@ -250,7 +250,7 @@ describe('ProcessAllVaultModal UI basics (Phase 7: 10.1–10.7 subset)', () => {
     await modal.onOpen();
 
     const warning = ((modal as any).contentEl.querySelector('.modal-warning') as HTMLElement).textContent || '';
-    expect(warning).toContain('This will modify all images in the Vault');
+    expect(warning).toContain('This will modify all images in the vault');
   });
 
   it('10.7 Clicking Process All Images triggers processor', async () => {
@@ -262,7 +262,7 @@ describe('ProcessAllVaultModal UI basics (Phase 7: 10.1–10.7 subset)', () => {
     await modal.onOpen();
     const container = (modal as any).contentEl as HTMLElement;
 
-    const btn = Array.from(container.querySelectorAll('button')).find(buttonEl => (buttonEl as HTMLButtonElement).textContent?.includes('Process All Images')) as HTMLButtonElement;
+    const btn = Array.from(container.querySelectorAll('button')).find(buttonEl => (buttonEl as HTMLButtonElement).textContent?.includes('Process all images')) as HTMLButtonElement;
     expect(btn).toBeTruthy();
     btn.click();
 
@@ -347,7 +347,7 @@ describe('ProcessAllVaultModal UI basics (Phase 7: 10.1–10.7 subset)', () => {
     const modal = new ProcessAllVaultModal(app as any, plugin as any, processor);
     await modal.onOpen();
     const container = (modal as any).contentEl as HTMLElement;
-    const btn = Array.from(container.querySelectorAll('button')).find(buttonEl => (buttonEl as HTMLButtonElement).textContent?.includes('Process All Images')) as HTMLButtonElement;
+    const btn = Array.from(container.querySelectorAll('button')).find(buttonEl => (buttonEl as HTMLButtonElement).textContent?.includes('Process all images')) as HTMLButtonElement;
     btn.click();
     await Promise.resolve();
 
@@ -372,7 +372,7 @@ describe('ProcessAllVaultModal UI basics (Phase 7: 10.1–10.7 subset)', () => {
     const modal = new ProcessAllVaultModal(app as any, plugin as any, processor);
     await modal.onOpen();
     const container = (modal as any).contentEl as HTMLElement;
-    const btn = Array.from(container.querySelectorAll('button')).find(buttonEl => (buttonEl as HTMLButtonElement).textContent?.includes('Process All Images')) as HTMLButtonElement;
+    const btn = Array.from(container.querySelectorAll('button')).find(buttonEl => (buttonEl as HTMLButtonElement).textContent?.includes('Process all images')) as HTMLButtonElement;
     btn.click();
     await Promise.resolve();
 
