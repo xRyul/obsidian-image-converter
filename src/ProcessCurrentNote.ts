@@ -17,6 +17,15 @@ import ImageConverterPlugin from './main';
 
 import { BatchImageProcessor } from './BatchImageProcessor';
 
+interface CanvasNode {
+    type?: string;
+    file?: string;
+    children?: CanvasNode[];
+}
+
+interface CanvasData {
+    nodes?: CanvasNode[];
+}
 
 export class ProcessCurrentNote extends Modal {
     private imageCount = 0;
@@ -45,7 +54,10 @@ export class ProcessCurrentNote extends Modal {
         super(app);
     }
 
-    async onOpen() {
+    // Obsidian calls Modal.onOpen as a lifecycle hook and intentionally ignores the returned Promise.
+    // We keep this method async to allow await inside, so we disable the no-misused-promises rule here.
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises
+    async onOpen(): Promise<void> {
         const { contentEl } = this;
 
         // Create main container
@@ -66,12 +78,12 @@ export class ProcessCurrentNote extends Modal {
         // --- Image Counts Display ---
         const countsDisplay = contentEl.createDiv({ cls: 'image-counts-display' });
 
-        countsDisplay.createEl('span', { text: 'Total Images Found: ' });
+        countsDisplay.createEl('span', { text: 'Total images found: ' });
         this.imageCountDisplay = countsDisplay.createEl('span');
 
         countsDisplay.createEl('br');
 
-        countsDisplay.createEl('span', { text: 'To be Processed: ' });
+        countsDisplay.createEl('span', { text: 'To be processed: ' });
         this.processedCountDisplay = countsDisplay.createEl('span');
 
         countsDisplay.createEl('br');
@@ -82,7 +94,8 @@ export class ProcessCurrentNote extends Modal {
         // Warning message
         headerContainer.createEl('p', {
             cls: 'modal-warning',
-            text: '⚠️ This will modify all images in the current note. Please ensure you have backups.'
+            // eslint-disable-next-line obsidianmd/ui/sentence-case
+            text: '⚠️ This will modify all images in the current note — please ensure you have backups.'
         });
 
         // --- Settings Container ---
@@ -108,7 +121,7 @@ export class ProcessCurrentNote extends Modal {
                     .onChange(async value => {
                         this.plugin.settings.ProcessCurrentNoteconvertTo = value;
                         await this.plugin.saveSettings();
-                        this.updateImageCountsAndDisplay(); // Update counts after changing this setting
+                        await this.updateImageCountsAndDisplay(); // Update counts after changing this setting
                     })
             );
 
@@ -116,7 +129,7 @@ export class ProcessCurrentNote extends Modal {
         new Setting(formatQualityContainer)
             .setName('Quality ⓘ')
             .setDesc('Compression level (0-100)')
-            .setTooltip('100: No compression (original quality)\n75: Recommended (good balance)\n0-50: High compression (lower quality)')
+            .setTooltip('100: no compression (original quality)\n75: recommended (good balance)\n0-50: high compression (lower quality)')
             .addText(text =>
                 text
                     .setPlaceholder('Enter quality (0-100)')
@@ -136,8 +149,9 @@ export class ProcessCurrentNote extends Modal {
         // Resize Mode setting
         this.resizeModeSetting = new Setting(resizeContainer)
             .setName('Resize mode ⓘ')
-            .setDesc('Choose how images should be resized. Note: Results are permanent.')
-            .setTooltip('Fit: Maintains aspect ratio within dimensions\nFill: Exactly matches dimensions\nLongest Edge: Limits the longest side\nShortest Edge: Limits the shortest side\nWidth/Height: Constrains single dimension')
+            .setDesc('Choose how images should be resized — results are permanent.')
+            // eslint-disable-next-line obsidianmd/ui/sentence-case
+            .setTooltip('Fit: maintains aspect ratio within dimensions\nFill: exactly matches dimensions\nLongest edge: limits the longest side\nShortest edge: limits the shortest side\nWidth/height: constrains single dimension')
             .addDropdown(dropdown =>
                 dropdown
                     .addOptions({
@@ -154,11 +168,11 @@ export class ProcessCurrentNote extends Modal {
                         this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode = value;
                         await this.plugin.saveSettings();
                         this.updateResizeInputVisibility(value);
-                        this.updateImageCountsAndDisplay(); // Update counts after changing this setting
+                        await this.updateImageCountsAndDisplay(); // Update counts after changing this setting
                     })
             );
 
-        // Create resize inputs and enlarge/reduce containers
+        // Create resize inputs
         this.resizeInputsDiv = resizeContainer.createDiv({ cls: 'resize-inputs' });
         this.enlargeReduceDiv = resizeContainer.createDiv({ cls: 'enlarge-reduce-settings' });
 
@@ -171,12 +185,13 @@ export class ProcessCurrentNote extends Modal {
             .setTooltip('Comma-separated list of file formats to skip (e.g., tif,tiff,heic). Leave empty to process all formats.')
             .addText(text =>
                 text
-                    .setPlaceholder('tif,tiff,heic')
+                    // eslint-disable-next-line obsidianmd/ui/sentence-case
+                    .setPlaceholder('e.g., tif, tiff, heic')
                     .setValue(this.plugin.settings.ProcessCurrentNoteSkipFormats)
                     .onChange(async value => {
                         this.plugin.settings.ProcessCurrentNoteSkipFormats = value;
                         await this.plugin.saveSettings();
-                        this.updateImageCountsAndDisplay(); // Update counts after changing this setting
+                        await this.updateImageCountsAndDisplay(); // Update counts after changing this setting
                     })
             );
 
@@ -190,7 +205,7 @@ export class ProcessCurrentNote extends Modal {
                     .onChange(async value => {
                         this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat = value;
                         await this.plugin.saveSettings();
-                        this.updateImageCountsAndDisplay(); // Update counts after changing this setting
+                        await this.updateImageCountsAndDisplay(); // Update counts after changing this setting
                     })
             );
 
@@ -210,7 +225,8 @@ export class ProcessCurrentNote extends Modal {
                     await this.batchImageProcessor.processImagesInNote(this.activeFile);
                     await this.refreshActiveNote();
                 } else {
-                    new Notice('Error: Active file must be a markdown or canvas file.');
+                    // eslint-disable-next-line obsidianmd/ui/sentence-case
+                    new Notice('Error: active file must be a markdown or canvas file.');
                 }
             });
     }
@@ -245,7 +261,8 @@ export class ProcessCurrentNote extends Modal {
             .setClass('enlarge-reduce-setting')
             .setName('Enlarge or reduce ⓘ')
             .setDesc('Controls how images are adjusted relative to target size:')
-            .setTooltip('• Reduce and Enlarge: Adjusts all images to fit specified dimensions\n• Reduce only: Only shrinks images larger than target\n• Enlarge only: Only enlarges images smaller than target')
+            // eslint-disable-next-line obsidianmd/ui/sentence-case
+            .setTooltip('• Reduce and enlarge: adjusts all images to fit specified dimensions\n• Reduce only: only shrinks images larger than target\n• Enlarge only: only enlarges images smaller than target')
             .addDropdown((dropdown) => {
                 dropdown
                     .addOptions({
@@ -395,7 +412,7 @@ export class ProcessCurrentNote extends Modal {
         const skipTargetFormat = this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat;
 
         if (this.activeFile.extension === 'canvas') {
-            const canvasData = JSON.parse(await this.app.vault.read(this.activeFile));
+            const canvasData = JSON.parse(await this.app.vault.read(this.activeFile)) as CanvasData;
             const images = this.getImagePathsFromCanvas(canvasData);
             this.imageCount = images.length;
             this.processedCount = images.filter(imagePath => {
@@ -427,14 +444,23 @@ export class ProcessCurrentNote extends Modal {
         }
     }
 
-    private getImagePathsFromCanvas(canvasData: any): string[] {
-        let imagePaths: string[] = [];
-        for (const node of canvasData.nodes || []) {
+    private hasNodes(data: CanvasData | CanvasNode): data is CanvasData {
+        return 'nodes' in data && Array.isArray(data.nodes);
+    }
+
+    private getImagePathsFromCanvas(canvasData: CanvasData | CanvasNode): string[] {
+        // Type guard ensures proper narrowing: CanvasData has 'nodes', CanvasNode has 'children'
+        const nodes: CanvasNode[] = this.hasNodes(canvasData)
+            ? canvasData.nodes ?? []
+            : canvasData.children ?? [];
+
+        const imagePaths: string[] = [];
+        for (const node of nodes) {
             if (node.type === 'file' && node.file) {
                 imagePaths.push(node.file);
             }
-            if (node.children && Array.isArray(node.children)) {
-                imagePaths = imagePaths.concat(this.getImagePathsFromCanvas(node));
+            if (Array.isArray(node.children) && node.children.length > 0) {
+                imagePaths.push(...this.getImagePathsFromCanvas(node));
             }
         }
         return imagePaths;
