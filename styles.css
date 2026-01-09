@@ -971,29 +971,49 @@ html[data-theme='dark'] {
 /* ----------------------------------------------------------------------- */
 
 
+/* --------------- IMAGE CAPTION STYLING ------------------------------ */
+/* Container styling for captioned images */
+.image-captions-enabled .internal-embed.image-embed[alt] {
+    display: flex !important;
+    flex-direction: column;
+    align-items: var(--image-converter-caption-align-items);
+    justify-content: center;
+    width: fit-content;
+}
+
+/* Caption styling via ::after pseudo-element */
+.image-captions-enabled .image-embed[alt]:after {
+    display: block;
+    width: var(--img-width);
+    font-family: var(--font-interface);
+    font-size: var(--image-converter-caption-font-size, var(--font-smaller));
+    color: var(--image-converter-caption-color, var(--text-muted));
+    background-color: var(--image-converter-caption-bg, transparent);
+    opacity: var(--image-converter-caption-opacity, 1);
+    content: attr(alt);
+    margin-top: var(--image-converter-caption-margin-top, 4px);
+    padding: var(--image-converter-caption-padding, 2px 4px);
+    border-radius: var(--image-converter-caption-border-radius, 0);
+    font-style: var(--image-converter-caption-font-style, italic);
+    font-weight: var(--image-converter-caption-font-weight, normal);
+    text-transform: var(--image-converter-caption-text-transform, none);
+    letter-spacing: var(--image-converter-caption-letter-spacing, normal);
+    border: var(--image-converter-caption-border, none);
+    text-align: var(--image-converter-caption-text-align, center);
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+}
+
+/* Image styling within captioned embeds */
+.image-captions-enabled .image-embed[alt] img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+}
+/* ----------------------------------------------------------------------- */
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/* MODAL WINDOW - each drop */
 
 /* MODAL WINDOW - each drop */
 /* FILENAME--------------------------------------------------------------------------- */

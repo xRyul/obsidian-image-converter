@@ -16,7 +16,7 @@ export class ImageCaptionManager {
         // Cleanup existing observer if any
         this.cleanup();
 
-        this.observer = new MutationObserver(this.handleMutations.bind(this));
+        this.observer = new MutationObserver((mutations) => this.handleMutations(mutations));
 
         // Start observing with specific configuration
         this.startObserving();
@@ -139,9 +139,21 @@ export class ImageCaptionManager {
         }
 
         const embedSrc = embed.getAttribute('src') || '';
-        const altText = img.getAttribute('alt') || '';
+        let altText = img.getAttribute('alt') || '';
         const extension = embedSrc.split('.').pop()?.split('?')[0]?.toLowerCase() || '';
         const excludedExtensions = skipCaptionExtensions.split(',').map(ext => ext.trim().toLowerCase());
+
+        // Fix: Strip trailing backslash from alt text
+        // This occurs when Obsidian escapes pipes in wikilinks inside tables (e.g., ![[path\|caption\|450]])
+        // Obsidian's rendering incorrectly includes the backslash in the caption (alt="sample\")
+        // Check if we're in a table context and the alt ends with backslash
+        const isInTable = embed.closest('table, .table-cell-wrapper, .cm-table-widget') !== null;
+        if (isInTable && altText.endsWith('\\')) {
+            altText = altText.slice(0, -1);
+            // Update both img and embed alt attributes to fix the rendered caption
+            img.setAttribute('alt', altText);
+            embed.setAttribute('alt', altText);
+        }
 
         // Handle caption visibility
         const isFilename = altText.trim().toLowerCase() === embedSrc.trim().toLowerCase();
@@ -170,8 +182,16 @@ export class ImageCaptionManager {
                 const img = embed.querySelector('img');
                 if (img) {
                     const embedSrc = embed.getAttribute('src') ?? '';
-                    const altText = img.getAttribute('alt') ?? '';
+                    let altText = img.getAttribute('alt') ?? '';
                     const extension = embedSrc.split('.').pop()?.split('?')[0]?.toLowerCase() ?? '';
+
+                    // Fix: Strip trailing backslash from alt text in tables
+                    const isInTable = embed.closest('table, .table-cell-wrapper, .cm-table-widget') !== null;
+                    if (isInTable && altText.endsWith('\\')) {
+                        altText = altText.slice(0, -1);
+                        img.setAttribute('alt', altText);
+                        embed.setAttribute('alt', altText);
+                    }
 
                     const isFilename = altText.trim().toLowerCase() === embedSrc.trim().toLowerCase();
                     const shouldHideCaption = excludedExtensions.includes(extension) || isFilename;
@@ -188,15 +208,6 @@ export class ImageCaptionManager {
     }
 
     applyCaptionStyles() {
-        const styleId = 'image-caption-styles';
-        let styleElement = document.getElementById(styleId) as HTMLStyleElement;
-
-        if (!styleElement) {
-            styleElement = document.createElement('style');
-            styleElement.id = styleId;
-            document.head.appendChild(styleElement);
-        }
-
         const {
             captionFontSize,
             captionColor,
@@ -213,48 +224,35 @@ export class ImageCaptionManager {
             captionAlignment
         } = this.plugin.settings;
 
-        styleElement.textContent = `
-            /* Container styling */
-            .image-captions-enabled .internal-embed.image-embed[alt] {
-                display: flex !important;
-                flex-direction: column;
-                align-items: ${captionAlignment === 'center' ? 'center' :
-                captionAlignment === 'left' ? 'flex-start' :
-                    'flex-end'};
-                justify-content: center;
-                width: fit-content;
+        // Compute align-items value from alignment setting
+        const alignItems = captionAlignment === 'left' ? 'flex-start'
+            : captionAlignment === 'right' ? 'flex-end' : 'center';
+
+        // Helper to set or remove CSS custom properties based on value
+        const rootStyle = document.body.style;
+        const setOrRemove = (name: string, value: string | number | null | undefined) => {
+            if (value != null && value !== '') {
+                rootStyle.setProperty(name, String(value));
+            } else {
+                rootStyle.removeProperty(name);
             }
-        
-            /* Caption styling */
-            .image-captions-enabled .image-embed[alt]:after {
-                display: block;
-                width: var(--img-width);
-                font-family: var(--font-interface);
-                font-size: ${captionFontSize || 'var(--font-smaller)'};
-                color: ${captionColor || 'var(--text-gray)'};
-                background-color: ${captionBackgroundColor || 'transparent'};
-                opacity: ${captionOpacity || '1'};
-                content: attr(alt);
-                margin-top: ${captionMarginTop || '4px'};
-                padding: ${captionPadding || '2px 4px'};
-                border-radius: ${captionBorderRadius || '0'};
-                font-style: ${captionFontStyle || 'italic'};
-                font-weight: ${captionFontWeight || 'normal'};
-                text-transform: ${captionTextTransform || 'none'};
-                letter-spacing: ${captionLetterSpacing || 'normal'};
-                border: ${captionBorder || 'none'};
-                text-align: ${captionAlignment || 'center'};
-                transition: all 0.2s ease;
-                box-sizing: border-box;
-            }
-        
-            /* Image styling */
-            .image-captions-enabled .image-embed[alt] img {
-                display: block;
-                max-width: 100%;
-                height: auto;
-            }
-        `;
+        };
+
+        // Set CSS custom properties on document.body for caption styling
+        rootStyle.setProperty('--image-converter-caption-align-items', alignItems);
+        setOrRemove('--image-converter-caption-font-size', captionFontSize);
+        setOrRemove('--image-converter-caption-color', captionColor);
+        setOrRemove('--image-converter-caption-bg', captionBackgroundColor);
+        setOrRemove('--image-converter-caption-opacity', captionOpacity);
+        setOrRemove('--image-converter-caption-margin-top', captionMarginTop);
+        setOrRemove('--image-converter-caption-padding', captionPadding);
+        setOrRemove('--image-converter-caption-border-radius', captionBorderRadius);
+        setOrRemove('--image-converter-caption-font-style', captionFontStyle);
+        setOrRemove('--image-converter-caption-font-weight', captionFontWeight);
+        setOrRemove('--image-converter-caption-text-transform', captionTextTransform);
+        setOrRemove('--image-converter-caption-letter-spacing', captionLetterSpacing);
+        setOrRemove('--image-converter-caption-border', captionBorder);
+        setOrRemove('--image-converter-caption-text-align', captionAlignment);
     }
 
     public refresh() {
@@ -277,6 +275,22 @@ export class ImageCaptionManager {
             clearTimeout(this.observerTimeout);
             this.observerTimeout = null;
         }
+
+        // Remove CSS custom properties
+        document.body.style.removeProperty('--image-converter-caption-align-items');
+        document.body.style.removeProperty('--image-converter-caption-font-size');
+        document.body.style.removeProperty('--image-converter-caption-color');
+        document.body.style.removeProperty('--image-converter-caption-bg');
+        document.body.style.removeProperty('--image-converter-caption-opacity');
+        document.body.style.removeProperty('--image-converter-caption-margin-top');
+        document.body.style.removeProperty('--image-converter-caption-padding');
+        document.body.style.removeProperty('--image-converter-caption-border-radius');
+        document.body.style.removeProperty('--image-converter-caption-font-style');
+        document.body.style.removeProperty('--image-converter-caption-font-weight');
+        document.body.style.removeProperty('--image-converter-caption-text-transform');
+        document.body.style.removeProperty('--image-converter-caption-letter-spacing');
+        document.body.style.removeProperty('--image-converter-caption-border');
+        document.body.style.removeProperty('--image-converter-caption-text-align');
     }
 }
 

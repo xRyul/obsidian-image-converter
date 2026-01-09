@@ -290,33 +290,76 @@ export class ContextMenu extends Component {
 			if (matches && matches.length > 0) {
 				const [firstMatch] = matches;
 
+				const inTable = this.isTableRow(firstMatch.line);
+
 				// Handle wiki-style links
-				const wikiMatch = firstMatch.fullMatch.match(
-					/!\[\[([^\]]+?)(?:\|([^|\]]+?))?\s*(?:\|([^|\]]+?))?\]\]/
-				);
-				if (wikiMatch) {
-					const secondPart = wikiMatch[2] || "";
-					const thirdPart = wikiMatch[3] || "";
+				if (firstMatch.fullMatch.startsWith("![[") && firstMatch.fullMatch.endsWith("]]")) {
+					const inner = firstMatch.fullMatch.slice(3, -2);
+
+					// Check if this wikilink uses escaped delimiters (Obsidian may auto-escape in tables)
+					// If it contains \| but no unescaped |, parse with escaped delimiters
+					const hasEscapedPipes = inner.includes("\\|");
+					const hasUnescapedPipes = /(?<!\\)\|/.test(inner);
 
 					const isDimensions = (part: string) =>
-						/^\s*\d+x\d+\s*$/.test(part);
+						/^\s*\d+(?:x\d+)?\s*$/.test(part);
 
-					if (thirdPart && !isDimensions(secondPart)) {
-						return secondPart.trim();
+					let parts: string[];
+					if (hasEscapedPipes && !hasUnescapedPipes) {
+						// Obsidian-escaped format: ![[path\|caption\|dimensions]]
+						parts = inner.split(/\\\|/);
+					} else {
+						// Standard format: ![[path|caption|dimensions]]
+						// Split on unescaped pipes, keeping escaped pipes intact
+						parts = inner.split(/(?<!\\)\|/);
 					}
-					if (secondPart && !isDimensions(secondPart)) {
-						return secondPart.trim();
+
+					if (parts.length >= 2) {
+						const secondPart = parts[1] ?? "";
+						const thirdPart = parts[2] ?? "";
+
+						// If third part exists and is a dimension, second part is caption
+						if (thirdPart && isDimensions(thirdPart)) {
+							return this.unescapePipes(secondPart.trim());
+						}
+						// If third part exists but is not a dimension, second part is caption if not dimension-like
+						if (thirdPart && !isDimensions(secondPart)) {
+							return this.unescapePipes(secondPart.trim());
+						}
+						// If only second part exists and is not a dimension, it's the caption
+						if (!thirdPart && !isDimensions(secondPart)) {
+							return this.unescapePipes(secondPart.trim());
+						}
 					}
 					return "";
 				}
 
-				// Handle markdown-style links
+				// Handle markdown-style links in tables: ![caption\|dimensions](path)
+				// For markdown links in tables, the pipe between caption and dimensions IS escaped.
+				if (inTable) {
+					const mdTableMatch = firstMatch.fullMatch.match(/!\[([^\]]*)\]\(([^)]+)\)/);
+					if (mdTableMatch) {
+						const alt = mdTableMatch[1] ?? "";
+						const parts = alt.split(/\\\|/);
+						if (parts.length > 1) {
+							const isDimensions = (part: string) => /^\s*\d+(?:x\d+)?\s*$/.test(part);
+							const last = parts[parts.length - 1] ?? "";
+							const captionParts = isDimensions(last) ? parts.slice(0, -1) : parts;
+							return captionParts.join("|").trim();
+						}
+						// Single part means no escaped pipe - just return it
+						return this.unescapePipes(parts[0].trim());
+					}
+				}
+
+				// Handle markdown-style links (non-table)
 				const markdownMatch = firstMatch.fullMatch.match(
-					/!\[([^|\]]*?)(?:\|(\d+x\d+))?\]\(([^)]+)\)/
+					/!\[([^|\]]*?)(?:\\?\|(\d+x\d+))?\]\(([^)]+)\)/
 				);
 				if (markdownMatch) {
 					const caption = markdownMatch[1] || "";
-					return caption.trim();
+					// If the delimiter pipe was escaped (\\|), markdownMatch[1] may end with a stray '\\'.
+					return this.unescapePipes(caption.replace(/\\$/, "").trim());
 				}
 			}
 			return "";
@@ -349,37 +392,74 @@ export class ContextMenu extends Component {
 			if (matches && matches.length > 0) {
 				const [firstMatch] = matches;
 
+				const inTable = this.isTableRow(firstMatch.line);
+
 				// Handle wiki-style links
-				const wikiMatch = firstMatch.fullMatch.match(
-					/!\[\[([^\]]+?)(?:\|([^|\]]+?))?\s*(?:\|([^|\]]+?))?\]\]/
-				);
-				if (wikiMatch) {
-					const secondPart = wikiMatch[2] || "";
-					const thirdPart = wikiMatch[3] || "";
+				if (firstMatch.fullMatch.startsWith("![[") && firstMatch.fullMatch.endsWith("]]")) {
+					const inner = firstMatch.fullMatch.slice(3, -2);
+
+					// Check if this wikilink uses escaped delimiters (Obsidian may auto-escape in tables)
+					// If it contains \| but no unescaped |, parse with escaped delimiters
+					const hasEscapedPipes = inner.includes("\\|");
+					const hasUnescapedPipes = /(?<!\\)\|/.test(inner);
 
 					const isDimensions = (part: string) =>
 						/^\s*\d+(?:x\d+)?\s*$/.test(part);
 
-					// Check third part first, then second part for dimensions
-					let dimensionPart = "";
-					if (isDimensions(thirdPart)) {
-						dimensionPart = thirdPart.trim();
-					} else if (isDimensions(secondPart)) {
-						dimensionPart = secondPart.trim();
+					let parts: string[];
+					if (hasEscapedPipes && !hasUnescapedPipes) {
+						// Obsidian-escaped format: ![[path\|caption\|dimensions]]
+						parts = inner.split(/\\\|/);
+					} else {
+						// Standard format: ![[path|caption|dimensions]]
+						// Split on unescaped pipes, keeping escaped pipes intact
+						parts = inner.split(/(?<!\\)\|/);
 					}
 
-					if (dimensionPart) {
-						const parts = dimensionPart.split("x");
-						return {
-							width: parts[0],
-							height: parts.length > 1 ? parts[1] : "",
-						};
+					if (parts.length >= 2) {
+						const secondPart = parts[1] ?? "";
+						const thirdPart = parts[2] ?? "";
+
+						// Check third part first, then second part for dimensions
+						let dimensionPart = "";
+						if (isDimensions(thirdPart)) {
+							dimensionPart = thirdPart.trim();
+						} else if (isDimensions(secondPart)) {
+							dimensionPart = secondPart.trim();
+						}
+
+						if (dimensionPart) {
+							const dimParts = dimensionPart.split("x");
+							return {
+								width: dimParts[0],
+								height: dimParts.length > 1 ? dimParts[1] : "",
+							};
+						}
+					}
+					return { width: "", height: "" };
+				}
+
+				// Handle markdown-style links in tables: ![caption\|dimensions](path)
+				// For markdown links in tables, the pipe between caption and dimensions IS escaped.
+				if (inTable) {
+					const mdTableMatch = firstMatch.fullMatch.match(/!\[([^\]]*)\]\(([^)]+)\)/);
+					if (mdTableMatch) {
+						const alt = mdTableMatch[1] ?? "";
+						const parts = alt.split(/\\\|/);
+						if (parts.length > 1) {
+							const last = parts[parts.length - 1] ?? "";
+							const isDimensions = (part: string) => /^\s*\d+(?:x\d+)?\s*$/.test(part);
+							if (isDimensions(last)) {
+								const dimParts = last.trim().split("x");
+								return { width: dimParts[0], height: dimParts.length > 1 ? dimParts[1] : "" };
+							}
+						}
 					}
 				}
 
-				// Handle markdown-style links
+				// Handle markdown-style links (non-table)
 				const markdownMatch = firstMatch.fullMatch.match(
-					/!\[([^|\]]*?)(?:\|(\d+(?:x\d+)?))?\]\(([^)]+)\)/
+					/!\[([^|\]]*?)(?:\\?\|(\d+(?:x\d+)?))?\]\(([^)]+)\)/
 				);
 				if (markdownMatch && markdownMatch[2]) {
 					const parts = markdownMatch[2].split("x");
@@ -412,19 +492,35 @@ export class ContextMenu extends Component {
 
 		const { line } = match;
 
+		// Check if line is inside a table row
+		const inTable = this.isTableRow(line);
+
+		// In tables, Obsidian's table parser runs BEFORE the wikilink parser.
+		// This means pipes inside ![[...]] are still treated as column delimiters.
+		// We must escape ALL pipes (delimiter and content) in tables to prevent column splits.
+		// The ImageCaptionManager will strip the trailing backslash from rendered captions.
+		//
+		// For markdown links (![...]()), the same applies to the alt text section.
+		const escapedCaption = inTable
+			? this.escapePipesForTable(newCaption)
+			: newCaption;
+
+		// Pipe character: escaped in tables to prevent table column split
+		const wikiPipe = inTable ? "\\|" : "|";
+
 		// Handle Wiki-style links
 		if (line.includes("![[")) {
 			return line.replace(
-				/!\[\[([^\]]+?)(?:\|([^|\]]+?))?\s*(?:\|([^|\]]+?))?\]\]/g,
+				/!\[\[([^\]]+?)(?:\\?\|([^|\]]+?))?\s*(?:\\?\|([^|\]]+?))?\]\]/g,
 				(fullMatch, path) => {
-					if (newCaption && dimensionsPart) {
-						return `![[${path}|${newCaption}|${dimensionsPart}]]`;
+					if (escapedCaption && dimensionsPart) {
+						return `![[${path}${wikiPipe}${escapedCaption}${wikiPipe}${dimensionsPart}]]`;
 					}
-					if (newCaption) {
-						return `![[${path}|${newCaption}]]`;
+					if (escapedCaption) {
+						return `![[${path}${wikiPipe}${escapedCaption}]]`;
 					}
 					if (dimensionsPart) {
-						return `![[${path}|${dimensionsPart}]]`;
+						return `![[${path}${wikiPipe}${dimensionsPart}]]`;
 					}
 					return `![[${path}]]`;
 				}
@@ -432,17 +528,19 @@ export class ContextMenu extends Component {
 		}
 
 		// Handle Markdown-style links
+		// For markdown, the pipe between caption and dimension in alt text needs escaping in tables
+		const mdPipe = inTable ? "\\|" : "|";
 		return line.replace(
-			/!\[([^|\]]*?)(?:\|(\d+(?:x\d+)?))?\]\(([^)]+)\)/g,
+			/!\[([^|\]]*?)(?:\\?\|(\d+(?:x\d+)?))?\]\(([^)]+)\)/g,
 			(fullMatch, caption, dimensions, path) => {
-				if (newCaption && dimensionsPart) {
-					return `![${newCaption}|${dimensionsPart}](${path})`;
+				if (escapedCaption && dimensionsPart) {
+					return `![${escapedCaption}${mdPipe}${dimensionsPart}](${path})`;
 				}
-				if (newCaption) {
-					return `![${newCaption}](${path})`;
+				if (escapedCaption) {
+					return `![${escapedCaption}](${path})`;
 				}
 				if (dimensionsPart) {
-					return `![|${dimensionsPart}](${path})`;
+					return `![${mdPipe}${dimensionsPart}](${path})`;
 				}
 				return `![](${path})`;
 			}
@@ -1014,6 +1112,41 @@ export class ContextMenu extends Component {
 	/*-----------------------------------------------------------------*/
 
 	/**
+	 * Detects if a line is a markdown table row (not a separator line).
+	 * A table row starts with `|` after trimming, but separator lines
+	 * (e.g., `|---|---|`) are excluded unless they contain an image.
+	 * @param line - The line to check.
+	 * @returns True if the line is a table data row.
+	 */
+	private isTableRow(line: string): boolean {
+		const trimmed = line.trim();
+		if (!trimmed.startsWith("|")) return false;
+		// Exclude separator lines like |---|---| unless they contain an image
+		return !/^\|[\s-:]+\|$/.test(trimmed) || trimmed.includes("!");
+	}
+
+	/**
+	 * Escapes unescaped pipe characters for use in table cells.
+	 * Avoids double-escaping already escaped pipes.
+	 * @param text - The text to escape.
+	 * @returns The text with unescaped pipes escaped as `\|`.
+	 */
+	private escapePipesForTable(text: string): string {
+		// Use negative lookbehind to only escape pipes not already escaped
+		return text.replace(/(?<!\\)\|/g, "\\|");
+	}
+
+	/**
+	 * Unescapes pipe characters for display in UI input fields.
+	 * Converts `\|` back to `|`.
+	 * @param text - The text to unescape.
+	 * @returns The text with escaped pipes unescaped.
+	 */
+	private unescapePipes(text: string): string {
+		return text.replace(/\\\|/g, "|");
+	}
+
+	/**
 	 * Normalizes an image path for consistent comparison.
 	 * Converts backslashes to forward slashes, replaces '%20' with spaces,
 	 * removes query parameters, converts to lowercase, and trims whitespace.
@@ -1080,7 +1213,8 @@ export class ContextMenu extends Component {
 	private extractFilenameFromLink(link: string): string | null {
 		const wikiMatch = link.match(/!\[\[\s*([^|\]]+?)\s*(?:\|[^\]]+)?\]\]/);
 		if (wikiMatch) {
-			return wikiMatch[1].trim(); // Trim spaces
+			// In tables, delimiter pipes may be written as \\|, which leaves a trailing '\\' in group 1.
+			return wikiMatch[1].trim().replace(/\\$/, "");
 		}
 
 		const markdownMatch = link.match(/!\[.*?\]\(\s*(.*?)\s*\)/);
