@@ -82,10 +82,11 @@ export class NonDestructiveResizeSettings {
             {
                 name: "Fit Editor",
                 resizeDimension: "editor-max-width",
+                editorMaxWidthValue: 100,
                 resizeScaleMode: "auto",
                 respectEditorMaxWidth: true,
                 maintainAspectRatio: true,
-                resizeUnits: "pixels",
+                resizeUnits: "percentage",
             },
             {
                 name: "Original Width",

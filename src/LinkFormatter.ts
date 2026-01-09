@@ -1,5 +1,10 @@
 import { App, TFile, Notice, MarkdownView } from "obsidian";
 import { EditorView } from "@codemirror/view";
+
+/** Interface for accessing the undocumented CodeMirror EditorView on Obsidian's Editor */
+interface ObsidianEditorWithCM {
+    cm: EditorView;
+}
 import { LinkFormat, PathFormat } from "./LinkFormatSettings";
 import { NonDestructiveResizePreset, ResizeScaleMode, ResizeUnits } from "./NonDestructiveResizeSettings";
 
@@ -65,7 +70,7 @@ export class LinkFormatter {
             case "relative":
                 return this.formatRelativePath(file, activeFile);
             default:
-                throw new Error(`Invalid path format: ${pathFormat}`);
+                throw new Error(`Invalid path format: ${pathFormat as string}`);
         }
     }
 
@@ -481,7 +486,7 @@ export class LinkFormatter {
 
         // If no active leaf or view is found, return the default width.
         if (!activeLeaf || !activeLeaf.view) {
-            console.log("Active leaf or view not found, using default 800");
+            console.warn("Active leaf or view not found, using default 800");
             return 800;
         }
 
@@ -490,7 +495,7 @@ export class LinkFormatter {
             !(activeLeaf.view instanceof MarkdownView) ||
             !activeLeaf.view.editor
         ) {
-            console.log(
+            console.warn(
                 "Active view is not a MarkdownView or has no editor, using default 800"
             );
             return 800;
@@ -500,9 +505,8 @@ export class LinkFormatter {
         const { editor } = view;
 
         // Access the CodeMirror EditorView through the Obsidian Editor.
-        // We temporarily use `as any` to bypass type checking for the undocumented `.cm` property,
-        // and then immediately cast it to `EditorView` for type safety.
-        const editorView = (editor as any).cm as EditorView;
+        // We use a type assertion to bypass type checking for the undocumented `.cm` property.
+        const editorView = (editor as unknown as ObsidianEditorWithCM).cm;
 
         // If we cannot access the CodeMirror EditorView, return the default width.
         if (!editorView) {
