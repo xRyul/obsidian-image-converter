@@ -70,10 +70,19 @@ export class ProcessSingleImageModal extends Modal {
 
     private saveModalSettings() {
         this.plugin.settings.singleImageModalSettings = { ...this.modalSettings };
-        this.plugin.saveSettings();
+        this.plugin.saveSettings().catch((error: unknown) => {
+            console.error("Failed to save single image modal settings:", error);
+        });
     }
 
-    async onOpen() {
+    private getErrorMessage(error: unknown): string {
+        return error instanceof Error ? error.message : String(error);
+    }
+
+    // Obsidian calls Modal.onOpen as a lifecycle hook and intentionally ignores the returned Promise.
+    // We keep this method async to allow await inside, so we disable the no-misused-promises rule here.
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises
+    async onOpen(): Promise<void> {
         this.contentEl.empty();
         this.contentEl.addClass("process-single-image-modal");
 
@@ -116,6 +125,7 @@ export class ProcessSingleImageModal extends Modal {
         );
 
         new Setting(this.conversionSettingsContainer)
+            // eslint-disable-next-line obsidianmd/ui/sentence-case
             .setName("Output Format")
             .addDropdown(dropdown => {
                 const options: Record<OutputFormat, string> = {
@@ -174,12 +184,10 @@ export class ProcessSingleImageModal extends Modal {
 
         if (this.modalSettings.outputFormat === "PNGQUANT") {
             new Setting(this.conversionSettingsContainer)
+                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setName("pngquant executable path 🛈")
                 .setTooltip("Provide full-path to the binary file. It can be inside vault or anywhere in your file system.")
                 .addText(text => {
-                    const pngquantPreset = this.plugin.settings.conversionPresets.find(preset => preset.outputFormat === "PNGQUANT");
-                    pngquantPreset?.pngquantExecutablePath || "";
-
                     text.setValue(this.modalSettings.pngquantExecutablePath)
                         .onChange(async value => {
                             if (currentPreset) {
@@ -193,7 +201,10 @@ export class ProcessSingleImageModal extends Modal {
 
             new Setting(this.conversionSettingsContainer)
                 .setName("Quality min-max range 🛈")
-                .setTooltip("Instructs pngquant to use the least amount of colors required to meet or exceed the max quality. min and max are numbers in range 0 (worst) to 100 (perfect).")
+                .setTooltip(
+                    // eslint-disable-next-line obsidianmd/ui/sentence-case
+                    "Instructs pngquant to use the least amount of colors required to meet or exceed the max quality. min and max are numbers in range 0 (worst) to 100 (perfect)."
+                )
                 .addText(text => {
                     text.setValue(this.modalSettings.pngquantQuality)
                         .onChange(async value => {
@@ -206,12 +217,10 @@ export class ProcessSingleImageModal extends Modal {
 
         if (this.modalSettings.outputFormat === "AVIF") {
             new Setting(this.conversionSettingsContainer)
+                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setName("FFmpeg executable path 🛈")
                 .setTooltip("Provide full-path to the binary file. It can be inside vault or anywhere in your file system.")
                 .addText(text => {
-                    const avifPreset = this.plugin.settings.conversionPresets.find(preset => preset.outputFormat === "AVIF");
-                    avifPreset?.ffmpegExecutablePath || "";
-
                     text.setValue(this.modalSettings.ffmpegExecutablePath)
                         .onChange(async value => {
                             if (currentPreset) {
@@ -224,6 +233,7 @@ export class ProcessSingleImageModal extends Modal {
                 });
 
             new Setting(this.conversionSettingsContainer)
+                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setName("FFmpeg CRF")
                 .setDesc("Lower values mean better quality (larger file size). 0 is lossless.")
                 .addSlider(slider => {
@@ -237,6 +247,7 @@ export class ProcessSingleImageModal extends Modal {
                 });
 
             new Setting(this.conversionSettingsContainer)
+                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setName("FFmpeg Preset")
                 .addDropdown(dropdown => {
                     dropdown.addOptions({
@@ -264,6 +275,7 @@ export class ProcessSingleImageModal extends Modal {
         this.resizeSettingsContainer.empty();
 
         new Setting(this.resizeSettingsContainer)
+            // eslint-disable-next-line obsidianmd/ui/sentence-case
             .setName("Resize Mode")
             .addDropdown(dropdown => {
                 const resizeOptions: Record<ResizeMode, string> = {
@@ -290,6 +302,7 @@ export class ProcessSingleImageModal extends Modal {
              //Consolidate all text inputs that effect the generate preview function
               if (["Fit", "Fill", "Width"].includes(this.modalSettings.resizeMode)){
                 new Setting(this.resizeSettingsContainer)
+                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setName("Desired Width")
                 .addText(text => {
                     text.setValue(this.modalSettings.desiredWidth.toString())
@@ -304,6 +317,7 @@ export class ProcessSingleImageModal extends Modal {
               }
             if (["Fit", "Fill", "Height"].includes(this.modalSettings.resizeMode)) {
                 new Setting(this.resizeSettingsContainer)
+                    // eslint-disable-next-line obsidianmd/ui/sentence-case
                     .setName("Desired Height")
                     .addText(text => {
                         text.setValue(this.modalSettings.desiredHeight.toString())
@@ -333,6 +347,7 @@ export class ProcessSingleImageModal extends Modal {
             }
 
             new Setting(this.resizeSettingsContainer)
+                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setName("Enlarge/Reduce")
                 .addDropdown(dropdown => {
                     const enlargeReduceOptions: Record<EnlargeReduce, string> = {
@@ -422,7 +437,7 @@ export class ProcessSingleImageModal extends Modal {
             loadingEl.remove();
 
         } catch (error) {
-            loadingEl.setText(`Preview failed: ${error.message}`);
+            loadingEl.setText(`Preview failed: ${this.getErrorMessage(error)}`);
             console.error("Preview generation failed:", error);
         }
     }
@@ -590,13 +605,19 @@ export class ProcessSingleImageModal extends Modal {
                 }
             }
 
-            this.refreshActiveNote();
+            try {
+                await this.refreshActiveNote();
+            } catch (error) {
+                // Non-critical: image was processed successfully, but view refresh failed
+                console.error("Error refreshing active note after image processing:", error);
+                new Notice("Image processed, but failed to refresh view. You may need to reload the note.");
+            }
             new Notice(`Image "${this.imageFile.name}" processed`, 1000);
             this.close();
 
         } catch (error) {
             console.error("Error processing image:", error);
-            new Notice(`Failed to process image: ${error.message}`, 2000);
+            new Notice(`Failed to process image: ${this.getErrorMessage(error)}`, 2000);
         } finally {
             if (this.previewImageUrl) {
                 URL.revokeObjectURL(this.previewImageUrl);
