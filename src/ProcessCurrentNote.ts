@@ -16,16 +16,7 @@ import ImageConverterPlugin from './main';
 // } from './ImageProcessor';
 
 import { BatchImageProcessor } from './BatchImageProcessor';
-
-interface CanvasNode {
-    type?: string;
-    file?: string;
-    children?: CanvasNode[];
-}
-
-interface CanvasData {
-    nodes?: CanvasNode[];
-}
+import { CanvasData, CanvasNode } from './canvas-types';
 
 export class ProcessCurrentNote extends Modal {
     private imageCount = 0;
