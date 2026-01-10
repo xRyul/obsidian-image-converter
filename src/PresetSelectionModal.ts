@@ -22,7 +22,6 @@ export class PresetSelectionModal extends Modal {
     private selectedResizePreset: NonDestructiveResizePreset;
 
     private conversionQualitySetting: Setting | null = null;
-    private conversionColorDepthSetting: Setting | null = null;
 
     private selectedGlobalPreset: GlobalPreset | null = null;
 
@@ -32,9 +31,7 @@ export class PresetSelectionModal extends Modal {
     private linkFormatPresetDropdown: Setting;
     private resizePresetDropdown: Setting;
 
-    private customFilenameSetting: Setting | null = null;
     private customFilenameText: TextComponent | null = null;
-    private customFolderSetting: Setting | null = null;
     private customFolderText: TextComponent | null = null;
 
     private previewContainer: HTMLDivElement | null = null;
@@ -144,7 +141,7 @@ export class PresetSelectionModal extends Modal {
         this.settings.modalSessionState.customFilenameOverride = this.temporaryCustomFilenameOverride;
 
         // Save settings to persist the state
-        this.plugin.saveSettings();
+        void this.plugin.saveSettings();
     }
 
     onOpen() {
@@ -171,7 +168,7 @@ export class PresetSelectionModal extends Modal {
         this.createActionButtons(mainContainer);
 
         // Initialize preview
-        this.updatePreviews();
+        void this.updatePreviews();
 
         // Focus the filename input field after a short delay to ensure DOM is ready
         setTimeout(() => {
@@ -187,6 +184,7 @@ export class PresetSelectionModal extends Modal {
         
         // Title on the left
         header.createEl("h2", { 
+          // eslint-disable-next-line obsidianmd/ui/sentence-case -- Plugin name
             text: "Image Converter",
             cls: "image-converter-compact-title"
         });
@@ -215,7 +213,6 @@ export class PresetSelectionModal extends Modal {
             inputSection,
             "📂 Folder",
             "Temporarily overwrite path defined in selected preset e.g.: assets/{YYYY}/{MM}",
-            "Where to save the image",
             this.selectedFolderPreset,
             this.settings.folderPresets,
             (text) => { this.customFolderText = text; },
@@ -227,7 +224,7 @@ export class PresetSelectionModal extends Modal {
                 if (this.customFolderText) {
                     this.customFolderText.setValue(this.temporaryCustomFolderOverride);
                 }
-                this.updatePreviews();
+                void this.updatePreviews();
             },
             (setting) => { this.folderPresetDropdown = setting; }
         );
@@ -237,7 +234,6 @@ export class PresetSelectionModal extends Modal {
             inputSection,
             "📄 Filename", 
             "e.g., {imagename}-{timestamp}",
-            "What to name the file",
             this.selectedFilenamePreset,
             this.settings.filenamePresets,
             (text) => { this.customFilenameText = text; },
@@ -249,7 +245,7 @@ export class PresetSelectionModal extends Modal {
                 if (this.customFilenameText) {
                     this.customFilenameText.setValue(this.temporaryCustomFilenameOverride);
                 }
-                this.updatePreviews();
+                void this.updatePreviews();
             },
             (setting) => { this.filenamePresetDropdown = setting; }
         );
@@ -260,7 +256,6 @@ export class PresetSelectionModal extends Modal {
         container: HTMLElement,
         label: string,
         placeholder: string,
-        description: string,
         selectedPreset: T,
         presets: T[],
         onTextCreated: (text: TextComponent) => void,
@@ -328,7 +323,7 @@ export class PresetSelectionModal extends Modal {
                         } else if (label.includes("📄")) {
                             this.temporaryCustomFilenameOverride = value;
                         }
-                        this.updatePreviews();
+                        void this.updatePreviews();
                     });
                 text.inputEl.setAttr("spellcheck", "false");
                 text.inputEl.addClass("image-converter-full-width-input");
@@ -477,7 +472,7 @@ export class PresetSelectionModal extends Modal {
         this.previewContainer = previewSection.createDiv("image-converter-preview-content-compact");
     }
 
-    private updateConversionSettings(container: HTMLElement): void {
+    private updateConversionSettings(_container: HTMLElement): void {
         // This method is now simplified since we don't need to recreate the quality slider
         // The quality slider is already properly positioned in the 2x2 grid
         
@@ -626,7 +621,7 @@ export class PresetSelectionModal extends Modal {
                         this.updateConversionSettings(processingSections[0] as HTMLElement);
                     }
 
-                    this.updatePreviews();
+                    void this.updatePreviews();
                 });
             });
 
@@ -640,7 +635,8 @@ export class PresetSelectionModal extends Modal {
             window.clearTimeout(this.updateTimeout);
         }
 
-        this.updateTimeout = window.setTimeout(async () => {
+        this.updateTimeout = window.setTimeout(() => {
+            void (async () => {
             if (!this.previewContainer) return;
 
             try {
@@ -700,6 +696,7 @@ export class PresetSelectionModal extends Modal {
                     });
                 }
             }
+            })();
         }, 150);
     }
 
@@ -748,10 +745,7 @@ export class PresetSelectionModal extends Modal {
         }
 
         this.conversionQualitySetting = null;
-        this.conversionColorDepthSetting = null;
-        this.customFilenameSetting = null;
         this.customFilenameText = null;
-        this.customFolderSetting = null;
         this.customFolderText = null;
         this.previewContainer = null;
 
