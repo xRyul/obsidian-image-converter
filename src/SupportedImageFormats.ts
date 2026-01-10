@@ -1,5 +1,9 @@
 import { TFile, CachedMetadata, App } from "obsidian";
 
+// Obsidian frontmatter values are user-authored and untyped at runtime.
+// We only care about these optional keys for MIME detection.
+type FrontmatterWithMedia = { mime?: unknown; type?: unknown };
+
 export class SupportedImageFormats {
     // Use a Map for faster mime type lookups
     supportedMimeTypes: Map<string, boolean> = new Map([
@@ -134,9 +138,22 @@ export class SupportedImageFormats {
      * @returns The mime type string or undefined if not found in the cache.
      */
     getMimeTypeFromCache(file: TFile): string | undefined {
-        const metadata: CachedMetadata | null =
-            this.app.metadataCache.getFileCache(file);
-        return metadata?.frontmatter?.mime || metadata?.frontmatter?.type;
+        // Obsidian frontmatter is user-authored and effectively untyped at runtime.
+        // Narrow to string to avoid returning `any` (and to satisfy ESLint's no-unsafe-return).
+        const metadata: CachedMetadata | null = this.app.metadataCache.getFileCache(file);
+        const frontmatter = metadata?.frontmatter as FrontmatterWithMedia | undefined;
+
+        const mime = frontmatter?.mime;
+        if (typeof mime === "string" && this.isValidMimeTypeFromFrontmatter(mime)) {
+            return mime.trim();
+        }
+
+        const type = frontmatter?.type;
+        if (typeof type === "string" && this.isValidMimeTypeFromFrontmatter(type)) {
+            return type.trim();
+        }
+
+        return undefined;
     }
 
     /**
@@ -225,6 +242,24 @@ export class SupportedImageFormats {
             }
             return "unknown";
         }
+    }
+
+    /**
+     * Validates that a frontmatter-provided string is a supported MIME type.
+     *
+     * This prevents arbitrary strings like "photo" or "document" from being
+     * treated as MIME types.
+     */
+    private isValidMimeTypeFromFrontmatter(value: string): boolean {
+        const trimmed = value.trim();
+        if (trimmed.length === 0) return false;
+
+        // Basic MIME type format check: type/subtype with allowed characters.
+        const mimePattern = /^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$/;
+        if (!mimePattern.test(trimmed)) return false;
+
+        // Only accept MIME types that are explicitly supported.
+        return this.supportedMimeTypes.has(trimmed);
     }
 
     // Helper function to extract ftyp from HEIF/AVIF header (ISO Base Media File Format)

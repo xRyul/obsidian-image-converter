@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
 import { makePngBytes, makeJpegBytes, corruptedBytes, makeImageBlob } from '../../factories/image';
+import { TFile, type App, type CachedMetadata, type MetadataCache } from 'obsidian';
 
 function makeIsoBmffFtypBytes(majorBrand: string): ArrayBuffer {
   // Create a minimal ISO BMFF buffer: [size=0x00000018][ftyp][majorBrand][...]
@@ -57,27 +58,34 @@ function makeWebpHeaderBytes(): ArrayBuffer {
   return u8.buffer;
 }
 
-function makeApp(): any {
-  return {
-    vault: {} as any,
-    metadataCache: {
-      resolvedLinks: {},
-      unresolvedLinks: {},
-      getFileCache: () => ({}),
-      getCache: () => ({}),
-      getFirstLinkpathDest: () => null,
-      on: () => {},
-      off: () => {},
-      trigger: () => {},
-      tryTrigger: () => {},
-    } as any,
-    workspace: {} as any,
-    fileManager: {} as any,
-    internalPlugins: {} as any,
-    plugins: {} as any,
+function makeApp(opts?: { frontmatter?: Record<string, unknown> }): App {
+  // Note: We intentionally do NOT try to implement the full Obsidian MetadataCache
+  // interface here (it has many overloads, e.g. `on()` returns EventRef). We only
+  // provide the members exercised by SupportedImageFormats, then cast.
+  const metadataCache = {
+    resolvedLinks: {},
+    unresolvedLinks: {},
+    getFileCache: () => ({ frontmatter: opts?.frontmatter } as unknown as CachedMetadata),
+    getCache: () => ({}),
+    getFirstLinkpathDest: () => null,
+    on: () => ({}),
+    off: () => {},
+    trigger: () => {},
+    tryTrigger: () => {},
+  } as unknown as MetadataCache;
+
+  const app = {
+    vault: {},
+    metadataCache,
+    workspace: {},
+    fileManager: {},
+    internalPlugins: {},
+    plugins: {},
     loadLocalStorage: () => null,
-    saveLocalStorage: () => {}
+    saveLocalStorage: () => {},
   };
+
+  return app as unknown as App;
 }
 
 describe('SupportedImageFormats — extension-based support (6.1–6.4, 6.10–6.11)', () => {
@@ -108,6 +116,31 @@ describe('SupportedImageFormats — extension-based support (6.1–6.4, 6.10–6
 
   it('Given conflicting MIME and extension, When MIME is supported and extension is not, Then MIME takes precedence (contract)', () => {
     expect(formats.isSupported('image/png', 'file.txt')).toBe(true);
+  });
+});
+
+describe('SupportedImageFormats — getMimeTypeFromCache (frontmatter) (6.19–6.22)', () => {
+  it('Given cache frontmatter mime is supported with surrounding whitespace, When read, Then returns trimmed mime (6.19)', () => {
+    const formats = new SupportedImageFormats(makeApp({ frontmatter: { mime: ' image/png ' } }));
+    expect(formats.getMimeTypeFromCache(new TFile())).toBe('image/png');
+  });
+
+  it('Given cache frontmatter mime is arbitrary string and type is supported, When read, Then ignores mime and returns supported type (6.20)', () => {
+    const formats = new SupportedImageFormats(makeApp({ frontmatter: { mime: 'photo', type: 'image/jpeg' } }));
+    expect(formats.getMimeTypeFromCache(new TFile())).toBe('image/jpeg');
+  });
+
+  it('Given cache frontmatter mime is syntactically valid but unsupported, When read, Then returns undefined (6.21)', () => {
+    const formats = new SupportedImageFormats(makeApp({ frontmatter: { mime: 'image/unknown' } }));
+    expect(formats.getMimeTypeFromCache(new TFile())).toBeUndefined();
+  });
+
+  it('Given cache frontmatter mime is empty/whitespace, When read, Then returns undefined (6.22)', () => {
+    const formatsEmpty = new SupportedImageFormats(makeApp({ frontmatter: { mime: '' } }));
+    expect(formatsEmpty.getMimeTypeFromCache(new TFile())).toBeUndefined();
+
+    const formatsWhitespace = new SupportedImageFormats(makeApp({ frontmatter: { mime: '   ' } }));
+    expect(formatsWhitespace.getMimeTypeFromCache(new TFile())).toBeUndefined();
   });
 });
 
