@@ -16,7 +16,7 @@ declare module 'obsidian' {
          * @param key - The key of the configuration option.
          * @returns The value of the configuration option, or undefined if not found.
          */
-        getConfig(key: string): any;
+        getConfig(key: string): unknown;
     }
     interface MenuItem {
         /**
@@ -30,7 +30,7 @@ declare module 'obsidian' {
          * @param callback - A function that configures the new menu item.
          * @returns The new menu item's MenuItem instance.
          */
-        addItem(callback: (item: MenuItem) => any): MenuItem;
+        addItem(callback: (item: MenuItem) => unknown): MenuItem;
 
         /**
          * Adds a separator line to the menu.
@@ -57,13 +57,13 @@ declare module 'obsidian' {
          * @param callback - The function to execute on click.
          * @returns The current MenuItem instance.
          */
-        onClick(callback: (event: MouseEvent | KeyboardEvent) => any): this;
+        onClick(callback: (event: MouseEvent | KeyboardEvent) => unknown): this;
     }
     interface Editor {
         posAtMouse(event: MouseEvent): EditorPosition | null;
     }
     interface Menu {
-        addItem(callback: (item: MenuItem) => any): this;
+        addItem(callback: (item: MenuItem) => unknown): this;
         addSeparator(): this;
     }
 }
