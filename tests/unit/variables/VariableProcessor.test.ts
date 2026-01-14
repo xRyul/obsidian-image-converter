@@ -1,151 +1,24 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'crypto';
+import moment from 'moment';
+import 'moment/locale/en-gb';
+import { FileSystemAdapter } from 'obsidian';
 import { VariableProcessor } from '../../../src/VariableProcessor';
 import { DEFAULT_SETTINGS } from '../../../src/ImageConverterSettings';
 import { fakeApp, fakeTFile, fakeVault } from '../../factories/obsidian';
 
-// Helper: Minimal moment stub for deterministic formatting (used by core variables suite)
-function makeMomentStub(baseDate: Date) {
-  const pad2 = (num: number) => num.toString().padStart(2, '0');
-  const fmt = (dt: Date, format: string) => {
-    switch (format) {
-      case 'YYYY': return dt.getUTCFullYear().toString();
-      case 'MM': return pad2(dt.getUTCMonth() + 1);
-      case 'DD': return pad2(dt.getUTCDate());
-      case 'HH': return pad2(dt.getUTCHours());
-      case 'mm': return pad2(dt.getUTCMinutes());
-      case 'ss': return pad2(dt.getUTCSeconds());
-      case 'YYYY-MM-DD': return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`;
-      case 'dddd': return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dt.getUTCDay()];
-      case 'MMMM': return ['January','February','March','April','May','June','July','August','September','October','November','December'][dt.getUTCMonth()];
-      case 'Do': return `${dt.getUTCDate()}${([undefined,'st','nd','rd'] as any)[(dt.getUTCDate()%10)] || 'th'}`;
-      case 'w': return '1';
-      case 'Q': return Math.floor((dt.getUTCMonth())/3 + 1).toString();
-      case 'YYYY/MM': return `${dt.getUTCFullYear()}/${pad2(dt.getUTCMonth() + 1)}`;
-      case 'HH-mm-ss': return `${pad2(dt.getUTCHours())}-${pad2(dt.getUTCMinutes())}-${pad2(dt.getUTCSeconds())}`;
-      default: return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`;
-    }
-  };
-  const api = (input?: any) => {
-    const date = input ? new Date(input) : new Date(baseDate);
-    return {
-      format: (formatStr: string) => fmt(date, formatStr),
-      add: (num: number, unit: string) => {
-        const d2 = new Date(date);
-        if (unit.startsWith('day')) d2.setUTCDate(d2.getUTCDate() + num);
-        if (unit.startsWith('week')) d2.setUTCDate(d2.getUTCDate() + num*7);
-        if (unit.startsWith('month')) d2.setUTCMonth(d2.getUTCMonth() + num);
-        return api(d2);
-      },
-      subtract: (num: number, unit: string) => api(date).add(-num, unit),
-      startOf: (unit: string) => {
-        const d2 = new Date(date);
-        if (unit === 'week') {
-          const day = d2.getUTCDay(); // Sunday=0
-          d2.setUTCDate(d2.getUTCDate() - day);
-          d2.setUTCHours(0,0,0,0);
-        }
-        if (unit === 'month') {
-          d2.setUTCDate(1); d2.setUTCHours(0,0,0,0);
-        }
-        return api(d2);
-      },
-      endOf: (unit: string) => {
-        const d2 = new Date(date);
-        if (unit === 'week') {
-          const day = d2.getUTCDay();
-          d2.setUTCDate(d2.getUTCDate() + (6 - day));
-          d2.setUTCHours(23,59,59,999);
-        }
-        if (unit === 'month') {
-          d2.setUTCMonth(d2.getUTCMonth() + 1, 0); d2.setUTCHours(23,59,59,999);
-        }
-        return api(d2);
-      },
-      week: () => 1,
-      quarter: () => Math.floor((date.getUTCMonth())/3 + 1),
-      daysInMonth: () => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth()+1, 0)).getUTCDate(),
-      calendar: () => `${fmt(date,'YYYY-MM-DD')} ${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}`,
-      fromNow: () => 'in a few seconds'
-    } as any;
-  };
-  return api;
-}
-
-// Helper: Simple moment stub installer (used by hashes/random/uuid suite)
-function installMomentStub() {
-  (globalThis as any).moment = ((input?: any) => {
-    const api: any = {
-      format: (formatStr: string) => '2025-01-02',
-      add: () => api,
-      subtract: () => api,
-      startOf: () => api,
-      endOf: () => api,
-      daysInMonth: () => 31,
-      week: () => 1,
-      quarter: () => 1,
-      calendar: () => '2025-01-02 12:00',
-      fromNow: () => 'in a few seconds'
-    };
-    return api;
-  }) as any;
-}
-
-// Helper: Moment stub with controllable base time (used by time/counters suite)
-function setMoment(date: Date) {
-  const pad2 = (num: number) => num.toString().padStart(2, '0');
-  (globalThis as any).moment = ((input?: any) => {
-    const base = input ? new Date(input) : new Date(date);
-    return {
-      format: (fmt: string) => {
-        switch (fmt) {
-          case 'YYYY-MM-DD': return `${base.getUTCFullYear()}-${pad2(base.getUTCMonth()+1)}-${pad2(base.getUTCDate())}`;
-          case 'HH-mm-ss': return `${pad2(base.getUTCHours())}-${pad2(base.getUTCMinutes())}-${pad2(base.getUTCSeconds())}`;
-          case 'YYYY': return base.getUTCFullYear().toString();
-          case 'MM': return pad2(base.getUTCMonth()+1);
-          case 'DD': return pad2(base.getUTCDate());
-          case 'dddd': return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][base.getUTCDay()];
-          case 'MMMM': return ['January','February','March','April','May','June','July','August','September','October','November','December'][base.getUTCMonth()];
-          default: return `${base.getUTCFullYear()}-${pad2(base.getUTCMonth()+1)}-${pad2(base.getUTCDate())}`;
-        }
-      },
-      add: (num: number, unit: string) => {
-        const nd = new Date(base);
-        if (unit.startsWith('day')) nd.setUTCDate(nd.getUTCDate()+num);
-        if (unit.startsWith('week')) nd.setUTCDate(nd.getUTCDate()+7*num);
-        if (unit.startsWith('month')) nd.setUTCMonth(nd.getUTCMonth()+num);
-        return (globalThis as any).moment(nd);
-      },
-      subtract: (num: number, unit: string) => (globalThis as any).moment(base).add(-num, unit),
-      startOf: (unit: string) => {
-        const nd = new Date(base);
-        if (unit==='week') { const day = nd.getUTCDay(); nd.setUTCDate(nd.getUTCDate()-day); nd.setUTCHours(0,0,0,0);} 
-        if (unit==='month') { nd.setUTCDate(1); nd.setUTCHours(0,0,0,0);} 
-        return (globalThis as any).moment(nd);
-      },
-      endOf: (unit: string) => {
-        const nd = new Date(base);
-        if (unit==='week') { const day = nd.getUTCDay(); nd.setUTCDate(nd.getUTCDate() + (6-day)); nd.setUTCHours(23,59,59,999);} 
-        if (unit==='month') { nd.setUTCMonth(nd.getUTCMonth()+1, 0); nd.setUTCHours(23,59,59,999);} 
-        return (globalThis as any).moment(nd);
-      },
-      daysInMonth: () => new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth()+1, 0)).getUTCDate(),
-      week: () => 1,
-      quarter: () => Math.floor(base.getUTCMonth()/3)+1,
-      calendar: () => `${base.getUTCFullYear()}-${pad2(base.getUTCMonth()+1)}-${pad2(base.getUTCDate())} ${pad2(base.getUTCHours())}:${pad2(base.getUTCMinutes())}`,
-      fromNow: () => 'in a few seconds'
-    };
-  }) as any;
-}
-
 // Suite 1: core variables
 describe('VariableProcessor core variables', () => {
-  const fixedNow = new Date(Date.UTC(2025, 0, 2, 12, 34, 56)); // 2025-01-02T12:34:56Z
+  // Use local time (not UTC) because VariableProcessor uses `moment()` (local) rather than `moment.utc()`.
+  // Setting a local time here keeps formatted outputs consistent across timezones.
+  const fixedNow = new Date(2025, 0, 2, 12, 34, 56); // Jan 2, 2025 12:34:56 (local time)
   let app: any;
   let processor: VariableProcessor;
   let activeNote: any;
 
   beforeEach(() => {
-    (globalThis as any).moment = makeMomentStub(fixedNow);
+    vi.useFakeTimers();
+    vi.setSystemTime(fixedNow);
 
     const vault = fakeVault({ attachmentFolderPath: 'attachments' });
     activeNote = fakeTFile({ path: 'Notes/Active Note.md', name: 'Active Note.md', basename: 'Active Note' });
@@ -160,6 +33,10 @@ describe('VariableProcessor core variables', () => {
     if (globalThis.crypto && 'randomUUID' in globalThis.crypto) {
       vi.spyOn(globalThis.crypto as any, 'randomUUID').mockReturnValue('00000000-0000-4000-8000-000000000000');
     }
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('2.1–2.2 imagename and filetype from File input', async () => {
@@ -196,15 +73,18 @@ describe('VariableProcessor core variables', () => {
   it('2.9–2.12 date/time/parts are based on frozen time', async () => {
     const file = new File([new Uint8Array([1])], 'x.png', { type: 'image/png' });
     const out = await processor.processTemplate('{date}-{time}-{YYYY}-{MM}-{DD}', { file, activeFile: activeNote });
-    expect(out).toMatch(/^2025-01-02-\d{2}-\d{2}-\d{2}-2025-01-02$/); // time format is HH-mm-ss
+
+    expect(out).toBe('2025-01-02-12-34-56-2025-01-02');
   });
 
-  it('2.10 date:FORMAT applies Moment format, invalid falls back to YYYY-MM-DD', async () => {
+  it('2.10 date:FORMAT applies custom Moment format strings', async () => {
     const file = new File([new Uint8Array([1])], 'x.png', { type: 'image/png' });
+
     const outA = await processor.processTemplate('{date:YYYY/MM}', { file, activeFile: activeNote });
     expect(outA).toBe('2025/01');
-    const outB = await processor.processTemplate('{date:INVALID}', { file, activeFile: activeNote });
-    expect(outB).toMatch(/^2025-01-02$/);
+
+    const outB = await processor.processTemplate('{date:[Year]-YYYY}', { file, activeFile: activeNote });
+    expect(outB).toBe('Year-2025');
   });
 
   it('2.41 unknown variables left unchanged; 2.42 empty template -> empty string; 2.43 malformed tokens unchanged', async () => {
@@ -225,7 +105,6 @@ describe('VariableProcessor hashes, random, and uuid', () => {
   let activeNote: any;
 
   beforeEach(() => {
-    installMomentStub();
     const vault = fakeVault({ attachmentFolderPath: 'attachments' });
     activeNote = fakeTFile({ path: 'Folder/Sub/Active.md', name: 'Active.md', basename: 'Active', parent: { path: 'Folder/Sub', name: 'Sub', parent: { path: 'Folder', name: 'Folder', parent: { path: '/', name: '/', parent: null, children: [] } as any, children: [] } as any, children: [] } as any });
     app = fakeApp({ vault }) as any;
@@ -251,7 +130,10 @@ describe('VariableProcessor hashes, random, and uuid', () => {
     const parts = out.split('-');
     expect(parts[0]).toMatch(/^[a-f0-9]{32}$/);
     expect(parts[1]).toMatch(/^[a-f0-9]{6}$/);
-    expect(parts[2]).toMatch(/^[a-f0-9]{32}$/);
+
+    // Verify MD5 implementation matches a known-good reference.
+    const expectedCustom = createHash('md5').update('custom-text').digest('hex');
+    expect(parts[2]).toBe(expectedCustom);
   });
 
   it('2.24 sha256: image content and types', async () => {
@@ -261,6 +143,54 @@ describe('VariableProcessor hashes, random, and uuid', () => {
     const [hashA, hashB] = out.split('-');
     expect(hashA).toMatch(/^[a-f0-9]{10}$/);
     expect(hashB).toMatch(/^[a-f0-9]{10}$/);
+  });
+
+  it('2.45 MD5 supports mixed-case type tokens and preserves token casing for replacement', async () => {
+    const file = new File([new Uint8Array([1, 2, 3])], 'Example.PNG', { type: 'image/png' });
+    const out = await processor.processTemplate('{MD5:FileName:8}', { file, activeFile: activeNote });
+
+    const expected = createHash('md5').update('Example').digest('hex').substring(0, 8);
+    expect(out).toBe(expected);
+  });
+
+  it('2.46 sha256 supports mixed-case type tokens and preserves token casing for replacement', async () => {
+    const file = new File([new Uint8Array([1, 2, 3])], 'Example.PNG', { type: 'image/png' });
+    const out = await processor.processTemplate('{sha256:FileName:10}', { file, activeFile: activeNote });
+
+    const expected = createHash('sha256').update('Example').digest('hex').substring(0, 10);
+    expect(out).toBe(expected);
+  });
+
+  it('2.47 MD5 fullpath hashes TFile.path when file is a vault TFile', async () => {
+    const tfile = fakeTFile({
+      path: 'Images/Sub/pic.png',
+      name: 'pic.png',
+      extension: 'png',
+      basename: 'pic',
+      stat: { mtime: Date.now(), ctime: Date.now(), size: 1 },
+    });
+
+    // Ensure stat() exists for TFile flows (file size variables are always populated)
+    (app.vault.adapter.stat as any).mockResolvedValue({ mtime: Date.now(), ctime: Date.now(), size: 1 });
+
+    const out = await processor.processTemplate('{MD5:fullpath:8}', { file: tfile as any, activeFile: activeNote });
+    const expected = createHash('md5').update('Images/Sub/pic.png').digest('hex').substring(0, 8);
+    expect(out).toBe(expected);
+  });
+
+  it('2.48 HEIC/TIFF metadata extraction is skipped (no throw; unresolved width/height remain)', async () => {
+    const heicFile = new File([new Uint8Array([1])], 'x.heic', { type: 'image/heic' });
+    const outFile = await processor.processTemplate('{width}|{height}', { file: heicFile, activeFile: activeNote });
+    expect(outFile).toBe('{width}|{height}');
+
+    const tiffFile = new File([new Uint8Array([1])], 'x.tiff', { type: 'image/tiff' });
+    const outTiff = await processor.processTemplate('{width}|{height}', { file: tiffFile, activeFile: activeNote });
+    expect(outTiff).toBe('{width}|{height}');
+
+    const heicTFile = fakeTFile({ path: 'img/x.heic', name: 'x.heic', extension: 'heic', basename: 'x', stat: { mtime: Date.now(), ctime: Date.now(), size: 1 } });
+    (app.vault.adapter.stat as any).mockResolvedValue({ mtime: Date.now(), ctime: Date.now(), size: 1 });
+    const outHeicTFile = await processor.processTemplate('{width}|{height}', { file: heicTFile as any, activeFile: activeNote });
+    expect(outHeicTFile).toBe('{width}|{height}');
   });
 
   it('2.25 uuid returns RFC 4122 string', async () => {
@@ -274,34 +204,73 @@ describe('VariableProcessor hashes, random, and uuid', () => {
     const out = await processor.processTemplate('{random}', { file, activeFile: activeNote });
     expect(out).toMatch(/^[a-z0-9]{1,6}$/);
   });
+
+  it('2.49 vaultpath uses FileSystemAdapter.getBasePath when available; falls back to vault root path otherwise', async () => {
+    const file = new File([new Uint8Array([1])], 'x.png', { type: 'image/png' });
+
+    // Desktop-like adapter
+    app.vault.adapter = new FileSystemAdapter('C:/Vault');
+    const outFs = await processor.processTemplate('{vaultpath}', { file, activeFile: activeNote });
+    expect(outFs).toBe('C:/Vault');
+
+    // Non-filesystem adapter fallback
+    app.vault.adapter = {} as any;
+    app.vault.getRoot = () => ({ path: '/VAULTROOT' }) as any;
+    const outFallback = await processor.processTemplate('{vaultpath}', { file, activeFile: activeNote });
+    expect(outFallback).toBe('/VAULTROOT');
+  });
 });
 
 // Suite 3: time and counters
 describe('VariableProcessor time and counters', () => {
   let app: any; let processor: VariableProcessor; let activeNote: any;
+
   beforeEach(() => {
-    setMoment(new Date(Date.UTC(2025, 0, 5, 8, 0, 0))); // Sun Jan 5, 2025 08:00:00Z
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2025, 0, 5, 8, 0, 0)); // Jan 5, 2025 08:00:00 (local time)
+
     const vault = fakeVault();
     activeNote = fakeTFile({ path: 'A/B/Active.md', name: 'Active.md', basename: 'Active' });
     app = fakeApp({ vault }) as any;
     processor = new VariableProcessor(app, { ...DEFAULT_SETTINGS } as any);
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('2.9 date and 2.11 time', async () => {
     const file = new File([new Uint8Array([1])], 'f.png', { type: 'image/png' });
     const out = await processor.processTemplate('{date} {time}', { file, activeFile: activeNote });
-    expect(out).toMatch(/^2025-01-05 08-00-00$/);
+
+    expect(out).toBe('2025-01-05 08-00-00');
   });
 
-  it('2.29 startofweek and 2.30 endofweek (Sunday-based)', async () => {
+  it('2.29 startofweek and 2.30 endofweek are locale-dependent', async () => {
     const file = new File([new Uint8Array([1])], 'f.png', { type: 'image/png' });
-    const out = await processor.processTemplate('{startofweek}|{endofweek}', { file, activeFile: activeNote });
-    expect(out).toBe('2025-01-05|2025-01-11');
+    const ctx = { file, activeFile: activeNote };
+
+    const previousLocale = moment.locale();
+
+    try {
+      // en: Sunday as start of week
+      moment.locale('en');
+      const outEn = await processor.processTemplate('{startofweek}|{endofweek}', ctx);
+      expect(outEn).toBe('2025-01-05|2025-01-11');
+
+      // en-gb: Monday as start of week
+      moment.locale('en-gb');
+      const outGb = await processor.processTemplate('{startofweek}|{endofweek}', ctx);
+      expect(outGb).toBe('2024-12-30|2025-01-05');
+    } finally {
+      moment.locale(previousLocale);
+    }
   });
 
   it('2.33 nextweek and 2.34 lastweek', async () => {
     const file = new File([new Uint8Array([1])], 'f.png', { type: 'image/png' });
     const out = await processor.processTemplate('{nextweek}|{lastweek}', { file, activeFile: activeNote });
+
     expect(out).toBe('2025-01-12|2024-12-29');
   });
 

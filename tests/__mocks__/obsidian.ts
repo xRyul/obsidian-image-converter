@@ -3,6 +3,11 @@
  * Provides test doubles for all Obsidian API imports
  */
 
+import moment from 'moment';
+
+// Match Obsidian's `export const moment` runtime behavior (callable function)
+export { moment };
+
 // Core classes
 export class Notice {
   message: string;

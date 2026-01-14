@@ -1,7 +1,11 @@
 // VariableProcessor.ts
-import { App, TFile } from "obsidian";
+import { App, FileSystemAdapter, TFile, moment as obsidianMomentModule } from "obsidian";
 import { ImageConverterSettings } from "./ImageConverterSettings";
 
+type MomentModule = typeof import('moment');
+// Obsidian exports `moment`, but the upstream typings can treat it as non-callable in TS5.9.
+// Cast to Moment's module type so `moment()` is typed and lint-safe.
+const moment: MomentModule = obsidianMomentModule as unknown as MomentModule;
 
 export interface VariableContext {
     file: TFile | File;
@@ -583,7 +587,6 @@ export class VariableProcessor {
         template: string
     ): Promise<Record<string, string>> {
         const { file, activeFile } = context;
-        const { moment } = window as any;
         let variables: Record<string, string> = {};
 
         // --- Static Variables ---
@@ -652,10 +655,19 @@ export class VariableProcessor {
         variables["{grandparentfolder}"] = (activeFile.parent?.parent?.path == "/" ? activeFile.parent?.name : activeFile.parent?.parent?.name) || "";
         variables["{notefolder}"] = activeFile.parent?.name || "";
         variables["{vaultname}"] = this.app.vault.getName();
-        variables["{vaultpath}"] = (this.app.vault.adapter as any).basePath || this.app.vault.getRoot().path;
+
+        const { adapter } = this.app.vault;
+        variables["{vaultpath}"] = adapter instanceof FileSystemAdapter
+            ? adapter.getBasePath()
+            : this.app.vault.getRoot().path;
+
         variables["{timezone}"] = Intl.DateTimeFormat().resolvedOptions().timeZone;
         variables["{locale}"] = navigator.language;
+
+        // eslint-disable-next-line obsidianmd/platform, @typescript-eslint/no-deprecated -- Expose the raw platform string for templates; not used for runtime platform detection.
         variables["{platform}"] = navigator.platform;
+
+        // eslint-disable-next-line obsidianmd/platform -- Expose user agent string for templates; not used for runtime platform detection.
         variables["{useragent}"] = navigator.userAgent;
 
         // --- Date, Time, and Calendar Variables ---
@@ -666,7 +678,7 @@ export class VariableProcessor {
         variables["{mm}"] = moment().format("mm");
         variables["{ss}"] = moment().format("ss");
         variables["{date}"] = moment().format("YYYY-MM-DD");
-        variables["{weekday}"] = moment().format("dddd"); 
+        variables["{weekday}"] = moment().format("dddd");
         variables["{month}"] = moment().format("MMMM");
         variables["{calendar}"] = moment().calendar();
         variables["{today}"] = moment().format('YYYY-MM-DD');
@@ -706,14 +718,6 @@ export class VariableProcessor {
         // --- Dynamic Variables ---
         variables = await this.processDynamicVariables(template, context, variables);
 
-        // --- Image Metadata ---
-        try {
-            const imgData = await this.getImageMetadata(file);
-            Object.assign(variables, imgData);
-        } catch (error) {
-            console.debug("Image metadata extraction failed:", error);
-        }
-
         return variables;
     }
 
@@ -724,7 +728,6 @@ export class VariableProcessor {
         variables: Record<string, string>
     ): Promise<Record<string, string>> {
         const { file, activeFile } = context;
-        const { moment } = window as any;
 
         // Handle {randomHex:X}
         const hexPattern = /{randomHex:(\d+)}/g;
@@ -755,8 +758,13 @@ export class VariableProcessor {
                 try {
                     variables[full] = moment().format(format);
                 } catch (error) {
-                    console.error(`Invalid date format: ${format}`, error);
-                    variables[full] = moment().format("YYYY-MM-DD"); // Default format on error
+                    console.error(
+                        "Error formatting date with format string:",
+                        format,
+                        error
+                    );
+                    // Fall back to our default date format to avoid breaking templates at runtime.
+                    variables[full] = moment().format('YYYY-MM-DD');
                 }
             }
         }
@@ -804,8 +812,9 @@ export class VariableProcessor {
         const md5Pattern = /{MD5:([\w\-./]+?)(?::(\d+))?}/g;
         let md5Match;
         while ((md5Match = md5Pattern.exec(template)) !== null) {
-            const hashType = md5Match[1].toLowerCase();
-            const length = md5Match[2] ? parseInt(md5Match[2]) : undefined;
+            const [fullToken, rawType, lengthStr] = md5Match;
+            const hashType = rawType.toLowerCase();
+            const length = lengthStr ? parseInt(lengthStr, 10) : undefined;
             let textToHash = "";
 
             switch (hashType) {
@@ -814,9 +823,8 @@ export class VariableProcessor {
                     break;
                 case "imagepath":
                 case "fullpath": {
-                    // Get the relative path of the image
-                    const relativeImagePath = file.name;
-                    textToHash = relativeImagePath;
+                    // Use the full vault path when available; for drag/paste `File` fall back to filename.
+                    textToHash = file instanceof TFile ? file.path : file.name;
                     break;
                 }
                 case "parentfolder":
@@ -844,22 +852,26 @@ export class VariableProcessor {
                     textToHash = activeFile.path;
                     break;
                 default:
-                    textToHash = hashType;
+                    // Preserve user-provided text case/formatting for hashing.
+                    textToHash = rawType;
             }
 
             let md5Hash = await this.generateMD5(textToHash);
             if (length) {
                 md5Hash = md5Hash.substring(0, length);
             }
-            variables[`{MD5:${hashType}${(length ? `:${length}` : "")}}`] = md5Hash;
+
+            // Replace exactly what the user typed (case-sensitive token match).
+            variables[fullToken] = md5Hash;
         }
 
         // Handle SHA-256 hashes
         const sha256Pattern = /{sha256:([\w\-./]+?)(?::(\d+))?}/g;
         let sha256Match;
         while ((sha256Match = sha256Pattern.exec(template)) !== null) {
-            const hashType = sha256Match[1].toLowerCase();
-            const length = sha256Match[2] ? parseInt(sha256Match[2]) : undefined;
+            const [fullToken, rawType, lengthStr] = sha256Match;
+            const hashType = rawType.toLowerCase();
+            const length = lengthStr ? parseInt(lengthStr, 10) : undefined;
             let sha256Hash: string;
 
             if (hashType === "image") {
@@ -874,8 +886,8 @@ export class VariableProcessor {
                         break;
                     case "imagepath":
                     case "fullpath": {
-                        const relativeImagePath = file.name;
-                        textToHash = relativeImagePath;
+                        // Use the full vault path when available; for drag/paste `File` fall back to filename.
+                        textToHash = file instanceof TFile ? file.path : file.name;
                         break;
                     }
                     case "parentfolder":
@@ -903,7 +915,8 @@ export class VariableProcessor {
                         textToHash = activeFile.path;
                         break;
                     default:
-                        textToHash = hashType;
+                        // Preserve user-provided text case/formatting for hashing.
+                        textToHash = rawType;
                 }
                 sha256Hash = await this.generateSHA256(textToHash);
             }
@@ -911,7 +924,9 @@ export class VariableProcessor {
             if (length) {
                 sha256Hash = sha256Hash.substring(0, length);
             }
-            variables[`{sha256:${hashType}${(length ? `:${length}` : "")}}`] = sha256Hash;
+
+            // Replace exactly what the user typed (case-sensitive token match).
+            variables[fullToken] = sha256Hash;
         }
 
         return variables;
@@ -920,6 +935,25 @@ export class VariableProcessor {
 
     private async getImageMetadata(file: TFile | File): Promise<Record<string, string>> {
         const metadata: Record<string, string> = {};
+
+        const getImageLoadErrorMessage = (event: unknown): string => {
+            if (typeof ErrorEvent !== 'undefined' && event instanceof ErrorEvent) {
+                return event.message;
+            }
+            if (typeof event === 'string') {
+                return event;
+            }
+            if (event instanceof Event) {
+                return event.type;
+            }
+            if (typeof event === 'object' && event !== null && 'type' in event) {
+                const { type } = event as { type?: unknown };
+                if (typeof type === 'string') {
+                    return type;
+                }
+            }
+            return 'Unknown image load error';
+        };
 
         const fileExtension = file instanceof TFile ? file.extension.toLowerCase() : file.name.split('.').pop()?.toLowerCase() || '';
         const isHeicOrTiff = ['heic', 'heif', 'tiff', 'tif'].includes(fileExtension);
@@ -941,8 +975,16 @@ export class VariableProcessor {
                 await new Promise((resolve, reject) => {
                     img.onload = () => resolve(img);
                     img.onerror = (event) => {
-                        console.error("Error extracting image metadata for File: ", event);
-                        reject(event);
+                        const errorMessage = getImageLoadErrorMessage(event);
+                        console.error(
+                            "Error extracting image metadata for TFile:",
+                            file.path,
+                            "Event:",
+                            event,
+                            "Message:",
+                            errorMessage
+                        );
+                        reject(new Error(`Error loading image '${file.path}' for metadata extraction: ${errorMessage}`));
                     };
                 });
 
@@ -1053,8 +1095,16 @@ export class VariableProcessor {
                 await new Promise((resolve, reject) => {
                     img.onload = () => resolve(img);
                     img.onerror = (event) => {
-                        console.error("Error extracting image metadata for File:", event);
-                        reject(event);
+                        const errorMessage = getImageLoadErrorMessage(event);
+                        console.error(
+                            "Error extracting image metadata for File:",
+                            file.name,
+                            "Event:",
+                            event,
+                            "Message:",
+                            errorMessage
+                        );
+                        reject(new Error(`Error loading image '${file.name}' for metadata extraction: ${errorMessage}`));
                     };
                 });
 
@@ -1256,7 +1306,7 @@ export class VariableProcessor {
                 const lNumberOfWordsTemp1 = lMessageLength + 8;
                 const lNumberOfWordsTemp2 = (lNumberOfWordsTemp1 - (lNumberOfWordsTemp1 % 64)) / 64;
                 const lNumberOfWords = (lNumberOfWordsTemp2 + 1) * 16;
-                const lWordArray = Array(lNumberOfWords - 1);
+                const lWordArray = new Array<number>(lNumberOfWords);
                 let lBytePosition = 0;
                 let lByteCount = 0;
 
@@ -1277,17 +1327,15 @@ export class VariableProcessor {
             }
 
             function wordToHex(lValue: number): string {
-                let WordToHexValue = "",
-                    WordToHexValueTemp = "",
-                    lByte, lCount;
+                let wordToHexValue = "";
 
-                for (lCount = 0; lCount <= 3; lCount++) {
-                    lByte = (lValue >>> (lCount * 8)) & 255;
-                    WordToHexValueTemp = `0${lByte.toString(16)}`;
-                    WordToHexValue = WordToHexValue + WordToHexValueTemp.substr(WordToHexValueTemp.length - 2, 2);
+                for (let lCount = 0; lCount <= 3; lCount++) {
+                    const lByte = (lValue >>> (lCount * 8)) & 255;
+                    const wordToHexValueTemp = `0${lByte.toString(16)}`;
+                    wordToHexValue += wordToHexValueTemp.substring(wordToHexValueTemp.length - 2);
                 }
 
-                return WordToHexValue;
+                return wordToHexValue;
             }
 
             const x = convertToWordArray(string);

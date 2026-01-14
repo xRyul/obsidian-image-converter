@@ -6,7 +6,8 @@ import {
     Setting,
     ButtonComponent,
     setIcon,
-    TextComponent
+    TextComponent,
+    TFile
 } from "obsidian";
 import ImageConverterPlugin from "./main";
 import { VariableProcessor } from "./VariableProcessor";
@@ -419,6 +420,41 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
 // --- Settings Tab Class ---
 
 export class ImageConverterSettingTab extends PluginSettingTab {
+    private cachedFirstMarkdownFile?: TFile;
+
+    private getCachedFirstMarkdownFile(): TFile | undefined {
+        if (!this.cachedFirstMarkdownFile) {
+            this.cachedFirstMarkdownFile = this.app.vault.getMarkdownFiles()[0]; // Cache for this settings-tab instance
+        }
+        return this.cachedFirstMarkdownFile;
+    }
+
+    /**
+     * Creates preview context, using real vault files when available, or mock data as fallback.
+     * This ensures previews always work even in empty vaults.
+     */
+    private getPreviewContext(): { file: TFile | File; activeFile: TFile } {
+        const activeFile = this.app.workspace.getActiveFile();
+        const firstImage = this.app.vault.getFiles().find(f => f.extension.match(/^(jpg|jpeg|png|gif|webp)$/i));
+        const firstNote = (activeFile?.extension === 'md') ? activeFile : this.getCachedFirstMarkdownFile();
+
+        // Use real image if available, otherwise create mock File
+        const imageFile: TFile | File = (activeFile?.extension.match(/^(jpg|jpeg|png|gif|webp)$/i) ? activeFile : firstImage)
+            ?? new File([new Uint8Array(256 * 1024)], 'example-image.png', { type: 'image/png' });
+
+        // Use real note if available, otherwise create mock TFile-like object
+        const noteFile: TFile = firstNote ?? ({
+            basename: 'MyNote',
+            name: 'MyNote.md',
+            path: 'MyNote.md',
+            extension: 'md',
+            parent: this.app.vault.getRoot(),
+            stat: { mtime: Date.now(), ctime: Date.now(), size: 1024 },
+            vault: this.app.vault
+        } as unknown as TFile);
+
+        return { file: imageFile, activeFile: noteFile };
+    }
     activeTab: "folder" | "filename" | "conversion" | "linkformat" | "resize" = "folder";
     presetUIState: PresetUIState;
     editingPresetKey: ActivePresetSetting | string | null = null;
@@ -1829,21 +1865,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             }
 
             try {
-                // Use activeFile if available, otherwise fallback to the first file in the vault
-                const activeFile = this.app.workspace.getActiveFile();
-
-                // Find the first image file for preview, if no active file or active file is not an image
-                const firstImage = this.app.vault.getFiles().find(file => file.extension.match(/^(jpg|jpeg|png|gif|webp)$/i));
-
-                if (!activeFile && !firstImage) {
-                    previewEl.setText("No file available for preview.");
-                    return;
-                }
-
-                // Use the active file or the first image for the preview context
-                const fileToUse = (activeFile && activeFile.extension.match(/^(jpg|jpeg|png|gif|webp)$/i)) ? activeFile : firstImage;
-
-                const processedPath = await this.plugin.variableProcessor.processTemplate(templateValue, { file: fileToUse!, activeFile: activeFile! });
+                const ctx = this.getPreviewContext();
+                const processedPath = await this.plugin.variableProcessor.processTemplate(templateValue, ctx);
                 previewEl.setText(processedPath);
             } catch (error) {
                 console.error('Preview generation error:', error);
@@ -1985,16 +2008,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 }
 
                 try {
-                    const activeFile = this.app.workspace.getActiveFile();
-                    const firstImage = this.app.vault.getFiles().find(file => file.extension.match(/^(jpg|jpeg|png|gif|webp)$/i));
-
-                    if (!activeFile && !firstImage) {
-                        previewEl.setText("No file available for preview.");
-                        return;
-                    }
-
-                    const fileToUse = (activeFile && activeFile.extension.match(/^(jpg|jpeg|png|gif|webp)$/i)) ? activeFile : firstImage;
-                    const processedPath = await this.plugin.variableProcessor.processTemplate(templateValue, { file: fileToUse!, activeFile: activeFile! });
+                    const ctx = this.getPreviewContext();
+                    const processedPath = await this.plugin.variableProcessor.processTemplate(templateValue, ctx);
                     previewEl.setText(processedPath);
                 } catch (error) {
                     console.error('Preview generation error:', error);
@@ -2051,16 +2066,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 }
 
                 try {
-                    const activeFile = this.app.workspace.getActiveFile();
-                    const firstImage = this.app.vault.getFiles().find(file => file.extension.match(/^(jpg|jpeg|png|gif|webp)$/i));
-
-                    if (!activeFile && !firstImage) {
-                        previewEl.setText("No file available for preview.");
-                        return;
-                    }
-
-                    const fileToUse = (activeFile && activeFile.extension.match(/^(jpg|jpeg|png|gif|webp)$/i)) ? activeFile : firstImage;
-                    const processedPath = await this.plugin.variableProcessor.processTemplate(templateValue, { file: fileToUse!, activeFile: activeFile! });
+                    const ctx = this.getPreviewContext();
+                    const processedPath = await this.plugin.variableProcessor.processTemplate(templateValue, ctx);
                     previewEl.setText(processedPath);
                 } catch (error) {
                     console.error('Preview generation error:', error);
@@ -2725,6 +2732,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
     async generateFolderPresetSummary(containerEl: HTMLElement, preset: FolderPreset): Promise<void> {
         containerEl.empty(); // Clear existing content
+        this.cachedFirstMarkdownFile = undefined;
 
         const fragment = document.createDocumentFragment();
 
@@ -2737,16 +2745,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             exampleEl.textContent = "Example: Loading..."; // Placeholder
 
             try {
-                const activeFile = this.app.workspace.getActiveFile();
-                const firstImage = this.app.vault.getFiles().find(file => file.extension.match(/^(jpg|jpeg|png|gif|webp)$/i));
-
-                if (!activeFile && !firstImage) {
-                    exampleEl.textContent = "Example: No file available for preview.";
-                    return;
-                }
-
-                const fileToUse = (activeFile && activeFile.extension.match(/^(jpg|jpeg|png|gif|webp)$/i)) ? activeFile : firstImage;
-                const processedPath = await this.plugin.variableProcessor.processTemplate(template, { file: fileToUse!, activeFile: activeFile! });
+                const ctx = this.getPreviewContext();
+                const processedPath = await this.plugin.variableProcessor.processTemplate(template, ctx);
                 exampleEl.textContent = `Example: ${processedPath}`;
             } catch (error) {
                 console.error('Preview generation error:', error);
@@ -2785,6 +2785,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
     async generateFilenamePresetSummary(containerEl: HTMLElement, preset: FilenamePreset): Promise<void> {
         containerEl.empty(); // Clear existing content
+        this.cachedFirstMarkdownFile = undefined;
 
         const fragment = document.createDocumentFragment();
 
@@ -2797,16 +2798,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             exampleEl.textContent = "Example: Loading..."; // Placeholder
 
             try {
-                const activeFile = this.app.workspace.getActiveFile();
-                const firstImage = this.app.vault.getFiles().find(file => file.extension.match(/^(jpg|jpeg|png|gif|webp)$/i));
-
-                if (!activeFile && !firstImage) {
-                    exampleEl.textContent = "Example: No file available for preview.";
-                    return;
-                }
-
-                const fileToUse = (activeFile && activeFile.extension.match(/^(jpg|jpeg|png|gif|webp)$/i)) ? activeFile : firstImage;
-                const processedPath = await this.plugin.variableProcessor.processTemplate(template, { file: fileToUse!, activeFile: activeFile! });
+                const ctx = this.getPreviewContext();
+                const processedPath = await this.plugin.variableProcessor.processTemplate(template, ctx);
                 exampleEl.textContent = `Example: ${processedPath}`;
             } catch (error) {
                 console.error('Preview generation error:', error);

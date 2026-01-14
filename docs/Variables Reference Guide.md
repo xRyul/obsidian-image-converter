@@ -25,7 +25,7 @@ This document provides a detailed explanation of all available variables for the
 - `{notepath}` - Full path of the current note e.g.: "Documents/Photos/Vacation/MyNote"
 - `{notefolder}` - Current note's folder name e.g.: In "Documents/Photos/Vacation" → "Vacation"
 - `{vaultname}` - Obsidian vault name e.g.: "My Knowledge Base"
-- `{vaultpath}` - Full vault path e.g.: "C:/Users/username/Documents/Obsidian/My Knowledge Base"
+- `{vaultpath}` - Full vault filesystem path (desktop) when available; otherwise falls back to the vault root path. e.g.: "C:/Users/username/Documents/Obsidian/My Knowledge Base"
 
 ## Date and Time Variables
 
@@ -149,11 +149,10 @@ This document provides a detailed explanation of all available variables for the
 
 ### MD5 Hashing Options
 
-All MD5 hashes can be truncated using `:length` suffix
+All MD5 hashes can be truncated using `:length` suffix. The type argument is case-insensitive (e.g. `{MD5:FileName}` works the same as `{MD5:filename}`).
 - `{MD5:filename}` - Hash of filename
 - `{MD5:filename:8}` - First 8 characters of filename hash
-- `{MD5:path}` - Hash of file path
-- `{MD5:fullpath}` - Hash of complete path
+- `{MD5:fullpath}` - Hash of the image path. For images already in the vault (`TFile`), this hashes the full vault path (e.g. `Images/Sub/pic.png`). For drag/paste images (`File`), it falls back to hashing the filename because no vault path exists.
 - `{MD5:parentfolder}` - Hash of parent folder
 - `{MD5:rootfolder}` - Hash of root folder
 - `{MD5:extension}` - Hash of file extension
@@ -161,6 +160,23 @@ All MD5 hashes can be truncated using `:length` suffix
 - `{MD5:notefolder}` - Hash of note's folder
 - `{MD5:notepath}` - Hash of note's path
 - `{MD5:custom text}` - Hash of custom text
+
+### SHA-256 Hashing Options
+
+SHA-256 supports the special `image` type (hashes the image file content). The type argument is case-insensitive (e.g. `{sha256:FileName}` works the same as `{sha256:filename}`). Hashes can be truncated using a `:length` suffix.
+
+- `{sha256:image}` - Hash of the image content
+- `{sha256:image:8}` - First 8 characters of image content hash
+- `{sha256:filename}` - Hash of filename
+- `{sha256:filename:10}` - First 10 characters of filename hash
+- `{sha256:fullpath}` - Hash of the image path. For images already in the vault (`TFile`), this hashes the full vault path (e.g. `Images/Sub/pic.png`). For drag/paste images (`File`), it falls back to hashing the filename because no vault path exists.
+- `{sha256:parentfolder}` - Hash of parent folder
+- `{sha256:rootfolder}` - Hash of root folder
+- `{sha256:extension}` - Hash of file extension
+- `{sha256:notename}` - Hash of current note
+- `{sha256:notefolder}` - Hash of note's folder
+- `{sha256:notepath}` - Hash of note's path
+- `{sha256:custom-text}` - Hash of custom text
 
 ### Random Identifiers
 
@@ -174,7 +190,7 @@ All MD5 hashes can be truncated using `:length` suffix
 - `{timezone}` - System timezone e.g.: "America/New_York" or "Europe/London"
 - `{locale}` - System locale e.g.: "en-US"
 - `{platform}` - Operating system e.g.:: "Win32", "MacIntel"
-- `{userAgent}` - Browser user agent string
+- `{useragent}` - Browser user agent string
 
 ## Examples and Use Cases
 
