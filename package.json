@@ -1,6 +1,6 @@
 {
 	"name": "image-converter",
-	"version": "1.3.20",
+	"version": "1.3.21",
 	"description": "Convert, compress, resize, annotate, markup, draw, crop, rotate, flip, align images directly in Obsidian. Drag-resize, rename with variables, batch process. WEBP, JPG, PNG, HEIC, TIF.",
 	"main": "main.js",
 	"scripts": {
