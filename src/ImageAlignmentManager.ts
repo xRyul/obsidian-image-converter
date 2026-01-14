@@ -92,8 +92,7 @@ export class ImageAlignmentManager {
 	public updateCacheFilePath() {
 		const cacheLocation = this.plugin.settings.imageAlignmentCacheLocation;
 		const { configDir } = this.app.vault;
-		// eslint-disable-next-line obsidianmd/hardcoded-config-path -- Setting value comparison (not a hardcoded path)
-		if (cacheLocation === ".obsidian") {
+		if (cacheLocation === "config") {
 			this.cacheFilePath = `${configDir}/image-converter-image-alignments.json`;
 		} else {
 			// It has to be "plugin" now

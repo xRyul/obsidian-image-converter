@@ -189,11 +189,12 @@ describe('ImageAlignmentManager updateCacheFilePath (12.24)', () => {
   beforeEach(() => {
     plugin = new ImageConverterPlugin({} as any, { id: 'image-converter', dir: '/plugins/image-converter' } as any);
     plugin.manifest = { id: 'image-converter', dir: '/plugins/image-converter' } as any;
-    plugin.settings = { isImageAlignmentEnabled: true, imageAlignmentCacheLocation: '.obsidian', imageAlignmentCacheCleanupInterval: 0 } as any;
+    // Setting value 'config' means use app.vault.configDir (typically .obsidian, but can be customized)
+    plugin.settings = { isImageAlignmentEnabled: true, imageAlignmentCacheLocation: 'config', imageAlignmentCacheCleanupInterval: 0 } as any;
   });
 
-  it('12.24 updateCacheFilePath with .obsidian location: uses configDir for cache path', async () => {
-    // Create vault with valid configDir
+  it('12.24 updateCacheFilePath with "config" setting: uses configDir (.obsidian) for cache path', async () => {
+    // Create vault with configDir set to .obsidian (default)
     const note = fakeTFile({ path: 'Notes/n1.md', name: 'n1.md', extension: 'md' });
     const vault = fakeVault({ files: [note], configDir: '.obsidian' });
     const app = fakeApp({ vault });
@@ -201,13 +202,13 @@ describe('ImageAlignmentManager updateCacheFilePath (12.24)', () => {
     supported = new SupportedImageFormats(app as any);
     const manager = new ImageAlignmentManager(app as any, plugin, supported);
     
-    // Set cache location to .obsidian to use configDir
-    plugin.settings.imageAlignmentCacheLocation = '.obsidian';
+    // Setting value 'config' maps to app.vault.configDir
+    plugin.settings.imageAlignmentCacheLocation = 'config';
     
     // Call updateCacheFilePath
     manager.updateCacheFilePath();
     
-    // With .obsidian location, path uses configDir
+    // With 'config' setting, path uses configDir (here: .obsidian)
     expect((manager as any).cacheFilePath).toBe('.obsidian/image-converter-image-alignments.json');
   });
 
@@ -220,8 +221,8 @@ describe('ImageAlignmentManager updateCacheFilePath (12.24)', () => {
     supported = new SupportedImageFormats(app as any);
     const manager = new ImageAlignmentManager(app as any, plugin, supported);
     
-    // Set cache location to .obsidian to use configDir
-    plugin.settings.imageAlignmentCacheLocation = '.obsidian';
+    // Set cache location to config to use configDir
+    plugin.settings.imageAlignmentCacheLocation = 'config';
     
     // Call updateCacheFilePath
     manager.updateCacheFilePath();

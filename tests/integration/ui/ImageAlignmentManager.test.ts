@@ -183,13 +183,14 @@ describe('ImageAlignmentManager (integration-lite) — 12.x behaviors', () => {
   });
 
   // ========== 12.4 Cache file location ==========
-  it('12.4 Cache file location: writes under plugin dir, then under .obsidian when setting changes', async () => {
+  it('12.4 Cache file location: writes under plugin dir, then under .obsidian (configDir) when setting changes to config', async () => {
     const writeSpy = vi.spyOn((app.vault as any).adapter, 'write');
 
     await manager.saveImageAlignmentToCache('Notes/n1.md', 'imgs/pic.png', 'left', '100px', '80px', true);
     expect(writeSpy).toHaveBeenCalledWith('/plugins/image-converter/image-converter-image-alignments.json', expect.any(String));
 
-    plugin.settings.imageAlignmentCacheLocation = '.obsidian';
+    // Setting value 'config' maps to app.vault.configDir (typically .obsidian)
+    plugin.settings.imageAlignmentCacheLocation = 'config';
     manager.updateCacheFilePath();
     await manager.saveImageAlignmentToCache('Notes/n1.md', 'imgs/pic2.png', 'right', '120px', '60px', false);
     expect(writeSpy).toHaveBeenCalledWith('.obsidian/image-converter-image-alignments.json', expect.any(String));
