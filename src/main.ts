@@ -724,8 +724,7 @@ export default class ImageConverterPlugin extends Plugin {
                             // Step 3.5.4: Create the Image File in Vault
                             // - Create the new image file in the Obsidian vault using `createBinary`.
                             // Show space savings notification
-                            // Check if processed image is larger than original
-                            // 如果大于原图的30KB则视为更大，那也不压缩——说明压缩的量小于 30kb
+                            // Check if processed image is larger than original + minimum savings
                             const minSavingsKB = (typeof this.settings.minimumCompressionSavingsInKB === 'number' && this.settings.minimumCompressionSavingsInKB >= 0)
                                 ? this.settings.minimumCompressionSavingsInKB
                                 : 30;
@@ -733,7 +732,7 @@ export default class ImageConverterPlugin extends Plugin {
                             if (this.settings.revertToOriginalIfLarger && this.processedImage.byteLength + (minSavingsKB * 1024) > originalSize) {
                                 // User wants to revert AND processed image is larger
                                 this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
-                                new Notice(`Using original image for "${file.name}" as processed image is larger / compress less than ${minSavingsKB}KB.`);
+                                new Notice(`Using original image for "${file.name}" as processed image is larger / saving less than ${minSavingsKB}KB.`);
 
                                 const fileBuffer = await file.arrayBuffer();
                                 tfile = await this.app.vault.createBinary(newFullPath, fileBuffer) as TFile;
@@ -1038,8 +1037,7 @@ export default class ImageConverterPlugin extends Plugin {
                             // Step 3.5.4: Create the Image File in Vault
                             // - Create the new image file in the Obsidian vault using `createBinary`.
                             // - Show space savings notification
-                            // Check if processed image is larger than original
-                            // 如果大于原图的30KB则视为更大，那也不压缩——说明压缩的量小于 30kb
+                            // Check if processed image is larger than original + minimum savings
                             const minSavingsKB = (typeof this.settings.minimumCompressionSavingsInKB === 'number' && this.settings.minimumCompressionSavingsInKB >= 0)
                                 ? this.settings.minimumCompressionSavingsInKB
                                 : 30;
@@ -1047,7 +1045,7 @@ export default class ImageConverterPlugin extends Plugin {
                             if (this.settings.revertToOriginalIfLarger && this.processedImage.byteLength + (minSavingsKB * 1024) > originalSize) {
                                 // User wants to revert AND processed image is larger
                                 this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
-                                new Notice(`Using original image for "${file.name}" as processed image is larger / compress less than ${minSavingsKB}KB.`);
+                                new Notice(`Using original image for "${file.name}" as processed image is larger / saving less than ${minSavingsKB}KB.`);
 
                                 const fileBuffer = await file.arrayBuffer();
                                 tfile = await this.app.vault.createBinary(newFullPath, fileBuffer) as TFile;
