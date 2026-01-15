@@ -143,11 +143,11 @@ export class ProcessSingleImageModal extends Modal {
                 dropdown.setValue(this.modalSettings.outputFormat);
                 dropdown.onChange(async (value: OutputFormat) => {
                     const currentPngquantPath = this.modalSettings.pngquantExecutablePath;
-                    const currentFfmpegPath = this.modalSettings.ffmpegExecutablePath;
+                    const currentFFmpegPath = this.modalSettings.ffmpegExecutablePath;
 
                     this.modalSettings.outputFormat = value;
                     this.modalSettings.pngquantExecutablePath = currentPngquantPath;
-                    this.modalSettings.ffmpegExecutablePath = currentFfmpegPath;
+                    this.modalSettings.ffmpegExecutablePath = currentFFmpegPath;
 
                     this.renderConversionSettings();
                     await this.generatePreview(); // Regenerate preview (conditional)
@@ -184,8 +184,7 @@ export class ProcessSingleImageModal extends Modal {
 
         if (this.modalSettings.outputFormat === "PNGQUANT") {
             new Setting(this.conversionSettingsContainer)
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
-                .setName("pngquant executable path 🛈")
+                .setName("Executable path for pngquant 🛈")
                 .setTooltip("Provide full-path to the binary file. It can be inside vault or anywhere in your file system.")
                 .addText(text => {
                     text.setValue(this.modalSettings.pngquantExecutablePath)
@@ -617,12 +616,10 @@ export class ProcessSingleImageModal extends Modal {
 
         } catch (error) {
             console.error("Error processing image:", error);
-            new Notice(`Failed to process image: ${this.getErrorMessage(error)}`, 2000);
-        } finally {
-            if (this.previewImageUrl) {
-                URL.revokeObjectURL(this.previewImageUrl);
-                this.previewImageUrl = null;
-            }
+            new Notice(
+                `Failed to process image "${this.imageFile.name}" (target: ${this.modalSettings.outputFormat}): ${this.getErrorMessage(error)}`,
+                2000
+            );
         }
     }
 

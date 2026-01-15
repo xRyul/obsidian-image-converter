@@ -24,7 +24,7 @@ import { fakeApp } from '../../factories/obsidian';
 // Pull mocked fs
 import * as fs from 'fs/promises';
 
-describe('Integration-lite: FfmpegAvifAdapter', () => {
+describe('Integration-lite: FFmpegAvifAdapter', () => {
   let processor: ImageProcessor;
   let supportedFormats: SupportedImageFormats;
 

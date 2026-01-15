@@ -2216,7 +2216,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         // Insert PNGQUANT settings after Output Format
         if (preset.outputFormat === "PNGQUANT") {
             const executablePathSetting = new Setting(containerEl)
-                .setName("Pngquant executable path 🛈")
+                .setName("Executable path for pngquant 🛈")
                 .setTooltip("Provide full-path to the binary file. It can be inside vault or anywhere in your file system.")
                 .setClass("image-converter-pngquant-executable-path") // Add class for easy selection
                 .addText((text) => {
@@ -2233,7 +2233,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             );
 
             const qualitySetting = new Setting(containerEl)
-                .setName("Pngquant quality range")
+                .setName("Quality range for pngquant")
                 .setDesc("Quality setting for pngquant (e.g., 65-80). Both min-max values must be provided.")
                 .setClass("image-converter-pngquant-quality") // Add class for easy selection
                 .addText((text) => {

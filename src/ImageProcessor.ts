@@ -1,14 +1,17 @@
 // ImageProcessor.ts
 import { Notice, Platform } from "obsidian";
 import { SupportedImageFormats } from "./SupportedImageFormats";
+// eslint-disable-next-line import/no-nodejs-modules -- Required for spawning external processes (FFmpeg, pngquant); Obsidian runs on Electron with Node.js support
 import { ChildProcess, spawn } from 'child_process';
 import { ConversionPreset, ImageConverterSettings, DEFAULT_SETTINGS } from "./ImageConverterSettings";
 import * as piexif from "piexifjs"; // Import piexif library
 
-
-import * as fs from 'fs/promises'; // Import Node.js file system functions (promises version)
-import * as os from 'os';          // Import Node.js os module
-import * as path from 'path';    // Import Node.js path module
+// eslint-disable-next-line import/no-nodejs-modules -- Required for temporary file handling in FFmpeg processing; Obsidian runs on Electron with Node.js support
+import * as fs from 'fs/promises';
+// eslint-disable-next-line import/no-nodejs-modules -- Required for temporary directory access; Obsidian runs on Electron with Node.js support
+import * as os from 'os';
+// eslint-disable-next-line import/no-nodejs-modules -- Required for path manipulation; Obsidian runs on Electron with Node.js support
+import * as path from 'path';
 
 // Import types
 export type ResizeMode = 'None' | 'Fit' | 'Fill' | 'LongestEdge' | 'ShortestEdge' | 'Width' | 'Height';
@@ -247,8 +250,10 @@ if (format === 'ORIGINAL') {
                     }
             }
         } catch (error) {
-            console.error('Error processing image:', error);
-            new Notice(`Failed to process image: ${error.message}`);
+            const filename = (file instanceof File) ? file.name : 'image';
+            const message = error instanceof Error ? (error.message || 'Unknown error') : String(error);
+            console.error(`Error processing image "${filename}" (target: ${format}):`, error);
+            new Notice(`Failed to process image "${filename}" (target: ${format}): ${message}`);
             return file.arrayBuffer(); // Fallback to original
         }
     }
@@ -321,10 +326,11 @@ if (format === 'ORIGINAL') {
                 blob,
                 type: outputMimeType,
                 quality
-            });
+            }) as Blob;
         } catch (error) {
             console.error('Error converting HEIC:', error);
-            throw new Error(`Failed to convert HEIC image: ${error.message}`);
+            const errorMessage = error instanceof Error ? (error.message || 'Unknown error') : String(error);
+            throw new Error(`Failed to convert HEIC image to ${format}: ${errorMessage}`);
         }
     }
 
@@ -394,7 +400,7 @@ if (format === 'ORIGINAL') {
                 const pngquantQuality = this.preset?.pngquantQuality || this.settings.pngquantQuality;
                 // Check if executable path is set
                 if (!pngquantExecutablePath) {
-                    new Notice("PNGQUANT executable path is not set. Please configure it in the plugin settings.");
+                    new Notice("The pngquant executable path is not set. Please configure it in the plugin settings.");
                     return file.arrayBuffer(); // Return original
                 }
 
@@ -417,6 +423,7 @@ if (format === 'ORIGINAL') {
 
                 // Check if executable path is set
                 if (!ffmpegExecutablePath) {
+                    // eslint-disable-next-line obsidianmd/ui/sentence-case -- FFmpeg is the official brand name
                     new Notice("FFmpeg executable path is not set. Please configure it in the plugin settings.");
                     return file.arrayBuffer();  // Return original
                 }
@@ -536,33 +543,33 @@ if (format === 'ORIGINAL') {
                     ffmpeg = spawn(executablePath, args);
                 }
             } catch (spawnError) {
-                const errorMessage = `Failed to spawn FFmpeg: ${spawnError instanceof Error ? spawnError.message : String(spawnError)}`;
-                console.error(errorMessage);
-                reject(new Error(errorMessage));
+                const errorMessage = spawnError instanceof Error ? (spawnError.message || 'Unknown error') : String(spawnError);
+                console.error(`Failed to spawn FFmpeg: ${errorMessage}`);
+                reject(new Error(`Failed to spawn FFmpeg: ${errorMessage}`));
                 return;
             }
-
-            // Fallback: ensure process terminates to unblock tests when mocks emit 'exit' instead of 'close'
-            const onExit = (code: number) => {
-                // Mirror close handler logic to reject on non-zero
-                ffmpeg?.removeAllListeners('close');
-                if (code !== 0) {
-                    const errorMessage = `FFmpeg failed with code ${code}: ${errorData}`;
-                    console.error(errorMessage);
-                    // Clean up temp file on error
-                    try { fs.unlink(tempFilePath); } catch { /* ignore cleanup errors */ }
-                    reject(new Error(errorMessage));
-                }
-            };
-            ffmpeg.on('exit', onExit as any);
 
             if (!ffmpeg) {
                 reject(new Error("Failed to spawn FFmpeg process."));
                 return;
             }
 
-            // No need for outputData array now, we're writing to a file.
+            // Declare errorData before onExit handler to avoid temporal dead zone
             let errorData = "";
+
+            // Fallback: ensure process terminates to unblock tests when mocks emit 'exit' instead of 'close'
+            const onExit = (code: number | null, _signal: string | null) => {
+                // Mirror close handler logic to reject on non-zero
+                ffmpeg?.removeAllListeners('close');
+                if (code !== null && code !== 0) {
+                    const exitErrorMessage = `FFmpeg failed with code ${code}: ${errorData}`;
+                    console.error(exitErrorMessage);
+                    // Clean up temp file on error (wrapped for test mock compatibility)
+                    void Promise.resolve(fs.unlink(tempFilePath)).catch(() => { /* ignore cleanup errors */ });
+                    reject(new Error(exitErrorMessage));
+                }
+            };
+            ffmpeg.on('exit', onExit);
 
             // We don't need stdout listener when writing to a file.
             // ffmpeg.stdout?.on('data', (data: Buffer) => {
@@ -573,41 +580,41 @@ if (format === 'ORIGINAL') {
                 errorData += data.toString();
             });
 
-            ffmpeg.on('close', async (code: number) => { // Make this callback async
-                if (code !== 0) {
-                    const errorMessage = `FFmpeg failed with code ${code}: ${errorData}`;
-                    console.error(errorMessage);
-                    // Clean up temp file on error
-                    try { await fs.unlink(tempFilePath); } catch { /* ignore errors during cleanup */ }
-                    reject(new Error(errorMessage));
-                    return;
-                }
-
-                try {
-                    // Read the temporary file and convert Buffer to ArrayBuffer
-                    const fileBuffer = await fs.readFile(tempFilePath);
-                    // Convert Node.js Buffer to ArrayBuffer (ensuring it's ArrayBuffer, not SharedArrayBuffer)
-                    const arrayBuffer: ArrayBuffer = fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength) as ArrayBuffer;
-                    resolve(arrayBuffer);
-                } catch (readError) {
-                    console.error("Error reading temporary file:", readError);
-                    reject(new Error(`Failed to read the processed image from the temporary file: ${readError}`));
-                } finally {
-                    //  Clean up the temporary file.  VERY IMPORTANT.
-                    try {
-                        await fs.unlink(tempFilePath);
-                    } catch (unlinkError) {
-                        console.error("Error deleting temporary file:", unlinkError);
-                        //  Don't reject here; we already resolved/rejected.
+            ffmpeg.on('close', (code: number) => {
+                void (async () => {
+                    if (code !== 0) {
+                        const closeErrorMessage = `FFmpeg failed with code ${code}: ${errorData}`;
+                        console.error(closeErrorMessage);
+                        // Clean up temp file on error
+                        try { await fs.unlink(tempFilePath); } catch { /* ignore errors during cleanup */ }
+                        reject(new Error(closeErrorMessage));
+                        return;
                     }
-                }
+
+                    try {
+                        // Read the temporary file and convert Buffer to ArrayBuffer
+                        const fileBuffer = await fs.readFile(tempFilePath);
+                        resolve(this.nodeBufferToArrayBuffer(fileBuffer));
+                    } catch (readError) {
+                        console.error("Error reading temporary file:", readError);
+                        reject(new Error(`Failed to read the processed image from the temporary file: ${String(readError)}`));
+                    } finally {
+                        //  Clean up the temporary file.  VERY IMPORTANT.
+                        try {
+                            await fs.unlink(tempFilePath);
+                        } catch (unlinkError) {
+                            console.error("Error deleting temporary file:", unlinkError);
+                            //  Don't reject here; we already resolved/rejected.
+                        }
+                    }
+                })();
             });
 
 ffmpeg.on('error', (err: Error) => {
                 const errorMessage = `Error with FFmpeg process: ${err.message}`;
                 console.error(errorMessage);
-                // Clean up temp file on error (if it exists)
-                fs.unlink(tempFilePath).catch(e => { /* ignore errors during cleanup */ });
+                // Clean up temp file on error (if it exists, wrapped for test mock compatibility)
+                void Promise.resolve(fs.unlink(tempFilePath)).catch(() => { /* ignore errors during cleanup */ });
                 reject(new Error(errorMessage));
             });
 
@@ -875,12 +882,14 @@ image.onload = () => { try {
                 // Method 1: toBlob approach
                 new Promise<ArrayBuffer>((resolve) => {
                     canvas.toBlob(
-                        async (blob) => {
+                        (blob) => {
                             if (!blob) {
                                 resolve(new ArrayBuffer(0));
                                 return;
                             }
-                            resolve(await blob.arrayBuffer());
+                            blob.arrayBuffer()
+                                .then(resolve)
+                                .catch(() => resolve(new ArrayBuffer(0)));
                         },
                         'image/webp',
                         quality
@@ -1055,12 +1064,14 @@ image.onload = () => { try {
                 // Method 1: toBlob approach
                 new Promise<ArrayBuffer>((resolve) => {
                     canvas.toBlob(
-                        async (blob) => {
+                        (blob) => {
                             if (!blob) {
                                 resolve(new ArrayBuffer(0));
                                 return;
                             }
-                            resolve(await blob.arrayBuffer());
+                            blob.arrayBuffer()
+                                .then(resolve)
+                                .catch(() => resolve(new ArrayBuffer(0)));
                         },
                         'image/jpeg',
                         quality
@@ -1241,12 +1252,14 @@ image.onload = () => { try {
                 // Method 1: toBlob approach
                 new Promise<ArrayBuffer>((resolve) => {
                     canvas.toBlob(
-                        async (blob) => {
+                        (blob) => {
                             if (!blob) {
                                 resolve(new ArrayBuffer(0));
                                 return;
                             }
-                            resolve(await blob.arrayBuffer());
+                            blob.arrayBuffer()
+                                .then(resolve)
+                                .catch(() => resolve(new ArrayBuffer(0)));
                         },
                         'image/png'
                     );
@@ -1357,9 +1370,9 @@ image.onload = () => { try {
                 }
             } catch (spawnError) {
                 // Handle spawn errors *immediately*.  This is crucial.
-                const errorMessage = `Failed to spawn pngquant: ${spawnError.message}`;
-                console.error(errorMessage);
-                reject(new Error(errorMessage));
+                const errorMessage = spawnError instanceof Error ? (spawnError.message || 'Unknown error') : String(spawnError);
+                console.error(`Failed to spawn pngquant: ${errorMessage}`);
+                reject(new Error(`Failed to spawn pngquant: ${errorMessage}`));
                 return; // Exit early.
             }
 
@@ -1400,9 +1413,7 @@ image.onload = () => { try {
                 // 9. Success: If we get here, pngquant succeeded.  Concatenate the
                 //    Buffer chunks and convert to ArrayBuffer.
                 const resultBuffer = Buffer.concat(outputData);
-                // Convert Node.js Buffer to ArrayBuffer (ensuring it's ArrayBuffer, not SharedArrayBuffer)
-                const arrayBuffer: ArrayBuffer = resultBuffer.buffer.slice(resultBuffer.byteOffset, resultBuffer.byteOffset + resultBuffer.byteLength) as ArrayBuffer;
-                resolve(arrayBuffer);
+                resolve(this.nodeBufferToArrayBuffer(resultBuffer));
             });
 
             // 10. Handle Errors on the process itself (e.g., couldn't start).
@@ -1683,6 +1694,17 @@ canvas.toBlob(
         }
 
         return { imageWidth, imageHeight, aspectRatio };
+    }
+
+    /**
+     * Converts a Node.js Buffer to an ArrayBuffer representing only the buffer's bytes.
+     */
+    private nodeBufferToArrayBuffer(buffer: Buffer): ArrayBuffer {
+        // Buffer.buffer may be backed by ArrayBuffer or SharedArrayBuffer depending on runtime.
+        // We always return a real ArrayBuffer for maximum Web API compatibility.
+        const out = new ArrayBuffer(buffer.byteLength);
+        new Uint8Array(out).set(buffer);
+        return out;
     }
 
     /**

@@ -117,6 +117,57 @@ describe('ImageProcessor - Error Handling Tests', () => {
       expect(result.byteLength).toBe(inputBytes.byteLength);
     });
 
+    it('1.31 [U] Given canvas toBlob Blob.arrayBuffer rejects, When processing WEBP, Then does not throw and falls back to a non-empty candidate', async () => {
+      // Arrange
+      const inputBytes = makePngBytes({ width: 100, height: 100 });
+      const inputBlob = makeImageBlob(inputBytes, 'image/png');
+
+      // Make toBlob succeed but blob.arrayBuffer() reject for WEBP only
+      const rejectingBlob = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/webp' });
+      const rejectingArrayBufferSpy = vi.fn(() => Promise.reject(new Error('Blob read failed')));
+      (rejectingBlob as any).arrayBuffer = rejectingArrayBufferSpy;
+
+      mockCanvas.toBlob = vi.fn((callback: (blob: Blob | null) => void, type?: string) => {
+        if (type === 'image/webp') {
+          callback(rejectingBlob);
+          return;
+        }
+        callback(new Blob([new Uint8Array([9, 9, 9, 9, 9])], { type: type ?? 'image/png' }));
+      });
+
+      // Ensure a valid non-empty fallback candidate exists (data URL path)
+      const fallbackBytes = new Uint8Array([9, 8, 7, 6, 5]);
+      const fallbackBase64 = btoa(String.fromCharCode(...fallbackBytes));
+      mockCanvas.toDataURL = vi.fn(() => `data:image/webp;base64,${fallbackBase64}`);
+
+      // Avoid relying on compressOriginalImage internals for this test (it uses canvas.toBlob too)
+      const largerOriginalCandidate = new ArrayBuffer(100);
+      vi.spyOn(processor, 'compressOriginalImage').mockResolvedValue(largerOriginalCandidate);
+
+      // Act
+      const result = await processor.processImage(
+        inputBlob,
+        'WEBP',
+        0.8,
+        1.0,
+        'None',
+        0,
+        0,
+        0,
+        'Auto',
+        true
+      );
+
+      // Assert - processing completes, rejection is handled, and a non-empty candidate is returned
+      expect(rejectingArrayBufferSpy).toHaveBeenCalled();
+      expect(result).toBeDefined();
+      expect(result.byteLength).toBeGreaterThan(0);
+      // Ensure we did not fall back to returning the original bytes for this single-candidate failure
+      expect(result.byteLength).not.toBe(inputBytes.byteLength);
+      // Ensure we did not pick the larger original-format candidate
+      expect(result.byteLength).toBeLessThan(largerOriginalCandidate.byteLength);
+    });
+
     it('Given TIFF input processing error, When TIFF handler fails, Then returns original bytes', async () => {
       // Arrange
       // Create TIFF-like bytes (starts with II or MM)
