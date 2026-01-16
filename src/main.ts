@@ -103,7 +103,11 @@ export default class ImageConverterPlugin extends Plugin {
             this.registerEvent(
                 this.app.workspace.on('file-open', (file) => {
                     if (file) {
-                        this.ImageAlignmentManager?.applyAlignmentsToNote(file.path);
+                        this.ImageAlignmentManager?.applyAlignmentsToNote(file.path)
+                            .catch((err) => {
+                                const errorMessage = err instanceof Error ? err.message : String(err);
+                                console.error('Failed to apply alignments on file-open:', errorMessage);
+                            });
 
                         if (this.settings.enableImageCaptions) {
                             this.captionManager.refresh();
@@ -138,7 +142,11 @@ export default class ImageConverterPlugin extends Plugin {
 
         // Wait for layout to be ready before initializing view-dependent components
         this.app.workspace.onLayoutReady(() => {
-            this.initializeComponents();
+            this.initializeComponents().catch((err) => {
+                console.error('Failed to initialize components:', err);
+                //eslint-disable-next-line
+                new Notice('Image Converter: Failed to initialize. Check console for details.');
+            });
 
             // Apply Image Alignment and Resizing when switching Live to Reading mode etc.
             if (this.settings.isImageAlignmentEnabled || this.settings.isImageResizeEnbaled) {
@@ -147,7 +155,11 @@ export default class ImageConverterPlugin extends Plugin {
                         if (this.settings.isImageAlignmentEnabled) {
                             const currentFile = this.app.workspace.getActiveFile();
                             if (currentFile) {
-                                void this.ImageAlignmentManager?.applyAlignmentsToNote(currentFile.path);
+                                this.ImageAlignmentManager?.applyAlignmentsToNote(currentFile.path)
+                                    .catch((err) => {
+                                        const errorMessage = err instanceof Error ? err.message : String(err);
+                                        console.error('Failed to apply alignments on layout-change:', errorMessage);
+                                    });
                             }
                         }
 
@@ -243,6 +255,7 @@ export default class ImageConverterPlugin extends Plugin {
                     });
                 } else if (file instanceof TFolder) {
                     menu.addItem((item) => {
+                        // eslint-disable-next-line obsidianmd/ui/sentence-case
                         item.setTitle("Process all images in Folder")
                             .setIcon("cog")
                             .onClick(() => {
@@ -251,7 +264,7 @@ export default class ImageConverterPlugin extends Plugin {
                     });
                 } else if (file instanceof TFile && (file.extension === 'md' || file.extension === 'canvas')) {
                     menu.addItem((item) => {
-                        item.setTitle(`Process all images in ${file.extension === 'md' ? 'Note' : 'Canvas'}`)
+                        item.setTitle(`Process all images in ${file.extension === 'md' ? 'note' : 'canvas'}`)
                             .setIcon("cog")
                             .onClick(() => {
                                 new ProcessCurrentNote(this.app, this, file, this.batchImageProcessor).open();
@@ -278,13 +291,15 @@ export default class ImageConverterPlugin extends Plugin {
                 if (activeFile) {
                     new ProcessCurrentNote(this.app, this, activeFile, this.batchImageProcessor).open();
                 } else {
-                    new Notice('Error: No active file found.');
+                    new Notice('No active file detected');
                 }
             }
         });
 
         this.addCommand({
+            // eslint-disable-next-line obsidianmd/commands/no-plugin-id-in-command-id -- not to break bindings
             id: 'open-image-converter-settings',
+            // eslint-disable-next-line obsidianmd/commands/no-plugin-name-in-command-name, obsidianmd/ui/sentence-case -- not to break bindings
             name: 'Open Image Converter Settings',
             callback: () => this.commandOpenSettingsTab()
         });
@@ -293,6 +308,7 @@ export default class ImageConverterPlugin extends Plugin {
     }
 
 
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises
     async onunload() {
         // Clean up alignment related components first
         if (this.ImageAlignmentManager) {
@@ -336,7 +352,7 @@ export default class ImageConverterPlugin extends Plugin {
 
     // Load settings method
     async loadSettings() {
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()) as ImageConverterSettings;
     }
 
     // Save settings method
@@ -346,7 +362,8 @@ export default class ImageConverterPlugin extends Plugin {
 
     // Command to open settings tab
     async commandOpenSettingsTab() {
-        const { setting } = this.app as any;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access -- Obsidian internal API
+        const setting = (this.app as any).setting as { open: () => Promise<void>; openTabById: (id: string) => void } | undefined;
         if (setting) {
             await setting.open();
             setting.openTabById(this.manifest.id);
@@ -356,22 +373,23 @@ export default class ImageConverterPlugin extends Plugin {
     }
 
     addReloadCommand() {
+
         this.addCommand({
             id: 'reload-plugin',
             name: 'Reload plugin',
             callback: async () => {
-                new Notice('Reloading Image Converter plugin...');
+                // eslint-disable-next-line obsidianmd/ui/sentence-case
+                new Notice('Reloading Image Converter...');
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access -- Obsidian internal API
+                const plugins = (this.app as any).plugins as { disablePlugin: (id: string) => Promise<void>; enablePlugin: (id: string) => Promise<void> } | undefined;
 
                 try {
-                    // Use the workaround to access the internal plugins API
-                    const { plugins } = this.app as any;
-
                     // 1. Disable the plugin
-                    if (plugins && plugins.disablePlugin) {
+                    if (plugins?.disablePlugin) {
                         await plugins.disablePlugin(this.manifest.id);
                     } else {
                         console.error("Plugins API is not accessible.");
-                        new Notice('Failed to reload plugin: Plugins API unavailable.');
+                        new Notice('Failed to reload: plugins API unavailable');
                         return;
                     }
 
@@ -379,19 +397,19 @@ export default class ImageConverterPlugin extends Plugin {
                     await new Promise(resolve => setTimeout(resolve, 500)); // even 100ms would be enough.
 
                     // 2. Re-enable the plugin
-                    if (plugins && plugins.enablePlugin) {
+                    if (plugins?.enablePlugin) {
                         await plugins.enablePlugin(this.manifest.id);
                     } else {
                         console.error("Plugins API is not accessible.");
-                        new Notice('Failed to reload plugin: Plugins API unavailable.');
+                        new Notice('Failed to reload: plugins API unavailable');
                         return;
                     }
 
-
-                    new Notice('Image Converter plugin reloaded!');
+                    // eslint-disable-next-line obsidianmd/ui/sentence-case
+                    new Notice('Image Converter reloaded!');
                 } catch (error) {
                     console.error("Error reloading plugin:", error);
-                    new Notice('Failed to reload plugin. See console for details.');
+                    new Notice('Failed to reload plugin, see console');
                 }
             },
         });
@@ -488,7 +506,7 @@ export default class ImageConverterPlugin extends Plugin {
 
         const activeFile = this.app.workspace.getActiveFile();
         if (!activeFile) {
-            new Notice('No active file detected.');
+            new Notice('No active file detected');
             return;
         }
 
@@ -597,7 +615,8 @@ export default class ImageConverterPlugin extends Plugin {
                         selectedFolderPreset
                     ));
                 } catch (error) {
-                    console.error("Error determining destination and filename:", error);
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    console.error("Error determining destination and filename:", errorMessage);
                     new Notice(`Failed to determine destination or filename for "${file.name}". Check console for details.`);
                     return; // Resolve this promise (no further processing for this file)
                 }
@@ -611,8 +630,9 @@ export default class ImageConverterPlugin extends Plugin {
                     await this.folderAndFilenameManagement.ensureFolderExists(destinationPath);
                 } catch (error) {
                     // Ignore "Folder already exists" error, but handle other errors.
-                    if (!error.message.startsWith('Folder already exists')) {
-                        console.error("Error creating folder:", error);
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    if (!errorMessage.startsWith('Folder already exists')) {
+                        console.error("Error creating folder:", errorMessage);
                         new Notice(`Failed to create folder "${destinationPath}". Check console for details.`);
                         return; // Resolve this promise
                     }
@@ -641,7 +661,8 @@ export default class ImageConverterPlugin extends Plugin {
                             `${destinationPath}/${newFilename}`
                         );
                     } catch (error) {
-                        console.error("Error handling filename conflicts:", error);
+                        const errorMessage = error instanceof Error ? error.message : String(error);
+                        console.error("Error handling filename conflicts:", errorMessage);
                         new Notice(`Error incrementing filename for "${file.name}". Check console for details.`);
                         return; // Resolve this promise
                     }
@@ -655,7 +676,13 @@ export default class ImageConverterPlugin extends Plugin {
                     // Step 3.5.1: Reuse Existing File (if applicable)
                     // - If a file exists and the preset is set to "reuse," insert a link to the existing file and skip processing.
                     if (existingFile && selectedFilenamePreset && selectedFilenamePreset.conflictResolution === "reuse") {
-                        this.insertLinkAtCursorPosition(editor, existingFile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                        try {
+                            await this.insertLinkAtCursorPosition(editor, existingFile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                        } catch (error) {
+                            const errorMessage = error instanceof Error ? error.message : String(error);
+                            console.error("Failed to insert link for reused file:", errorMessage);
+                            new Notice(`Failed to insert link for "${existingFile.name}". Check console for details.`);
+                        }
                         return; // Resolve this promise
                     }
 
@@ -670,15 +697,17 @@ export default class ImageConverterPlugin extends Plugin {
                         // Save the original file directly to the vault without any processing.
                         // const originalSize = file.size;
                         const fileBuffer = await file.arrayBuffer();
-                        const tfile = await this.app.vault.createBinary(newFullPath, fileBuffer) as TFile;
-
-                        if (!tfile) {
-                            new Notice(`Failed to create file "${newFilename}". Check console for details.`);
-                            return; // Resolve this promise
-                        }
+                        // Vault.createBinary returns a TFile or throws on failure (no null result).
+                        const tfile = await this.app.vault.createBinary(newFullPath, fileBuffer);
 
                         // Insert a link to the newly created (but unprocessed) file.
-                        this.insertLinkAtCursorPosition(editor, tfile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                        try {
+                            await this.insertLinkAtCursorPosition(editor, tfile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                        } catch (error) {
+                            const errorMessage = error instanceof Error ? error.message : String(error);
+                            console.error("Failed to insert link for skipped conversion:", errorMessage);
+                            new Notice(`Failed to insert link for "${file.name}". Check console for details.`);
+                        }
 
                     } else {
                         // Step 3.5.3: Process the Image (ONLY if not skipped)
@@ -731,20 +760,27 @@ export default class ImageConverterPlugin extends Plugin {
                                 new Notice(`Using original image for "${file.name}" as processed image is larger.`);
 
                                 const fileBuffer = await file.arrayBuffer();
-                                tfile = await this.app.vault.createBinary(newFullPath, fileBuffer) as TFile;
+                                tfile = await this.app.vault.createBinary(newFullPath, fileBuffer);
                             } else {
                                 // Processed image is smaller OR user doesn't want to revert
                                 this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
-                                tfile = await this.app.vault.createBinary(newFullPath, this.processedImage) as TFile;
+                                tfile = await this.app.vault.createBinary(newFullPath, this.processedImage);
                             }
 
                             // Step 3.5.5: Insert Link into Editor
                             // - Insert the Markdown link to the newly created image file into the editor at the current cursor position.
-                            await this.insertLinkAtCursorPosition(editor, tfile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                            try {
+                                await this.insertLinkAtCursorPosition(editor, tfile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                            } catch (error) {
+                                const errorMessage = error instanceof Error ? error.message : String(error);
+                                console.error("Failed to insert link after processing:", errorMessage);
+                                new Notice(`Failed to insert link for "${file.name}". Check console for details.`);
+                            }
                         } catch (error) {
                             // Step 3.5.6: Handle Image Processing Errors
                             // - Catch and display errors that occur during image processing.
-                            console.error("Image processing failed:", error);
+                            const errorMessage = error instanceof Error ? error.message : String(error);
+                            console.error("Image processing failed:", errorMessage);
                             if (error instanceof Error) {
                                 if (error.message.includes("File already exists")) {
                                     new Notice(`Failed to process image: File "${newFilename}" already exists.`);
@@ -766,13 +802,20 @@ export default class ImageConverterPlugin extends Plugin {
                     // Step 3.6: Handle Skipped Processing
                     // - If further processing is skipped due to filename conflict resolution, insert a link to an existing file (if applicable).
                     if (existingFile) {
-                        this.insertLinkAtCursorPosition(editor, existingFile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                        try {
+                            await this.insertLinkAtCursorPosition(editor, existingFile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                        } catch (error) {
+                            const errorMessage = error instanceof Error ? error.message : String(error);
+                            console.error("Failed to insert link for skipped processing:", errorMessage);
+                            new Notice(`Failed to insert link for "${existingFile.name}". Check console for details.`);
+                        }
                     }
                 }
             } catch (error) {
                 // Step 3.7: Handle Unexpected Errors
                 // - Catch and display any other unexpected errors that might occur.
-                console.error("An unexpected error occurred:", error);
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                console.error("An unexpected error occurred:", errorMessage);
                 new Notice('An unexpected error occurred. Check console for details.');
             }
         });
@@ -801,7 +844,7 @@ export default class ImageConverterPlugin extends Plugin {
 
         const activeFile = this.app.workspace.getActiveFile();
         if (!activeFile) {
-            new Notice('No active file found!');
+            new Notice('No active file detected');
             return;
         }
 
@@ -908,7 +951,8 @@ export default class ImageConverterPlugin extends Plugin {
                         selectedFolderPreset
                     ));
                 } catch (error) {
-                    console.error("Error determining destination and filename:", error);
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    console.error("Error determining destination and filename:", errorMessage);
                     new Notice(`Failed to determine destination or filename for "${file.name}". Check console for details.`);
                     return; // Resolve this promise
                 }
@@ -918,9 +962,10 @@ export default class ImageConverterPlugin extends Plugin {
                 try {
                     await this.folderAndFilenameManagement.ensureFolderExists(destinationPath);
                 } catch (error) {
-                    if (!error.message.startsWith('Folder already exists')) {
-                        console.error("Error creating folder:", error);
-                        new Notice(`Failed to create folder: ${destinationPath}`);
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    if (!errorMessage.startsWith('Folder already exists')) {
+                        console.error("Error creating folder:", errorMessage);
+                        new Notice(`Failed to create folder "${destinationPath}". Check console for details.`);
                         return; // Resolve this promise
                     }
                 }
@@ -956,7 +1001,8 @@ export default class ImageConverterPlugin extends Plugin {
                             `${destinationPath}/${newFilename}`
                         );
                     } catch (error) {
-                        console.error("Error handling filename conflicts:", error);
+                        const errorMessage = error instanceof Error ? error.message : String(error);
+                        console.error("Error handling filename conflicts:", errorMessage);
                         new Notice(`Error incrementing filename for "${file.name}". Check console for details.`);
                         return; // Resolve this promise
                     }
@@ -969,7 +1015,13 @@ export default class ImageConverterPlugin extends Plugin {
                     // Step 3.5.1: Reuse Existing File (if applicable)
                     // - If the file exists and the preset is set to "reuse," insert a link to the existing file.
                     if (existingFile && selectedFilenamePreset && selectedFilenamePreset.conflictResolution === "reuse") {
-                        this.insertLinkAtCursorPosition(editor, existingFile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                        try {
+                            await this.insertLinkAtCursorPosition(editor, existingFile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                        } catch (error) {
+                            const errorMessage = error instanceof Error ? error.message : String(error);
+                            console.error("Failed to insert link for reused file:", errorMessage);
+                            new Notice(`Failed to insert link for "${existingFile.name}". Check console for details.`);
+                        }
                         return;
                     }
 
@@ -982,15 +1034,17 @@ export default class ImageConverterPlugin extends Plugin {
                         // Save the original file directly to the vault without any processing.
                         // const originalSize = file.size;
                         const fileBuffer = await file.arrayBuffer();
-                        const tfile = await this.app.vault.createBinary(newFullPath, fileBuffer) as TFile;
-
-                        if (!tfile) {
-                            new Notice(`Failed to create file: ${newFilename}`);
-                            return; // Resolve this promise
-                        }
+                        // Vault.createBinary returns a TFile or throws on failure (no null result).
+                        const tfile = await this.app.vault.createBinary(newFullPath, fileBuffer);
 
                         // Insert a link to the newly created (unprocessed) file.
-                        this.insertLinkAtCursorPosition(editor, tfile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                        try {
+                            await this.insertLinkAtCursorPosition(editor, tfile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                        } catch (error) {
+                            const errorMessage = error instanceof Error ? error.message : String(error);
+                            console.error("Failed to insert link for skipped conversion:", errorMessage);
+                            new Notice(`Failed to insert link for "${file.name}". Check console for details.`);
+                        }
                     } else {
                         // Step 3.5.3: Process the Image (ONLY if not skipped)
                         // - Process the image using the selected or default settings.
@@ -1040,26 +1094,27 @@ export default class ImageConverterPlugin extends Plugin {
                                 new Notice(`Using original image for "${file.name}" as processed image is larger.`);
 
                                 const fileBuffer = await file.arrayBuffer();
-                                tfile = await this.app.vault.createBinary(newFullPath, fileBuffer) as TFile;
+                                tfile = await this.app.vault.createBinary(newFullPath, fileBuffer);
                             } else {
                                 // Processed image is smaller OR user doesn't want to revert
                                 this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
-                                tfile = await this.app.vault.createBinary(newFullPath, this.processedImage) as TFile;
-                            }
-
-
-                            if (!tfile) {
-                                new Notice(`Failed to create file "${newFilename}". Check console for details.`);
-                                return; // Resolve this promise
+                                tfile = await this.app.vault.createBinary(newFullPath, this.processedImage);
                             }
 
                             // Step 3.5.5: Insert Link into Editor
                             // - Insert the link to the new image into the editor.
-                            this.insertLinkAtCursorPosition(editor, tfile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                            try {
+                                await this.insertLinkAtCursorPosition(editor, tfile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                            } catch (error) {
+                                const errorMessage = error instanceof Error ? error.message : String(error);
+                                console.error("Failed to insert link after processing:", errorMessage);
+                                new Notice(`Failed to insert link for "${file.name}". Check console for details.`);
+                            }
                         } catch (error) {
                             // Step 3.5.6: Handle Image Processing Errors
                             // - Handle errors during image processing.
-                            console.error("Image processing failed:", error);
+                            const errorMessage = error instanceof Error ? error.message : String(error);
+                            console.error("Image processing failed:", errorMessage);
                             if (error instanceof Error) {
                                 if (error.message.includes("File already exists")) {
                                     new Notice(`Failed to process image: File "${newFilename}" already exists.`);
@@ -1078,12 +1133,19 @@ export default class ImageConverterPlugin extends Plugin {
                     // Step 3.6: Handle Skipped Processing
                     // - If skipping, insert a link to an existing file or do nothing.
                     if (existingFile) {
-                        this.insertLinkAtCursorPosition(editor, existingFile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                        try {
+                            await this.insertLinkAtCursorPosition(editor, existingFile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                        } catch (error) {
+                            const errorMessage = error instanceof Error ? error.message : String(error);
+                            console.error("Failed to insert link for skipped processing:", errorMessage);
+                            new Notice(`Failed to insert link for "${existingFile.name}". Check console for details.`);
+                        }
                     }
                 }
             } catch (error) {
                 // Step 3.7: Handle Unexpected Errors
-                console.error("An unexpected error occurred:", error);
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                console.error("An unexpected error occurred:", errorMessage);
                 new Notice('An unexpected error occurred. Check console for details.');
             } finally {
                 // Clear memory after processing
@@ -1108,7 +1170,6 @@ export default class ImageConverterPlugin extends Plugin {
         selectedLinkFormatPreset?: LinkFormatPreset,
         selectedResizePreset?: NonDestructiveResizePreset
     ) {
-
         const activeFile = this.app.workspace.getActiveFile();
 
         // Use the passed presets or fall back to the plugin settings
@@ -1120,28 +1181,35 @@ export default class ImageConverterPlugin extends Plugin {
             (preset) => preset.name === this.settings.nonDestructiveResizeSettings.selectedResizePreset
         );
 
-        // Await the result of formatLink
-        const formattedLink = await this.linkFormatter.formatLink(
-            linkPath, // Pass the original linkPath
-            linkFormatPresetToUse?.linkFormat || "wikilink",
-            linkFormatPresetToUse?.pathFormat || "shortest",
-            activeFile,
-            resizePresetToUse // Now using the selected resize preset
-        );
+        let formattedLink: string;
+        try {
+            // Await the result of formatLink
+            formattedLink = await this.linkFormatter.formatLink(
+                linkPath, // Pass the original linkPath
+                linkFormatPresetToUse?.linkFormat || "wikilink",
+                linkFormatPresetToUse?.pathFormat || "shortest",
+                activeFile,
+                resizePresetToUse // Now using the selected resize preset
+            );
 
+            // ----- FRONT or BACK ---------
+            // Insert the link at the saved cursor position
+            // - FRONT:Keeps the cursor at the front by default (by doing nothing) when cursorLocation is "front"
+            editor.replaceRange(formattedLink, cursor);
 
-        // ----- FRONT or BACK ---------
-        // Insert the link at the saved cursor position
-        // - FRONT:Keeps the cursor at the front by default (by doing nothing) when cursorLocation is "front"
-        editor.replaceRange(formattedLink, cursor);
-
-        // Use positive check for "back"
-        // - We have to be carefull not to place it to the back 2 times.
-        if (this.settings.dropPasteCursorLocation === "back") {
-            editor.setCursor({
-                line: cursor.line,
-                ch: cursor.ch + formattedLink.length,
-            });
+            // Use positive check for "back"
+            // - We have to be carefull not to place it to the back 2 times.
+            if (this.settings.dropPasteCursorLocation === "back") {
+                editor.setCursor({
+                    line: cursor.line,
+                    ch: cursor.ch + formattedLink.length,
+                });
+            }
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error('Failed to insert image link:', errorMessage);
+            new Notice('Failed to insert image link. Check console for details.');
+            return;
         }
 
         // Apply default alignment if enabled
@@ -1152,21 +1220,30 @@ export default class ImageConverterPlugin extends Plugin {
             activeFile &&
             this.ImageAlignmentManager
         ) {
-            const defaultAlign = this.settings.imageAlignmentDefaultAlignment;
-            const alignmentAdded = await this.ImageAlignmentManager.ensureDefaultAlignment(
-                activeFile.path,
-                linkPath,
-                defaultAlign
-            );
+            try {
+                const defaultAlign = this.settings.imageAlignmentDefaultAlignment;
+                const alignmentAdded = await this.ImageAlignmentManager.ensureDefaultAlignment(
+                    activeFile.path,
+                    linkPath,
+                    defaultAlign
+                );
 
-            // If alignment was added, refresh the view to apply it
-            if (alignmentAdded) {
-                window.setTimeout(() => {
-                    const currentFile = this.app.workspace.getActiveFile();
-                    if (currentFile?.path === activeFile.path) {
-                        this.ImageAlignmentManager?.applyAlignmentsToNote(activeFile.path);
-                    }
-                }, 0);
+                // If alignment was added, refresh the view to apply it
+                if (alignmentAdded) {
+                    window.setTimeout(() => {
+                        const currentFile = this.app.workspace.getActiveFile();
+                        if (currentFile?.path === activeFile.path) {
+                            this.ImageAlignmentManager?.applyAlignmentsToNote(activeFile.path)
+                                .catch((err) => {
+                                    const errorMessage = err instanceof Error ? err.message : String(err);
+                                    console.error('Failed to apply alignments:', errorMessage);
+                                });
+                        }
+                    }, 0);
+                }
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                console.error('Failed to apply default alignment after insert:', errorMessage);
             }
         }
     }
