@@ -37,7 +37,8 @@ export class ViewportManager {
         if (!canvas) return;
 
         canvas.on('mouse:wheel', (opt) => {
-            const event = opt.e as WheelEvent;
+            const event = opt.e;
+
             event.preventDefault();
             event.stopPropagation();
 
@@ -216,11 +217,12 @@ export class ViewportManager {
 
     setupResizable(): void {
         this.resizeHandle = this.modalEl.createDiv('modal-resize-handle');
-        this.resizeHandle.innerHTML = '⋮⋮';
+        this.resizeHandle.addClass('resize-grip-icon');
 
-        this.componentContainer.registerDomEvent(this.resizeHandle, 'mousedown', this.startResize.bind(this));
-        this.componentContainer.registerDomEvent(document, 'mousemove', this.resize.bind(this));
-        this.componentContainer.registerDomEvent(document, 'mouseup', this.stopResize.bind(this));
+        // Arrow functions preserve type inference for registerDomEvent's expected callback signature
+        this.componentContainer.registerDomEvent(this.resizeHandle, 'mousedown', (e: MouseEvent) => { this.startResize(e); });
+        this.componentContainer.registerDomEvent(document, 'mousemove', (e: MouseEvent) => { this.resize(e); });
+        this.componentContainer.registerDomEvent(document, 'mouseup', () => { this.stopResize(); });
 
         this.modalEl.addClass('resizable-modal');
     }
