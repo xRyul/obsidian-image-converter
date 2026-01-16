@@ -13,12 +13,11 @@ export class LayerManager {
         const activeObject = canvas.getActiveObject();
         if (!activeObject) return;
 
-        if (activeObject.type === 'activeselection') {
-            const selection = activeObject as ActiveSelection;
-            selection.getObjects().forEach(obj => {
+        if (activeObject instanceof ActiveSelection) {
+            activeObject.getObjects().forEach(obj => {
                 canvas.bringObjectToFront(obj);
             });
-            canvas.bringObjectToFront(selection);
+            canvas.bringObjectToFront(activeObject);
         } else {
             canvas.bringObjectToFront(activeObject);
         }
@@ -34,12 +33,11 @@ export class LayerManager {
         const activeObject = canvas.getActiveObject();
         if (!activeObject) return;
 
-        if (activeObject.type === 'activeselection') {
-            const selection = activeObject as ActiveSelection;
-            selection.getObjects().forEach(obj => {
+        if (activeObject instanceof ActiveSelection) {
+            activeObject.getObjects().forEach(obj => {
                 canvas.bringObjectForward(obj);
             });
-            canvas.bringObjectForward(selection);
+            canvas.bringObjectForward(activeObject);
         } else {
             canvas.bringObjectForward(activeObject);
         }
@@ -55,12 +53,11 @@ export class LayerManager {
         const activeObject = canvas.getActiveObject();
         if (!activeObject) return;
 
-        if (activeObject.type === 'activeselection') {
-            const selection = activeObject as ActiveSelection;
-            selection.getObjects().reverse().forEach(obj => {
+        if (activeObject instanceof ActiveSelection) {
+            [...activeObject.getObjects()].reverse().forEach(obj => {
                 canvas.sendObjectBackwards(obj);
             });
-            canvas.sendObjectBackwards(selection);
+            canvas.sendObjectBackwards(activeObject);
         } else {
             canvas.sendObjectBackwards(activeObject);
         }
@@ -76,19 +73,17 @@ export class LayerManager {
         const activeObject = canvas.getActiveObject();
         if (!activeObject) return;
 
-        if (activeObject.type === 'activeselection') {
-            const selection = activeObject as ActiveSelection;
-            selection.getObjects().reverse().forEach(obj => {
+        if (activeObject instanceof ActiveSelection) {
+            [...activeObject.getObjects()].reverse().forEach(obj => {
                 canvas.sendObjectToBack(obj);
-                if (obj !== selection) {
-                    const objects = canvas.getObjects();
-                    const index = objects.indexOf(obj);
-                    if (index > 1) {
-                        canvas.moveObjectTo(obj, 1);
-                    }
+
+                const objects = canvas.getObjects();
+                const index = objects.indexOf(obj);
+                if (index > 1) {
+                    canvas.moveObjectTo(obj, 1);
                 }
             });
-            canvas.sendObjectToBack(selection);
+            canvas.sendObjectToBack(activeObject);
         } else {
             canvas.sendObjectToBack(activeObject);
             const objects = canvas.getObjects();
