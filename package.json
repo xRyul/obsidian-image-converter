@@ -24,7 +24,6 @@
 		"@codemirror/view": "^6.39.9",
 		"@eslint/js": "^9.35.0",
 		"@faker-js/faker": "^10.0.0",
-		"@types/fabric": "^5.3.9",
 		"@types/node": "^24.3.1",
 		"@types/piexifjs": "^1.0.0",
 		"@types/sortablejs": "^1.15.8",

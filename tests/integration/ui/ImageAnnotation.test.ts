@@ -2,11 +2,36 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Use the richer Fabric mock so both initialization and behaviors are supported
 vi.mock('fabric', () => {
+  class MockFabricObject {
+    type = 'object';
+    __active = false;
+    constructor(type?: string) {
+      if (type) this.type = type;
+    }
+
+    // Basic fabric-style API used throughout the annotation tool
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    set(prop: string, value: any) { (this as any)[prop] = value; return this; }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    get(prop: string) { return (this as any)[prop]; }
+
+    toObject() {
+      // Provide a sane default serialization shape.
+      // Individual tests can override by providing their own toObject() implementations.
+      return { type: this.type };
+    }
+  }
+
   class MockCanvas {
     width: number; height: number; isDrawingMode = false; preserveObjectStacking = true;
     freeDrawingBrush: any; _objects: any[] = []; _handlers: Record<string, Function[]> = {};
     constructor(_el: HTMLCanvasElement, opts: any) { this.width = opts?.width ?? 300; this.height = opts?.height ?? 200; }
     add(obj: any) { this._objects.push(obj); return obj; }
+    remove(obj: any) {
+      const idx = this._objects.indexOf(obj);
+      if (idx !== -1) this._objects.splice(idx, 1);
+      return obj;
+    }
     getObjects() { return this._objects; }
     forEachObject(cb: (obj:any)=>void) { this._objects.forEach(cb); }
     getActiveObject() { return this._objects.find(obj => obj.__active); }
@@ -25,18 +50,69 @@ vi.mock('fabric', () => {
     bringObjectToFront(){} bringObjectForward(){} sendObjectBackwards(){} sendObjectToBack(){} moveObjectTo(){}
     getScenePoint(_e: any) { return { x: 100, y: 100 }; }
   }
-  class MockImage { constructor(public img: HTMLImageElement, public opts: any) {} set(_props: any) { return this; } }
-  class MockIText { type='i-text'; fill='#000'; backgroundColor='transparent'; isEditing=false; __active=false;
-    set(prop: string, value: any) { (this as any)[prop] = value; return this; }
-    get(prop: string) { return (this as any)[prop]; }
+
+  class MockImage extends MockFabricObject {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(public img: HTMLImageElement, public opts: any) {
+      super('image');
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    set(_props: any) { return this; }
+  }
+
+  class MockIText extends MockFabricObject {
+    fill = '#000'; backgroundColor = 'transparent'; isEditing = false;
+
+    constructor(_text?: string) {
+      super('i-text');
+    }
+
     enterEditing(){ this.isEditing=true; }
     exitEditing(){ this.isEditing=false; }
     selectAll(){}
   }
-  class MockPath { type='path'; stroke='#000'; __active=false; set(prop:string,val:any){(this as any)[prop]=val;return this;} get(prop: string){return (this as any)[prop];} }
-  class MockActiveSelection { type='activeselection'; __objs:any[]=[]; __active=false; getObjects(){return this.__objs;} forEachObject(cb:(obj:any)=>void){ this.__objs.forEach(cb); } }
+
+  class MockPath extends MockFabricObject {
+    stroke = '#000';
+    constructor(_path?: string) {
+      super('path');
+    }
+  }
+
+  class MockActiveSelection extends MockFabricObject {
+    __objs:any[]=[];
+    constructor() {
+      super('activeselection');
+    }
+    getObjects(){return this.__objs;}
+    forEachObject(cb:(obj:any)=>void){ this.__objs.forEach(cb); }
+  }
+
   class MockPencilBrush { constructor(public canvas:any){} color='#000'; width=1; }
-  return { Canvas: MockCanvas, FabricImage: MockImage, IText: MockIText, ActiveSelection: MockActiveSelection, PencilBrush: MockPencilBrush, Path: MockPath, util:{}, Point: class {}, Pattern: class {}, TEvent: class {}, TBrushEventData: class {} };
+
+  return {
+    Canvas: MockCanvas,
+    FabricObject: MockFabricObject,
+    FabricImage: MockImage,
+    IText: MockIText,
+    ActiveSelection: MockActiveSelection,
+    PencilBrush: MockPencilBrush,
+    Path: MockPath,
+    util: {
+      enlivenObjects: async (objects: unknown[]) => objects.map((obj) => {
+        const type = typeof (obj as any)?.type === 'string' ? (obj as any).type : 'unknown';
+        const instance = new MockFabricObject(type);
+        if (obj && typeof obj === 'object') {
+          Object.assign(instance as any, obj);
+        }
+        return instance;
+      }),
+    },
+    Point: class {},
+    Pattern: class {},
+    TEvent: class {},
+    TBrushEventData: class {},
+  };
 });
 
 import ImageConverterPlugin from '../../../src/main';
@@ -153,21 +229,73 @@ describe('ImageAnnotation — 16.2–16.11 Behaviors (integration-lite)', () => 
   it('16.7/16.8 Undo/Redo: undo reverts last and redo reapplies', async () => {
     const modal = new ImageAnnotationModal(app as any, plugin, imageFile);
     await modal.onOpen();
-    const { historyManager } = (modal as any);
-    // Directly test historyManager since canvas event handlers are set up async after image loads
-    // Initialize state and manually save states to test undo/redo
+    const { historyManager, canvas } = (modal as any);
+
+    // Helper to create objects with toObject() - required for serialization
+    const createMockObject = (type: string, props: Record<string, unknown>) => ({
+      type,
+      ...props,
+      toObject() { return { type, ...props }; },
+    });
+
+    // HistoryManager assumes a stable background object at index 0 and serializes/restores everything after.
+    // Ensure the test canvas matches that contract to make object-count assertions deterministic.
+    const existingObjects = canvas.getObjects();
+    if (existingObjects.length === 0) {
+      canvas.add(createMockObject('background', { id: 'bg' }));
+    } else if (existingObjects.length > 1) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      (canvas as any)._objects = [existingObjects[0]];
+    }
+
+    // Initialize history - starts with empty state
     historyManager.initialize();
-    expect(historyManager.canUndo()).toBe(false); // Only initial empty state
-    // Simulate state changes by directly calling saveState
+    expect(historyManager.canUndo()).toBe(false);
+    expect(historyManager.canRedo()).toBe(false);
+
+    const baselineCount = canvas.getObjects().length;
+    expect(baselineCount).toBeGreaterThanOrEqual(1);
+
+    // Add first object and save state
+    const firstObject = createMockObject('rect', { left: 10, top: 10 });
+    canvas.add(firstObject);
     historyManager.saveState();
-    // After saving state, canUndo should be true if state differs from initial
-    // Note: saveState checks for duplicate states, so save another different state
-    const initialCanUndo = historyManager.canUndo();
-    // Test undo/redo methods exist and can be called
-    expect(typeof historyManager.undo).toBe('function');
-    expect(typeof historyManager.redo).toBe('function');
-    expect(typeof historyManager.canUndo).toBe('function');
-    expect(typeof historyManager.canRedo).toBe('function');
+
+    expect(canvas.getObjects().length).toBe(baselineCount + 1);
+    expect(historyManager.canUndo()).toBe(true);
+    expect(historyManager.canRedo()).toBe(false);
+
+    // Add second object and save state
+    const secondObject = createMockObject('circle', { radius: 20 });
+    canvas.add(secondObject);
+    historyManager.saveState();
+
+    expect(canvas.getObjects().length).toBe(baselineCount + 2);
+
+    // Spy after setup so modal initialization noise doesn't affect this test.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    // Undo - should go back to state with only first object
+    await historyManager.undo();
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(canvas.getObjects().length).toBe(baselineCount + 1);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const typesAfterUndo = canvas.getObjects().slice(1).map((obj: any) => obj.type);
+    expect(typesAfterUndo).toEqual(['rect']);
+    expect(historyManager.canRedo()).toBe(true);
+
+    // Redo - should restore second object
+    await historyManager.redo();
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(canvas.getObjects().length).toBe(baselineCount + 2);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const typesAfterRedo = canvas.getObjects().slice(1).map((obj: any) => obj.type);
+    expect(typesAfterRedo).toEqual(['rect', 'circle']);
+
+    expect(historyManager.canRedo()).toBe(false);
+    expect(historyManager.canUndo()).toBe(true);
+
+    errorSpy.mockRestore();
   });
 
   it('16.9 Save writes to same TFile and closes; on failure no write occurs', async () => {
