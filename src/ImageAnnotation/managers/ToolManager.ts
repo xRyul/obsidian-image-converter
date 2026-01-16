@@ -1,6 +1,6 @@
 import { Canvas, PencilBrush, FabricImage, IText } from 'fabric';
 import { ButtonComponent } from 'obsidian';
-import { ToolMode, BlendMode, BRUSH_SIZES, BRUSH_OPACITIES } from '../types';
+import { ToolMode, BlendMode, BRUSH_SIZES, BRUSH_OPACITIES, DrawingBrushWithComposite } from '../types';
 import { ArrowBrush } from '../brushes/ArrowBrush';
 import { hexToRgba } from '../utils/colorUtils';
 
@@ -221,7 +221,7 @@ export class ToolManager {
         this.currentBlendMode = mode;
         const canvas = this.getCanvas();
         if (canvas?.freeDrawingBrush) {
-            (canvas.freeDrawingBrush as any).globalCompositeOperation = mode;
+            (canvas.freeDrawingBrush as DrawingBrushWithComposite).globalCompositeOperation = mode;
         }
     }
 

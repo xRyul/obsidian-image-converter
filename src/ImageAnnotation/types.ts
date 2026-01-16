@@ -1,4 +1,4 @@
-import { ImageFormat } from 'fabric';
+import { ImageFormat, BaseBrush } from 'fabric';
 
 // Const arrays as single source of truth
 export const BLEND_MODES = [
@@ -55,3 +55,12 @@ export interface ViewportState {
 
 export const BRUSH_SIZES = [2, 4, 8, 12, 16, 24] as const;
 export const BRUSH_OPACITIES = [0.2, 0.4, 0.6, 0.8, 0.9, 1.0] as const;
+
+/**
+ * Extended brush type that includes globalCompositeOperation.
+ * FabricJS's BaseBrush TypeScript definitions don't include this property,
+ * but it exists at runtime and is used to control blend modes during drawing.
+ */
+export type DrawingBrushWithComposite = BaseBrush & {
+    globalCompositeOperation?: GlobalCompositeOperation;
+};
