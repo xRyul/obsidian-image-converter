@@ -205,6 +205,7 @@ export interface ImageConverterSettings {
 
     showSpaceSavedNotification: boolean;
     revertToOriginalIfLarger: boolean;
+    minimumCompressionSavingsInKB: number;
 
     enableImageCaptions: boolean;
     skipCaptionExtensions: string;
@@ -394,6 +395,7 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
 
     showSpaceSavedNotification: true,
     revertToOriginalIfLarger: false,
+    minimumCompressionSavingsInKB: 30,
 
     enableImageCaptions: true,
     skipCaptionExtensions: "icns",
@@ -2462,6 +2464,27 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             newSetting.settingEl
         );
         lastAddedSetting = newSetting.settingEl;
+
+        const minSavingsSetting = new Setting(containerEl)
+            .setName("Minimum compression savings (KB)")
+            .setDesc("If 0, compress whenever size decreases. Otherwise, requires savings > this value (KB). Only effective when 'Revert to original if larger' is enabled.")
+            .addText((text) =>
+                text
+                    .setPlaceholder("30")
+                    .setValue(String(this.plugin.settings.minimumCompressionSavingsInKB))
+                    .onChange(async (value) => {
+                        const numValue = Number(value);
+                        if (!isNaN(numValue) && numValue >= 0) {
+                            this.plugin.settings.minimumCompressionSavingsInKB = numValue;
+                            await this.plugin.saveSettings();
+                        }
+                    })
+            );
+        lastAddedSetting.insertAdjacentElement(
+            "afterend",
+            minSavingsSetting.settingEl
+        );
+        lastAddedSetting = minSavingsSetting.settingEl;
     }
 
 

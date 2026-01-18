@@ -753,11 +753,15 @@ export default class ImageConverterPlugin extends Plugin {
                             // Step 3.5.4: Create the Image File in Vault
                             // - Create the new image file in the Obsidian vault using `createBinary`.
                             // Show space savings notification
-                            // Check if processed image is larger than original
-                            if (this.settings.revertToOriginalIfLarger && this.processedImage.byteLength > originalSize) {
+                            // Check if processed image is larger than original + minimum savings
+                            const minSavingsKB = (typeof this.settings.minimumCompressionSavingsInKB === 'number' && this.settings.minimumCompressionSavingsInKB >= 0)
+                                ? this.settings.minimumCompressionSavingsInKB
+                                : 30;
+
+                            if (this.settings.revertToOriginalIfLarger && this.processedImage.byteLength + (minSavingsKB * 1024) > originalSize) {
                                 // User wants to revert AND processed image is larger
                                 this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
-                                new Notice(`Using original image for "${file.name}" as processed image is larger.`);
+                                new Notice(`Using original image for "${file.name}" as processed image is larger / saving less than ${minSavingsKB}KB.`);
 
                                 const fileBuffer = await file.arrayBuffer();
                                 tfile = await this.app.vault.createBinary(newFullPath, fileBuffer);
@@ -1087,11 +1091,15 @@ export default class ImageConverterPlugin extends Plugin {
                             // Step 3.5.4: Create the Image File in Vault
                             // - Create the new image file in the Obsidian vault using `createBinary`.
                             // - Show space savings notification
-                            // Check if processed image is larger than original
-                            if (this.settings.revertToOriginalIfLarger && this.processedImage.byteLength > originalSize) {
+                            // Check if processed image is larger than original + minimum savings
+                            const minSavingsKB = (typeof this.settings.minimumCompressionSavingsInKB === 'number' && this.settings.minimumCompressionSavingsInKB >= 0)
+                                ? this.settings.minimumCompressionSavingsInKB
+                                : 30;
+
+                            if (this.settings.revertToOriginalIfLarger && this.processedImage.byteLength + (minSavingsKB * 1024) > originalSize) {
                                 // User wants to revert AND processed image is larger
                                 this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
-                                new Notice(`Using original image for "${file.name}" as processed image is larger.`);
+                                new Notice(`Using original image for "${file.name}" as processed image is larger / saving less than ${minSavingsKB}KB.`);
 
                                 const fileBuffer = await file.arrayBuffer();
                                 tfile = await this.app.vault.createBinary(newFullPath, fileBuffer);
