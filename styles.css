@@ -2091,6 +2091,18 @@ button.image-converter-encoder-detected:hover,
 }
 
 .image-converter-annotation-tool-image-annotation-modal
+	.mosaic-block-size-controls {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.image-converter-annotation-tool-image-annotation-modal
+	.mosaic-block-size-controls.is-hidden {
+	display: none;
+}
+
+.image-converter-annotation-tool-image-annotation-modal
 	.image-converter-annotation-tool-preset-buttons.is-hidden {
 	display: none;
 }

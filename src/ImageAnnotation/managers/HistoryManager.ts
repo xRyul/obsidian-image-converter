@@ -1,4 +1,5 @@
-import { Canvas, FabricObject, SerializedObjectProps, util } from 'fabric';
+import { Canvas, FabricObject, FabricImage, SerializedObjectProps, util } from 'fabric';
+import { MOSAIC_MARKER, isMosaicImage } from '../tools/MosaicTool';
 
 /** Minimum number of properties a valid serialized object must have (type + at least one other) */
 const MIN_SERIALIZED_PROPS = 2;
@@ -20,7 +21,7 @@ export class HistoryManager {
      * to avoid writing malformed state into the history stacks.
      */
     private static serializeObject(obj: FabricObject): SerializedObjectProps {
-        const raw: unknown = obj.toObject();
+        const raw: unknown = isMosaicImage(obj) ? obj.toObject([MOSAIC_MARKER]) : obj.toObject();
 
         if (HistoryManager.isSerializedObjectProps(raw)) {
             return raw;
@@ -222,8 +223,12 @@ export class HistoryManager {
                 objectsToRemove.forEach(obj => canvas.remove(obj));
 
                 const enlivenedObjects = await util.enlivenObjects(objects);
-                enlivenedObjects.forEach(obj => {
+                enlivenedObjects.forEach((obj, index) => {
                     if (obj instanceof FabricObject) {
+                        // Restore mosaic marker from serialized data
+                        if (obj instanceof FabricImage && objects[index] && (objects[index] as unknown as Record<string, unknown>)[MOSAIC_MARKER]) {
+                            (obj as unknown as Record<string, unknown>)[MOSAIC_MARKER] = true;
+                        }
                         canvas.add(obj);
                     }
                 });
@@ -280,8 +285,12 @@ export class HistoryManager {
             objectsToRemove.forEach(obj => canvas.remove(obj));
 
             const enlivenedObjects = await util.enlivenObjects(objects);
-            enlivenedObjects.forEach(obj => {
+            enlivenedObjects.forEach((obj, index) => {
                 if (obj instanceof FabricObject) {
+                    // Restore mosaic marker from serialized data
+                    if (obj instanceof FabricImage && objects[index] && (objects[index] as unknown as Record<string, unknown>)[MOSAIC_MARKER]) {
+                        (obj as unknown as Record<string, unknown>)[MOSAIC_MARKER] = true;
+                    }
                     canvas.add(obj);
                 }
             });

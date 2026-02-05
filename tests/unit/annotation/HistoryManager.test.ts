@@ -10,10 +10,24 @@ vi.mock('fabric', () => {
       return { type: 'mock-fabric-object' };
     }
   }
+  class MockFabricImage extends MockFabricObject {
+    toObject(additionalProperties?: string[]): Record<string, unknown> {
+      const base: Record<string, unknown> = { type: 'image' };
+      if (additionalProperties) {
+        for (const prop of additionalProperties) {
+          if ((this as unknown as Record<string, unknown>)[prop] !== undefined) {
+            base[prop] = (this as unknown as Record<string, unknown>)[prop];
+          }
+        }
+      }
+      return base;
+    }
+  }
 
   return {
     Canvas: MockCanvas,
     FabricObject: MockFabricObject,
+    FabricImage: MockFabricImage,
     util: {
       enlivenObjects: (objects: unknown[]) => Promise.resolve(objects.map(() => new MockFabricObject())),
     },

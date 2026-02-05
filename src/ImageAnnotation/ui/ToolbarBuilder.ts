@@ -1,5 +1,5 @@
 import { ButtonComponent, DropdownComponent, Component } from 'obsidian';
-import { BlendMode, BLEND_MODES, BRUSH_SIZES, BRUSH_OPACITIES, ToolPreset } from '../types';
+import { BlendMode, BLEND_MODES, BRUSH_SIZES, BRUSH_OPACITIES, MOSAIC_BLOCK_SIZES, ToolPreset } from '../types';
 import { hexToRgba, hslToRgb, rgbToHex, getLuminosity } from '../utils/colorUtils';
 import { Canvas } from 'fabric';
 
@@ -7,6 +7,7 @@ export interface ToolbarCallbacks {
     onDrawingToggle: () => void;
     onTextToggle: () => void;
     onArrowToggle: () => void;
+    onMosaicToggle: () => void;
     onResetZoom: () => void;
     onClearAll: () => void;
     onSave: () => void;
@@ -22,21 +23,26 @@ export interface ToolbarCallbacks {
     onPresetSave: (index: number) => void;
     onPresetLoad: (index: number) => void;
     onTextBackgroundChange: (color: string) => void;
+    onMosaicBlockSizeChange: (index: number) => void;
     getCanvas: () => Canvas | null;
     getCurrentOpacity: () => number;
     getBrushSizeIndex: () => number;
     getOpacityIndex: () => number;
     getBlendMode: () => BlendMode;
+    getMosaicBlockSizeIndex: () => number;
     isDrawingMode: () => boolean;
     isTextMode: () => boolean;
     isArrowMode: () => boolean;
+    isMosaicMode: () => boolean;
 }
 
 export interface ToolbarElements {
     drawButton: ButtonComponent;
     textButton: ButtonComponent;
     arrowButton: ButtonComponent;
+    mosaicButton: ButtonComponent;
     textBackgroundControls: HTMLElement;
+    mosaicBlockSizeControls: HTMLElement;
 }
 
 export class ToolbarBuilder {
@@ -82,6 +88,12 @@ export class ToolbarBuilder {
             .setTooltip('Add Text (T)')
             .setIcon('type')
             .onClick(() => this.callbacks.onTextToggle());
+
+        const mosaicButton = new ButtonComponent(drawingToolsColumn)
+            // eslint-disable-next-line obsidianmd/ui/sentence-case
+            .setTooltip('Mosaic (M)')
+            .setIcon('grid')
+            .onClick(() => this.callbacks.onMosaicToggle());
 
         new ButtonComponent(drawingToolsColumn)
             // eslint-disable-next-line obsidianmd/ui/sentence-case
@@ -141,6 +153,10 @@ export class ToolbarBuilder {
         const textBackgroundControls = brushControlsColumn.createDiv('text-background-controls is-hidden');
         this.createTextBackgroundControls(textBackgroundControls);
 
+        // Mosaic block size controls
+        const mosaicBlockSizeControls = brushControlsColumn.createDiv('mosaic-block-size-controls is-hidden');
+        this.createMosaicBlockSizeButtons(mosaicBlockSizeControls);
+
         // Utility buttons
         new ButtonComponent(utilityGroup)
             .setTooltip('Clear all')
@@ -159,7 +175,9 @@ export class ToolbarBuilder {
             drawButton,
             textButton,
             arrowButton,
-            textBackgroundControls
+            mosaicButton,
+            textBackgroundControls,
+            mosaicBlockSizeControls
         };
     }
 
@@ -398,6 +416,28 @@ export class ToolbarBuilder {
 
         this.componentContainer.registerDomEvent(bgColorPicker, 'input', updateBackground);
         this.componentContainer.registerDomEvent(alphaSlider, 'input', updateBackground);
+    }
+
+    private createMosaicBlockSizeButtons(container: HTMLElement): void {
+        const blockSizeContainer = container.createDiv('image-converter-annotation-tool-control-group');
+        // eslint-disable-next-line obsidianmd/ui/sentence-case
+        blockSizeContainer.createDiv('control-label').setText('Block Size:');
+        const buttonContainer = blockSizeContainer.createDiv('image-converter-annotation-tool-button-group');
+
+        MOSAIC_BLOCK_SIZES.forEach((size, index) => {
+            const button = new ButtonComponent(buttonContainer)
+                .setButtonText(`${size}px`)
+                .onClick(() => {
+                    this.callbacks.onMosaicBlockSizeChange(index);
+                    buttonContainer.querySelectorAll('button').forEach(btn =>
+                        btn.removeClass('is-active'));
+                    button.buttonEl.addClass('is-active');
+                });
+
+            if (index === this.callbacks.getMosaicBlockSizeIndex()) {
+                button.buttonEl.addClass('is-active');
+            }
+        });
     }
 
     private createPresetButtons(container: Element): void {
