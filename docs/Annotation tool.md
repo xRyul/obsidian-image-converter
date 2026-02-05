@@ -21,7 +21,7 @@ Right click on any image and select **"Annotate Image**" from the context menu 
 
 ## To add annotation:
 
-Simply use 1 of 3 tools: Brush (B), freehand Arrow (A), Text (T)
+Simply use 1 of 4 tools: Brush (B), freehand Arrow (A), Text (T), Mosaic (M)
 
 ![image](https://github.com/user-attachments/assets/2ec87dfc-7a57-416b-8a7f-d87d14cad726)
 
@@ -29,7 +29,7 @@ Simply use 1 of 3 tools: Brush (B), freehand Arrow (A), Text (T)
 
 ## To modify annotation:
 
-- Selection Tool. Active by default. Deselect active tools (Brush, Arrow, or Text) via shortcuts (B, A, T) or buttons to reactivate the Selection Tool. Use the Selection Tool to move or adjust elements.
+- Selection Tool. Active by default. Deselect active tools (Brush, Arrow, Text, or Mosaic) via shortcuts (B, A, T, M) or buttons to reactivate the Selection Tool. Use the Selection Tool to move or adjust elements.
 - Editing text: Double-click anywhere to create a new text element. Double-click an existing text element to edit it. Text automatically sharpens when scaled to ensure clarity.
 - Changing Colors. Select an element and choose a color from the swatches or use the color picker. The color picker allows HEX, HSL, or RGB value input. 6 Dominant colors are automatically calculated, then 6 Complimentary colors at 180 degrees are provided beneath it.
 
@@ -93,6 +93,20 @@ https://github.com/user-attachments/assets/38ef5d1f-4cbd-4ce5-9b52-4c830694a0e9
 ![image](https://github.com/user-attachments/assets/828c1128-719a-45ef-a5fd-cad2c7222e71)
 
 
+
+
+### **Mosaic (Pixelation):**
+
+The Mosaic tool (M) allows you to pixelate/censor regions of an image. This is useful for hiding sensitive information such as faces, text, or personal data before sharing screenshots.
+
+- Press **M** or click the Mosaic button (grid icon) to enter mosaic mode.
+- Click and drag a rectangle over the area you want to pixelate.
+- Adjust the **Block Size** (5, 10, 15, 20, or 30px) to control the pixelation intensity. Smaller values produce finer pixelation, larger values produce stronger censoring.
+- Mosaic regions are annotation objects: you can select, move, resize, and delete them like any other annotation.
+- Undo/Redo (Ctrl+Z / Ctrl+Shift+Z) works with mosaic regions.
+- Saving flattens mosaic regions permanently into the image.
+
+![Mosaic tool demo](mosaic-tool-demo.png)
 
 
 ## Notes:

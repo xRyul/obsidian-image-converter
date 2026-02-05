@@ -189,6 +189,7 @@ export interface ImageConverterSettings {
         drawing: ToolPreset[];
         arrow: ToolPreset[];
         text: ToolPreset[];
+        mosaic: ToolPreset[];
     };
 
     isImageAlignmentEnabled: boolean;
@@ -385,6 +386,11 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
             { color: '#000000', opacity: 1, blendMode: 'source-over', size: 24, backgroundColor: 'transparent', backgroundOpacity: 0.7 },
             { color: '#000000', opacity: 1, blendMode: 'source-over', size: 24, backgroundColor: 'transparent', backgroundOpacity: 0.7 },
             { color: '#000000', opacity: 1, blendMode: 'source-over', size: 24, backgroundColor: 'transparent', backgroundOpacity: 0.7 }
+        ] as ToolPreset[],
+        mosaic: [
+            { color: '#000000', opacity: 1, blendMode: 'source-over', size: 10 },
+            { color: '#000000', opacity: 1, blendMode: 'source-over', size: 15 },
+            { color: '#000000', opacity: 1, blendMode: 'source-over', size: 20 }
         ] as ToolPreset[]
     },
 
