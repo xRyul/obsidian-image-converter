@@ -267,6 +267,80 @@ export class ContextMenu extends Component {
 	/*                        CAPTION INPUT                            */
 	/*-----------------------------------------------------------------*/
 
+	private isDimensionsPart(part: string): boolean {
+		return /^\s*\d+(?:x\d+)?\s*$/.test(part);
+	}
+
+	private getCaptionFromFullMatch(fullMatch: string, inTable: boolean): string {
+		// Handle wiki-style links
+		if (fullMatch.startsWith("![[") && fullMatch.endsWith("]]")) {
+			const inner = fullMatch.slice(3, -2);
+
+			// Check if this wikilink uses escaped delimiters (Obsidian may auto-escape in tables)
+			// If it contains \| but no unescaped |, parse with escaped delimiters
+			const hasEscapedPipes = inner.includes("\\|");
+			const hasUnescapedPipes = /(?<!\\)\|/.test(inner);
+
+			let parts: string[];
+			if (hasEscapedPipes && !hasUnescapedPipes) {
+				// Obsidian-escaped format: ![[path\|caption\|dimensions]]
+				parts = inner.split(/\\\|/);
+			} else {
+				// Standard format: ![[path|caption|dimensions]]
+				// Split on unescaped pipes, keeping escaped pipes intact
+				parts = inner.split(/(?<!\\)\|/);
+			}
+
+			if (parts.length >= 2) {
+				const secondPart = parts[1] ?? "";
+				const thirdPart = parts[2] ?? "";
+
+				// If third part exists and is a dimension, second part is caption
+				if (thirdPart && this.isDimensionsPart(thirdPart)) {
+					return this.unescapePipes(secondPart.trim());
+				}
+				// If third part exists but is not a dimension, second part is caption if not dimension-like
+				if (thirdPart && !this.isDimensionsPart(secondPart)) {
+					return this.unescapePipes(secondPart.trim());
+				}
+				// If only second part exists and is not a dimension, it's the caption
+				if (!thirdPart && !this.isDimensionsPart(secondPart)) {
+					return this.unescapePipes(secondPart.trim());
+				}
+			}
+			return "";
+		}
+
+		// Handle markdown-style links in tables: ![caption\|dimensions](path)
+		// For markdown links in tables, the pipe between caption and dimensions IS escaped.
+		if (inTable) {
+			const mdTableMatch = fullMatch.match(/!\[([^\]]*)\]\(([^)]+)\)/);
+			if (mdTableMatch) {
+				const alt = mdTableMatch[1] ?? "";
+				const parts = alt.split(/\\\|/);
+				if (parts.length > 1) {
+					const last = parts[parts.length - 1] ?? "";
+					const captionParts = this.isDimensionsPart(last) ? parts.slice(0, -1) : parts;
+					return captionParts.join("|").trim();
+				}
+				// Single part means no escaped pipe - just return it
+				return this.unescapePipes(parts[0].trim());
+			}
+		}
+
+		// Handle markdown-style links (non-table)
+		const markdownMatch = fullMatch.match(
+			/!\[([^|\]]*?)(?:\\?\|(\d+x\d+))?\]\(([^)]+)\)/
+		);
+		if (markdownMatch) {
+			const caption = markdownMatch[1] || "";
+			// If the delimiter pipe was escaped (\\|), markdownMatch[1] may end with a stray '\\'.
+			return this.unescapePipes(caption.replace(/\\$/, "").trim());
+		}
+
+		return "";
+	}
+
 	private async loadCurrentCaption(
 		img: HTMLImageElement,
 		activeFile: TFile
@@ -289,78 +363,8 @@ export class ContextMenu extends Component {
 
 			if (matches && matches.length > 0) {
 				const [firstMatch] = matches;
-
 				const inTable = this.isTableRow(firstMatch.line);
-
-				// Handle wiki-style links
-				if (firstMatch.fullMatch.startsWith("![[") && firstMatch.fullMatch.endsWith("]]")) {
-					const inner = firstMatch.fullMatch.slice(3, -2);
-
-					// Check if this wikilink uses escaped delimiters (Obsidian may auto-escape in tables)
-					// If it contains \| but no unescaped |, parse with escaped delimiters
-					const hasEscapedPipes = inner.includes("\\|");
-					const hasUnescapedPipes = /(?<!\\)\|/.test(inner);
-
-					const isDimensions = (part: string) =>
-						/^\s*\d+(?:x\d+)?\s*$/.test(part);
-
-					let parts: string[];
-					if (hasEscapedPipes && !hasUnescapedPipes) {
-						// Obsidian-escaped format: ![[path\|caption\|dimensions]]
-						parts = inner.split(/\\\|/);
-					} else {
-						// Standard format: ![[path|caption|dimensions]]
-						// Split on unescaped pipes, keeping escaped pipes intact
-						parts = inner.split(/(?<!\\)\|/);
-					}
-
-					if (parts.length >= 2) {
-						const secondPart = parts[1] ?? "";
-						const thirdPart = parts[2] ?? "";
-
-						// If third part exists and is a dimension, second part is caption
-						if (thirdPart && isDimensions(thirdPart)) {
-							return this.unescapePipes(secondPart.trim());
-						}
-						// If third part exists but is not a dimension, second part is caption if not dimension-like
-						if (thirdPart && !isDimensions(secondPart)) {
-							return this.unescapePipes(secondPart.trim());
-						}
-						// If only second part exists and is not a dimension, it's the caption
-						if (!thirdPart && !isDimensions(secondPart)) {
-							return this.unescapePipes(secondPart.trim());
-						}
-					}
-					return "";
-				}
-
-				// Handle markdown-style links in tables: ![caption\|dimensions](path)
-				// For markdown links in tables, the pipe between caption and dimensions IS escaped.
-				if (inTable) {
-					const mdTableMatch = firstMatch.fullMatch.match(/!\[([^\]]*)\]\(([^)]+)\)/);
-					if (mdTableMatch) {
-						const alt = mdTableMatch[1] ?? "";
-						const parts = alt.split(/\\\|/);
-						if (parts.length > 1) {
-							const isDimensions = (part: string) => /^\s*\d+(?:x\d+)?\s*$/.test(part);
-							const last = parts[parts.length - 1] ?? "";
-							const captionParts = isDimensions(last) ? parts.slice(0, -1) : parts;
-							return captionParts.join("|").trim();
-						}
-						// Single part means no escaped pipe - just return it
-						return this.unescapePipes(parts[0].trim());
-					}
-				}
-
-				// Handle markdown-style links (non-table)
-				const markdownMatch = firstMatch.fullMatch.match(
-					/!\[([^|\]]*?)(?:\\?\|(\d+x\d+))?\]\(([^)]+)\)/
-				);
-				if (markdownMatch) {
-					const caption = markdownMatch[1] || "";
-					// If the delimiter pipe was escaped (\\|), markdownMatch[1] may end with a stray '\\'.
-					return this.unescapePipes(caption.replace(/\\$/, "").trim());
-				}
+				return this.getCaptionFromFullMatch(firstMatch.fullMatch, inTable);
 			}
 			return "";
 		} catch (error) {
@@ -479,7 +483,7 @@ export class ContextMenu extends Component {
 	private async updateImageLinkWithDimensions(
 		editor: Editor,
 		match: { lineNumber: number; line: string },
-		newCaption: string,
+		newCaption: string | null,
 		width: string,
 		height: string
 	): Promise<string> {
@@ -495,16 +499,6 @@ export class ContextMenu extends Component {
 		// Check if line is inside a table row
 		const inTable = this.isTableRow(line);
 
-		// In tables, Obsidian's table parser runs BEFORE the wikilink parser.
-		// This means pipes inside ![[...]] are still treated as column delimiters.
-		// We must escape ALL pipes (delimiter and content) in tables to prevent column splits.
-		// The ImageCaptionManager will strip the trailing backslash from rendered captions.
-		//
-		// For markdown links (![...]()), the same applies to the alt text section.
-		const escapedCaption = inTable
-			? this.escapePipesForTable(newCaption)
-			: newCaption;
-
 		// Pipe character: escaped in tables to prevent table column split
 		const wikiPipe = inTable ? "\\|" : "|";
 
@@ -513,6 +507,13 @@ export class ContextMenu extends Component {
 			return line.replace(
 				/!\[\[([^\]]+?)(?:\\?\|([^|\]]+?))?\s*(?:\\?\|([^|\]]+?))?\]\]/g,
 				(fullMatch, path) => {
+					const effectiveCaption = newCaption === null
+						? this.getCaptionFromFullMatch(fullMatch, inTable)
+						: newCaption;
+					const escapedCaption = inTable
+						? this.escapePipesForTable(effectiveCaption)
+						: effectiveCaption;
+
 					if (escapedCaption && dimensionsPart) {
 						return `![[${path}${wikiPipe}${escapedCaption}${wikiPipe}${dimensionsPart}]]`;
 					}
@@ -533,6 +534,13 @@ export class ContextMenu extends Component {
 		return line.replace(
 			/!\[([^|\]]*?)(?:\\?\|(\d+(?:x\d+)?))?\]\(([^)]+)\)/g,
 			(fullMatch, caption, dimensions, path) => {
+				const effectiveCaption = newCaption === null
+					? this.getCaptionFromFullMatch(fullMatch, inTable)
+					: newCaption;
+				const escapedCaption = inTable
+					? this.escapePipesForTable(effectiveCaption)
+					: effectiveCaption;
+
 				if (escapedCaption && dimensionsPart) {
 					return `![${escapedCaption}${mdPipe}${dimensionsPart}](${path})`;
 				}
@@ -549,7 +557,7 @@ export class ContextMenu extends Component {
 
 	private async handleDimensionsAndCaptionUpdate(
 		menu: Menu,
-		captionInput: HTMLInputElement,
+		captionInput: HTMLInputElement | null,
 		widthInput: HTMLInputElement,
 		heightInput: HTMLInputElement,
 		img: HTMLImageElement,
@@ -558,7 +566,7 @@ export class ContextMenu extends Component {
 	) {
 		if (!isImageResolvable) return;
 
-		const newCaption = captionInput.value.trim();
+		const newCaption = captionInput ? captionInput.value.trim() : null;
 		const width = widthInput.value.trim();
 		const height = heightInput.value.trim();
 
@@ -599,7 +607,11 @@ export class ContextMenu extends Component {
 				);
 				editor.setLine(match.lineNumber, updatedLine);
 			}
-			new Notice("Image caption and dimensions updated successfully.");
+			new Notice(
+				newCaption === null
+					? "Image dimensions updated successfully."
+					: "Image caption and dimensions updated successfully."
+			);
 			this.plugin.captionManager?.refresh();
 		};
 
@@ -739,32 +751,38 @@ export class ContextMenu extends Component {
 				}
 				pathGroup.appendChild(pathInput);
 
-				// Create caption input group
-				const captionGroup = document.createElement("div");
-				captionGroup.className =
-					"image-converter-contextmenu-input-group";
+				const shouldShowCaptionInput =
+					this.plugin.settings.enableImageCaptions === true;
+				let captionGroup: HTMLDivElement | null = null;
+				let captionInput: HTMLInputElement | null = null;
 
-				const captionIcon = document.createElement("div");
-				captionIcon.className =
-					"image-converter-contextmenu-icon-container";
-				setIcon(captionIcon, "subtitles");
-				captionGroup.appendChild(captionIcon);
+				if (shouldShowCaptionInput) {
+					captionGroup = document.createElement("div");
+					captionGroup.className =
+						"image-converter-contextmenu-input-group";
 
-				const captionLabel = document.createElement("label");
-				captionLabel.textContent = "Caption:";
-				captionLabel.setAttribute(
-					"for",
-					"image-converter-caption-input"
-				);
-				captionGroup.appendChild(captionLabel);
+					const captionIcon = document.createElement("div");
+					captionIcon.className =
+						"image-converter-contextmenu-icon-container";
+					setIcon(captionIcon, "subtitles");
+					captionGroup.appendChild(captionIcon);
 
-				const captionInput = document.createElement("input");
-				captionInput.type = "text";
-				captionInput.placeholder = "Loading caption...";
-				captionInput.className =
-					"image-converter-contextmenu-caption-input";
-				captionInput.id = "image-converter-caption-input";
-				captionGroup.appendChild(captionInput);
+					const captionLabel = document.createElement("label");
+					captionLabel.textContent = "Caption:";
+					captionLabel.setAttribute(
+						"for",
+						"image-converter-caption-input"
+					);
+					captionGroup.appendChild(captionLabel);
+
+					captionInput = document.createElement("input");
+					captionInput.type = "text";
+					captionInput.placeholder = "Loading caption...";
+					captionInput.className =
+						"image-converter-contextmenu-caption-input";
+					captionInput.id = "image-converter-caption-input";
+					captionGroup.appendChild(captionInput);
+				}
 
 				// Create dimensions input group
 				const dimensionsGroup = document.createElement("div");
@@ -828,7 +846,9 @@ export class ContextMenu extends Component {
 				// Add all groups to container
 				inputContainer.appendChild(nameGroup);
 				inputContainer.appendChild(pathGroup);
-				inputContainer.appendChild(captionGroup);
+				if (captionGroup) {
+					inputContainer.appendChild(captionGroup);
+				}
 				inputContainer.appendChild(dimensionsGroup);
 
 				// Add single confirm button
@@ -839,13 +859,17 @@ export class ContextMenu extends Component {
 				inputContainer.appendChild(confirmButton);
 
 				// Register event listeners for all inputs
-				[
+				const interactiveInputs = [
 					nameInput,
 					pathInput,
-					captionInput,
 					widthInput,
 					heightInput,
-				].forEach((input) => {
+				];
+				if (captionInput) {
+					interactiveInputs.splice(2, 0, captionInput);
+				}
+
+				interactiveInputs.forEach((input) => {
 					this.registerDomEvent(
 						input,
 						"mousedown",
@@ -869,16 +893,18 @@ export class ContextMenu extends Component {
 					this.documentClickHandler
 				);
 
-				// Load the current caption asynchronously
-				this.loadCurrentCaption(img, activeFile)
-					.then((currentCaption) => {
-						captionInput.value = currentCaption;
-						captionInput.placeholder = "Enter a custom caption";
-					})
-					.catch((error: unknown) => {
-						console.error("Failed to load caption:", error);
-						captionInput.placeholder = "Enter a custom caption";
-					});
+				if (captionInput) {
+					// Load the current caption asynchronously
+					this.loadCurrentCaption(img, activeFile)
+						.then((currentCaption) => {
+							captionInput.value = currentCaption;
+							captionInput.placeholder = "Enter a custom caption";
+						})
+						.catch((error: unknown) => {
+							console.error("Failed to load caption:", error);
+							captionInput.placeholder = "Enter a custom caption";
+						});
+				}
 
 				// Single confirm button handler
 				this.registerDomEvent(confirmButton, "click", async () => {

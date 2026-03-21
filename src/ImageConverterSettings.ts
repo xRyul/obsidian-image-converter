@@ -411,7 +411,7 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
     revertToOriginalIfLarger: false,
     minimumCompressionSavingsInKB: 30,
 
-    enableImageCaptions: true,
+    enableImageCaptions: false,
     skipCaptionExtensions: "icns",
     captionFontSize: "var(--font-smaller)",
     captionColor: "var(--text-gray)",
@@ -1165,7 +1165,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         .onChange(async (value) => {
                             this.plugin.settings.captionAlignment = value;
                             await this.plugin.saveSettings();
-                            this.plugin.captionManager.applyCaptionStyles();
+                            this.plugin.captionManager?.applyCaptionStyles();
                         })
                 );
 
@@ -1183,7 +1183,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         .onChange(async (value) => {
                             this.plugin.settings.captionTextTransform = value;
                             await this.plugin.saveSettings();
-                            this.plugin.captionManager.applyCaptionStyles();
+                            this.plugin.captionManager?.applyCaptionStyles();
                         })
                 );
 
@@ -1195,7 +1195,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         .onChange(async (value) => {
                             this.plugin.settings.captionFontSize = value;
                             await this.plugin.saveSettings();
-                            this.plugin.captionManager.applyCaptionStyles();
+                            this.plugin.captionManager?.applyCaptionStyles();
                         })
                 );
 
@@ -1216,7 +1216,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         .onChange(async (value) => {
                             this.plugin.settings.captionFontWeight = value;
                             await this.plugin.saveSettings();
-                            this.plugin.captionManager.applyCaptionStyles();
+                            this.plugin.captionManager?.applyCaptionStyles();
                         })
                 );
 
@@ -1228,7 +1228,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         .onChange(async (value) => {
                             this.plugin.settings.captionColor = value;
                             await this.plugin.saveSettings();
-                            this.plugin.captionManager.applyCaptionStyles();
+                            this.plugin.captionManager?.applyCaptionStyles();
                         })
                 );
 
@@ -1243,7 +1243,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         .onChange(async (value) => {
                             this.plugin.settings.captionFontStyle = value;
                             await this.plugin.saveSettings();
-                            this.plugin.captionManager.applyCaptionStyles();
+                            this.plugin.captionManager?.applyCaptionStyles();
                         })
                 );
 
@@ -1255,7 +1255,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         .onChange(async (value) => {
                             this.plugin.settings.captionBackgroundColor = value;
                             await this.plugin.saveSettings();
-                            this.plugin.captionManager.applyCaptionStyles();
+                            this.plugin.captionManager?.applyCaptionStyles();
                         })
                 );
 
@@ -1268,7 +1268,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         .onChange(async (value) => {
                             this.plugin.settings.captionBorder = value;
                             await this.plugin.saveSettings();
-                            this.plugin.captionManager.applyCaptionStyles();
+                            this.plugin.captionManager?.applyCaptionStyles();
                         })
                 );
             new Setting(imageCaptionSection)
@@ -1279,7 +1279,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         .onChange(async (value) => {
                             this.plugin.settings.captionBorderRadius = value;
                             await this.plugin.saveSettings();
-                            this.plugin.captionManager.applyCaptionStyles();
+                            this.plugin.captionManager?.applyCaptionStyles();
                         })
                 );
 
@@ -1291,7 +1291,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         .onChange(async (value) => {
                             this.plugin.settings.captionMarginTop = value;
                             await this.plugin.saveSettings();
-                            this.plugin.captionManager.applyCaptionStyles();
+                            this.plugin.captionManager?.applyCaptionStyles();
                         })
                 );
 
@@ -1303,7 +1303,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         .onChange(async (value) => {
                             this.plugin.settings.captionPadding = value;
                             await this.plugin.saveSettings();
-                            this.plugin.captionManager.applyCaptionStyles();
+                            this.plugin.captionManager?.applyCaptionStyles();
                         })
                 );
 

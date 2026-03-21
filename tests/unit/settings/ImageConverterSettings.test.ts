@@ -78,6 +78,7 @@ describe('Settings defaults and persistence (11.1–11.2)', () => {
       .toBe(DEFAULT_SETTINGS.linkFormatSettings.selectedLinkFormatPreset);
     expect(plugin.settings.nonDestructiveResizeSettings.selectedResizePreset)
       .toBe(DEFAULT_SETTINGS.nonDestructiveResizeSettings.selectedResizePreset);
+    expect(plugin.settings.enableImageCaptions).toBe(false);
   });
 
   it('Given a change, When saveSettings then reload, Then values persist (11.2)', async () => {
@@ -93,6 +94,7 @@ describe('Settings defaults and persistence (11.1–11.2)', () => {
     plugin.settings.selectedFolderPreset = DEFAULT_SETTINGS.folderPresets[0].name;
     plugin.settings.selectedFilenamePreset = DEFAULT_SETTINGS.filenamePresets[0].name;
     plugin.settings.showSpaceSavedNotification = !DEFAULT_SETTINGS.showSpaceSavedNotification;
+    plugin.settings.enableImageCaptions = true;
 
     const saveDataSpy = vi.spyOn(plugin as any, 'saveData').mockResolvedValue(undefined);
     await plugin.saveSettings();
@@ -105,6 +107,7 @@ describe('Settings defaults and persistence (11.1–11.2)', () => {
     expect(plugin.settings.selectedFolderPreset).toBe(DEFAULT_SETTINGS.folderPresets[0].name);
     expect(plugin.settings.selectedFilenamePreset).toBe(DEFAULT_SETTINGS.filenamePresets[0].name);
     expect(plugin.settings.showSpaceSavedNotification).toBe(!DEFAULT_SETTINGS.showSpaceSavedNotification);
+    expect(plugin.settings.enableImageCaptions).toBe(true);
   });
 
 });

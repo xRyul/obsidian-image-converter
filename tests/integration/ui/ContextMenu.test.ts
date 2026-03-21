@@ -178,6 +178,51 @@ expect(modalSpy).toHaveBeenCalled();
     });
   });
 
+  describe('Caption input gating', () => {
+    it('removes the caption input from the image tools panel when captions are disabled', () => {
+      plugin.settings.enableImageCaptions = false;
+
+      const ctx = new contextMenuCls(app as any, plugin, { getImagePath: () => 'imgs/pic.jpg' } as any, {} as any);
+      const menuItems: Array<{ dom: HTMLElement; setTitle: any }> = [];
+      const menu = {
+        addItem(cb: (item: any) => void) {
+          const item = { dom: document.createElement('div'), setTitle: vi.fn() };
+          cb(item);
+          menuItems.push(item);
+          return this;
+        }
+      } as any;
+
+      ctx.addRenameAndMoveInputs(menu, document.createElement('img'), fakeTFile({ path: 'n1.md', name: 'n1.md', extension: 'md' }) as any);
+
+      expect(menuItems).toHaveLength(1);
+      expect(menuItems[0].dom.querySelector('#image-converter-caption-input')).toBeNull();
+      expect(menuItems[0].dom.querySelector('#image-converter-width-input')).not.toBeNull();
+      (ctx as any).onunload?.();
+    });
+
+    it('shows the caption input in the image tools panel when captions are enabled', () => {
+      plugin.settings.enableImageCaptions = true;
+
+      const ctx = new contextMenuCls(app as any, plugin, { getImagePath: () => 'imgs/pic.jpg' } as any, {} as any);
+      const menuItems: Array<{ dom: HTMLElement; setTitle: any }> = [];
+      const menu = {
+        addItem(cb: (item: any) => void) {
+          const item = { dom: document.createElement('div'), setTitle: vi.fn() };
+          cb(item);
+          menuItems.push(item);
+          return this;
+        }
+      } as any;
+
+      ctx.addRenameAndMoveInputs(menu, document.createElement('img'), fakeTFile({ path: 'n1.md', name: 'n1.md', extension: 'md' }) as any);
+
+      expect(menuItems).toHaveLength(1);
+      expect(menuItems[0].dom.querySelector('#image-converter-caption-input')).not.toBeNull();
+      (ctx as any).onunload?.();
+    });
+  });
+
   describe('Mobile gating (Phase 9: 25.4/25.5)', () => {
     it('does not add desktop-only items when Platform.isMobile=true', async () => {
       // Arrange

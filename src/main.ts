@@ -71,7 +71,7 @@ export default class ImageConverterPlugin extends Plugin {
     // ProcessAllVault
     processAllVaultModal: ProcessAllVaultModal
     // captions
-    captionManager: ImageCaptionManager;
+    captionManager?: ImageCaptionManager;
     
     private processedImage: ArrayBuffer | null = null;
     private temporaryBuffers: (ArrayBuffer | Blob | null)[] = [];
@@ -86,7 +86,7 @@ export default class ImageConverterPlugin extends Plugin {
         // Captions are time-sensitive
         if (this.settings.enableImageCaptions) {
             this.captionManager = new ImageCaptionManager(this);
-            this.register(() => this.captionManager.cleanup());
+            this.register(() => this.captionManager?.cleanup());
         }
 
 
@@ -110,7 +110,7 @@ export default class ImageConverterPlugin extends Plugin {
                             });
 
                         if (this.settings.enableImageCaptions) {
-                            this.captionManager.refresh();
+                            this.captionManager?.refresh();
                         }
                     }
                 })
@@ -171,7 +171,7 @@ export default class ImageConverterPlugin extends Plugin {
                         }
 
                         if (this.settings.enableImageCaptions) {
-                            this.captionManager.refresh();
+                            this.captionManager?.refresh();
                         }
                         
                     })
@@ -853,7 +853,7 @@ export default class ImageConverterPlugin extends Plugin {
         await Promise.all(filePromises);
         
         if (this.settings.enableImageCaptions) {
-            this.captionManager.refresh();
+            this.captionManager?.refresh();
         }
     }
 
@@ -1193,7 +1193,7 @@ export default class ImageConverterPlugin extends Plugin {
         await Promise.all(filePromises);
 
         if (this.settings.enableImageCaptions) {
-            this.captionManager.refresh();
+            this.captionManager?.refresh();
         }
     }
 
