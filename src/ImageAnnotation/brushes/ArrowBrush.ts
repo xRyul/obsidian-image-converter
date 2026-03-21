@@ -7,11 +7,20 @@ import {
     TBrushEventData,
 } from 'fabric';
 
+type HistoryIgnoredPath = Path & {
+    excludeFromHistory?: boolean;
+};
+
+type CanvasEventEmitter = Canvas & {
+    fire?: (eventName: string, options?: Record<string, unknown>) => void;
+    trigger?: (eventName: string, options?: Record<string, unknown>) => void;
+};
+
 export class ArrowBrush extends PencilBrush {
     private points: Point[] = [];
     private readonly minDistance = 3;
-    private currentPath: Path | null = null;
-    private currentArrowHead: Path | null = null;
+    private currentPath: HistoryIgnoredPath | null = null;
+    private currentArrowHead: HistoryIgnoredPath | null = null;
 
     constructor(canvas: Canvas) {
         super(canvas);
@@ -45,8 +54,8 @@ export class ArrowBrush extends PencilBrush {
                 this.canvas.remove(this.currentArrowHead);
             }
 
-            this.currentPath = this.createSmoothedPath();
-            this.currentArrowHead = this.createArrowHead();
+            this.currentPath = this.markAsTemporary(this.createSmoothedPath());
+            this.currentArrowHead = this.markAsTemporary(this.createArrowHead());
 
             if (this.currentPath) {
                 this.canvas.add(this.currentPath);
@@ -70,12 +79,19 @@ export class ArrowBrush extends PencilBrush {
 
             const finalPath = this.createSmoothedPath();
             const finalArrowHead = this.createArrowHead();
+            const finalizedObjects: Path[] = [];
 
             if (finalPath) {
                 this.canvas.add(finalPath);
+                finalizedObjects.push(finalPath);
             }
             if (finalArrowHead) {
                 this.canvas.add(finalArrowHead);
+                finalizedObjects.push(finalArrowHead);
+            }
+
+            if (finalizedObjects.length > 0) {
+                this.notifyArrowCreated(finalizedObjects);
             }
 
             this.canvas.requestRenderAll();
@@ -86,6 +102,30 @@ export class ArrowBrush extends PencilBrush {
         this.currentArrowHead = null;
 
         return false;
+    }
+
+    private markAsTemporary(path: Path | null): HistoryIgnoredPath | null {
+        if (!path) {
+            return null;
+        }
+
+        const temporaryPath = path as HistoryIgnoredPath;
+        temporaryPath.excludeFromHistory = true;
+        return temporaryPath;
+    }
+
+    private notifyArrowCreated(objects: Path[]): void {
+        const canvasWithEvents = this.canvas as CanvasEventEmitter;
+        const payload = { paths: objects };
+
+        if (typeof canvasWithEvents.fire === 'function') {
+            canvasWithEvents.fire('arrow:created', payload);
+            return;
+        }
+
+        if (typeof canvasWithEvents.trigger === 'function') {
+            canvasWithEvents.trigger('arrow:created', payload);
+        }
     }
 
     private createSmoothedPath(): Path | null {

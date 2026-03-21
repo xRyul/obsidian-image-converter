@@ -20,7 +20,7 @@ vi.mock('fabric', () => {
     toObject() {
       // Provide a sane default serialization shape.
       // Individual tests can override by providing their own toObject() implementations.
-      return { type: this.type };
+      return { type: this.type, mock: true };
     }
   }
 
@@ -28,10 +28,17 @@ vi.mock('fabric', () => {
     width: number; height: number; isDrawingMode = false; preserveObjectStacking = true;
     freeDrawingBrush: any; _objects: any[] = []; _handlers: Record<string, Function[]> = {};
     constructor(_el: HTMLCanvasElement, opts: any) { this.width = opts?.width ?? 300; this.height = opts?.height ?? 200; }
-    add(obj: any) { this._objects.push(obj); return obj; }
+    add(obj: any) {
+      this._objects.push(obj);
+      this.fire('object:added', { target: obj });
+      return obj;
+    }
     remove(obj: any) {
       const idx = this._objects.indexOf(obj);
-      if (idx !== -1) this._objects.splice(idx, 1);
+      if (idx !== -1) {
+        this._objects.splice(idx, 1);
+        this.fire('object:removed', { target: obj });
+      }
       return obj;
     }
     getObjects() { return this._objects; }
@@ -48,6 +55,7 @@ vi.mock('fabric', () => {
     getElement() { const canvasElement = document.createElement('canvas'); canvasElement.width=10; canvasElement.height=10; return canvasElement; }
     on(evt: string, cb: Function) { (this._handlers[evt] ||= []).push(cb); }
     off() {}
+    fire(evt: string, payload: any) { this.trigger(evt, payload); }
     trigger(evt: string, payload: any) { (this._handlers[evt]||[]).forEach(cb=>cb(payload)); }
     bringObjectToFront(){} bringObjectForward(){} sendObjectBackwards(){} sendObjectToBack(){} moveObjectTo(){}
     getScenePoint(_e: any) { return { x: 100, y: 100 }; }
@@ -299,6 +307,56 @@ describe('ImageAnnotation — 16.2–16.11 Behaviors (integration-lite)', () => 
     expect(historyManager.canUndo()).toBe(true);
 
     errorSpy.mockRestore();
+  });
+
+  it('Arrow undo saves a single history entry per arrow and does not oscillate through preview states', async () => {
+    const modal = new ImageAnnotationModal(app, plugin, imageFile);
+    await modal.onOpen();
+    await waitForCanvas();
+    const { canvas, historyManager } = (modal as any);
+
+    const buttons = (modal as any).contentEl.querySelectorAll('.image-converter-annotation-tool-drawing-tools-column button');
+    (buttons[1] as HTMLButtonElement).click();
+
+    const drawArrow = (startX: number, startY: number, endX: number, endY: number): void => {
+      const brush = canvas.freeDrawingBrush;
+      brush.onMouseDown({ x: startX, y: startY }, {});
+      brush.onMouseMove({ x: endX, y: endY }, {});
+      brush.onMouseUp({ e: new MouseEvent('mouseup') });
+    };
+
+    const baselineCount = canvas.getObjects().length;
+    expect(historyManager.canUndo()).toBe(false);
+
+    drawArrow(10, 10, 120, 120);
+
+    expect(canvas.getObjects().length).toBe(baselineCount + 2);
+    expect(historyManager.canUndo()).toBe(true);
+
+    await historyManager.undo();
+    expect(canvas.getObjects().length).toBe(baselineCount);
+    expect(historyManager.canRedo()).toBe(true);
+
+    await historyManager.redo();
+    expect(canvas.getObjects().length).toBe(baselineCount + 2);
+
+    await historyManager.undo();
+    expect(canvas.getObjects().length).toBe(baselineCount);
+
+    drawArrow(20, 20, 140, 80);
+    drawArrow(30, 30, 180, 150);
+
+    expect(canvas.getObjects().length).toBe(baselineCount + 4);
+
+    await historyManager.undo();
+    expect(canvas.getObjects().length).toBe(baselineCount + 2);
+
+    await historyManager.undo();
+    expect(canvas.getObjects().length).toBe(baselineCount);
+    expect(historyManager.canUndo()).toBe(false);
+
+    await historyManager.undo();
+    expect(canvas.getObjects().length).toBe(baselineCount);
   });
 
   it('16.9 Save writes to same TFile and closes; on failure no write occurs', async () => {

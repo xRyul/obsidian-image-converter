@@ -23,6 +23,14 @@ import { HistoryManager, ViewportManager, LayerManager, ToolManager, BackgroundM
 import { ToolbarBuilder, ToolbarCallbacks } from './ui';
 import { ImageExporter } from './export/ImageExporter';
 
+type FabricObjectWithHistoryFlag = FabricObject & {
+    excludeFromHistory?: boolean;
+};
+
+type CanvasWithArrowEvents = Canvas & {
+    on(eventName: 'arrow:created', handler: () => void): void;
+};
+
 export class ImageAnnotationModal extends Modal {
     private componentContainer = new Component();
     private canvas!: Canvas;
@@ -515,6 +523,14 @@ export class ImageAnnotationModal extends Modal {
 
         this.toolManager.updateBrushColor();
 
+        const shouldIgnoreHistoryTarget = (target?: FabricObject): boolean => {
+            if (target instanceof FabricImage || this.historyManager.isPerformingUndoRedo()) {
+                return true;
+            }
+
+            return Boolean((target as FabricObjectWithHistoryFlag | undefined)?.excludeFromHistory);
+        };
+
         this.canvas.on('path:created', (e: { path?: FabricObject }) => {
             if (!this.historyManager.isPerformingUndoRedo()) {
                 if (e.path) {
@@ -525,21 +541,27 @@ export class ImageAnnotationModal extends Modal {
             }
         });
 
+        (this.canvas as CanvasWithArrowEvents).on('arrow:created', () => {
+            if (!this.historyManager.isPerformingUndoRedo()) {
+                this.historyManager.saveState();
+            }
+        });
+
         this.canvas.on('object:added', (e) => {
             this.toolManager.updateObjectInteractivity();
-            if (e.target instanceof FabricImage || this.historyManager.isPerformingUndoRedo()) return;
+            if (shouldIgnoreHistoryTarget(e.target)) return;
             if (e.target && !(e.target instanceof Path)) {
                 this.historyManager.saveState();
             }
         });
 
         this.canvas.on('object:modified', (e) => {
-            if (e.target instanceof FabricImage || this.historyManager.isPerformingUndoRedo()) return;
+            if (shouldIgnoreHistoryTarget(e.target)) return;
             this.historyManager.saveState();
         });
 
         this.canvas.on('object:removed', (e) => {
-            if (e.target instanceof FabricImage || this.historyManager.isPerformingUndoRedo()) return;
+            if (shouldIgnoreHistoryTarget(e.target)) return;
             this.historyManager.saveState();
         });
 
