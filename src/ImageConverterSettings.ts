@@ -341,7 +341,7 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
             resizePreset: "Default (No Resize)"
         }
     ],
-    selectedGlobalPreset: "", // No global preset selected by default
+    selectedGlobalPreset: "", // Base default remains none; fresh installs opt into "WebP 75" in loadSettings()
     linkFormatSettings: new LinkFormatSettings(),
     nonDestructiveResizeSettings: new NonDestructiveResizeSettings(),
     resizeCursorLocation: "none",
@@ -1514,7 +1514,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             case "selectedFolderPreset":
                 return "Define where converted images will be stored. Choose from predefined locations or create custom paths using variables.";
             case "selectedFilenamePreset":
-                return "Control how converted images are named. Use variables like {notename}, {timestamp}, {MD5}, {UUID} to create unique filenames.";
+                return "Control how converted images are named. Use variables like {notename}, {timestamp}, {uuid}, or {MD5:filename} to create unique filenames.";
             case "selectedConversionPreset":
                 return "Control the output format, quality, and resizing options for converted images. This allows to significantly reduce file size and keep vault size small.";
             case "selectedLinkFormatPreset":
@@ -3171,7 +3171,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             }
         };
 
-        // addLine(`Filename: `);
+        addLine(`Template: ${preset.customTemplate || "{imagename}"}`);
         void addExample(preset.customTemplate || "{imagename}");
 
         if (preset.skipRenamePatterns) {

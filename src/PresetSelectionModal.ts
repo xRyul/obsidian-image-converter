@@ -65,6 +65,10 @@ export class PresetSelectionModal extends Modal {
         super(app);
         this.variableProcessor = variableProcessor;
 
+        this.selectedGlobalPreset = this.settings.globalPresets.find(
+            (preset) => preset.name === this.settings.selectedGlobalPreset
+        ) || null;
+
         // Initialize selected presets with current settings or defaults
         this.selectedConversionPreset = this.plugin.getPresetByName(
             this.settings.selectedConversionPreset,
@@ -279,7 +283,8 @@ export class PresetSelectionModal extends Modal {
             .addDropdown((dropdown) => {
                 presets.forEach((preset) => {
                     dropdown.addOption(preset.name, preset.name);
-                });                dropdown.setValue(selectedPreset.name);
+                });
+                dropdown.setValue(selectedPreset.name);
                 dropdown.onChange(onPresetChange);
                 
                 // Apply compact styling to the dropdown using CSS classes

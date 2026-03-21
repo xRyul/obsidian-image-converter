@@ -355,6 +355,19 @@ export default class ImageConverterPlugin extends Plugin {
         const loadedSettings = (await this.loadData()) as Partial<ImageConverterSettings> | null;
         this.settings = Object.assign({}, DEFAULT_SETTINGS, loadedSettings ?? {}) as ImageConverterSettings;
 
+        const isFreshInstall = !loadedSettings || Object.keys(loadedSettings).length === 0;
+        if (isFreshInstall) {
+            const defaultGlobalPreset = this.settings.globalPresets.find((preset) => preset.name === "WebP 75");
+            if (defaultGlobalPreset) {
+                this.settings.selectedGlobalPreset = defaultGlobalPreset.name;
+                this.settings.selectedFolderPreset = defaultGlobalPreset.folderPreset;
+                this.settings.selectedFilenamePreset = defaultGlobalPreset.filenamePreset;
+                this.settings.selectedConversionPreset = defaultGlobalPreset.conversionPreset;
+                this.settings.linkFormatSettings.selectedLinkFormatPreset = defaultGlobalPreset.linkFormatPreset;
+                this.settings.nonDestructiveResizeSettings.selectedResizePreset = defaultGlobalPreset.resizePreset;
+            }
+        }
+
         // eslint-disable-next-line obsidianmd/hardcoded-config-path -- legacy stored value for migration
         const legacyCacheLocation = ".obsidian";
         if ((this.settings.imageAlignmentCacheLocation as string) === legacyCacheLocation) {

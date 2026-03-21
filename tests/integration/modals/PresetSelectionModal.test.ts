@@ -190,6 +190,40 @@ describe('PresetSelectionModal additional UI flows for Phase 6 (18.1–18.6)', (
     expect(variablesBtn).toBeTruthy();
   });
 
+  it('18.1 Fresh install preselects the "WebP 75" global preset in the modal header', async () => {
+    const app = makeAppWithVault(['img.png']);
+    const plugin = new ImageConverterPlugin(app, { id: 'image-converter' } as any);
+    vi.spyOn(plugin as any, 'loadData').mockResolvedValue(undefined);
+    await plugin.loadSettings();
+
+    const modal = new PresetSelectionModal(app, plugin.settings, () => {}, plugin, new VariableProcessor(app, plugin.settings));
+    modal.onOpen();
+    const container = (modal as any).contentEl as HTMLElement;
+
+    const globalPresetSelect = container.querySelector('.image-converter-global-mini-setting select') as HTMLSelectElement;
+    expect(globalPresetSelect).toBeTruthy();
+    expect(globalPresetSelect.value).toBe('WebP 75');
+  });
+
+  it('18.1 Filename preset dropdown uses stored preset names', async () => {
+    const app = makeAppWithVault(['img.png']);
+    const plugin = new ImageConverterPlugin(app, { id: 'image-converter' } as any);
+    vi.spyOn(plugin as any, 'loadData').mockResolvedValue(undefined);
+    await plugin.loadSettings();
+
+    const modal = new PresetSelectionModal(app, plugin.settings, () => {}, plugin, new VariableProcessor(app, plugin.settings));
+    modal.onOpen();
+    const container = (modal as any).contentEl as HTMLElement;
+
+    const filenameSelect = container.querySelector('select[data-preset-type="filename"]') as HTMLSelectElement;
+    expect(filenameSelect).toBeTruthy();
+
+    const optionTexts = Array.from(filenameSelect.options).map((option) => option.text);
+    expect(optionTexts).toContain('Keep original name');
+    expect(optionTexts).toContain('NoteName-Timestamp');
+    expect(filenameSelect.value).toBe('NoteName-Timestamp');
+  });
+
   it('18.2 Preset selection updates inputs and processing preview', async () => {
     const app = makeAppWithVault(['img.png']);
     const plugin = new ImageConverterPlugin(app, { id: 'image-converter' } as any);
@@ -377,7 +411,7 @@ const saveSpy3 = vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
     const [folderInput4, filenameInput4] = c4.querySelectorAll('.image-converter-text-setting input') as unknown as HTMLInputElement[];
     // Folder preset default has no template
     expect(folderInput4.value).toBe('');
-    // Filename default preset template
-    expect(filenameInput4.value).toBe('{imagename}');
+    // Fresh-install default comes from the "WebP 75" global preset
+    expect(filenameInput4.value).toBe('{notename}-{timestamp}');
   });
 });

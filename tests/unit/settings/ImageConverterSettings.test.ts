@@ -59,7 +59,7 @@ function changeSelect(sel: HTMLSelectElement, value: string) {
 // -----------------------------
 
 describe('Settings defaults and persistence (11.1–11.2)', () => {
-  it('Given no saved data, When loadSettings, Then merges with DEFAULT_SETTINGS (11.1)', async () => {
+  it('Given no saved data, When loadSettings, Then fresh install defaults to global preset "WebP 75" (11.1)', async () => {
     const app = makeAppWithStorage();
     const manifest = { id: 'image-converter' } as any;
     const plugin = new ImageConverterPlugin(app, manifest);
@@ -69,8 +69,10 @@ describe('Settings defaults and persistence (11.1–11.2)', () => {
 
     await plugin.loadSettings();
 
-    // Expect required keys present and equal to DEFAULTS for absence
+    expect(plugin.settings.selectedGlobalPreset).toBe('WebP 75');
     expect(plugin.settings.selectedFolderPreset).toBe(DEFAULT_SETTINGS.selectedFolderPreset);
+    expect(plugin.settings.selectedFilenamePreset).toBe('NoteName-Timestamp');
+    expect(plugin.settings.selectedConversionPreset).toBe('WEBP (75, no resizing)');
     expect(plugin.settings.conversionPresets.length).toBeGreaterThan(0);
     expect(plugin.settings.linkFormatSettings.selectedLinkFormatPreset)
       .toBe(DEFAULT_SETTINGS.linkFormatSettings.selectedLinkFormatPreset);
@@ -334,6 +336,18 @@ describe('Settings defaults, global preset application, and field constraints (1
     expect(plugin.settings.nonDestructiveResizeSettings.selectedResizePreset).toBe(DEFAULT_SETTINGS.nonDestructiveResizeSettings.selectedResizePreset);
   });
 
+  it('11.10 Filename preset cards show stored preset names and the template in the summary', async () => {
+    tab.activeTab = 'filename';
+    tab.display();
+
+    const cardTitles = Array.from(tab.containerEl.querySelectorAll('.image-converter-preset-card-title'))
+      .map((el) => (el.textContent || '').trim());
+
+    expect(cardTitles).toContain('Keep original name');
+    expect(cardTitles).toContain('NoteName-Timestamp');
+    expect(tab.containerEl.textContent || '').toContain('Template: {notename}-{timestamp}');
+  });
+
   it('11.6 Field constraints: sliders have correct min/max and accept sanitized values', async () => {
     tab.display();
 
@@ -365,7 +379,8 @@ describe('Settings defaults, global preset application, and field constraints (1
     expect(plugin2.settings.selectedFolderPreset).toBe('Root folder');
     expect(plugin2.settings.showSpaceSavedNotification).toBe(false);
 
-    // Unspecified fields fall back to defaults
+    // Unspecified fields fall back to defaults for existing installs and are not overwritten by the fresh-install global preset
+    expect(plugin2.settings.selectedGlobalPreset).toBe(DEFAULT_SETTINGS.selectedGlobalPreset);
     expect(plugin2.settings.selectedConversionPreset).toBe(DEFAULT_SETTINGS.selectedConversionPreset);
     expect(plugin2.settings.linkFormatSettings.selectedLinkFormatPreset).toBe(DEFAULT_SETTINGS.linkFormatSettings.selectedLinkFormatPreset);
     expect(plugin2.settings.nonDestructiveResizeSettings.selectedResizePreset).toBe(DEFAULT_SETTINGS.nonDestructiveResizeSettings.selectedResizePreset);
