@@ -79,6 +79,7 @@ describe('Settings defaults and persistence (11.1–11.2)', () => {
     expect(plugin.settings.nonDestructiveResizeSettings.selectedResizePreset)
       .toBe(DEFAULT_SETTINGS.nonDestructiveResizeSettings.selectedResizePreset);
     expect(plugin.settings.enableImageCaptions).toBe(false);
+    expect(plugin.settings.isDragAspectRatioLocked).toBe(true);
   });
 
   it('Given a change, When saveSettings then reload, Then values persist (11.2)', async () => {

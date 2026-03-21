@@ -397,7 +397,7 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
 
     isDragResizeEnabled: true,
     isScrollResizeEnabled: true,
-    isDragAspectRatioLocked: false,
+    isDragAspectRatioLocked: true,
     isResizeInReadingModeEnabled: false,
 
     resizeSensitivity: 0.1,
