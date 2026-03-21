@@ -513,41 +513,113 @@ export class FolderAndFilenameManagement {
             .map((part) => part.trim())
             .filter((part) => part.length > 0);
 
+        return patterns.some((pattern) => this.matchesPattern(filename, pattern));
+    }
+
+    matchesPathPatterns(path: string, patternsString: string): boolean {
+        if (!patternsString.trim()) {
+            return false;
+        }
+
+        const normalizedPath = normalizePath(path)
+            .replace(/^\.[/\\]+/, "")
+            .replace(/^\//, "");
+        const patterns = patternsString
+            .split(",")
+            .map((part) => part.trim())
+            .filter((part) => part.length > 0);
+
         return patterns.some((pattern) => {
-            try {
-                // Check if pattern is a regex (enclosed in /)
-                if (pattern.startsWith("/") && pattern.endsWith("/")) {
-                    // Extract regex pattern without the slashes
-                    const regexPattern = pattern.slice(1, -1);
-                    const regex = new RegExp(regexPattern, "i");
-                    return regex.test(filename);
-                }
-                // Check if pattern is a regex (enclosed in r/)
-                if (pattern.startsWith("r/") && pattern.endsWith("/")) {
-                    // Extract regex pattern without r/ and /
-                    const regexPattern = pattern.slice(2, -1);
-                    const regex = new RegExp(regexPattern, "i");
-                    return regex.test(filename);
-                }
-                // Check if pattern is a regex (enclosed in regex:)
-                if (pattern.startsWith("regex:")) {
-                    // Extract regex pattern without regex:
-                    const regexPattern = pattern.slice(6);
-                    const regex = new RegExp(regexPattern, "i");
-                    return regex.test(filename);
-                }
-                // Default to glob pattern
-                const globPattern = pattern
-                    .replace(/\./g, "\\.")
-                    .replace(/\*/g, ".*")
-                    .replace(/\?/g, ".");
-                const regex = new RegExp(`^${globPattern}$`, "i");
-                return regex.test(filename);
-            } catch (e) {
-                console.error(`Invalid pattern: ${pattern}`, e);
-                return false;
+            const normalizedPattern = this.normalizePathPattern(pattern);
+
+            if (this.matchesFolderPrefixPattern(normalizedPath, normalizedPattern)) {
+                return true;
             }
+
+            if (this.matchesPattern(normalizedPath, normalizedPattern)) {
+                return true;
+            }
+
+            if (this.isPlainFolderPattern(normalizedPattern)) {
+                return normalizedPath === normalizedPattern
+                    || normalizedPath.startsWith(`${normalizedPattern}/`);
+            }
+
+            return false;
         });
+    }
+
+    private normalizePathPattern(pattern: string): string {
+        if (this.isRegexPattern(pattern)) {
+            return pattern;
+        }
+
+        return normalizePath(pattern)
+            .replace(/^\.[/\\]+/, "")
+            .replace(/^\//, "");
+    }
+
+    private matchesFolderPrefixPattern(pathValue: string, pattern: string): boolean {
+        const normalizedPattern = pattern.replace(/\/\*\*\/?$/, "");
+        if (pattern.endsWith("/**") && normalizedPattern.length > 0 && this.isPlainFolderPattern(normalizedPattern)) {
+            return pathValue === normalizedPattern || pathValue.startsWith(`${normalizedPattern}/`);
+        }
+        return false;
+    }
+
+    private matchesPattern(filename: string, pattern: string): boolean {
+        try {
+            // Check if pattern is a regex (enclosed in /)
+            if (pattern.startsWith("/") && pattern.endsWith("/")) {
+                // Extract regex pattern without the slashes
+                const regexPattern = pattern.slice(1, -1);
+                const regex = new RegExp(regexPattern, "i");
+                return regex.test(filename);
+            }
+            // Check if pattern is a regex (enclosed in r/)
+            if (pattern.startsWith("r/") && pattern.endsWith("/")) {
+                // Extract regex pattern without r/ and /
+                const regexPattern = pattern.slice(2, -1);
+                const regex = new RegExp(regexPattern, "i");
+                return regex.test(filename);
+            }
+            // Check if pattern is a regex (enclosed in regex:)
+            if (pattern.startsWith("regex:")) {
+                // Extract regex pattern without regex:
+                const regexPattern = pattern.slice(6);
+                const regex = new RegExp(regexPattern, "i");
+                return regex.test(filename);
+            }
+            // Default to glob pattern
+            // Handle ** (match any characters including /) before * (match any characters except /)
+            const globPattern = pattern
+                .replace(/\./g, "\\.")
+                .replace(/\*\*/g, "<!DOUBLESTAR!>")  // Temporarily replace ** with placeholder
+                .replace(/\*/g, "[^/]*")             // Single * matches any characters except /
+                .replace(/<!DOUBLESTAR!>/g, ".*")    // ** matches any characters including /
+                .replace(/\?/g, ".");
+            const regex = new RegExp(`^${globPattern}$`, "i");
+            return regex.test(filename);
+        } catch (e) {
+            console.error(`Invalid pattern: ${pattern}`, e);
+            return false;
+        }
+    }
+
+    private isRegexPattern(pattern: string): boolean {
+        return (pattern.startsWith("/") && pattern.endsWith("/"))
+            || (pattern.startsWith("r/") && pattern.endsWith("/"))
+            || pattern.startsWith("regex:");
+    }
+
+    private isPlainFolderPattern(pattern: string): boolean {
+        if (!pattern) {
+            return false;
+        }
+
+        return !pattern.includes("*")
+            && !pattern.includes("?")
+            && !this.isRegexPattern(pattern);
     }
 
     async processSubfolderVariables(

@@ -174,6 +174,7 @@ export interface ImageConverterSettings {
     ProcessCurrentNoteskipImagesInTargetFormat: boolean;
     ProcessCurrentNoteEnlargeOrReduce: 'Always' | 'Reduce' | 'Enlarge';
     ProcessCurrentNoteSkipFormats: string;
+    ProcessCurrentNoteIgnoreFolders: string;
 
     ProcessAllVaultconvertTo: string;
     ProcessAllVaultquality: number;
@@ -359,6 +360,7 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
     ProcessCurrentNoteskipImagesInTargetFormat: false,
     ProcessCurrentNoteEnlargeOrReduce: 'Always',
     ProcessCurrentNoteSkipFormats: 'tif,tiff,heic',
+    ProcessCurrentNoteIgnoreFolders: '',
 
     ProcessAllVaultconvertTo: "disabled",
     ProcessAllVaultquality: 0.75,

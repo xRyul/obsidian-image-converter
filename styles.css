@@ -2919,6 +2919,24 @@ button.image-converter-encoder-detected:hover,
 	border-radius: 4px;
 }
 
+.image-convert-modal .image-converter-ignore-folders-help {
+	margin: -0.35rem 0 0.75rem;
+}
+
+.image-convert-modal .image-converter-ignore-folders-help-summary {
+	cursor: pointer;
+	color: var(--text-muted);
+	font-size: 0.9em;
+}
+
+.image-convert-modal .image-converter-ignore-folders-help-content {
+	margin-top: 8px;
+	padding-left: 12px;
+	border-left: 2px solid var(--background-modifier-border);
+	color: var(--text-muted);
+	font-size: 0.9em;
+}
+
 /* ============================================ */
 /* COMPACT SINGLE-COLUMN LAYOUT STYLES */
 /* ============================================ */

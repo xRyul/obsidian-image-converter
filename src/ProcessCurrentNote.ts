@@ -1,3 +1,4 @@
+/* eslint-disable obsidianmd/ui/sentence-case */
 // ProcessCurrentNote.ts
 import {
     App,
@@ -8,6 +9,7 @@ import {
     TFile,
     TextComponent
 } from "obsidian";
+import { FolderSuggest } from "./FolderSuggest";
 import ImageConverterPlugin from './main';
 
 // import {
@@ -49,178 +51,347 @@ export class ProcessCurrentNote extends Modal {
     // We keep this method async to allow await inside, so we disable the no-misused-promises rule here.
     // eslint-disable-next-line @typescript-eslint/no-misused-promises
     async onOpen(): Promise<void> {
-        const { contentEl } = this;
+		const { contentEl } = this;
 
-        // Create main container
-        const mainContainer = contentEl.createDiv({ cls: 'image-convert-modal' });
+		// Create main container
+		const mainContainer = contentEl.createDiv({
+			cls: "image-convert-modal",
+		});
 
-        // Header section
-        const headerContainer = mainContainer.createDiv({ cls: 'modal-header' });
-        headerContainer.createEl('h2', { text: 'Convert, compress and resize' });
+		// Header section
+		const headerContainer = mainContainer.createDiv({
+			cls: "modal-header",
+		});
+		headerContainer.createEl("h2", {
+			text: "Convert, compress and resize",
+		});
 
-        headerContainer.createEl('h6', {
-            text: `all images in: ${this.activeFile.basename}.${this.activeFile.extension}`,
-            cls: 'modal-subtitle'
-        });
+		headerContainer.createEl("h6", {
+			text: `all images in: ${this.activeFile.basename}.${this.activeFile.extension}`,
+			cls: "modal-subtitle",
+		});
 
-        // Initial image counts (fetch these before creating settings)
-        await this.updateImageCounts();
+		// Initial image counts (fetch these before creating settings)
+		await this.updateImageCounts();
 
-        // --- Image Counts Display ---
-        const countsDisplay = contentEl.createDiv({ cls: 'image-counts-display' });
+		// --- Image Counts Display ---
+		const countsDisplay = contentEl.createDiv({
+			cls: "image-counts-display",
+		});
 
-        countsDisplay.createEl('span', { text: 'Total images found: ' });
-        this.imageCountDisplay = countsDisplay.createEl('span');
+		countsDisplay.createEl("span", { text: "Total images found: " });
+		this.imageCountDisplay = countsDisplay.createEl("span");
 
-        countsDisplay.createEl('br');
+		countsDisplay.createEl("br");
 
-        countsDisplay.createEl('span', { text: 'To be processed: ' });
-        this.processedCountDisplay = countsDisplay.createEl('span');
+		countsDisplay.createEl("span", { text: "To be processed: " });
+		this.processedCountDisplay = countsDisplay.createEl("span");
 
-        countsDisplay.createEl('br');
+		countsDisplay.createEl("br");
 
-        countsDisplay.createEl('span', { text: 'Skipped: ' });
-        this.skippedCountDisplay = countsDisplay.createEl('span');
+		countsDisplay.createEl("span", { text: "Skipped: " });
+		this.skippedCountDisplay = countsDisplay.createEl("span");
 
-        // Warning message
-        headerContainer.createEl('p', {
-            cls: 'modal-warning',
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
-            text: '⚠️ This will modify all images in the current note — please ensure you have backups.'
-        });
+		// Warning message
+		headerContainer.createEl("p", {
+			cls: "modal-warning",
+			 
+			text: "⚠️ This will modify all images in the current note — please ensure you have backups.",
+		});
 
-        // --- Settings Container ---
-        const settingsContainer = mainContainer.createDiv({ cls: 'settings-container' });
+		// --- Settings Container ---
+		const settingsContainer = mainContainer.createDiv({
+			cls: "settings-container",
+		});
 
-        // Format and Quality Container
-        const formatQualityContainer = settingsContainer.createDiv({ cls: 'format-quality-container' });
+		// Format and Quality Container
+		const formatQualityContainer = settingsContainer.createDiv({
+			cls: "format-quality-container",
+		});
 
-        // Convert To setting
-        this.convertToSetting = new Setting(formatQualityContainer)
-            .setName('Convert to ⓘ ')
-            .setDesc('Choose output format for your images')
-            .setTooltip('Same as original: preserves current format while applying compression/resizing')
-            .addDropdown(dropdown =>
-                dropdown
-                    .addOptions({
-                        disabled: 'Same as original',
-                        webp: 'WebP',
-                        jpg: 'JPG',
-                        png: 'PNG'
-                    })
-                    .setValue(this.plugin.settings.ProcessCurrentNoteconvertTo)
-                    .onChange(async value => {
-                        this.plugin.settings.ProcessCurrentNoteconvertTo = value;
-                        await this.plugin.saveSettings();
-                        await this.updateImageCountsAndDisplay(); // Update counts after changing this setting
-                    })
-            );
+		// Convert To setting
+		this.convertToSetting = new Setting(formatQualityContainer)
+			.setName("Convert to ⓘ ")
+			.setDesc("Choose output format for your images")
+			.setTooltip(
+				"Same as original: preserves current format while applying compression/resizing",
+			)
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOptions({
+						disabled: "Same as original",
+						webp: "WebP",
+						jpg: "JPG",
+						png: "PNG",
+					})
+					.setValue(this.plugin.settings.ProcessCurrentNoteconvertTo)
+					.onChange(async (value) => {
+						this.plugin.settings.ProcessCurrentNoteconvertTo =
+							value;
+						await this.plugin.saveSettings();
+						await this.updateImageCountsAndDisplay(); // Update counts after changing this setting
+					}),
+			);
 
-        // Quality setting
-        new Setting(formatQualityContainer)
-            .setName('Quality ⓘ')
-            .setDesc('Compression level (0-100)')
-            .setTooltip('100: no compression (original quality)\n75: recommended (good balance)\n0-50: high compression (lower quality)')
-            .addText(text =>
-                text
-                    .setPlaceholder('Enter quality (0-100)')
-                    .setValue((this.plugin.settings.ProcessCurrentNotequality * 100).toString())
-                    .onChange(async value => {
-                        const quality = parseInt(value);
-                        if (/^\d+$/.test(value) && quality >= 0 && quality <= 100) {
-                            this.plugin.settings.ProcessCurrentNotequality = quality / 100;
-                            await this.plugin.saveSettings();
-                        }
-                    })
-            );
+		// Quality setting
+		new Setting(formatQualityContainer)
+			.setName("Quality ⓘ")
+			.setDesc("Compression level (0-100)")
+			.setTooltip(
+				"100: no compression (original quality)\n75: recommended (good balance)\n0-50: high compression (lower quality)",
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("Enter quality (0-100)")
+					.setValue(
+						(
+							this.plugin.settings.ProcessCurrentNotequality * 100
+						).toString(),
+					)
+					.onChange(async (value) => {
+						const quality = parseInt(value);
+						if (
+							/^\d+$/.test(value) &&
+							quality >= 0 &&
+							quality <= 100
+						) {
+							this.plugin.settings.ProcessCurrentNotequality =
+								quality / 100;
+							await this.plugin.saveSettings();
+						}
+					}),
+			);
 
-        // Resize Container (separate from format/quality)
-        const resizeContainer = settingsContainer.createDiv({ cls: 'resize-container' });
+		// Resize Container (separate from format/quality)
+		const resizeContainer = settingsContainer.createDiv({
+			cls: "resize-container",
+		});
 
-        // Resize Mode setting
-        this.resizeModeSetting = new Setting(resizeContainer)
-            .setName('Resize mode ⓘ')
-            .setDesc('Choose how images should be resized — results are permanent.')
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
-            .setTooltip('Fit: maintains aspect ratio within dimensions\nFill: exactly matches dimensions\nLongest edge: limits the longest side\nShortest edge: limits the shortest side\nWidth/height: constrains single dimension')
-            .addDropdown(dropdown =>
-                dropdown
-                    .addOptions({
-                        None: 'None',
-                        LongestEdge: 'Longest edge',
-                        ShortestEdge: 'Shortest edge',
-                        Width: 'Width',
-                        Height: 'Height',
-                        Fit: 'Fit',
-                        Fill: 'Fill',
-                    })
-                    .setValue(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode)
-                    .onChange(async value => {
-                        this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode = value;
-                        await this.plugin.saveSettings();
-                        this.updateResizeInputVisibility(value);
-                        await this.updateImageCountsAndDisplay(); // Update counts after changing this setting
-                    })
-            );
+		// Resize Mode setting
+		this.resizeModeSetting = new Setting(resizeContainer)
+			.setName("Resize mode ⓘ")
+			.setDesc(
+				"Choose how images should be resized - results are permanent.",
+			)
+			 
+			.setTooltip(
+				"Fit: maintains aspect ratio within dimensions\nFill: exactly matches dimensions\nLongest edge: limits the longest side\nShortest edge: limits the shortest side\nWidth/height: constrains single dimension",
+			)
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOptions({
+						None: "None",
+						LongestEdge: "Longest edge",
+						ShortestEdge: "Shortest edge",
+						Width: "Width",
+						Height: "Height",
+						Fit: "Fit",
+						Fill: "Fill",
+					})
+					.setValue(
+						this.plugin.settings
+							.ProcessCurrentNoteResizeModalresizeMode,
+					)
+					.onChange(async (value) => {
+						this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode =
+							value;
+						await this.plugin.saveSettings();
+						this.updateResizeInputVisibility(value);
+						await this.updateImageCountsAndDisplay(); // Update counts after changing this setting
+					}),
+			);
 
-        // Create resize inputs
-        this.resizeInputsDiv = resizeContainer.createDiv({ cls: 'resize-inputs' });
-        this.enlargeReduceDiv = resizeContainer.createDiv({ cls: 'enlarge-reduce-settings' });
+		// Create resize inputs
+		this.resizeInputsDiv = resizeContainer.createDiv({
+			cls: "resize-inputs",
+		});
+		this.enlargeReduceDiv = resizeContainer.createDiv({
+			cls: "enlarge-reduce-settings",
+		});
 
-        // Skip formats Container
-        const skipContainer = settingsContainer.createDiv({ cls: 'skip-container' });
+		// Skip formats Container
+		const skipContainer = settingsContainer.createDiv({
+			cls: "skip-container",
+		});
 
-        // Skip formats setting
-        this.skipFormatsSetting = new Setting(skipContainer)
-            .setName('Skip file formats ⓘ')
-            .setTooltip('Comma-separated list of file formats to skip (e.g., tif,tiff,heic). Leave empty to process all formats.')
-            .addText(text =>
-                text
-                    // eslint-disable-next-line obsidianmd/ui/sentence-case
-                    .setPlaceholder('e.g., tif, tiff, heic')
-                    .setValue(this.plugin.settings.ProcessCurrentNoteSkipFormats)
-                    .onChange(async value => {
-                        this.plugin.settings.ProcessCurrentNoteSkipFormats = value;
-                        await this.plugin.saveSettings();
-                        await this.updateImageCountsAndDisplay(); // Update counts after changing this setting
-                    })
-            );
+		// Skip formats setting
+		this.skipFormatsSetting = new Setting(skipContainer)
+			.setName("Skip file formats ⓘ")
+			.setTooltip(
+				"Comma-separated list of file formats to skip (e.g., tif,tiff,heic). Leave empty to process all formats.",
+			)
+			.addText((text) =>
+				text
+					 
+					.setPlaceholder("e.g., tif, tiff, heic")
+					.setValue(
+						this.plugin.settings.ProcessCurrentNoteSkipFormats,
+					)
+					.onChange(async (value) => {
+						this.plugin.settings.ProcessCurrentNoteSkipFormats =
+							value;
+						await this.plugin.saveSettings();
+						await this.updateImageCountsAndDisplay(); // Update counts after changing this setting
+					}),
+			);
 
-        // Skip target format setting
-        this.skipTargetFormatSetting = new Setting(skipContainer)
-            .setName('Skip images in target format ⓘ')
-            .setTooltip('If image is already in target format, this allows you to skip its compression, conversion and resizing. Processing of all other formats will be still performed.')
-            .addToggle(toggle =>
-                toggle
-                    .setValue(this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat)
-                    .onChange(async value => {
-                        this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat = value;
-                        await this.plugin.saveSettings();
-                        await this.updateImageCountsAndDisplay(); // Update counts after changing this setting
-                    })
-            );
+		// Ignore folders setting
+		new Setting(skipContainer)
+			.setClass("image-converter-ignore-folders-setting")
+			.setName("Skip folders ⓘ")
+			.setTooltip(
+				"Comma-separated folder patterns to exclude images from processing.",
+			)
+			.addText((text) => {
+				text.setPlaceholder("e.g., _attachments, images/**")
+					.setValue(
+						this.plugin.settings.ProcessCurrentNoteIgnoreFolders,
+					)
+					.onChange(async (value) => {
+						this.plugin.settings.ProcessCurrentNoteIgnoreFolders =
+							value;
+						await this.plugin.saveSettings();
+						await this.updateImageCountsAndDisplay();
+					});
 
-        // Initialize resize inputs
-        this.updateResizeInputVisibility(this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode);
+				text.inputEl.setAttr("spellcheck", "false");
+				new FolderSuggest(this.app, text.inputEl);
+			});
 
-        // --- Update Counts After Settings Change ---
-        await this.updateImageCountsAndDisplay();
+		// Add collapsible help section below the setting row so the input stays visually anchored.
+		const helpDetails = skipContainer.createEl("details", {
+			cls: "image-converter-ignore-folders-help",
+		});
+		helpDetails.createEl("summary", {
+			text: "Show examples and how matching works",
+			cls: "image-converter-ignore-folders-help-summary",
+		});
 
-        // Submit button
-        const buttonContainer = settingsContainer.createDiv({ cls: 'button-container' });
-        this.submitButton = new ButtonComponent(buttonContainer)
-            .setButtonText('Submit')
-            .onClick(async () => { // Use async here
-                this.close();
-                if (this.activeFile.extension === 'md' || this.activeFile.extension === 'canvas') {
-                    await this.batchImageProcessor.processImagesInNote(this.activeFile);
-                    await this.refreshActiveNote();
-                } else {
-                    // eslint-disable-next-line obsidianmd/ui/sentence-case
-                    new Notice('Error: active file must be a markdown or canvas file.');
-                }
-            });
-    }
+		const helpContent = helpDetails.createDiv({
+			cls: "image-converter-ignore-folders-help-content",
+		});
+
+		helpContent.createDiv({
+			text: "How matching works:",
+			attr: { style: "font-weight: bold; margin: 8px 0 4px 0;" },
+		});
+		const behaviorList = helpContent.createEl("ul", {
+			attr: { style: "margin: 4px 0; padding-left: 20px;" },
+		});
+		behaviorList.createEl("li", {
+			text: "Folder paths without wildcards skip that folder and all subfolders",
+		});
+		behaviorList.createEl("li", {
+			text: "Leading / is optional",
+		});
+		behaviorList.createEl("li", {
+			text: "Use * to match only direct children",
+		});
+		behaviorList.createEl("li", {
+			text: "Use ** to include subfolders too",
+		});
+		behaviorList.createEl("li", {
+			text: "Regex is supported for advanced patterns",
+		});
+
+		helpContent.createDiv({
+			text: "Examples:",
+			attr: { style: "font-weight: bold; margin-bottom: 4px;" },
+		});
+
+		const examplesList = helpContent.createEl("ul", {
+			attr: { style: "margin: 4px 0 8px 0; padding-left: 20px;" },
+		});
+		examplesList.createEl("li", {
+			text: "_attachments → Skips that folder and everything inside it",
+		});
+		examplesList.createEl("li", {
+			text: "/_attachments → Same as above",
+		});
+		examplesList.createEl("li", {
+			text: "_attachments/* → Skips only direct children in that folder",
+		});
+		examplesList.createEl("li", {
+			text: "_attachments/** → Skips that folder and all nested subfolders",
+		});
+		examplesList.createEl("li", {
+			text: "images/**, assets/** → Skips multiple folder trees",
+		});
+		examplesList.createEl("li", {
+			text: "archive/2025/** → Skips a specific folder tree",
+		});
+
+		helpContent.createDiv({
+			text: "Advanced (regex):",
+			attr: { style: "font-weight: bold; margin-bottom: 4px;" },
+		});
+
+		const advancedExamplesList = helpContent.createEl("ul", {
+			attr: { style: "margin: 4px 0 8px 0; padding-left: 20px;" },
+		});
+		advancedExamplesList.createEl("li", {
+			text: "/^_attachments\\// → Skips paths starting with _attachments/",
+		});
+		advancedExamplesList.createEl("li", {
+			text: "regex:^media/(raw|temp)/ → Skips media/raw and media/temp",
+		});
+		advancedExamplesList.createEl("li", {
+			text: "r/^(drafts|scratch)\\// → Skips drafts/ and scratch/",
+		});
+
+		// Skip target format setting
+		this.skipTargetFormatSetting = new Setting(skipContainer)
+			.setName("Skip images in target format ⓘ")
+			.setTooltip(
+				"If image is already in target format, this allows you to skip its compression, conversion and resizing. Processing of all other formats will be still performed.",
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(
+						this.plugin.settings
+							.ProcessCurrentNoteskipImagesInTargetFormat,
+					)
+					.onChange(async (value) => {
+						this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat =
+							value;
+						await this.plugin.saveSettings();
+						await this.updateImageCountsAndDisplay(); // Update counts after changing this setting
+					}),
+			);
+
+		// Initialize resize inputs
+		this.updateResizeInputVisibility(
+			this.plugin.settings.ProcessCurrentNoteResizeModalresizeMode,
+		);
+
+		// --- Update Counts After Settings Change ---
+		await this.updateImageCountsAndDisplay();
+
+		// Submit button
+		const buttonContainer = settingsContainer.createDiv({
+			cls: "button-container",
+		});
+		this.submitButton = new ButtonComponent(buttonContainer)
+			.setButtonText("Submit")
+			.onClick(async () => {
+				// Use async here
+				this.close();
+				if (
+					this.activeFile.extension === "md" ||
+					this.activeFile.extension === "canvas"
+				) {
+					await this.batchImageProcessor.processImagesInNote(
+						this.activeFile,
+					);
+					await this.refreshActiveNote();
+				} else {
+					 
+					new Notice(
+						"Error: active file must be a markdown or canvas file.",
+					);
+				}
+			});
+	}
     
     private updateResizeInputVisibility(resizeMode: string): void {
         if (resizeMode === "None") {
@@ -252,7 +423,7 @@ export class ProcessCurrentNote extends Modal {
             .setClass('enlarge-reduce-setting')
             .setName('Enlarge or reduce ⓘ')
             .setDesc('Controls how images are adjusted relative to target size:')
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
+             
             .setTooltip('• Reduce and enlarge: adjusts all images to fit specified dimensions\n• Reduce only: only shrinks images larger than target\n• Enlarge only: only enlarges images smaller than target')
             .addDropdown((dropdown) => {
                 dropdown
@@ -401,12 +572,18 @@ export class ProcessCurrentNote extends Modal {
 
         const targetFormat = this.plugin.settings.ProcessCurrentNoteconvertTo.toLowerCase();
         const skipTargetFormat = this.plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat;
+        const ignoreFolders = this.plugin.settings.ProcessCurrentNoteIgnoreFolders ?? '';
+        const matchesIgnoreFolders = (filePath: string) =>
+            this.plugin.folderAndFilenameManagement.matchesPathPatterns(filePath, ignoreFolders);
 
         if (this.activeFile.extension === 'canvas') {
             const canvasData = JSON.parse(await this.app.vault.read(this.activeFile)) as CanvasData;
             const images = this.getImagePathsFromCanvas(canvasData);
             this.imageCount = images.length;
             this.processedCount = images.filter(imagePath => {
+                if (matchesIgnoreFolders(imagePath)) {
+                    return false;
+                }
                 const imageFile = this.app.vault.getAbstractFileByPath(imagePath);
                 if (!(imageFile instanceof TFile) || skipFormats.includes(imageFile.extension.toLowerCase())) {
                     return false; // Skip if not a TFile or in skipFormats
@@ -423,6 +600,9 @@ export class ProcessCurrentNote extends Modal {
             this.imageCount = linkedFiles.length;
 
             this.processedCount = linkedFiles.filter(file => {
+                if (matchesIgnoreFolders(file.path)) {
+                    return false;
+                }
                 if (skipFormats.includes(file.extension.toLowerCase())) {
                     return false;
                 }

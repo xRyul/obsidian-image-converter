@@ -59,7 +59,8 @@ export class BatchImageProcessor {
                 ProcessCurrentNoteEnlargeOrReduce: enlargeOrReduce,
                 allowLargerFiles,
                 ProcessCurrentNoteSkipFormats: processCurrentNoteSkipFormats,
-                ProcessCurrentNoteskipImagesInTargetFormat: processCurrentNoteSkipImagesInTargetFormat
+                ProcessCurrentNoteskipImagesInTargetFormat: processCurrentNoteSkipImagesInTargetFormat,
+                ProcessCurrentNoteIgnoreFolders: processCurrentNoteIgnoreFolders = ""
             } = this.plugin.settings;
 
             const isKeepOriginalFormat = convertTo === 'disabled';
@@ -94,6 +95,13 @@ export class BatchImageProcessor {
                 seen.add(file.path);
                 return true;
             });
+
+            // Filter out ignored folders
+            if (processCurrentNoteIgnoreFolders.trim()) {
+                linkedFiles = linkedFiles.filter(
+                    (file) => !this.folderAndFilenameManagement.matchesPathPatterns(file.path, processCurrentNoteIgnoreFolders)
+                );
+            }
 
             // If no images found at all
             if (linkedFiles.length === 0) {

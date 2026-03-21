@@ -100,6 +100,21 @@ export class PluginSettingTab {
   hide() {}
 }
 
+export class AbstractInputSuggest<T> {
+  app: App;
+  inputEl: HTMLInputElement;
+
+  constructor(app: App, inputEl: HTMLInputElement) {
+    this.app = app;
+    this.inputEl = inputEl;
+  }
+
+  getSuggestions(_query: string): T[] { return []; }
+  renderSuggestion(_value: T, _el: HTMLElement): void {}
+  selectSuggestion(_value: T): void {}
+  close(): void {}
+}
+
 // UI Components and helpers
 export class ButtonComponent {
   buttonEl: HTMLButtonElement;

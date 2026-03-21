@@ -202,6 +202,34 @@ describe('FolderAndFilenameManagement conflicts and rename/convert skip rules', 
 });
 
 // -----------------------------------------------------------------------------
+// 2.5) Ignore folder path patterns
+// -----------------------------------------------------------------------------
+
+describe('FolderAndFilenameManagement.matchesPathPatterns', () => {
+  it('handles folder glob prefixes without matching root files', () => {
+    const { ffm } = makeFFMGeneric();
+
+    expect(ffm.matchesPathPatterns('2025-12-16-1769210898077.webp', '/_attachments/**')).toBe(false);
+    expect(ffm.matchesPathPatterns('_attachments/Pasted image.webp', '/_attachments/**')).toBe(true);
+    expect(ffm.matchesPathPatterns('_attachments/subfolder1/Pasted image.webp', '/_attachments/**')).toBe(true);
+  });
+
+  it('accepts leading ./ in ignore patterns and paths', () => {
+    const { ffm } = makeFFMGeneric();
+
+    expect(ffm.matchesPathPatterns('./_attachments/photo.webp', './_attachments/**')).toBe(true);
+    expect(ffm.matchesPathPatterns('./photo.webp', './_attachments/**')).toBe(false);
+  });
+
+  it('preserves regex-style path patterns that start with /', () => {
+    const { ffm } = makeFFMGeneric();
+
+    expect(ffm.matchesPathPatterns('_attachments/photo.webp', '/^_attachments\//')).toBe(true);
+    expect(ffm.matchesPathPatterns('photo.webp', '/^_attachments\//')).toBe(false);
+  });
+});
+
+// -----------------------------------------------------------------------------
 // 3) getImagePath resolution
 // -----------------------------------------------------------------------------
 describe('FolderAndFilenameManagement.getImagePath', () => {
