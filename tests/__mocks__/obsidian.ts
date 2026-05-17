@@ -4,6 +4,7 @@
  */
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-function-type, import/no-extraneous-dependencies, no-restricted-imports */
 
+import path from 'node:path';
 import moment from 'moment';
 
 // Match Obsidian's `export const moment` runtime behavior (callable function)
@@ -523,8 +524,25 @@ export class MarkdownView extends View { editor: any = { getValue: () => '', set
 export class Editor {}
 
 // Utility functions
-export function normalizePath(path: string): string {
-  return path.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '');
+export function normalizePath(pathname: string): string {
+  if (!pathname) return '';
+
+  let normalized = pathname.replace(/\\/g, '/');
+  normalized = path.posix.normalize(normalized);
+
+  if (normalized === '.') {
+    return '';
+  }
+
+  if (normalized !== '/' && normalized.endsWith('/')) {
+    normalized = normalized.slice(0, -1);
+  }
+
+  if (normalized !== '/' && normalized.startsWith('/')) {
+    normalized = normalized.slice(1);
+  }
+
+  return normalized;
 }
 
 export function getLinkpath(linktext: string): string {

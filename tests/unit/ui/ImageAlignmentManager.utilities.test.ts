@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import ImageConverterPlugin from '../../../src/main';
 import { ImageAlignmentManager } from '../../../src/ImageAlignmentManager';
 import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
-import { fakeApp, fakeTFile, fakeVault } from '../../factories/obsidian';
+import { fakeApp, fakeTFile, fakeVault, makeObsidianAppResourcePath } from '../../factories/obsidian';
 import { FileSystemAdapter } from 'obsidian';
 
 /**
@@ -94,7 +94,7 @@ describe('ImageAlignmentManager utilities (12.10–12.12)', () => {
     expect(relFromFile.endsWith('imgs/p.png')).toBe(true);
 
     // app:// path under base -> normalize similarly
-    const appUrl = `app://local/${encodeURIComponent(normalizedBase)}/imgs/app-based.png`;
+    const appUrl = makeObsidianAppResourcePath('imgs/app-based.png', { basePath: normalizedBase, mtime: 123 });
     const relFromApp = manager.getRelativePath(appUrl);
     expect(relFromApp.endsWith('imgs/app-based.png')).toBe(true);
 

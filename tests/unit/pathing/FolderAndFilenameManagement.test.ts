@@ -1,12 +1,18 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { FileSystemAdapter } from 'obsidian';
+import { FileSystemAdapter, type TFile } from 'obsidian';
 import { FolderAndFilenameManagement } from '../../../src/FolderAndFilenameManagement';
 import { VariableProcessor } from '../../../src/VariableProcessor';
 import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
 import { DEFAULT_SETTINGS, type FolderPreset, type FilenamePreset, type ConversionPreset } from '../../../src/ImageConverterSettings';
-import { fakeApp, fakeVault, fakeTFile, fakeTFolder } from '../../factories/obsidian';
+import {
+  fakeApp,
+  fakeVault,
+  fakeTFile,
+  fakeTFolder,
+  makeObsidianAppResourcePath,
+} from '../../factories/obsidian';
 
 // Consolidated suite bringing together destination, conflicts, sanitization, validation,
 // getImagePath, and ensureFolderExists case-sensitivity tests for FolderAndFilenameManagement.
@@ -41,12 +47,12 @@ function makeDepsDest(opts?: { attachmentFolderPath?: string }) {
 }
 
 // -------------------- getImagePath helpers --------------------
-function makeSutImagePath(opts?: { basePath?: string; withUnicode?: boolean }) {
+function makeSutImagePath(opts?: { basePath?: string; withUnicode?: boolean; extraFiles?: TFile[] }) {
   const basePath = opts?.basePath ?? 'C:/Vault';
   // Seed vault with files and folders
   const image = fakeTFile({ path: 'Assets/image with spaces.png', name: 'image with spaces.png', extension: 'png' });
   const unicode = fakeTFile({ path: 'Assets/中文-汉字-測試.png', name: '中文-汉字-測試.png', extension: 'png' });
-  const files = [image].concat(opts?.withUnicode ? [unicode] : []);
+  const files = [image, ...(opts?.withUnicode ? [unicode] : []), ...(opts?.extraFiles ?? [])];
   const vault = fakeVault({ files });
   const app = fakeApp({ vault }) as any;
 
@@ -66,6 +72,56 @@ function makeImg(src: string): HTMLImageElement {
   img.setAttribute('src', src);
   return img;
 }
+
+function makeRuntimeAppUrl(vaultPath: string, basePath: string, mtime = 1700000000000): string {
+  return makeObsidianAppResourcePath(vaultPath, { basePath, mtime });
+}
+
+async function withPlatform<T>(platform: NodeJS.Platform, run: () => T | Promise<T>): Promise<T> {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+
+  try {
+    return await run();
+  } finally {
+    if (originalDescriptor) {
+      Object.defineProperty(process, 'platform', originalDescriptor);
+    }
+  }
+}
+
+describe('makeObsidianAppResourcePath', () => {
+  it('builds POSIX-style Obsidian resource URLs', () => {
+    expect(
+      makeObsidianAppResourcePath('Assets/image with spaces.png', {
+        basePath: '/home/user/Vault',
+        hash: 'abc123',
+        mtime: 123,
+      })
+    ).toBe('app://abc123/home/user/Vault/Assets/image%20with%20spaces.png?123');
+  });
+
+  it('builds Windows drive-letter Obsidian resource URLs independent of host platform', () => {
+    expect(
+      makeObsidianAppResourcePath('Assets/image with spaces.png', {
+        basePath: 'C:/Vault',
+        hash: 'abc123',
+        mtime: 123,
+      })
+    ).toBe('app://abc123/C:/Vault/Assets/image%20with%20spaces.png?123');
+  });
+
+  it('builds UNC Obsidian resource URLs independent of host platform', () => {
+    expect(
+      makeObsidianAppResourcePath('Assets/image with spaces.png', {
+        basePath: '//server/share/Vault',
+        hash: 'abc123',
+        mtime: 123,
+      })
+    ).toBe('app://abc123/%5C%5Cserver/share/Vault/Assets/image%20with%20spaces.png?123');
+  });
+});
+
 
 // -------------------- Generic FFM helper --------------------
 function makeFFMGeneric() {
@@ -150,7 +206,7 @@ describe('FolderAndFilenameManagement destination resolution', () => {
 
   it('3.12 combinePath normalizes and handles root base', () => {
     const { ffm } = makeDepsDest();
-    expect(ffm.combinePath('/', 'file.png')).toBe('/file.png');
+    expect(ffm.combinePath('/', 'file.png')).toBe('file.png');
     expect(ffm.combinePath('Folder', 'file.png')).toBe('Folder/file.png');
   });
 });
@@ -239,16 +295,19 @@ describe('FolderAndFilenameManagement.getImagePath', () => {
     expect(ffm.getImagePath(img)).toBe(image.path);
   });
 
-  it('resolves app://local URIs with query to vault path', () => {
-    const { ffm, image } = makeSutImagePath();
-    const img = makeImg(`app://local/${encodeURIComponent(image.path)}?v=123`);
+  it('resolves real Obsidian app:// resource URLs with query to vault path', () => {
+    const basePath = '/home/user/Vault';
+    const { ffm, image } = makeSutImagePath({ basePath });
+    const img = makeImg(makeRuntimeAppUrl(image.path, basePath, 123));
     expect(ffm.getImagePath(img)).toBe(image.path);
   });
 
-  it('resolves absolute app:// OS path under basePath (Windows)', () => {
-    const { ffm } = makeSutImagePath({ basePath: 'C:/Vault' });
-    const img = makeImg('app://obsidian/C:/Vault/Assets/image%20with%20spaces.png');
-    expect(ffm.getImagePath(img)).toBe('/Assets/image with spaces.png');
+  it('resolves absolute app:// OS path under basePath on Windows', async () => {
+    await withPlatform('win32', () => {
+      const { ffm, image } = makeSutImagePath({ basePath: 'C:/Vault' });
+      const img = makeImg('app://obsidian/C:/Vault/Assets/image%20with%20spaces.png');
+      expect(ffm.getImagePath(img)).toBe(image.path);
+    });
   });
 
   it('resolves relative path from active note', () => {
@@ -262,10 +321,22 @@ describe('FolderAndFilenameManagement.getImagePath', () => {
     expect(ffm.getImagePath(img)).toBe(image.path);
   });
 
-  it('handles Unicode filenames and percent-decoding', () => {
-    const { ffm, unicode } = makeSutImagePath({ withUnicode: true });
-    const encoded = encodeURIComponent(unicode.path);
-    const img = makeImg(`app://local/${encoded}`);
+  it('resolves real Obsidian app:// resource URLs for root-level files', () => {
+    const basePath = '/home/user/Vault';
+    const rootImage = fakeTFile({
+      path: 'Screenshot 2026-05-17 111424.png',
+      name: 'Screenshot 2026-05-17 111424.png',
+      extension: 'png'
+    });
+    const { ffm } = makeSutImagePath({ basePath, extraFiles: [rootImage] });
+    const img = makeImg(makeRuntimeAppUrl(rootImage.path, basePath, 1779014495226));
+    expect(ffm.getImagePath(img)).toBe(rootImage.path);
+  });
+
+  it('handles Unicode filenames and percent-decoding for real Obsidian app:// resource URLs', () => {
+    const basePath = '/home/user/Vault';
+    const { ffm, unicode } = makeSutImagePath({ basePath, withUnicode: true });
+    const img = makeImg(makeRuntimeAppUrl(unicode.path, basePath, 456));
     expect(ffm.getImagePath(img)).toBe(unicode.path);
   });
 
@@ -299,7 +370,7 @@ describe('FolderAndFilenameManagement sanitization and ensureFolderExists', () =
 
   it('3.21 combinePath behavior', () => {
     const { ffm } = makeFFMGeneric();
-    expect(ffm.combinePath('/', 'name.png')).toBe('/name.png');
+    expect(ffm.combinePath('/', 'name.png')).toBe('name.png');
     expect(ffm.combinePath('base', 'name.png')).toBe('base/name.png');
   });
 
@@ -485,10 +556,12 @@ describe('FolderAndFilenameManagement — Platform/Security (Phase 9)', () => {
     expect(result).toBe('projects/assets/images/final');
   });
 
-  it('25.3 Linux app://obsidian absolute path under base → vault-relative with POSIX separators', () => {
-    const { ffm } = makeSutImagePath({ basePath: '/home/user/Vault' } as any);
-    const img = makeImg('app://obsidian//home/user/Vault/Assets/img%20x.png');
-    expect(ffm.getImagePath(img)).toBe('/Assets/img x.png');
+  it('25.3 Linux real Obsidian app:// absolute path under base → vault-relative with POSIX separators', () => {
+    const basePath = '/home/user/Vault';
+    const appImage = fakeTFile({ path: 'Assets/img x.png', name: 'img x.png', extension: 'png' });
+    const { ffm } = makeSutImagePath({ basePath, extraFiles: [appImage] });
+    const img = makeImg(makeRuntimeAppUrl(appImage.path, basePath, 789));
+    expect(ffm.getImagePath(img)).toBe(appImage.path);
   });
 
   it('27.1 Path traversal prevention: .. segments and leading / are normalized away', async () => {
@@ -504,12 +577,14 @@ describe('FolderAndFilenameManagement — Platform/Security (Phase 9)', () => {
     expect(result.includes('\\')).toBe(false);
   });
 
-  it('27.5 Vault boundary enforcement: app:// path outside base is not mapped to vault-relative (boundary enforced at write)', () => {
-    const { ffm } = makeSutImagePath({ basePath: 'C:/Vault' });
-    const img = makeImg('app://obsidian/C:/OtherVault/Assets/x.png');
-    const result = ffm.getImagePath(img);
-    expect(result).toBe('C:/OtherVault/Assets/x.png');
-    expect((result as string).startsWith('/')).toBe(false);
+  it('27.5 Windows paths outside the vault base are returned unchanged', async () => {
+    await withPlatform('win32', () => {
+      const { ffm } = makeSutImagePath({ basePath: 'C:/Vault' });
+      const img = makeImg('app://obsidian/C:/OtherVault/Assets/x.png');
+      const result = ffm.getImagePath(img);
+      expect(result).toBe('C:/OtherVault/Assets/x.png');
+      expect((result as string).startsWith('/')).toBe(false);
+    });
   });
 
   it('26.8 Deeply nested folders: ensureFolderExists creates all intermediate levels', async () => {
