@@ -41,20 +41,12 @@ function expandHomeDir(filePath) {
 }
 
 function getDefaultPluginsDirCandidates() {
-	const homeDir = os.homedir();
-
 	const windowsFirstCandidates = [
-		path.join(homeDir, "Developer", "Obsidian Plugins", "Plugin-Testing-Vault", ".obsidian", "plugins"),
-		path.join(homeDir, "Developer", "Obsidian Plugins", "plugin-testing-vault", ".obsidian", "plugins"),
-		path.join(homeDir, "Developer", "Projects", "Obsidian Plugins", "Plugin-Testing-Vault", ".obsidian", "plugins"),
-		path.join(homeDir, "Developer", "Projects", "Obsidian Plugins", "plugin-testing-vault", ".obsidian", "plugins"),
+		"D:\\plugin-testing-vault\\.obsidian\\plugins",
 	];
 
 	const unixFirstCandidates = [
-		path.join(homeDir, "Developer", "Projects", "Obsidian Plugins", "plugin-testing-vault", ".obsidian", "plugins"),
-		path.join(homeDir, "Developer", "Projects", "Obsidian Plugins", "Plugin-Testing-Vault", ".obsidian", "plugins"),
-		path.join(homeDir, "Developer", "Obsidian Plugins", "plugin-testing-vault", ".obsidian", "plugins"),
-		path.join(homeDir, "Developer", "Obsidian Plugins", "Plugin-Testing-Vault", ".obsidian", "plugins"),
+		"/mnt/d/plugin-testing-vault/.obsidian/plugins",
 	];
 
 	const candidates = process.platform === "win32" ? windowsFirstCandidates : unixFirstCandidates;
@@ -62,7 +54,7 @@ function getDefaultPluginsDirCandidates() {
 }
 
 async function resolvePluginsDir(args) {
-	const explicitPluginsDir = args.pluginsDir ?? process.env.OBSIDIAN_PLUGINS_DIR;
+	const explicitPluginsDir = args.pluginsDir ?? process.env.OBSIDIAN_VAULT_PLUGINS_DIR ?? process.env.OBSIDIAN_PLUGINS_DIR;
 
 	if (typeof explicitPluginsDir === "string" && explicitPluginsDir.trim() !== "") {
 		return path.resolve(expandHomeDir(explicitPluginsDir));
