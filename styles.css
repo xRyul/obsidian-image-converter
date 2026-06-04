@@ -1506,6 +1506,11 @@ button.image-converter-encoder-detected:hover,
 	overflow: hidden;
 }
 
+.image-converter-annotation-tool-image-annotation-modal .image-converter-annotation-tool-modal-content {
+	padding: 0;
+	overflow: hidden;
+}
+
 .image-converter-annotation-tool-image-annotation-modal
 	.image-converter-annotation-tool-modal-container {
 	background-color: var(--background-primary);
