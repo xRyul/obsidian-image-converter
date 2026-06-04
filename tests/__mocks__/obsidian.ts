@@ -487,6 +487,12 @@ export class Component {
       this.register(() => { try { child.onunload(); } catch { /* noop */ } });
     }
   }
+  removeChild(child: any) {
+    try { child?.onunload?.(); } catch { /* noop */ }
+    const children = ((this as any).__children ?? []) as any[];
+    (this as any).__children = children.filter((existingChild) => existingChild !== child);
+    return child;
+  }
   registerEvent(_event: any) {}
   registerDomEvent(el: HTMLElement | Document, event: string, handler: any, useCapture?: boolean) {
     (el as any).addEventListener?.(event, handler, useCapture as any);

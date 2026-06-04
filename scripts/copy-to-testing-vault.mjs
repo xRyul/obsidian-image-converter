@@ -40,12 +40,26 @@ function expandHomeDir(filePath) {
 	return filePath;
 }
 
-function getDefaultPluginsDirCandidates() {
+function getDefaultPluginsDirCandidates(repoRoot) {
+	const homeDir = os.homedir();
+	const projectRootCandidates = [
+		path.resolve(repoRoot, "..", "plugin-testing-vault", ".obsidian", "plugins"),
+		path.resolve(repoRoot, "..", "Plugin-Testing-Vault", ".obsidian", "plugins"),
+		path.join(homeDir, "Developer", "Projects", "obsidian-plugins", "plugin-testing-vault", ".obsidian", "plugins"),
+		path.join(homeDir, "Developer", "Projects", "obsidian-plugins", "Plugin-Testing-Vault", ".obsidian", "plugins"),
+		path.join(homeDir, "Developer", "Projects", "Obsidian Plugins", "plugin-testing-vault", ".obsidian", "plugins"),
+		path.join(homeDir, "Developer", "Projects", "Obsidian Plugins", "Plugin-Testing-Vault", ".obsidian", "plugins"),
+		path.join(homeDir, "Developer", "Obsidian Plugins", "plugin-testing-vault", ".obsidian", "plugins"),
+		path.join(homeDir, "Developer", "Obsidian Plugins", "Plugin-Testing-Vault", ".obsidian", "plugins"),
+	];
+
 	const windowsFirstCandidates = [
+		...projectRootCandidates,
 		"D:\\plugin-testing-vault\\.obsidian\\plugins",
 	];
 
 	const unixFirstCandidates = [
+		...projectRootCandidates,
 		"/mnt/d/plugin-testing-vault/.obsidian/plugins",
 	];
 
@@ -53,14 +67,14 @@ function getDefaultPluginsDirCandidates() {
 	return [...new Set(candidates)];
 }
 
-async function resolvePluginsDir(args) {
+async function resolvePluginsDir(args, repoRoot) {
 	const explicitPluginsDir = args.pluginsDir ?? process.env.OBSIDIAN_VAULT_PLUGINS_DIR ?? process.env.OBSIDIAN_PLUGINS_DIR;
 
 	if (typeof explicitPluginsDir === "string" && explicitPluginsDir.trim() !== "") {
 		return path.resolve(expandHomeDir(explicitPluginsDir));
 	}
 
-	const candidates = getDefaultPluginsDirCandidates().map((candidate) => path.resolve(candidate));
+	const candidates = getDefaultPluginsDirCandidates(repoRoot).map((candidate) => path.resolve(candidate));
 	for (const candidate of candidates) {
 		if (await pathExists(candidate)) {
 			return candidate;
@@ -72,9 +86,9 @@ async function resolvePluginsDir(args) {
 
 async function main() {
 	const args = parseArgs(process.argv.slice(2));
-	const pluginsDir = await resolvePluginsDir(args);
-
 	const repoRoot = process.cwd();
+	const pluginsDir = await resolvePluginsDir(args, repoRoot);
+
 	const buildDir = path.join(repoRoot, "build");
 	const manifestPath = path.join(repoRoot, "manifest.json");
 

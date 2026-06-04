@@ -40,36 +40,36 @@ import {
 import { PresetSelectionModal } from "./PresetSelectionModal";
 
 export default class ImageConverterPlugin extends Plugin {
-    settings: ImageConverterSettings;
+    settings!: ImageConverterSettings;
 
     // Check supported image formats
-    supportedImageFormats: SupportedImageFormats;
+    supportedImageFormats!: SupportedImageFormats;
     // Handle image management
-    folderAndFilenameManagement: FolderAndFilenameManagement;
+    folderAndFilenameManagement!: FolderAndFilenameManagement;
     // Handle image processing
-    imageProcessor: ImageProcessor;
+    imageProcessor!: ImageProcessor;
     // Handle variable processing
-    variableProcessor: VariableProcessor;
+    variableProcessor!: VariableProcessor;
     // linkFormatSettings: LinkFormatSettings;     // Link format - it is initialised via ImageConverterSettings
     // Link formatter
-    linkFormatter: LinkFormatter;
+    linkFormatter!: LinkFormatter;
     // Context menu
-    contextMenu: ContextMenu;
+    contextMenu: ContextMenu | null = null;
     // Alignment
     // imageAlignment: ImageAlignment | null = null;
     ImageAlignmentManager: ImageAlignmentManager | null = null;
     // drag-resize
     imageResizer: ImageResizer | null = null;
     // batch processing
-    batchImageProcessor: BatchImageProcessor;
+    batchImageProcessor!: BatchImageProcessor;
     // Single Image Modal
-    processSingleImageModal: ProcessSingleImageModal;
+    processSingleImageModal?: ProcessSingleImageModal;
     // Process whole fodler
-    processFolderModal: ProcessFolderModal;
+    processFolderModal?: ProcessFolderModal;
     // Processcurrent note/canvas
-    processCurrentNote: ProcessCurrentNote;
+    processCurrentNote?: ProcessCurrentNote;
     // ProcessAllVault
-    processAllVaultModal: ProcessAllVaultModal
+    processAllVaultModal?: ProcessAllVaultModal;
     // captions
     captionManager?: ImageCaptionManager;
     
@@ -80,6 +80,59 @@ export default class ImageConverterPlugin extends Plugin {
         document.body.classList.toggle(
             'image-converter-disable-native-image-selection',
             this.settings.disableObsidianImageSelectionOnClick
+        );
+    }
+
+    private attachImageResizerToMarkdownView(markdownView: MarkdownView, refreshLayout = false) {
+        if (!this.settings.isImageResizeEnbaled || !this.imageResizer) return;
+
+        if (refreshLayout) {
+            this.imageResizer.onLayoutChange(markdownView);
+            return;
+        }
+
+        this.imageResizer.onActiveViewChange(markdownView);
+    }
+
+    private attachImageResizerToActiveView(refreshLayout = false) {
+        if (!this.settings.isImageResizeEnbaled || !this.imageResizer) return;
+
+        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (activeView) {
+            this.attachImageResizerToMarkdownView(activeView, refreshLayout);
+            return;
+        }
+
+        this.imageResizer.detachView();
+    }
+
+    private registerImageResizerWorkspaceEvents() {
+        if (!this.settings.isImageResizeEnbaled) return;
+
+        this.registerEvent(
+            this.app.workspace.on('file-open', (file) => {
+                if (!file) {
+                    this.imageResizer?.detachView();
+                    return;
+                }
+
+                this.attachImageResizerToActiveView();
+            })
+        );
+
+        this.registerEvent(
+            this.app.workspace.on('active-leaf-change', (leaf: { view?: unknown } | null) => {
+                const markdownView = leaf?.view instanceof MarkdownView
+                    ? leaf.view
+                    : this.app.workspace.getActiveViewOfType(MarkdownView);
+
+                if (markdownView) {
+                    this.attachImageResizerToMarkdownView(markdownView);
+                    return;
+                }
+
+                this.imageResizer?.detachView();
+            })
         );
     }
 
@@ -125,27 +178,6 @@ export default class ImageConverterPlugin extends Plugin {
             );
         }
 
-        // // REDUNDANT - Below already initializes on layout change and for applying alignemnt "file-open" is much better option as it fires much less often
-        // // NOTE: For alignment to be set this must be outside `this.app.workspace.onLayoutReady(() => {`
-        // // Initialize DRAG/SCROLL rESIZING and apply alignments- when opening into the note or swithing notes 
-        // this.registerEvent(
-        //     this.app.workspace.on('active-leaf-change', (leaf) => {
-        //         console.count("active-leaf-change triggered")
-        //         // const markdownView = leaf?.view instanceof MarkdownView ? leaf.view : null;
-        //         // if (markdownView && this.imageResizer && this.settings.isImageResizeEnbaled) {
-        //         //     this.imageResizer.onload(markdownView);
-        //         // }
-        //         // // Delay the execution slightly to ensure the new window's DOM is ready
-        //         // setTimeout(() => {
-        //         //     this.ImageAlignmentManager!.setupImageObserver();
-        //         // }, 500);
-        //         const currentFile = this.app.workspace.getActiveFile();
-        //         if (currentFile) {
-        //             // console.log("current file path:", currentFile.path)
-        //             void this.ImageAlignmentManager!.applyAlignmentsToNote(currentFile.path);
-        //         }
-        //     })
-        // );
 
 
         // Wait for layout to be ready before initializing view-dependent components
@@ -155,6 +187,8 @@ export default class ImageConverterPlugin extends Plugin {
                 //eslint-disable-next-line
                 new Notice('Image Converter: Failed to initialize. Check console for details.');
             });
+
+            this.registerImageResizerWorkspaceEvents();
 
             // Apply Image Alignment and Resizing when switching Live to Reading mode etc.
             if (this.settings.isImageAlignmentEnabled || this.settings.isImageResizeEnbaled) {
@@ -172,10 +206,7 @@ export default class ImageConverterPlugin extends Plugin {
                         }
 
                         if (this.settings.isImageResizeEnbaled) {
-                            const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-                            if (activeView) {
-                                this.imageResizer?.onLayoutChange(activeView);
-                            }
+                            this.attachImageResizerToActiveView(true);
                         }
 
                         if (this.settings.enableImageCaptions) {
@@ -211,10 +242,7 @@ export default class ImageConverterPlugin extends Plugin {
         if (this.settings.isImageResizeEnbaled) {
             this.imageResizer = new ImageResizer(this);
             this.addChild(this.imageResizer);
-            const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-            if (activeView) {
-                this.imageResizer.attachView(activeView);
-            }
+            this.attachImageResizerToActiveView();
         }
 
         // Initialize components that depend on others
@@ -324,8 +352,8 @@ export default class ImageConverterPlugin extends Plugin {
             this.ImageAlignmentManager = null;
         }
 
-        // Clean up resizer reference (it will be unloaded automatically as a child)
         if (this.imageResizer) {
+            this.imageResizer.detachView();
             this.imageResizer = null;
         }
 

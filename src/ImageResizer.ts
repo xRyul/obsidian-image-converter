@@ -117,15 +117,32 @@ export class ImageResizer extends Component {
 
     }
 
+    private unloadViewScope() {
+        if (!this.viewScope) return;
+
+        this.removeChild(this.viewScope);
+        this.viewScope = null;
+    }
+
+    detachView(forceCleanup = true) {
+        this.cleanupHandles(forceCleanup);
+        this.unloadViewScope();
+
+        this.editor = null;
+        this.markdownView = null;
+        this.cachedEditorMaxWidth = null;
+    }
+
     attachView(markdownView: MarkdownView) { // Accept MarkdownView
+        if (this.markdownView === markdownView && this.viewScope) {
+            this.editor = markdownView.editor;
+            return;
+        }
+
+        this.detachView();
+
         this.markdownView = markdownView;
         this.editor = markdownView.editor;
-
-        // Reset old scope (if any) to avoid duplicate listeners across layout changes
-        if (this.viewScope) {
-            this.viewScope.unload();
-            this.viewScope = null;
-        }
 
         // Only register events if master switch is enabled
         if (this.plugin.settings.isImageResizeEnbaled) {
@@ -143,11 +160,6 @@ export class ImageResizer extends Component {
             this.rafId = null;
         }
 
-        // Reset event scope reference; child will be unloaded by super.onunload()
-        if (this.viewScope) {
-            this.viewScope = null;
-        }
-
         if (this.scrollTimeout) {
             clearTimeout(this.scrollTimeout);
             this.scrollTimeout = null;
@@ -163,8 +175,7 @@ export class ImageResizer extends Component {
         }
         this.resizeRetryTimers = {};
 
-        // Clean up DOM elements
-        this.cleanupHandles();
+        this.detachView();
 
         // Reset state
         this.resizeState = {
@@ -173,22 +184,20 @@ export class ImageResizer extends Component {
             isScrolling: false
         };
 
-        // Clear cached editor width
-        this.cachedEditorMaxWidth = null;
-
         // Clear references
         this.activeImage = null;
         this.lastMouseEvent = null;
         this.currentHandle = null;
         this.handles = [];
 
-        // this.removeEditorEvents();
-
-        this.editor = null;
-        this.markdownView = null;
-
         // Ensure base class cleanup (children, etc.)
         super.onunload();
+    }
+
+    onActiveViewChange(markdownView: MarkdownView) {
+        // Clear cached editor width when the active Markdown view changes.
+        this.cachedEditorMaxWidth = null;
+        this.attachView(markdownView);
     }
 
     onLayoutChange(markdownView: MarkdownView) {
@@ -198,9 +207,6 @@ export class ImageResizer extends Component {
         // Handle layout changes (e.g., reposition handles)
         this.cleanupHandles();
         this.attachView(markdownView);
-        if (this.lastMouseEvent) {
-            this.handleImageHover(this.lastMouseEvent);
-        }
     }
 
     /**
@@ -463,8 +469,8 @@ export class ImageResizer extends Component {
      * Cleans up any existing resize handles or borders applied to the active image.
      * Resets the cursor and clears the active image and last mouse event references.
      */
-    private cleanupHandles() {
-        if (this.resizeState.isResizing || !this.activeImage) return;
+    private cleanupHandles(force = false) {
+        if ((this.resizeState.isResizing && !force) || !this.activeImage) return;
 
         const handleContainer = this.activeImage.matchParent(
             ".image-resize-container"
