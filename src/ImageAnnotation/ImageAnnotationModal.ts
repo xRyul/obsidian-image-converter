@@ -619,8 +619,9 @@ export class ImageAnnotationModal extends Modal {
         });
 
         // Keyboard handlers
-        this.componentContainer.registerDomEvent(document, 'keydown', this.boundKeyDownHandler);
-        this.componentContainer.registerDomEvent(document, 'keyup', this.boundKeyUpHandler);
+        const modalDocument = this.modalEl.doc ?? this.modalEl.ownerDocument;
+        this.componentContainer.registerDomEvent(modalDocument, 'keydown', this.boundKeyDownHandler);
+        this.componentContainer.registerDomEvent(modalDocument, 'keyup', this.boundKeyUpHandler);
 
         // Periodic state check
         const textEditingInterval = window.setInterval(() => {

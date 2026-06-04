@@ -5,7 +5,8 @@ export function addInfoIcon(setting: Setting, tooltip?: string): void {
         return;
     }
 
-    const iconEl = document.createElement("span");
+    const settingDocument = setting.nameEl.doc ?? setting.nameEl.ownerDocument;
+    const iconEl = settingDocument.createElement("span");
     iconEl.className = "image-converter-setting-info-icon";
 
     if (tooltip) {
@@ -19,6 +20,6 @@ export function addInfoIcon(setting: Setting, tooltip?: string): void {
     }
 
     setIcon(iconEl, "info");
-    setting.nameEl.appendChild(document.createTextNode(" "));
+    setting.nameEl.appendChild(settingDocument.createTextNode(" "));
     setting.nameEl.appendChild(iconEl);
 }
