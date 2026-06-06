@@ -7,7 +7,7 @@
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit && node esbuild.config.mjs production",
 		"build:copy": "npm run build && node scripts/copy-to-testing-vault.mjs",
-		"lint": "eslint src/**/*.ts",
+		"lint": "eslint \"src/**/*.ts\" --max-warnings=0",
 		"lint:fix": "eslint src/**/*.ts --fix",
 		"pre-release": "node scripts/prepare-release.js",
 		"test": "vitest run",
