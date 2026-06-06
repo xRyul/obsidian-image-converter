@@ -26,13 +26,24 @@ export interface ImageAlignmentCache {
 	};
 }
 
+type MarkdownViewLike = {
+	file?: TFile | null;
+	containerEl?: HTMLElement;
+	getState?: () => { file?: string } | null;
+};
+
+type WorkspaceLeafLike = {
+	view?: MarkdownViewLike | null;
+	getViewState?: () => { state?: { file?: string } } | null;
+};
+
 export class ImageAlignmentManager {
 	private imageAlignment: ImageAlignment; // Instance of the new class
 
 	// BE cautions of using DOT files. Obsidian Sync will not sync dot files.
 	// private readonly CACHE_FILE = '.obsidian/image-converter-image-alignments.json';
 	private pluginDir: string;
-	private cacheFilePath: string;
+	private cacheFilePath = "";
 
 	cache: ImageAlignmentCache = {};
 	private imageObserver: MutationObserver | null = null;
@@ -570,6 +581,56 @@ export class ImageAlignmentManager {
 		return src;
 	}
 
+	private getLeafNotePath(leaf: WorkspaceLeafLike): string | null {
+		const viewFilePath = leaf.view?.file?.path;
+		if (viewFilePath) return viewFilePath;
+
+		const viewStateFile = leaf.view?.getState?.()?.file;
+		if (viewStateFile) return viewStateFile;
+
+		return leaf.getViewState?.()?.state?.file ?? null;
+	}
+
+	private getImageRootsForNote(notePath: string): HTMLElement[] {
+		const roots: HTMLElement[] = [];
+		const seen = new Set<HTMLElement>();
+		const addRoot = (root: HTMLElement | null | undefined) => {
+			if (root && !seen.has(root)) {
+				seen.add(root);
+				roots.push(root);
+			}
+		};
+
+		this.app.workspace.iterateAllLeaves?.((leaf) => {
+			const leafLike = leaf as unknown as WorkspaceLeafLike;
+			if (this.getLeafNotePath(leafLike) === notePath) {
+				addRoot(leafLike.view?.containerEl);
+			}
+		});
+
+		return roots;
+	}
+
+	private getImagesForNote(notePath: string): HTMLImageElement[] {
+		const roots = this.getImageRootsForNote(notePath);
+		if (roots.length === 0) {
+			return Array.from(activeDocument.querySelectorAll("img"));
+		}
+
+		const images: HTMLImageElement[] = [];
+		const seen = new Set<HTMLImageElement>();
+		for (const root of roots) {
+			for (const img of Array.from(root.querySelectorAll("img"))) {
+				if (!seen.has(img)) {
+					seen.add(img);
+					images.push(img);
+				}
+			}
+		}
+
+		return images;
+	}
+
 	public async applyAlignmentsToNote(notePath: string) {
 		try {
 			// console.log("applyAlignmentsToNote")
@@ -580,7 +641,7 @@ export class ImageAlignmentManager {
 					this.plugin.settings.isImageAlignmentEnabled &&
 					defaultAlignment !== "none";
 
-				const images = Array.from(document.querySelectorAll("img"));
+				const images = this.getImagesForNote(notePath);
 				// console.log(`Found ${images.length} content images`);
 
 				for (const img of images) {
@@ -838,10 +899,11 @@ export class ImageAlignmentManager {
 		// Disconnect the MutationObserver
 		this.cleanupObserver();
 
-		// Unregister all events
-		this.eventRefs.forEach((eventRef) =>
-			this.app.workspace.offref(eventRef)
-		);
+		// Unregister all events from the emitter they were registered on.
+		// These refs come from app.vault.on(...); using workspace.offref(ref) is a no-op for vault refs.
+		this.eventRefs.forEach((eventRef) => {
+			this.app.vault.offref(eventRef);
+		});
 		this.eventRefs = [];
 
 		// Clear interval

@@ -681,6 +681,137 @@ describe('ImageAlignmentManager (integration-lite) — 12.x behaviors', () => {
     });
   });
 
+  describe('ImageAlignmentManager lifecycle and popout regressions', () => {
+    it('applies alignments in activeDocument without mutating the inactive main document', async () => {
+      const notePath = 'Notes/n1.md';
+      const src = 'imgs/popout.png';
+      document.body.innerHTML = '';
+      const mainImage = document.createElement('img');
+      mainImage.setAttribute('src', src);
+      document.body.appendChild(mainImage);
+
+      const popoutDocument = document.implementation.createHTMLDocument('popout');
+      const popoutImage = popoutDocument.createElement('img');
+      popoutImage.setAttribute('src', src);
+      popoutDocument.body.appendChild(popoutImage);
+
+      const previousActiveDocument = (globalThis as any).activeDocument;
+      const previousActiveWindow = (globalThis as any).activeWindow;
+      (globalThis as any).activeDocument = popoutDocument;
+      (globalThis as any).activeWindow = popoutDocument.defaultView ?? window;
+      (window as any).activeDocument = popoutDocument;
+      (window as any).activeWindow = popoutDocument.defaultView ?? window;
+
+      try {
+        await manager.saveImageAlignmentToCache(notePath, src, 'center', '120px', '', false);
+        await manager.applyAlignmentsToNote(notePath);
+
+        expect(popoutImage.classList.contains('image-position-center')).toBe(true);
+        expect(popoutImage.classList.contains('image-converter-aligned')).toBe(true);
+        expect(mainImage.classList.contains('image-position-center')).toBe(false);
+        expect(mainImage.classList.contains('image-converter-aligned')).toBe(false);
+      } finally {
+        (globalThis as any).activeDocument = previousActiveDocument;
+        (globalThis as any).activeWindow = previousActiveWindow;
+        (window as any).activeDocument = previousActiveDocument;
+        (window as any).activeWindow = previousActiveWindow;
+      }
+    });
+
+    it('does not mutate another open note in the same active document when images share a src', async () => {
+      const targetNotePath = 'Notes/target.md';
+      const otherNotePath = 'Notes/other.md';
+      const sharedSrc = 'imgs/shared.png';
+      document.body.innerHTML = '';
+
+      const createLeaf = (notePath: string) => {
+        const containerEl = document.createElement('div');
+        containerEl.className = 'workspace-leaf-content';
+        const previewEl = document.createElement('div');
+        previewEl.className = 'markdown-reading-view markdown-preview-view';
+        const embed = document.createElement('span');
+        embed.className = 'internal-embed image-embed';
+        const img = document.createElement('img');
+        img.setAttribute('src', sharedSrc);
+        embed.appendChild(img);
+        previewEl.appendChild(embed);
+        containerEl.appendChild(previewEl);
+        document.body.appendChild(containerEl);
+
+        return {
+          img,
+          embed,
+          leaf: {
+            view: {
+              file: fakeTFile({ path: notePath, name: notePath.split('/').pop(), extension: 'md' }),
+              containerEl,
+              getState: () => ({ file: notePath }),
+            },
+            getViewState: () => ({ type: 'markdown', state: { file: notePath } }),
+          },
+        };
+      };
+
+      const target = createLeaf(targetNotePath);
+      const other = createLeaf(otherNotePath);
+      (app.workspace.iterateAllLeaves as any) = vi.fn((callback: (leaf: any) => void) => {
+        callback(target.leaf);
+        callback(other.leaf);
+      });
+
+      await manager.saveImageAlignmentToCache(targetNotePath, sharedSrc, 'right', '120px', '', true);
+      await manager.applyAlignmentsToNote(targetNotePath);
+
+      expect(target.img.classList.contains('image-position-right')).toBe(true);
+      expect(target.img.classList.contains('image-wrap')).toBe(true);
+      expect(target.img.classList.contains('image-converter-aligned')).toBe(true);
+
+      expect(other.img.classList.contains('image-position-right')).toBe(false);
+      expect(other.img.classList.contains('image-wrap')).toBe(false);
+      expect(other.img.classList.contains('image-converter-aligned')).toBe(false);
+      expect(other.embed.classList.contains('image-position-right')).toBe(false);
+      expect(other.embed.classList.contains('image-wrap')).toBe(false);
+    });
+
+    it('unregisters ImageAlignmentManager vault EventRefs from the vault on unload', async () => {
+      const note = fakeTFile({ path: 'Notes/n1.md', name: 'n1.md', extension: 'md' });
+      const vault = fakeVault({ files: [note] }) as any;
+      const vaultEventRefs: any[] = [];
+      vault.on = vi.fn((eventName: string, callback: (...args: any[]) => void) => {
+        const eventRef = { eventName, callback };
+        vaultEventRefs.push(eventRef);
+        return eventRef;
+      });
+      vault.offref = vi.fn();
+
+      const testApp = fakeApp({ vault });
+      (testApp.workspace as any).offref = vi.fn();
+
+      const testPlugin = new ImageConverterPlugin(testApp as any, { id: 'image-converter', dir: '/plugins/image-converter' } as any);
+      testPlugin.manifest = { id: 'image-converter', dir: '/plugins/image-converter' } as any;
+      testPlugin.settings = {
+        isImageAlignmentEnabled: true,
+        imageAlignmentDefaultAlignment: 'none',
+        imageAlignmentCacheLocation: 'plugin',
+        imageAlignmentCacheCleanupInterval: 0,
+      } as any;
+
+      const testSupported = new SupportedImageFormats(testApp as any);
+      const testManager = new ImageAlignmentManager(testApp as any, testPlugin, testSupported);
+
+      await testManager.initialize();
+      expect(vaultEventRefs.map((eventRef) => eventRef.eventName)).toEqual(['delete', 'rename']);
+
+      testManager.onunload();
+
+      expect(vault.offref).toHaveBeenCalledTimes(2);
+      expect(vault.offref).toHaveBeenNthCalledWith(1, vaultEventRefs[0]);
+      expect(vault.offref).toHaveBeenNthCalledWith(2, vaultEventRefs[1]);
+      expect((testApp.workspace as any).offref).not.toHaveBeenCalled();
+      expect((testManager as any).eventRefs).toEqual([]);
+    });
+  });
+
   // ========== 12.25-12.28 Rapid alignment changes and race condition tests ==========
   describe('12.25-12.28 Rapid alignment changes', () => {
     it('12.25 rapid toggle-off: getCurrentImageAlignment returns none immediately after toggle-off', async () => {

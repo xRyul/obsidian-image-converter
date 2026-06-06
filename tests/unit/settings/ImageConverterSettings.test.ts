@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/await-thenable, obsidianmd/hardcoded-config-path */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import ImageConverterPlugin from '../../../src/main';
-import { ImageConverterSettingTab, DEFAULT_SETTINGS, type ConversionPreset, type FilenamePreset } from '../../../src/ImageConverterSettings';
+import { AvailableVariablesModal, ImageConverterSettingTab, DEFAULT_SETTINGS, type ConversionPreset, type FilenamePreset } from '../../../src/ImageConverterSettings';
 import type { LinkFormatPreset } from '../../../src/LinkFormatSettings';
 import { App, Platform } from 'obsidian';
 import { crossPlatformPathPattern } from '../../helpers/test-setup';
@@ -54,6 +54,133 @@ function changeSelect(sel: HTMLSelectElement, value: string) {
   sel.dispatchEvent(new Event('change'));
 }
 
+
+function makeVariableProcessor(variables: Record<string, Array<{ name: string; description: string; example: string }>>) {
+  return {
+    getCategorizedVariables: vi.fn(() => variables)
+  };
+}
+
+function countTrackedListeners(
+  trackedListeners: Map<EventTarget, Map<string, Set<EventListenerOrEventListenerObject>>>,
+  predicate: (target: EventTarget, type: string) => boolean = () => true
+) {
+  let count = 0;
+  for (const [target, listenersByType] of trackedListeners.entries()) {
+    for (const [type, listeners] of listenersByType.entries()) {
+      if (predicate(target, type)) {
+        count += listeners.size;
+      }
+    }
+  }
+  return count;
+}
+
+// -----------------------------
+// Available variables modal runtime safety
+// -----------------------------
+
+describe('AvailableVariablesModal runtime safety', () => {
+  it('renders variable text as text instead of interpreting HTML markup', () => {
+    const app = makeAppWithStorage();
+    const modal = new AvailableVariablesModal(app, makeVariableProcessor({
+      Unsafe: [
+        {
+          name: '<img class="p95-injected-name" src="x" onerror="window.__p95Injected = true">',
+          description: 'Description with <svg class="p95-injected-description"></svg> markup',
+          example: '<a class="p95-injected-example" href="javascript:void(0)">bad link</a>',
+        }
+      ]
+    }) as any);
+
+    modal.onOpen();
+
+    expect(modal.contentEl.querySelector('.p95-injected-name,.p95-injected-description,.p95-injected-example')).toBeNull();
+    expect(modal.contentEl.textContent).toContain('<img class="p95-injected-name"');
+    expect(modal.contentEl.textContent).toContain('<svg class="p95-injected-description"></svg>');
+    expect(modal.contentEl.textContent).toContain('<a class="p95-injected-example"');
+  });
+
+  it('removes search/click listeners and copy feedback timers on close', async () => {
+    vi.useFakeTimers();
+    const trackedListeners = new Map<EventTarget, Map<string, Set<EventListenerOrEventListenerObject>>>();
+    const originalAddEventListener = EventTarget.prototype.addEventListener;
+    const originalRemoveEventListener = EventTarget.prototype.removeEventListener;
+    const originalClipboard = navigator.clipboard;
+
+    EventTarget.prototype.addEventListener = function addTrackedListener(type, listener, options) {
+      if (this instanceof HTMLElement && (this.matches('.variable-search-input') || this.matches('.variable-name'))) {
+        let listenersByType = trackedListeners.get(this);
+        if (!listenersByType) {
+          listenersByType = new Map();
+          trackedListeners.set(this, listenersByType);
+        }
+        let listeners = listenersByType.get(type);
+        if (!listeners) {
+          listeners = new Set();
+          listenersByType.set(type, listeners);
+        }
+        listeners.add(listener);
+      }
+      return originalAddEventListener.call(this, type, listener, options);
+    };
+
+    EventTarget.prototype.removeEventListener = function removeTrackedListener(type, listener, options) {
+      const listenersByType = trackedListeners.get(this);
+      const listeners = listenersByType?.get(type);
+      listeners?.delete(listener);
+      if (listeners?.size === 0) {
+        listenersByType?.delete(type);
+      }
+      return originalRemoveEventListener.call(this, type, listener, options);
+    };
+
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+
+    try {
+      const app = makeAppWithStorage();
+      const modal = new AvailableVariablesModal(app, makeVariableProcessor({
+        Basic: [
+          { name: '{alpha}', description: 'Alpha variable', example: 'alpha-output' },
+          { name: '{beta}', description: 'Beta variable', example: 'beta-output' },
+        ]
+      }) as any);
+
+      modal.onOpen();
+      const searchInput = modal.contentEl.querySelector('.variable-search-input') as HTMLInputElement;
+      searchInput.value = 'alpha';
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      searchInput.value = '';
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+      expect(countTrackedListeners(trackedListeners, (target, type) => (
+        type === 'click' && target instanceof HTMLElement && target.classList.contains('variable-name') && !target.isConnected
+      ))).toBe(0);
+
+      const firstNameCell = modal.contentEl.querySelector('.variable-name') as HTMLElement;
+      firstNameCell.click();
+      await Promise.resolve();
+
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      modal.onClose();
+
+      expect(countTrackedListeners(trackedListeners)).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      EventTarget.prototype.addEventListener = originalAddEventListener;
+      EventTarget.prototype.removeEventListener = originalRemoveEventListener;
+      if (originalClipboard === undefined) {
+        delete (navigator as Partial<Navigator>).clipboard;
+      } else {
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard });
+      }
+      vi.useRealTimers();
+    }
+  });
+});
 // -----------------------------
 // 11.1–11.2 Defaults and persistence
 // -----------------------------

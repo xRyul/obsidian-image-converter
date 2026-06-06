@@ -474,7 +474,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
     activeTab: "folder" | "filename" | "conversion" | "linkformat" | "resize" = "folder";
     presetUIState: PresetUIState;
     editingPresetKey: string | null = null;
-    formContainer: HTMLElement;
+    formContainer!: HTMLElement;
 
     constructor(app: App, private plugin: ImageConverterPlugin) {
         super(app, plugin);
@@ -1058,8 +1058,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
             new Setting(imageDragResizeSection)
                 .setName("Disable Obsidian image selection on click")
-                .then((setting) => addInfoIcon(setting, "Keep focus in the editor when clicking an internal image in live preview instead of showing Obsidian's default outline/resize corner. Cursor placement follows the drop/paste cursor position setting."))
-                .setDesc("Keep focus in the editor when clicking an internal image in live preview instead of showing Obsidian's default outline/resize corner. Cursor placement follows the drop/paste cursor position setting.")
+                .then((setting) => addInfoIcon(setting, "Keep focus in the editor when clicking an internal image in live preview instead of showing Obsidian's default outline/resize corner. Cursor placement follows the drop/paste Cursor position setting."))
+                .setDesc("Keep focus in the editor when clicking an internal image in live preview instead of showing Obsidian's default outline/resize corner. Cursor placement follows the drop/paste Cursor position setting.")
                 .addToggle((toggle) =>
                     toggle
                         .setValue(this.plugin.settings.disableObsidianImageSelectionOnClick)
@@ -1072,14 +1072,13 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             // New Setting: Resize Cursor Location
             new Setting(imageDragResizeSection)
                 .setName("Cursor position during resize")
-                // eslint-disable-next-line obsidianmd/ui/sentence-case -- Intentional messaging style
                 .then((setting) => addInfoIcon(setting, "Where to place the cursor when resizing an image. Note: 'don't move cursor' - will try to keep your exisiting cursor in place but if you DRAG-RESIZE and cursor is still over the image when you finish resizing, it will get the text selected."))
                 .addDropdown((dropdown) => {
                     dropdown
                         .addOption("front", "At the front of the link")
                         .addOption("back", "At the back of the link")
-                        .addOption("below", "1 line below the image")
-                        .addOption("none", "Don't move cursor")
+                        .addOption("below", "1 Line below the image")
+                        .addOption("none", "Don't move Cursor")
                         .setValue(this.plugin.settings.resizeCursorLocation)
                         .onChange(async (value: "front" | "back" | "below" | "none") => {
                             this.plugin.settings.resizeCursorLocation = value;
@@ -1238,7 +1237,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
             new Setting(imageCaptionSection)
                 .setName("Color")
-                .setDesc("Choose a color for image captions e.g.: red, grey, white, black, hsl(50, 50%, 50%), rgb(50%, 75%, 100%) ")
+                .setDesc("Choose a color for image captions e.g.: Red, grey, white, black, hsl(50, 50%, 50%), rgb(50%, 75%, 100%) ")
                 .addText(text =>
                     text.setValue(this.plugin.settings.captionColor)
                         .onChange(async (value) => {
@@ -1265,7 +1264,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
             new Setting(imageCaptionSection)
                 .setName("Background color")
-                .setDesc("Choose a background color for image captions (e.g.: transparent, #f5f5f5, rgba(255,255,255,0.8))")
+                .setDesc("Choose a background color for image captions (e.g.: Transparent, #f5f5f5, rgba(255,255,255,0.8))")
                 .addText(text =>
                     text.setValue(this.plugin.settings.captionBackgroundColor)
                         .onChange(async (value) => {
@@ -1500,7 +1499,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         }
 
         // Append the form container after the cards if it's a valid Node
-        if (this.formContainer instanceof Node) {
+        if (this.formContainer?.instanceOf(Node)) {
             tabContentWrapper.appendChild(this.formContainer);
         }
 
@@ -2291,15 +2290,16 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         // Insert AVIF settings after Output Format
         if (preset.outputFormat === "AVIF") {
             let textComponent: TextComponent | undefined;
+            const settingsDocument = containerEl.ownerDocument;
 
             const buildEncoderDesc = (prefix: string, encoderLabel: string, suffix: string): DocumentFragment => {
-                const fragment = document.createDocumentFragment();
-                const prefixSpan = document.createElement("span");
+                const fragment = settingsDocument.createDocumentFragment();
+                const prefixSpan = settingsDocument.createElement("span");
                 prefixSpan.textContent = prefix;
-                const encoderSpan = document.createElement("span");
+                const encoderSpan = settingsDocument.createElement("span");
                 encoderSpan.textContent = encoderLabel;
                 encoderSpan.className = "image-converter-encoder-highlight";
-                const suffixSpan = document.createElement("span");
+                const suffixSpan = settingsDocument.createElement("span");
                 suffixSpan.textContent = suffix;
                 fragment.append(prefixSpan, encoderSpan, suffixSpan);
                 return fragment;
@@ -2327,7 +2327,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                     dropdown.innerHTML = '';
                     const defaultPresets = ['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow', 'placebo'];
                     defaultPresets.forEach(presetName => {
-                        const option = document.createElement('option');
+                        const option = dropdown.ownerDocument.createElement('option');
                         option.value = presetName;
                         option.text = presetName;
                         dropdown.appendChild(option);
@@ -2473,7 +2473,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                                             
                                             // Add encoder-specific presets
                                             encoderInfo.presetNames.forEach(presetName => {
-                                                const option = document.createElement('option');
+                                                const option = dropdown.ownerDocument.createElement('option');
                                                 option.value = presetName;
                                                 option.text = presetName;
                                                 dropdown.appendChild(option);
@@ -2511,7 +2511,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                                             if (dropdown) {
                                                 dropdown.innerHTML = '';
                                                 cachedInfo.presetNames.forEach(presetName => {
-                                                    const option = document.createElement('option');
+                                                    const option = dropdown.ownerDocument.createElement('option');
                                                     option.value = presetName;
                                                     option.text = presetName;
                                                     dropdown.appendChild(option);
@@ -2640,7 +2640,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         if (dropdown) {
                             dropdown.innerHTML = '';
                             encoderInfo.presetNames.forEach(presetName => {
-                                const option = document.createElement('option');
+                                const option = dropdown.ownerDocument.createElement('option');
                                 option.value = presetName;
                                 option.text = presetName;
                                 dropdown.appendChild(option);
@@ -2936,42 +2936,70 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             }
         };
 
-        const formats = [
-            ["Shortest",
-                `Uses just the file name without any path:
-             <ul>
-                 <li><b>Wikilink</b>: ![[image.jpg]]</li>
-                 <li><b>Markdown</b>: ![](image.jpg)</li>
-             </ul>`,
-                buildExample("shortest")],
-
-            ["Relative",
-                `Uses the path relative to the current note:
-             <ul>
-                 <li>Same folder: starts with <code>./</code> (e.g., <code>./image.jpg</code>)</li>
-                 <li>Parent folder: starts with <code>../</code> (e.g., <code>../image.jpg</code>)</li>
-                 <li>Subfolder: includes folder path (e.g., <code>./subfolder/image.jpg</code>)</li>
-             </ul>`,
-                buildExample("relative")],
-
-            ["Absolute",
-                `Uses the complete path from your vault root, always starting with <code>/</code>. 
-             This ensures the link works from any note in your vault, regardless of its location.`,
-                buildExample("absolute")]
+        const formats: Array<{ label: string; format: PathFormat; example: string }> = [
+            { label: "Shortest", format: "shortest", example: buildExample("shortest") },
+            { label: "Relative", format: "relative", example: buildExample("relative") },
+            { label: "Absolute", format: "absolute", example: buildExample("absolute") }
         ];
 
-        formats.forEach(([format, description, example]) => {
+        const appendCode = (parent: HTMLElement, text: string) => {
+            parent.createEl("code", { text });
+        };
+
+        const appendFormatDescription = (parent: HTMLElement, format: PathFormat) => {
+            if (format === "shortest") {
+                parent.append("Uses just the file name without any path:");
+                const list = parent.createEl("ul");
+                const wikilinkItem = list.createEl("li");
+                wikilinkItem.createEl("b", { text: "Wikilink" });
+                wikilinkItem.append(": ![[image.jpg]]");
+                const markdownItem = list.createEl("li");
+                markdownItem.createEl("b", { text: "Markdown" });
+                markdownItem.append(": ![](image.jpg)");
+                return;
+            }
+
+            if (format === "relative") {
+                parent.append("Uses the path relative to the current note:");
+                const list = parent.createEl("ul");
+
+                const sameFolderItem = list.createEl("li");
+                sameFolderItem.append("Same folder: starts with ");
+                appendCode(sameFolderItem, "./");
+                sameFolderItem.append(" (e.g., ");
+                appendCode(sameFolderItem, "./image.jpg");
+                sameFolderItem.append(")");
+
+                const parentFolderItem = list.createEl("li");
+                parentFolderItem.append("Parent folder: starts with ");
+                appendCode(parentFolderItem, "../");
+                parentFolderItem.append(" (e.g., ");
+                appendCode(parentFolderItem, "../image.jpg");
+                parentFolderItem.append(")");
+
+                const subfolderItem = list.createEl("li");
+                subfolderItem.append("Subfolder: includes folder path (e.g., ");
+                appendCode(subfolderItem, "./subfolder/image.jpg");
+                subfolderItem.append(")");
+                return;
+            }
+
+            parent.append("Uses the complete path from your vault root, always starting with ");
+            appendCode(parent, "/");
+            parent.append(". This ensures the link works from any note in your vault, regardless of its location.");
+        };
+
+        formats.forEach(({ label, format, example }) => {
             const row = table.createEl("tr");
-            row.createEl("td", { cls: "image-converter-format-label", text: format });
-        // eslint-disable-next-line @microsoft/sdl/no-inner-html -- Safe: developer-controlled static HTML content
-            row.createEl("td", { cls: "image-converter-format-description" }).innerHTML = description;
+            row.createEl("td", { cls: "image-converter-format-label", text: label });
+            const descriptionCell = row.createEl("td", { cls: "image-converter-format-description" });
+            appendFormatDescription(descriptionCell, format);
             row.createEl("td", { cls: "image-converter-format-example", text: example });
         });
 
         // Practical example
         const scenario = content.createEl("div", { cls: "image-converter-format-scenario" });
         const paths = scenario.createEl("div", { cls: "image-converter-format-paths" });
-        // eslint-disable-next-line obsidianmd/ui/sentence-case -- Example label with emoji
         paths.createEl("div", { cls: "image-converter-path-label" }).setText("📄 Note location:");
         paths.createEl("div", { cls: "image-converter-path-value" }).setText("/Folder/Subfolder1/note.md");
         // eslint-disable-next-line obsidianmd/ui/sentence-case -- Example label with emoji
@@ -3114,7 +3142,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         containerEl.empty(); // Clear existing content
         this.cachedFirstMarkdownFile = undefined;
 
-        const fragment = document.createDocumentFragment();
+        const fragment = containerEl.ownerDocument.createDocumentFragment();
 
         const addLine = (text: string) => {
             fragment.createEl("p", { text });
@@ -3167,7 +3195,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         containerEl.empty(); // Clear existing content
         this.cachedFirstMarkdownFile = undefined;
 
-        const fragment = document.createDocumentFragment();
+        const fragment = containerEl.ownerDocument.createDocumentFragment();
 
         const addLine = (text: string) => {
             fragment.createEl("p", { text });
@@ -3207,7 +3235,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
     }
 
     getConversionPresetSummary(preset: ConversionPreset): DocumentFragment {
-        const fragment = document.createDocumentFragment();
+        const fragment = this.containerEl.ownerDocument.createDocumentFragment();
 
         const addLine = (text: string) => {
             fragment.createEl("p", { text });
@@ -3317,10 +3345,11 @@ export class ImageConverterSettingTab extends PluginSettingTab {
     }
 
     getResizePresetSummary(preset: NonDestructiveResizePreset): DocumentFragment {
-        const fragment = document.createDocumentFragment();
+        const summaryDocument = this.containerEl.ownerDocument;
+        const fragment = summaryDocument.createDocumentFragment();
 
         const addLine = (text: string) => {
-            const paragraphEl = document.createElement("p");
+            const paragraphEl = summaryDocument.createElement("p");
             paragraphEl.textContent = text;
             fragment.appendChild(paragraphEl);
         };
@@ -4023,12 +4052,13 @@ export class SaveGlobalPresetModal extends Modal {
             (presetItem) => presetItem.name === this.plugin.settings.nonDestructiveResizeSettings.selectedResizePreset
         );
 
+        const summaryDocument = summaryEl.ownerDocument;
         // Use DocumentFragment for efficient DOM updates
-        const fragment = document.createDocumentFragment();
+        const fragment = summaryDocument.createDocumentFragment();
 
         // Helper function to create a section title
         const createSectionTitle = (title: string) => {
-            const titleEl = document.createElement("div");
+            const titleEl = summaryDocument.createElement("div");
             titleEl.classList.add("summary-section-title");
             titleEl.textContent = title;
             return titleEl;
@@ -4036,7 +4066,7 @@ export class SaveGlobalPresetModal extends Modal {
 
         // Helper function to create a summary item
         const createSummaryItem = (label: string, value: string | undefined | number | boolean, boldValue = false) => {
-            const itemEl = document.createElement("div");
+            const itemEl = summaryDocument.createElement("div");
             itemEl.classList.add("summary-item");
             itemEl.createEl("span", { text: `${label}: `, cls: "summary-label" });
             itemEl.createEl("span", {
@@ -4049,7 +4079,7 @@ export class SaveGlobalPresetModal extends Modal {
         // Function to add a preset summary section
         const addPresetSummary = (presetType: string, preset: FolderPreset | FilenamePreset | ConversionPreset | LinkFormatPreset | NonDestructiveResizePreset | undefined) => {
             if (preset) {
-                const sectionEl = document.createElement("div");
+                const sectionEl = summaryDocument.createElement("div");
                 sectionEl.classList.add("summary-section");
                 sectionEl.appendChild(createSectionTitle(`${presetType} Preset: ${preset.name}`));
 
@@ -4181,13 +4211,42 @@ export class SaveGlobalPresetModal extends Modal {
 export class AvailableVariablesModal extends Modal {
     private variableProcessor: VariableProcessor;
     private modalClass = "image-converter-available-variables-modal";
-    private searchInput: HTMLInputElement;
-    private categorizedVariables: Record<string, { name: string; description: string; example: string }[]>;
-    private contentContainer: HTMLElement;
+    private searchInput!: HTMLInputElement;
+    private categorizedVariables!: Record<string, { name: string; description: string; example: string }[]>;
+    private contentContainer!: HTMLElement;
+    private eventDisposers: Array<() => void> = [];
+    private contentEventDisposers: Array<() => void> = [];
+    private feedbackTimeouts: number[] = [];
 
     constructor(app: App, variableProcessor: VariableProcessor) {
         super(app);
         this.variableProcessor = variableProcessor;
+    }
+
+    private registerModalDomEvent<K extends keyof HTMLElementEventMap>(
+        el: HTMLElement,
+        type: K,
+        handler: (event: HTMLElementEventMap[K]) => void
+    ): void {
+        el.addEventListener(type, handler as EventListener);
+        this.eventDisposers.push(() => el.removeEventListener(type, handler as EventListener));
+    }
+
+    private registerContentDomEvent<K extends keyof HTMLElementEventMap>(
+        el: HTMLElement,
+        type: K,
+        handler: (event: HTMLElementEventMap[K]) => void
+    ): void {
+        el.addEventListener(type, handler as EventListener);
+        this.contentEventDisposers.push(() => el.removeEventListener(type, handler as EventListener));
+    }
+
+    private setFeedbackTimeout(callback: () => void, delay: number): void {
+        const timeoutId = window.setTimeout(() => {
+            this.feedbackTimeouts = this.feedbackTimeouts.filter((id) => id !== timeoutId);
+            callback();
+        }, delay);
+        this.feedbackTimeouts.push(timeoutId);
     }
 
     onOpen() {
@@ -4221,7 +4280,7 @@ export class AvailableVariablesModal extends Modal {
         this.renderVariables();
 
         // Add search functionality
-        this.searchInput.addEventListener("input", () => {
+        this.registerModalDomEvent(this.searchInput, "input", () => {
             this.handleSearch();
         });
 
@@ -4230,6 +4289,7 @@ export class AvailableVariablesModal extends Modal {
     }
 
     private renderVariables(searchTerm = "") {
+        this.cleanupContentHandlers();
         this.contentContainer.empty();
 
         for (const [category, variables] of Object.entries(this.categorizedVariables)) {
@@ -4266,29 +4326,26 @@ export class AvailableVariablesModal extends Modal {
                     
                     // Highlight search term in the content
                     const nameCell = row.createEl("td", { cls: "variable-name" });
-                    // eslint-disable-next-line @microsoft/sdl/no-inner-html -- Safe: content from variableProcessor with escaped search term
-                    nameCell.innerHTML = this.highlightSearchTerm(variable.name, searchTerm);
-                    
+                    this.appendHighlightedText(nameCell, variable.name, searchTerm);
+
                     const descCell = row.createEl("td", { cls: "variable-description" });
-                    // eslint-disable-next-line @microsoft/sdl/no-inner-html -- Safe: content from variableProcessor with escaped search term
-                    descCell.innerHTML = this.highlightSearchTerm(variable.description, searchTerm);
+                    this.appendHighlightedText(descCell, variable.description, searchTerm);
                     const exampleCell = row.createEl("td", { cls: "variable-example" });
-                    // eslint-disable-next-line @microsoft/sdl/no-inner-html -- Safe: content from variableProcessor with escaped search term
-                    exampleCell.innerHTML = this.highlightSearchTerm(variable.example, searchTerm);
+                    this.appendHighlightedText(exampleCell, variable.example, searchTerm);
                     // Add click handler to copy variable name
-                    nameCell.addEventListener("click", () => {
+                    this.registerContentDomEvent(nameCell, "click", () => {
                         void (async () => {
                             try {
                                 await navigator.clipboard.writeText(variable.name);
-                                
+
                                 // Visual feedback - add CSS class for copy success
                                 nameCell.classList.add("variable-name-copied");
-                                
+
                                 // Show "Copied!" text temporarily
                                 const originalText = nameCell.textContent;
                                 nameCell.textContent = "Copied!";
-                                
-                                setTimeout(() => {
+
+                                this.setFeedbackTimeout(() => {
                                     nameCell.classList.remove("variable-name-copied");
                                     nameCell.textContent = originalText;
                                 }, 800);
@@ -4296,7 +4353,7 @@ export class AvailableVariablesModal extends Modal {
                                 console.error("Failed to copy to clipboard:", err);
                                 // Fallback visual indication for copy failure
                                 nameCell.classList.add("variable-name-copy-error");
-                                setTimeout(() => {
+                                this.setFeedbackTimeout(() => {
                                     nameCell.classList.remove("variable-name-copy-error");
                                 }, 500);
                             }
@@ -4316,11 +4373,32 @@ export class AvailableVariablesModal extends Modal {
         }
     }
 
-    private highlightSearchTerm(text: string, searchTerm: string): string {
-        if (!searchTerm) return text;
-        
-        const regex = new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-        return text.replace(regex, '<mark>$1</mark>');
+    private appendHighlightedText(target: HTMLElement, text: string, searchTerm: string): void {
+        target.empty();
+        if (!searchTerm) {
+            target.textContent = text;
+            return;
+        }
+
+        const searchLower = searchTerm.toLowerCase();
+        const textLower = text.toLowerCase();
+        let currentIndex = 0;
+        let matchIndex = textLower.indexOf(searchLower, currentIndex);
+
+        while (matchIndex !== -1) {
+            if (matchIndex > currentIndex) {
+                target.appendChild(target.ownerDocument.createTextNode(text.slice(currentIndex, matchIndex)));
+            }
+
+            const matchEndIndex = matchIndex + searchTerm.length;
+            target.createEl("mark", { text: text.slice(matchIndex, matchEndIndex) });
+            currentIndex = matchEndIndex;
+            matchIndex = textLower.indexOf(searchLower, currentIndex);
+        }
+
+        if (currentIndex < text.length) {
+            target.appendChild(target.ownerDocument.createTextNode(text.slice(currentIndex)));
+        }
     }
 
     private handleSearch() {
@@ -4328,7 +4406,21 @@ export class AvailableVariablesModal extends Modal {
         this.renderVariables(searchTerm);
     }
 
+    private cleanupContentHandlers(): void {
+        this.contentEventDisposers.forEach((dispose) => dispose());
+        this.contentEventDisposers = [];
+    }
+
+    private cleanupRegisteredHandlers(): void {
+        this.cleanupContentHandlers();
+        this.eventDisposers.forEach((dispose) => dispose());
+        this.eventDisposers = [];
+        this.feedbackTimeouts.forEach((timeoutId) => window.clearTimeout(timeoutId));
+        this.feedbackTimeouts = [];
+    }
+
     onClose() {
+        this.cleanupRegisteredHandlers();
         const { contentEl } = this;
         contentEl.empty();
         this.modalEl.removeClass(this.modalClass); // Remove class on close

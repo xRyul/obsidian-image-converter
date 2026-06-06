@@ -594,6 +594,72 @@ describe('ImageResizer lifecycle and wheel behaviors (13.15–13.16, 13.17–13.
     expect(spyMove).not.toHaveBeenCalled();
   });
 
+  it('13.16a registers drag listeners on the Markdown view ownerDocument for popout support', () => {
+    const { resizer } = makeResizer();
+    const popoutDocument = document.implementation.createHTMLDocument('popout');
+    const popoutContainer = popoutDocument.createElement('div');
+    const registerDomEvent = vi.fn();
+
+    (resizer as any).editor = { getValue: () => '', getCursor: () => ({ line: 0, ch: 0 }), getLine: () => '', lastLine: () => 0, transaction: () => {}, setCursor: () => {} };
+    (resizer as any).markdownView = {
+      containerEl: popoutContainer,
+      editor: (resizer as any).editor,
+      getState: () => ({ mode: 'source' })
+    };
+    (resizer as any).viewScope = { registerDomEvent };
+
+    (resizer as any).registerEditorEvents();
+
+    const dragTargets = registerDomEvent.mock.calls
+      .filter(([target, eventName]) => target !== popoutContainer && ['mousedown', 'mousemove', 'mouseup'].includes(eventName))
+      .map(([target]) => target);
+
+    expect(dragTargets).toEqual([popoutDocument, popoutDocument, popoutDocument]);
+  });
+
+  it('13.16b resolves image targets using Obsidian instanceOf for cross-window elements', () => {
+    const { resizer } = makeResizer();
+    const { img } = setupViewWithImage();
+    const originalHTMLImageElement = (globalThis as any).HTMLImageElement;
+
+    try {
+      (globalThis as any).HTMLImageElement = function ForeignHTMLImageElement() {};
+      (img as any).instanceOf = vi.fn((ctor: any) => ctor === (globalThis as any).HTMLImageElement);
+
+      expect((resizer as any).resolveImageTarget(img)).toBe(img);
+    } finally {
+      (globalThis as any).HTMLImageElement = originalHTMLImageElement;
+    }
+  });
+
+  it('13.16c force cleanup uses activeDocument fallback for orphaned popout resize containers', () => {
+    const { resizer } = makeResizer();
+    const popoutDocument = document.implementation.createHTMLDocument('popout');
+    const resizeContainer = popoutDocument.createElement('div');
+    resizeContainer.className = 'image-resize-container';
+    const image = popoutDocument.createElement('img');
+    resizeContainer.appendChild(image);
+    popoutDocument.body.appendChild(resizeContainer);
+
+    const previousGlobalActiveDocument = (globalThis as any).activeDocument;
+    const previousWindowActiveDocument = (window as any).activeDocument;
+
+    try {
+      (globalThis as any).activeDocument = popoutDocument;
+      (window as any).activeDocument = popoutDocument;
+      (resizer as any).markdownView = null;
+      (resizer as any).activeImage = null;
+
+      (resizer as any).cleanupHandles(true);
+
+      expect(popoutDocument.querySelector('.image-resize-container')).toBeNull();
+      expect(popoutDocument.body.querySelector('img')).toBe(image);
+    } finally {
+      (globalThis as any).activeDocument = previousGlobalActiveDocument;
+      (window as any).activeDocument = previousWindowActiveDocument;
+    }
+  });
+
   it('13.17 Cursor fallback validity: outside edges -> cursor="default" and values are valid', () => {
     const { resizer } = makeResizer();
     const { container } = setupView();

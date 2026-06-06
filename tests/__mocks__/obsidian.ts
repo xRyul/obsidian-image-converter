@@ -511,8 +511,9 @@ export class MenuItem {
   trigger() { this.click?.(); }
 }
 
-export class Menu {
+export class Menu extends Component {
   private items: MenuItem[] = [];
+  private hideCallbacks: Array<() => void> = [];
   addItem(cb: (item: MenuItem) => void) { const i = new MenuItem(); cb(i); this.items.push(i); return this; }
   addSeparator() { return this; }
   showAtMouseEvent(_evt: MouseEvent) {
@@ -521,8 +522,11 @@ export class Menu {
     for (const item of this.items) {
       try { item.trigger(); } catch { /* ignore synchronous errors in tests */ }
     }
+    return this;
   }
-  hide() { /* no-op */ }
+  hide() { this.hideCallbacks.forEach((cb) => cb()); this.unload(); return this; }
+  close() { this.hide(); }
+  onHide(callback: () => void) { this.hideCallbacks.push(callback); }
 }
 
 export class View { getViewType(): string { return 'markdown'; } }

@@ -99,6 +99,10 @@ beforeEach(() => {
     // Mock Obsidian-specific globals
     (window as any).app = undefined;
     (window as any).moment = undefined;
+    (window as any).activeDocument = document;
+    (window as any).activeWindow = window;
+    (globalThis as any).activeDocument = document;
+    (globalThis as any).activeWindow = window;
   }
 
   // Ensure requestAnimationFrame/cancelAnimationFrame behave predictably in tests

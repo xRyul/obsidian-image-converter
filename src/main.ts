@@ -77,7 +77,7 @@ export default class ImageConverterPlugin extends Plugin {
     private temporaryBuffers: (ArrayBuffer | Blob | null)[] = [];
 
     private updateBodyStateClasses() {
-        document.body.classList.toggle(
+        activeDocument.body.classList.toggle(
             'image-converter-disable-native-image-selection',
             this.settings.disableObsidianImageSelectionOnClick
         );
@@ -268,6 +268,7 @@ export default class ImageConverterPlugin extends Plugin {
                 this.folderAndFilenameManagement,
                 this.variableProcessor
             );
+            this.addChild(this.contextMenu);
         }
 
         // REDUNDANT as it is already initialized inside ImageConverterSettings %%Initialize NonDestructiveResizeSettings if needed%%
@@ -353,24 +354,17 @@ export default class ImageConverterPlugin extends Plugin {
         }
 
         if (this.imageResizer) {
-            this.imageResizer.detachView();
+            const { imageResizer } = this;
             this.imageResizer = null;
+            this.removeChild(imageResizer);
         }
 
-        // Clean up UI components
+        // Clean up UI components registered as child components so their registerDomEvent() disposers run now.
         if (this.contextMenu) {
-            this.contextMenu.onunload();
+            const { contextMenu } = this;
+            this.contextMenu = null;
+            this.removeChild(contextMenu);
         }
-
-        // Clean up modals
-        [
-            this.processSingleImageModal,
-            this.processFolderModal,
-            this.processCurrentNote,
-            this.processAllVaultModal
-        ].forEach(modal => {
-            if (modal?.close) modal.close();
-        });
 
         // Clean up any open modals
         [
@@ -382,8 +376,18 @@ export default class ImageConverterPlugin extends Plugin {
             if (modal?.close) modal.close();
         });
 
-        document.body.classList.remove('image-captions-enabled');
-        document.body.classList.remove('image-converter-disable-native-image-selection');
+        this.processSingleImageModal = undefined;
+        this.processFolderModal = undefined;
+        this.processCurrentNote = undefined;
+        this.processAllVaultModal = undefined;
+
+        if (this.captionManager) {
+            this.captionManager.cleanup();
+            this.captionManager = undefined;
+        }
+
+        activeDocument.body.classList.remove('image-captions-enabled');
+        activeDocument.body.classList.remove('image-converter-disable-native-image-selection');
     }
 
 
@@ -453,7 +457,7 @@ export default class ImageConverterPlugin extends Plugin {
                     }
 
                     // add some delay as disabling takes some time.
-                    await new Promise(resolve => setTimeout(resolve, 500)); // even 100ms would be enough.
+                    await new Promise(resolve => window.setTimeout(resolve, 500)); // even 100ms would be enough.
 
                     // 2. Re-enable the plugin
                     if (plugins?.enablePlugin) {
@@ -481,6 +485,8 @@ export default class ImageConverterPlugin extends Plugin {
         // Drop event (Obsidian editor - primary handlers)
         this.registerEvent(
             this.app.workspace.on("editor-drop", async (evt: DragEvent, editor: Editor) => {
+                if (evt.defaultPrevented) return;
+
                 if (!evt.dataTransfer) {
                     console.warn("DataTransfer object is null initially. Cannot process drop event.");
                     return;
@@ -517,6 +523,8 @@ export default class ImageConverterPlugin extends Plugin {
         // --- Paste event handler ---
         this.registerEvent(
             this.app.workspace.on("editor-paste", async (evt: ClipboardEvent, editor: Editor) => {
+                if (evt.defaultPrevented) return;
+
                 if (!evt.clipboardData) {
                     console.warn("ClipboardData object is null. Cannot process paste event.");
                     return;

@@ -161,7 +161,7 @@ export class ImageResizer extends Component {
         }
 
         if (this.scrollTimeout) {
-            clearTimeout(this.scrollTimeout);
+            window.clearTimeout(this.scrollTimeout);
             this.scrollTimeout = null;
         }
 
@@ -249,9 +249,10 @@ export class ImageResizer extends Component {
         this.viewScope.registerDomEvent(this.markdownView.containerEl, 'click', this.handleImageClickCapture, { capture: true });
 
         // 2. Drag Handling: Mouse down, move, up events for handles
-        this.viewScope.registerDomEvent(document, 'mousedown', this.handleMouseDown);
-        this.viewScope.registerDomEvent(document, 'mousemove', this.handleMouseMove);
-        this.viewScope.registerDomEvent(document, 'mouseup', this.handleMouseUp);
+        const viewDocument = this.markdownView.containerEl.ownerDocument;
+        this.viewScope.registerDomEvent(viewDocument, 'mousedown', this.handleMouseDown);
+        this.viewScope.registerDomEvent(viewDocument, 'mousemove', this.handleMouseMove);
+        this.viewScope.registerDomEvent(viewDocument, 'mouseup', this.handleMouseUp);
 
         // 3. Register mousewheel event for resizing (arrow function already preserves `this`)
         this.viewScope.registerDomEvent(this.markdownView.containerEl, 'wheel', this.handleMouseWheel, { passive: false });
@@ -264,7 +265,7 @@ export class ImageResizer extends Component {
     // }
 
     private resolveImageTarget(target: HTMLElement): HTMLImageElement | null {
-        if (target instanceof HTMLImageElement) {
+        if (target.instanceOf(HTMLImageElement)) {
             return target;
         }
 
@@ -274,7 +275,7 @@ export class ImageResizer extends Component {
         }
 
         const image = wrapper.querySelector(".image-resize-container img, img");
-        return image instanceof HTMLImageElement ? image : null;
+        return image?.instanceOf(HTMLImageElement) ? image : null;
     }
 
     private getInternalImageTargetForClickOverride(event: MouseEvent): HTMLImageElement | null {
@@ -286,8 +287,8 @@ export class ImageResizer extends Component {
         const state = this.markdownView.getState();
         if (state.mode !== "source") return null;
 
-        const { target } = event;
-        if (!(target instanceof HTMLElement)) return null;
+        const target = event.target as Node | null;
+        if (!target?.instanceOf(HTMLElement)) return null;
         if (!this.markdownView.containerEl.contains(target)) return null;
         if (target.closest(".image-resize-handle, .edit-block-button")) return null;
 
@@ -315,8 +316,8 @@ export class ImageResizer extends Component {
             this.editor.setCursor(cursorPosition);
         }
 
-        const { activeElement } = document;
-        if (activeElement instanceof HTMLElement && activeElement.closest(".image-embed")) {
+        const { activeElement } = image.ownerDocument;
+        if (activeElement?.instanceOf(HTMLElement) && activeElement.closest(".image-embed")) {
             activeElement.blur();
         }
     };
@@ -347,7 +348,7 @@ export class ImageResizer extends Component {
         // If we already have an active image and the hover is within its container, avoid cleanup/recreate thrash
         const activeContainer = this.activeImage?.matchParent(".image-resize-container") as HTMLElement | null;
         const activeWrapper = activeContainer?.parentElement;
-        const resolvedImageTarget = target instanceof HTMLElement ? this.resolveImageTarget(target) : null;
+        const resolvedImageTarget = target.instanceOf(HTMLElement) ? this.resolveImageTarget(target) : null;
 
         // Early exit: Not an image or a resize handle?
         if (!target.instanceOf(HTMLImageElement) && !target.hasClass('image-resize-handle')) {
@@ -465,12 +466,32 @@ export class ImageResizer extends Component {
         }
     }
 
+    private cleanupOrphanedResizeContainers() {
+        const root = this.markdownView?.containerEl ?? activeDocument;
+        root.querySelectorAll('.image-resize-container').forEach((container) => {
+            const image = container.querySelector('img');
+            if (image && container.parentNode) {
+                container.parentNode.insertBefore(image, container);
+            }
+            if (typeof (container as HTMLElement & { detach?: () => void }).detach === 'function') {
+                (container as HTMLElement & { detach: () => void }).detach();
+            } else {
+                container.remove();
+            }
+        });
+        this.handles = [];
+    }
+
     /**
      * Cleans up any existing resize handles or borders applied to the active image.
      * Resets the cursor and clears the active image and last mouse event references.
      */
     private cleanupHandles(force = false) {
-        if ((this.resizeState.isResizing && !force) || !this.activeImage) return;
+        if (this.resizeState.isResizing && !force) return;
+        if (!this.activeImage) {
+            if (force) this.cleanupOrphanedResizeContainers();
+            return;
+        }
 
         const handleContainer = this.activeImage.matchParent(
             ".image-resize-container"
@@ -787,7 +808,7 @@ export class ImageResizer extends Component {
         }
 
         // Request a new animation frame to handle the resize calculations and updates
-        this.rafId = requestAnimationFrame(runResizeCalc);
+        this.rafId = window.requestAnimationFrame(runResizeCalc);
     };
 
     /**
@@ -991,7 +1012,7 @@ export class ImageResizer extends Component {
 
         // Reset scroll state after delay
         if (this.scrollTimeout) {
-            clearTimeout(this.scrollTimeout);
+            window.clearTimeout(this.scrollTimeout);
         }
 
         this.scrollTimeout = window.setTimeout(() => {
