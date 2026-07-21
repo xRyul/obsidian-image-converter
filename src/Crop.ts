@@ -1,4 +1,4 @@
-import { App, Component, Modal, Notice, TFile } from 'obsidian';
+import { App, Component, Modal, Notice, TFile, MarkdownView } from 'obsidian';
 
 
 type SupportedImageFormat = 'jpeg' | 'png' | 'webp' | 'avif';
@@ -946,23 +946,40 @@ export class Crop extends Modal {
 			await this.app.vault.modifyBinary(this.imageFile, arrayBuffer);
 	
 			new Notice('Image saved successfully');
-	
-			const leaf = this.app.workspace.getMostRecentLeaf();
-			if (leaf) {
-				const currentState = leaf.getViewState();
-				await leaf.setViewState({
-					type: 'empty',
-					state: {}
-				});
-				await leaf.setViewState(currentState);
-			}
-	
+
+			// Refresh only the modified image in the active markdown view
+			// without destroying/recreating the entire view (preserves scroll position)
+			this.refreshImageInView();
+
 			this.close();
 	
 	} catch (error) {
 			console.error('Save error:', error);
 			const message = error instanceof Error ? error.message : String(error);
 			new Notice(`Error saving image: ${message}`);
+		}
+	}
+
+	// Add cache-busting refresh — modifies only the <img> tag for the edited file
+	// without destroying/recreating the whole view (preserves scroll position)
+	private refreshImageInView(): void {
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!activeView) return;
+
+		const container = activeView.containerEl;
+		const imgs = container.querySelectorAll<HTMLImageElement>('img');
+		const filePath = this.imageFile.path;
+		for (const img of imgs) {
+			try {
+				const src = img.src;
+				if (!src.includes(encodeURI(filePath)) && !src.includes(filePath)) continue;
+
+				const url = new URL(src);
+				url.searchParams.set('_t', Date.now().toString());
+				img.src = url.toString();
+			} catch {
+				continue;
+			}
 		}
 	}
 

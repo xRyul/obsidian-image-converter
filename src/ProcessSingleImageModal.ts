@@ -867,28 +867,25 @@ export class ProcessSingleImageModal extends Modal {
     }
 
     async refreshActiveNote() {
-        const activeFile = this.app.workspace.getActiveFile();
-        if (activeFile) {
-            const activeLeaf = this.app.workspace.getLeaf();
-            if (activeLeaf) {
-                // Get the current leaf using getMostRecentLeaf (or getLeaf for specific cases)
-                const leaf = this.app.workspace.getMostRecentLeaf();
-                if (leaf) {
-                    // Store current state
-                    const currentState = leaf.getViewState();
+        // Instead of a destructive view reload (empty → restore → openFile),
+        // only update the <img> tag for the processed file via cache-busting.
+        // This preserves the user's scroll position completely.
+        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (!activeView) return;
 
-                    // Switch to a different view type temporarily
-                    await leaf.setViewState({
-                        type: 'empty',
-                        state: {}
-                    });
+        const container = activeView.containerEl;
+        const imgs = container.querySelectorAll<HTMLImageElement>('img');
+        const filePath = this.imageFile.path;
+        for (const img of imgs) {
+            try {
+                const src = img.src;
+                if (!src.includes(encodeURI(filePath)) && !src.includes(filePath)) continue;
 
-                    // Switch back to the original view
-                    await leaf.setViewState(currentState);
-
-                }
-                // Reopen the file to refresh its content
-                await activeLeaf.openFile(activeFile, { active: true });
+                const url = new URL(src);
+                url.searchParams.set('_t', Date.now().toString());
+                img.src = url.toString();
+            } catch {
+                continue;
             }
         }
     }
