@@ -641,17 +641,75 @@ export class ImageAlignmentManager {
 					this.plugin.settings.isImageAlignmentEnabled &&
 					defaultAlignment !== "none";
 
-				const images = this.getImagesForNote(notePath);
-				// console.log(`Found ${images.length} content images`);
-
-				for (const img of images) {
-					await this.applyAlignmentToSingleImage(
-						img,
-						notePath,
-						allowDefault,
-						defaultAlignment
-					);
+				// Fast path: if the note's images are already in the DOM
+				// (e.g. layout-change after a tab switch), apply now and
+				// return.
+				const initialImages = this.getImagesForNote(notePath);
+				if (initialImages.length > 0) {
+					for (const img of initialImages) {
+						await this.applyAlignmentToSingleImage(
+							img,
+							notePath,
+							allowDefault,
+							defaultAlignment
+						);
+					}
+					return;
 				}
+
+				// Slow path: on `file-open` Obsidian fires the event before
+				// the markdown has been rendered into the preview pane, so
+				// `getImagesForNote` returns an empty list. Without a
+				// follow-up mechanism the alignment stays missing until the
+				// user manually switches to another tab and back, which
+				// triggers `layout-change` once the images are present.
+				//
+				// Fix: watch `document.body` for newly-inserted <img>
+				// elements and apply alignment to each as it appears. The
+				// hash-based cache lookup inside
+				// `applyAlignmentToSingleImage` silently ignores images
+				// that don't belong to this note (file explorer
+				// thumbnails, other panes, etc.), so observing the whole
+				// body is safe.
+				//
+				// The observer auto-disconnects after 5 seconds — by then
+				// the note has long since finished rendering, and we don't
+				// want to keep watching the entire document body forever.
+				this.imageObserver?.disconnect();
+				this.imageObserver = new MutationObserver((mutations) => {
+					for (const mutation of mutations) {
+						for (const node of mutation.addedNodes) {
+							if (!(node instanceof HTMLElement)) continue;
+							if (node.tagName === "IMG") {
+								void this.applyAlignmentToSingleImage(
+									node as HTMLImageElement,
+									notePath,
+									allowDefault,
+									defaultAlignment
+								);
+							} else {
+								for (const img of node.querySelectorAll(
+									"img"
+								)) {
+									void this.applyAlignmentToSingleImage(
+										img as HTMLImageElement,
+										notePath,
+										allowDefault,
+										defaultAlignment
+									);
+								}
+							}
+						}
+					}
+				});
+				this.imageObserver.observe(activeDocument.body, {
+					childList: true,
+					subtree: true,
+				});
+				setTimeout(
+					() => this.imageObserver?.disconnect(),
+					5000
+				);
 			});
 		} catch (error) {
 			console.error("Error in applyAlignmentsToNote:", error);
