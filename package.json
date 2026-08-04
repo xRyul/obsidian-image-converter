@@ -25,7 +25,6 @@
 		"@eslint/js": "^9.35.0",
 		"@faker-js/faker": "^10.0.0",
 		"@types/node": "^24.3.1",
-		"@types/piexifjs": "^1.0.0",
 		"@types/sortablejs": "^1.15.8",
 		"@typescript-eslint/eslint-plugin": "^8.42.0",
 		"@typescript-eslint/parser": "^8.42.0",
@@ -43,8 +42,5 @@
 		"tslib": "2.4.0",
 		"typescript": "^5.9.2",
 		"vitest": "^3.2.4"
-	},
-	"dependencies": {
-		"piexifjs": "^1.0.6"
 	}
 }
