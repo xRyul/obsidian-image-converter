@@ -60,7 +60,7 @@ function getFabricImageElement(image: unknown): unknown {
 export class ImageExporter {
     constructor(private app: App) {}
 
-    async save(canvas: Canvas, file: TFile): Promise<boolean> {
+    async save(canvas: Canvas, file: TFile, quality: number = 1): Promise<boolean> {
         if (!canvas) return false;
 
         try {
@@ -118,16 +118,16 @@ export class ImageExporter {
             let arrayBuffer: ArrayBuffer | null = null;
 
             // Method 1: Try toBlob first
-            arrayBuffer = await this.exportViaToBlob(canvas, minX, minY, finalWidth, finalHeight, scaleToOriginal, mimeType);
+            arrayBuffer = await this.exportViaToBlob(canvas, minX, minY, finalWidth, finalHeight, scaleToOriginal, mimeType, quality);
 
             // Method 2: Try toDataURL if toBlob failed
             if (!arrayBuffer) {
-                arrayBuffer = await this.exportViaDataURL(canvas, exportFormat, minX, minY, finalWidth, finalHeight, scaleToOriginal);
+                arrayBuffer = await this.exportViaDataURL(canvas, exportFormat, minX, minY, finalWidth, finalHeight, scaleToOriginal, quality);
             }
 
             // Method 3: Try canvas drawing fallback
             if (!arrayBuffer) {
-                arrayBuffer = await this.exportViaNativeCanvas(canvas, minX, minY, finalWidth, finalHeight, scaleToOriginal, mimeType);
+                arrayBuffer = await this.exportViaNativeCanvas(canvas, minX, minY, finalWidth, finalHeight, scaleToOriginal, mimeType, quality);
             }
 
             if (!arrayBuffer || arrayBuffer.byteLength === 0) {
@@ -146,7 +146,7 @@ export class ImageExporter {
 
             new Notice('Image saved successfully');
 
-            await this.refreshActiveView();
+            await this.refreshActiveView(file);
 
             canvas.preserveObjectStacking = originalStacking;
             canvas.requestRenderAll();
@@ -272,10 +272,10 @@ export class ImageExporter {
         return { minX, minY, finalWidth, finalHeight, scaleToOriginal };
     }
 
-    private async canvasElementToArrayBuffer(canvasElement: HTMLCanvasElement, mimeType: string): Promise<ArrayBuffer | null> {
+    private async canvasElementToArrayBuffer(canvasElement: HTMLCanvasElement, mimeType: string, quality: number): Promise<ArrayBuffer | null> {
         if (typeof canvasElement.toBlob === 'function') {
             const blob: Blob | null = await new Promise<Blob | null>((resolve) => {
-                canvasElement.toBlob((result: Blob | null) => resolve(result), mimeType, 1);
+                canvasElement.toBlob((result: Blob | null) => resolve(result), mimeType, quality);
             });
 
             if (blob) {
@@ -285,7 +285,7 @@ export class ImageExporter {
 
         // Fallback when toBlob isn't available (e.g. in some test/DOM environments)
         // Avoids using fetch/requestUrl since this is a local data URL.
-        const dataUrl = canvasElement.toDataURL(mimeType, 1);
+        const dataUrl = canvasElement.toDataURL(mimeType, quality);
         if (!dataUrl || dataUrl === 'data:,') return null;
         return dataUrlToArrayBuffer(dataUrl);
     }
@@ -297,7 +297,8 @@ export class ImageExporter {
         finalWidth: number,
         finalHeight: number,
         scaleToOriginal: number,
-        mimeType: string
+        mimeType: string,
+        quality: number
     ): Promise<ArrayBuffer | null> {
         try {
             const canvasElement = canvas.toCanvasElement(scaleToOriginal);
@@ -319,7 +320,7 @@ export class ImageExporter {
                     tempCanvas.height
                 );
 
-                return await this.canvasElementToArrayBuffer(tempCanvas, mimeType);
+                return await this.canvasElementToArrayBuffer(tempCanvas, mimeType, quality);
             }
         } catch (e) {
             console.debug('toCanvasElement method failed, trying alternative...', e);
@@ -334,12 +335,13 @@ export class ImageExporter {
         minY: number,
         finalWidth: number,
         finalHeight: number,
-        scaleToOriginal: number
+        scaleToOriginal: number,
+        quality: number
     ): Promise<ArrayBuffer | null> {
         try {
             const dataUrl = canvas.toDataURL({
                 format: exportFormat as ImageFormat,
-                quality: 1,
+                quality: quality,
                 multiplier: scaleToOriginal,
                 left: minX,
                 top: minY,
@@ -366,7 +368,8 @@ export class ImageExporter {
         finalWidth: number,
         finalHeight: number,
         scaleToOriginal: number,
-        mimeType: string
+        mimeType: string,
+        quality: number
     ): Promise<ArrayBuffer | null> {
         try {
             const nativeCanvas = canvas.getElement();
@@ -382,7 +385,7 @@ export class ImageExporter {
                     0, 0, tempCanvas.width, tempCanvas.height
                 );
 
-                return await this.canvasElementToArrayBuffer(tempCanvas, mimeType);
+                return await this.canvasElementToArrayBuffer(tempCanvas, mimeType, quality);
             }
         } catch (e) {
             console.debug('Native canvas fallback failed', e);
@@ -390,20 +393,31 @@ export class ImageExporter {
         return null;
     }
 
-    private async refreshActiveView(): Promise<void> {
+    private async refreshActiveView(file: TFile): Promise<void> {
         const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
         if (!activeView) return;
 
-        const leaf = this.app.workspace.getMostRecentLeaf();
-        if (leaf) {
-            const currentState = leaf.getViewState();
+        // Instead of a destructive view reload (which loses scroll position),
+        // find only the <img> element(s) for the modified file and force them
+        // to reload by adding a cache-busting query parameter.
+        // Obsidian app:// URLs include the file path, so we match by that.
+        const container = activeView.containerEl;
+        const imgs = container.querySelectorAll<HTMLImageElement>('img');
+        const filePath = file.path;
+        for (const img of imgs) {
+            try {
+                const src = img.src;
+                // Match images whose src contains the vault file path
+                // (both encoded and raw forms, as Obsidian uses app:// URLs)
+                if (!src.includes(encodeURI(filePath)) && !src.includes(filePath)) continue;
 
-            await leaf.setViewState({
-                type: 'empty',
-                state: {}
-            });
-
-            await leaf.setViewState(currentState);
+                const url = new URL(src);
+                url.searchParams.set('_t', Date.now().toString());
+                img.src = url.toString();
+            } catch {
+                // If URL parsing fails (e.g. data: URLs), skip
+                continue;
+            }
         }
     }
 }
