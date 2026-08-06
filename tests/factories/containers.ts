@@ -271,68 +271,303 @@ function box(type: string, payload: Uint8Array): Uint8Array {
   return out;
 }
 
+/** Item IDs the builder hands out, in the order the item table lists them. */
+const IMAGE_ITEM_ID = 1;
+const EXIF_ITEM_ID = 2;
+
+/** Stand-in for coded image data, distinctive enough to spot if it moves. */
+function imageItemData(): Uint8Array {
+  const data = new Uint8Array(48);
+  for (let i = 0; i < data.length; i++) data[i] = (i * 7 + 3) & 0xff;
+  return data;
+}
+
+export interface IsobmffOptions {
+  brand?: string;
+  compatibleBrands?: string[];
+  exif?: Uint8Array;
+  tiffHeaderOffset?: number;
+  /** Give the EXIF item the wrong item_type, so the table has no EXIF in it. */
+  omitExifItem?: boolean;
+  /** Drop the `meta` box entirely. */
+  omitMeta?: boolean;
+  /**
+   * Box order. `mdat-first` keeps item data ahead of `meta`, so growing `meta`
+   * leaves its offsets alone; `meta-first` is what real encoders emit and is
+   * the layout that forces every offset to be patched.
+   */
+  layout?: 'mdat-first' | 'meta-first';
+  width?: number;
+  height?: number;
+  /** Quarter turns recorded in an `irot` property. */
+  rotation?: 0 | 1 | 2 | 3;
+  /** Drop `pitm`, leaving the primary item unidentified. */
+  omitPrimaryItem?: boolean;
+  /** Drop `iprp`, leaving no `ispe` to read dimensions from. */
+  omitProperties?: boolean;
+}
+
 /**
- * A minimal HEIC/AVIF file carrying an EXIF item.
+ * A HEIC/AVIF file with a primary image item, its properties, and optionally an
+ * EXIF item alongside.
  *
- * `mdat` is placed before `meta` so the item's file offset is known while the
- * `iloc` box is being built - no back-patching needed.
+ * The `meta` box is sized with placeholder offsets and then rebuilt with real
+ * ones. Every field in `iloc` has a fixed width, so the box comes out the same
+ * length both times and one measuring pass is enough.
  */
-export function buildIsobmff(
-  options: {
-    brand?: string;
-    compatibleBrands?: string[];
-    exif?: Uint8Array;
-    tiffHeaderOffset?: number;
-    omitExifItem?: boolean;
-  } = {}
-): Uint8Array {
+export function buildIsobmff(options: IsobmffOptions = {}): Uint8Array {
   const brand = options.brand ?? 'heic';
   const compatible = options.compatibleBrands ?? [brand, 'mif1'];
   const ftyp = box('ftyp', concat([fourCc(brand), u32be(0), ...compatible.map(fourCc)]));
 
-  if (!options.exif) {
-    return concat([ftyp, box('mdat', new Uint8Array(8))]);
+  const imageData = imageItemData();
+  const headerOffset = options.tiffHeaderOffset ?? 0;
+  const exifPayload = options.exif
+    ? concat([u32be(headerOffset), new Uint8Array(headerOffset), options.exif])
+    : null;
+
+  const mdat = box('mdat', exifPayload ? concat([imageData, exifPayload]) : imageData);
+
+  if (options.omitMeta) {
+    return concat([ftyp, mdat]);
   }
 
-  const headerOffset = options.tiffHeaderOffset ?? 0;
-  const itemPayload = concat([u32be(headerOffset), new Uint8Array(headerOffset), options.exif]);
-  const mdat = box('mdat', itemPayload);
-  const extentOffset = ftyp.length + 8; // mdat payload begins here
+  const layout = options.layout ?? 'mdat-first';
 
-  // Item type is deliberately wrong when omitExifItem is set, so the reader
-  // has an item table to walk but no EXIF in it.
-  const infe = box('infe', concat([
-    new Uint8Array([2, 0, 0, 0]),          // version 2, flags
-    u16be(1),                              // item_ID
-    u16be(0),                              // item_protection_index
-    fourCc(options.omitExifItem ? 'mime' : 'Exif'),
-    new Uint8Array([0]),                   // item_name
+  const buildMeta = (mdatPayloadStart: number) => {
+    const items: Uint8Array[] = [
+      box('infe', concat([
+        new Uint8Array([2, 0, 0, 0]),    // version 2, flags
+        u16be(IMAGE_ITEM_ID),
+        u16be(0),                        // item_protection_index
+        fourCc('av01'),
+        new Uint8Array([0]),             // item_name
+      ])),
+    ];
+
+    const locations: Uint8Array[] = [
+      itemLocation(IMAGE_ITEM_ID, mdatPayloadStart, imageData.length),
+    ];
+
+    if (exifPayload) {
+      items.push(box('infe', concat([
+        new Uint8Array([2, 0, 0, 0]),
+        u16be(EXIF_ITEM_ID),
+        u16be(0),
+        // Deliberately wrong when omitExifItem is set, so the reader has an item
+        // table to walk but no EXIF in it.
+        fourCc(options.omitExifItem ? 'mime' : 'Exif'),
+        new Uint8Array([0]),
+      ])));
+      locations.push(itemLocation(
+        EXIF_ITEM_ID,
+        mdatPayloadStart + imageData.length,
+        exifPayload.length
+      ));
+    }
+
+    const children: Uint8Array[] = [
+      box('hdlr', concat([
+        new Uint8Array([0, 0, 0, 0]),
+        u32be(0),
+        fourCc('pict'),
+        new Uint8Array(12),
+        new Uint8Array([0]),
+      ])),
+    ];
+
+    if (!options.omitPrimaryItem) {
+      children.push(box('pitm', concat([new Uint8Array([0, 0, 0, 0]), u16be(IMAGE_ITEM_ID)])));
+    }
+
+    children.push(box('iinf', concat([
+      new Uint8Array([0, 0, 0, 0]),
+      u16be(items.length),
+      ...items,
+    ])));
+
+    children.push(box('iloc', concat([
+      new Uint8Array([1, 0, 0, 0]),      // version 1, flags
+      new Uint8Array([0x44]),            // offset_size 4, length_size 4
+      new Uint8Array([0x00]),            // base_offset_size 0, index_size 0
+      u16be(locations.length),
+      ...locations,
+    ])));
+
+    if (exifPayload && !options.omitExifItem) {
+      children.push(box('iref', concat([
+        new Uint8Array([0, 0, 0, 0]),
+        box('cdsc', concat([u16be(EXIF_ITEM_ID), u16be(1), u16be(IMAGE_ITEM_ID)])),
+      ])));
+    }
+
+    if (!options.omitProperties) {
+      children.push(buildIprp(options));
+    }
+
+    return box('meta', concat([new Uint8Array([0, 0, 0, 0]), ...children]));
+  };
+
+  if (layout === 'mdat-first') {
+    return concat([ftyp, mdat, buildMeta(ftyp.length + 8)]);
+  }
+
+  const measured = buildMeta(0);
+  const meta = buildMeta(ftyp.length + measured.length + 8);
+  if (meta.length !== measured.length) {
+    throw new Error('meta box changed size between passes');
+  }
+
+  return concat([ftyp, meta, mdat]);
+}
+
+function itemLocation(itemId: number, offset: number, length: number): Uint8Array {
+  return concat([
+    u16be(itemId),
+    u16be(0),        // construction_method 0 (file offset)
+    u16be(0),        // data_reference_index
+    u16be(1),        // extent_count
+    u32be(offset),
+    u32be(length),
+  ]);
+}
+
+function buildIprp(options: IsobmffOptions): Uint8Array {
+  const properties: Uint8Array[] = [
+    box('ispe', concat([
+      new Uint8Array([0, 0, 0, 0]),
+      u32be(options.width ?? 100),
+      u32be(options.height ?? 80),
+    ])),
+  ];
+
+  if (options.rotation) {
+    properties.push(box('irot', new Uint8Array([options.rotation & 0x03])));
+  }
+
+  const ipco = box('ipco', concat(properties));
+
+  // One entry, associating every property with the image item.
+  const associations = properties.map((_, index) => new Uint8Array([(index + 1) & 0x7f]));
+  const ipma = box('ipma', concat([
+    new Uint8Array([0, 0, 0, 0]),        // version 0, flags 0: 1-byte indices
+    u32be(1),                            // entry_count
+    u16be(IMAGE_ITEM_ID),
+    new Uint8Array([properties.length]), // association_count
+    ...associations,
   ]));
 
-  const iinf = box('iinf', concat([new Uint8Array([0, 0, 0, 0]), u16be(1), infe]));
+  return box('iprp', concat([ipco, ipma]));
+}
 
-  const iloc = box('iloc', concat([
-    new Uint8Array([1, 0, 0, 0]),          // version 1, flags
-    new Uint8Array([0x44]),                // offset_size 4, length_size 4
-    new Uint8Array([0x00]),                // base_offset_size 0, index_size 0
-    u16be(1),                              // item_count
-    u16be(1),                              // item_ID
-    u16be(0),                              // construction_method 0 (file offset)
-    u16be(0),                              // data_reference_index
-    u16be(1),                              // extent_count
-    u32be(extentOffset),
-    u32be(itemPayload.length),
-  ]));
+// --- ISOBMFF inspection, parsed independently of the code under test ---
 
-  const hdlr = box('hdlr', concat([
-    new Uint8Array([0, 0, 0, 0]),
-    u32be(0),
-    fourCc('pict'),
-    new Uint8Array(12),
-    new Uint8Array([0]),
-  ]));
+function isobmffBoxes(bytes: Uint8Array, start: number, end: number) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const boxes: { type: string; payloadStart: number; end: number }[] = [];
+  let offset = start;
 
-  const meta = box('meta', concat([new Uint8Array([0, 0, 0, 0]), hdlr, iinf, iloc]));
+  while (offset + 8 <= end) {
+    const size = view.getUint32(offset, false);
+    if (size < 8 || offset + size > end) break;
+    boxes.push({
+      type: String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]),
+      payloadStart: offset + 8,
+      end: offset + size,
+    });
+    offset += size;
+  }
 
-  return concat([ftyp, mdat, meta]);
+  return boxes;
+}
+
+function metaChildren(bytes: Uint8Array) {
+  const meta = isobmffBoxes(bytes, 0, bytes.length).find((box) => box.type === 'meta');
+  if (!meta) throw new Error('no meta box');
+  return isobmffBoxes(bytes, meta.payloadStart + 4, meta.end);
+}
+
+/** Item types in `iinf` order, paired with their item IDs. */
+export function isobmffItems(bytes: Uint8Array): { itemId: number; itemType: string }[] {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const iinf = metaChildren(bytes).find((box) => box.type === 'iinf');
+  if (!iinf) throw new Error('no iinf box');
+
+  return isobmffBoxes(bytes, iinf.payloadStart + 6, iinf.end)
+    .filter((box) => box.type === 'infe')
+    .map((infe) => ({
+      itemId: view.getUint16(infe.payloadStart + 4, false),
+      itemType: String.fromCharCode(
+        bytes[infe.payloadStart + 8],
+        bytes[infe.payloadStart + 9],
+        bytes[infe.payloadStart + 10],
+        bytes[infe.payloadStart + 11]
+      ),
+    }));
+}
+
+/**
+ * Resolves an item's bytes through `iloc`, for the fixed 4/4/0/0 field widths
+ * both the builder and the writer emit.
+ */
+export function isobmffItemData(bytes: Uint8Array, itemId: number): Uint8Array | null {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const iloc = metaChildren(bytes).find((box) => box.type === 'iloc');
+  if (!iloc) throw new Error('no iloc box');
+
+  const version = bytes[iloc.payloadStart];
+  if (version !== 1 || bytes[iloc.payloadStart + 4] !== 0x44 || bytes[iloc.payloadStart + 5] !== 0x00) {
+    throw new Error('unexpected iloc field widths');
+  }
+
+  let cursor = iloc.payloadStart + 6;
+  const itemCount = view.getUint16(cursor, false);
+  cursor += 2;
+
+  for (let i = 0; i < itemCount; i++) {
+    const currentId = view.getUint16(cursor, false);
+    const constructionMethod = view.getUint16(cursor + 2, false) & 0x0f;
+    const extentCount = view.getUint16(cursor + 6, false);
+    cursor += 8;
+
+    for (let extent = 0; extent < extentCount; extent++) {
+      const offset = view.getUint32(cursor, false);
+      const length = view.getUint32(cursor + 4, false);
+      cursor += 8;
+
+      if (currentId === itemId && extent === 0) {
+        if (constructionMethod !== 0 || offset + length > bytes.length) return null;
+        return bytes.slice(offset, offset + length);
+      }
+    }
+  }
+
+  return null;
+}
+
+/** `iref` entries as (type, from, to[]) triples, for version 0 boxes. */
+export function isobmffReferences(bytes: Uint8Array): { type: string; from: number; to: number[] }[] {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const iref = metaChildren(bytes).find((box) => box.type === 'iref');
+  if (!iref) return [];
+  if (bytes[iref.payloadStart] !== 0) throw new Error('unexpected iref version');
+
+  return isobmffBoxes(bytes, iref.payloadStart + 4, iref.end).map((reference) => {
+    const count = view.getUint16(reference.payloadStart + 2, false);
+    const to: number[] = [];
+    for (let i = 0; i < count; i++) {
+      to.push(view.getUint16(reference.payloadStart + 4 + i * 2, false));
+    }
+    return { type: reference.type, from: view.getUint16(reference.payloadStart, false), to };
+  });
+}
+
+/** Top-level box types in file order. */
+export function isobmffBoxTypes(bytes: Uint8Array): string[] {
+  return isobmffBoxes(bytes, 0, bytes.length).map((box) => box.type);
+}
+
+/** Child box types of `meta`, in order. */
+export function isobmffMetaChildTypes(bytes: Uint8Array): string[] {
+  return metaChildren(bytes).map((box) => box.type);
 }

@@ -55,6 +55,10 @@ describe('ISOBMFF container (HEIC / AVIF)', () => {
   });
 
   it('Given a HEIC with no meta box, When read, Then null is returned', () => {
+    expect(isobmff.readExif(buildIsobmff({ omitMeta: true }))).toBeNull();
+  });
+
+  it('Given a HEIC with an image item but no EXIF item, When read, Then null is returned', () => {
     expect(isobmff.readExif(buildIsobmff({}))).toBeNull();
   });
 

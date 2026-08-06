@@ -5,16 +5,23 @@
 
 import { describe, it, expect } from 'vitest';
 
+import * as isobmff from '../../../src/metadata/containers/isobmff';
 import * as jpeg from '../../../src/metadata/containers/jpeg';
 import * as png from '../../../src/metadata/containers/png';
 import * as webp from '../../../src/metadata/containers/webp';
 import { exifBlockFrom } from '../../factories/exif';
 import { makeJpegBytes } from '../../factories/image';
 import {
+  buildIsobmff,
   buildPng,
   buildWebpExtended,
   buildWebpLossless,
   buildWebpLossy,
+  isobmffBoxTypes,
+  isobmffItemData,
+  isobmffItems,
+  isobmffMetaChildTypes,
+  isobmffReferences,
   pngChunkCrcsValid,
   pngChunkTypes,
   webpChunkTypes,
@@ -249,6 +256,133 @@ describe('WebP container', () => {
 
   it('Given non-WebP bytes, When written, Then it throws', () => {
     expect(() => webp.writeExif(buildPng(), exifBlockFrom({ make: 'Cam' }))).toThrow();
+  });
+});
+
+describe('ISOBMFF container (AVIF / HEIC)', () => {
+  const layouts = ['mdat-first', 'meta-first'] as const;
+
+  // The layout decides whether item data sits after the meta box, and so
+  // whether growing meta forces every offset in iloc to be patched.
+  for (const layout of layouts) {
+    describe(`${layout} layout`, () => {
+      it('Given no EXIF item, When written, Then the block reads back', () => {
+        const file = buildIsobmff({ brand: 'avif', layout });
+        const block = exifBlockFrom({ make: 'Cam', model: 'Model' });
+
+        const out = isobmff.writeExif(file, block);
+
+        expect(isobmff.readExif(out)).toEqual(block);
+        expect(isobmff.isIsobmff(out)).toBe(true);
+      });
+
+      it('Given an image item, When written, Then its data still resolves unchanged', () => {
+        const file = buildIsobmff({ brand: 'avif', layout });
+        const before = isobmffItemData(file, 1);
+
+        const out = isobmff.writeExif(file, exifBlockFrom({ make: 'Cam' }));
+
+        expect(before).not.toBeNull();
+        expect(isobmffItemData(out, 1)).toEqual(before);
+      });
+
+      it('Given an EXIF item already present, When written, Then it is replaced not duplicated', () => {
+        const file = buildIsobmff({ brand: 'heic', layout, exif: exifBlockFrom({ make: 'Old' }) });
+        const replacement = exifBlockFrom({ make: 'New', model: 'Replacement' });
+
+        const out = isobmff.writeExif(file, replacement);
+
+        expect(isobmff.readExif(out)).toEqual(replacement);
+        expect(isobmffItems(out).filter((item) => item.itemType === 'Exif')).toHaveLength(1);
+      });
+    });
+  }
+
+  it('Given a written file, When inspected, Then the EXIF item describes the primary item', () => {
+    const file = buildIsobmff({ brand: 'avif', layout: 'meta-first' });
+
+    const out = isobmff.writeExif(file, exifBlockFrom({ make: 'Cam' }));
+
+    const exifItem = isobmffItems(out).find((item) => item.itemType === 'Exif');
+    expect(exifItem).toBeDefined();
+    expect(isobmffReferences(out)).toContainEqual({
+      type: 'cdsc',
+      from: exifItem!.itemId,
+      to: [1],
+    });
+  });
+
+  it('Given an EXIF item being replaced, When written, Then its stale reference is dropped', () => {
+    const file = buildIsobmff({ brand: 'heic', exif: exifBlockFrom({ make: 'Old' }) });
+
+    const out = isobmff.writeExif(file, exifBlockFrom({ make: 'New' }));
+
+    expect(isobmffReferences(out).filter((reference) => reference.type === 'cdsc')).toHaveLength(1);
+  });
+
+  it('Given a written file, When inspected, Then the payload lands in a trailing mdat', () => {
+    const file = buildIsobmff({ brand: 'avif', layout: 'meta-first' });
+
+    const out = isobmff.writeExif(file, exifBlockFrom({ make: 'Cam' }));
+
+    expect(isobmffBoxTypes(out)).toEqual(['ftyp', 'meta', 'mdat', 'mdat']);
+    expect(isobmffMetaChildTypes(out)).toEqual(['hdlr', 'pitm', 'iinf', 'iref', 'iloc', 'iprp']);
+  });
+
+  it('Given a file with no meta box, When written, Then it throws', () => {
+    const file = buildIsobmff({ brand: 'avif', omitMeta: true });
+
+    expect(() => isobmff.writeExif(file, exifBlockFrom({ make: 'Cam' }))).toThrow();
+  });
+
+  it('Given non-ISOBMFF bytes, When written, Then it throws', () => {
+    expect(() => isobmff.writeExif(buildPng(), exifBlockFrom({ make: 'Cam' }))).toThrow();
+  });
+
+  it('Given an oversized block, When written, Then it refuses rather than truncating', () => {
+    const file = buildIsobmff({ brand: 'avif' });
+    const huge = new Uint8Array(isobmff.MAX_EXIF_BYTES + 1);
+
+    expect(() => isobmff.writeExif(file, huge)).toThrow();
+  });
+
+  it('Given a primary item, When dimensions are read, Then its ispe values are returned', () => {
+    const file = buildIsobmff({ brand: 'avif', width: 321, height: 123 });
+
+    expect(isobmff.readDimensions(file)).toEqual({ width: 321, height: 123 });
+  });
+
+  it('Given a quarter-turn irot, When dimensions are read, Then the axes are swapped', () => {
+    // ispe describes the stored image; irot is applied on top of it.
+    const file = buildIsobmff({ brand: 'avif', width: 321, height: 123, rotation: 1 });
+
+    expect(isobmff.readDimensions(file)).toEqual({ width: 123, height: 321 });
+  });
+
+  it('Given a half-turn irot, When dimensions are read, Then the axes are unchanged', () => {
+    const file = buildIsobmff({ brand: 'avif', width: 321, height: 123, rotation: 2 });
+
+    expect(isobmff.readDimensions(file)).toEqual({ width: 321, height: 123 });
+  });
+
+  it('Given no property association, When dimensions are read, Then the first ispe is used', () => {
+    const file = buildIsobmff({ brand: 'avif', width: 640, height: 480, omitPrimaryItem: true });
+
+    expect(isobmff.readDimensions(file)).toEqual({ width: 640, height: 480 });
+  });
+
+  it('Given no properties at all, When dimensions are read, Then null is returned', () => {
+    const file = buildIsobmff({ brand: 'avif', omitProperties: true });
+
+    expect(isobmff.readDimensions(file)).toBeNull();
+  });
+
+  it('Given a written file, When dimensions are read, Then they are unaffected', () => {
+    const file = buildIsobmff({ brand: 'avif', width: 200, height: 150, layout: 'meta-first' });
+
+    const out = isobmff.writeExif(file, exifBlockFrom({ make: 'Cam' }));
+
+    expect(isobmff.readDimensions(out)).toEqual({ width: 200, height: 150 });
   });
 });
 

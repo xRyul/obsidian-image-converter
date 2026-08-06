@@ -7,6 +7,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 
 import { MetadataTransfer } from '../../../src/metadata/MetadataTransfer';
 import { parseExifBlock, TAG_ORIENTATION, TAG_PIXEL_X_DIMENSION } from '../../../src/metadata/ExifBlock';
+import * as isobmff from '../../../src/metadata/containers/isobmff';
 import * as jpeg from '../../../src/metadata/containers/jpeg';
 import * as png from '../../../src/metadata/containers/png';
 import * as webp from '../../../src/metadata/containers/webp';
@@ -146,6 +147,51 @@ describe('MetadataTransfer', () => {
 
     const block = parseExifBlock(jpeg.readExif(new Uint8Array(result))!)!;
     expect(asciiValue(block.ifd0.get(TAG.make)!.value)).toBe('TestCamera');
+  });
+
+  it('Given a JPEG source and AVIF output, When transferring, Then EXIF reaches the AVIF', async () => {
+    // What the ffmpeg conversion path produces: a meta box ahead of the image
+    // data, so every item offset has to be patched as the EXIF item goes in.
+    const source = blobOf(makeJpegBytes({ exif: richExif() }));
+    const output = bufferOf(buildIsobmff({ brand: 'avif', layout: 'meta-first', width: 200, height: 150 }));
+
+    const result = await transfer.transfer(source, output);
+
+    const block = parseExifBlock(isobmff.readExif(new Uint8Array(result))!)!;
+    expect(asciiValue(block.ifd0.get(TAG.make)!.value)).toBe('TestCamera');
+    expect(asciiValue(block.exif.get(TAG.dateTimeOriginal)!.value)).toBe('2024:01:02 03:04:05');
+    expect(asciiValue(block.gps.get(TAG.gpsLatitudeRef)!.value)).toBe('N');
+  });
+
+  it('Given AVIF output, When transferring, Then orientation and dimensions are normalised', async () => {
+    const source = blobOf(makeJpegBytes({ exif: richExif() }));
+    const output = bufferOf(buildIsobmff({ brand: 'avif', layout: 'meta-first', width: 200, height: 150 }));
+
+    const result = await transfer.transfer(source, output);
+
+    const block = parseExifBlock(isobmff.readExif(new Uint8Array(result))!)!;
+    expect(shortValue(block.ifd0.get(TAG_ORIENTATION)!.value)).toBe(1);
+    expect(longValue(block.exif.get(TAG_PIXEL_X_DIMENSION)!.value)).toBe(200);
+  });
+
+  it('Given a HEIC source and AVIF output, When transferring, Then EXIF survives the hop', async () => {
+    const source = blobOf(buildIsobmff({ brand: 'heic', exif: richExif() }));
+    const output = bufferOf(buildIsobmff({ brand: 'avif', layout: 'meta-first', width: 200, height: 150 }));
+
+    const result = await transfer.transfer(source, output);
+
+    const block = parseExifBlock(isobmff.readExif(new Uint8Array(result))!)!;
+    expect(asciiValue(block.ifd0.get(TAG.make)!.value)).toBe('TestCamera');
+  });
+
+  it('Given an AVIF output that cannot be rewritten, When transferring, Then it is returned untouched', async () => {
+    const source = blobOf(makeJpegBytes({ exif: richExif() }));
+    const output = bufferOf(buildIsobmff({ brand: 'avif', omitMeta: true }));
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const result = await transfer.transfer(source, output);
+
+    expect(new Uint8Array(result)).toEqual(new Uint8Array(output));
   });
 
   it('Given a TIFF source, When transferring, Then descriptive tags reach the PNG output', async () => {

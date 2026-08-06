@@ -48,17 +48,26 @@ const WEBP_CODEC: ContainerWriter = {
     maxExifBytes: webp.MAX_EXIF_BYTES,
 };
 
-/** Source containers. HEIC and TIFF are read-only formats we only convert from. */
+/** HEIC, HEIF and AVIF: read as a source, written when ffmpeg emits AVIF. */
+const ISOBMFF_CODEC: ContainerWriter = {
+    matches: isobmff.isIsobmff,
+    readExif: isobmff.readExif,
+    readDimensions: isobmff.readDimensions,
+    writeExif: isobmff.writeExif,
+    maxExifBytes: isobmff.MAX_EXIF_BYTES,
+};
+
+/** Source containers. TIFF is a read-only format we only convert from. */
 const READERS: ContainerReader[] = [
     JPEG_CODEC,
     PNG_CODEC,
     WEBP_CODEC,
-    { matches: isobmff.isIsobmff, readExif: isobmff.readExif },
+    ISOBMFF_CODEC,
     { matches: tiff.isTiff, readExif: tiff.readExif },
 ];
 
 /** Output containers we can write metadata into. */
-const WRITERS: ContainerWriter[] = [JPEG_CODEC, PNG_CODEC, WEBP_CODEC];
+const WRITERS: ContainerWriter[] = [JPEG_CODEC, PNG_CODEC, WEBP_CODEC, ISOBMFF_CODEC];
 
 export class MetadataTransfer {
     /**
