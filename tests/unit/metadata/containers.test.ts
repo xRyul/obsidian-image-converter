@@ -339,6 +339,24 @@ describe('ISOBMFF container (AVIF / HEIC)', () => {
     expect(() => isobmff.writeExif(buildPng(), exifBlockFrom({ make: 'Cam' }))).toThrow();
   });
 
+  it('Given a meta child that cannot be walked, When written, Then it throws rather than dropping the boxes behind it', () => {
+    const file = buildIsobmff({ brand: 'avif', unwalkableMetaChild: true });
+
+    // Writing would otherwise return a file with no iprp, and so no decoder
+    // configuration, while passing every check the writer makes.
+    expect(() => isobmff.writeExif(file, exifBlockFrom({ make: 'Cam' }))).toThrow(/fully parsed/);
+  });
+
+  it('Given a meta child that cannot be walked, When read, Then the boxes ahead of it still resolve', () => {
+    const block = exifBlockFrom({ make: 'Cam' });
+    const file = buildIsobmff({ brand: 'heic', exif: block, unwalkableMetaChild: true });
+
+    expect(isobmff.readExif(file)).toEqual(block);
+    // iprp sits behind the box the walk gives up on, which is exactly what a
+    // rewrite would have dropped.
+    expect(isobmff.readDimensions(file)).toBeNull();
+  });
+
   it('Given an oversized block, When written, Then it refuses rather than truncating', () => {
     const file = buildIsobmff({ brand: 'avif' });
     const huge = new Uint8Array(isobmff.MAX_EXIF_BYTES + 1);

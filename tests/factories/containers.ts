@@ -305,6 +305,11 @@ export interface IsobmffOptions {
   omitPrimaryItem?: boolean;
   /** Drop `iprp`, leaving no `ispe` to read dimensions from. */
   omitProperties?: boolean;
+  /**
+   * Put a box whose declared size overruns `meta` just ahead of `iprp`, so a
+   * walk of the children stops there and never sees the boxes behind it.
+   */
+  unwalkableMetaChild?: boolean;
 }
 
 /**
@@ -399,6 +404,13 @@ export function buildIsobmff(options: IsobmffOptions = {}): Uint8Array {
         new Uint8Array([0, 0, 0, 0]),
         box('cdsc', concat([u16be(EXIF_ITEM_ID), u16be(1), u16be(IMAGE_ITEM_ID)])),
       ])));
+    }
+
+    if (options.unwalkableMetaChild) {
+      const free = box('free', new Uint8Array(4));
+      // Claims more bytes than it holds, which is where a walk gives up.
+      new DataView(free.buffer).setUint32(0, free.length + 64, false);
+      children.push(free);
     }
 
     if (!options.omitProperties) {

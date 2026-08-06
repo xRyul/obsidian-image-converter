@@ -47,6 +47,8 @@ interface Meta {
     /** meta is a FullBox; these are its version and flags. */
     header: Uint8Array;
     children: Box[];
+    /** False when `children` does not account for the whole box. See `walkAll`. */
+    complete: boolean;
 }
 
 /** One `infe` entry. The raw box is reused verbatim when the entry survives. */
@@ -60,6 +62,8 @@ interface ItemInfo {
     version: number;
     flags: Uint8Array;
     entries: ItemEntry[];
+    /** False when `entries` does not account for every `infe` in the box. */
+    complete: boolean;
 }
 
 /** One `iloc` entry, with its extents resolved. */
@@ -161,6 +165,9 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
     if (!meta) {
         throw new Error("ISOBMFF file has no meta box");
     }
+    if (!meta.complete) {
+        throw new Error("ISOBMFF meta box could not be fully parsed");
+    }
 
     const iinfBox = findChild(meta, 'iinf');
     const ilocBox = findChild(meta, 'iloc');
@@ -172,6 +179,9 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
     const locations = parseLocations(bytes, ilocBox);
     if (!info || !locations) {
         throw new Error("Could not parse the ISOBMFF item table");
+    }
+    if (!info.complete) {
+        throw new Error("ISOBMFF item table has entries that cannot be rewritten");
     }
 
     // An item already holding EXIF is dropped from the tables. Its bytes stay in
@@ -313,11 +323,13 @@ function readMeta(bytes: Uint8Array): Meta | null {
 
     // `meta` is a FullBox: version and flags precede its child boxes.
     const childrenStart = box.payloadStart + 4;
+    const { boxes, complete } = walkAll(bytes, childrenStart, box.end);
 
     return {
         box,
         header: bytes.slice(box.payloadStart, childrenStart),
-        children: [...walkBoxes(bytes, childrenStart, box.end)],
+        children: boxes,
+        complete,
     };
 }
 
@@ -343,8 +355,16 @@ function parseItemInfo(bytes: Uint8Array, iinf: Box): ItemInfo | null {
     }
 
     const entries: ItemEntry[] = [];
-    for (const infe of walkBoxes(bytes, entriesStart, iinf.end)) {
-        if (infe.type !== 'infe' || infe.payloadStart + 4 > infe.end) {
+    const { boxes, complete } = walkAll(bytes, entriesStart, iinf.end);
+
+    let entriesIntact = complete;
+
+    for (const infe of boxes) {
+        if (infe.type !== 'infe') {
+            continue; // padding; `iinf` carries nothing else worth keeping
+        }
+        if (infe.payloadStart + 4 > infe.end) {
+            entriesIntact = false;
             continue;
         }
 
@@ -353,6 +373,7 @@ function parseItemInfo(bytes: Uint8Array, iinf: Box): ItemInfo | null {
 
         let cursor = infe.payloadStart + 4; // past version and flags
         if (cursor + (wideId ? 4 : 2) > infe.end) {
+            entriesIntact = false;
             continue;
         }
 
@@ -370,7 +391,7 @@ function parseItemInfo(bytes: Uint8Array, iinf: Box): ItemInfo | null {
         entries.push({ itemId, itemType, bytes: bytes.slice(infe.start, infe.end) });
     }
 
-    return { version, flags, entries };
+    return { version, flags, entries, complete: entriesIntact };
 }
 
 /** Parses `iloc` into absolute extents, one entry per item. */
@@ -828,6 +849,16 @@ function* walkBoxes(bytes: Uint8Array, start: number, end: number): Generator<Bo
         yield { type, start: offset, payloadStart, end: boxEnd };
         offset = boxEnd;
     }
+}
+
+/**
+ * Walks a range and reports whether the boxes it found cover all of it.
+ */
+function walkAll(bytes: Uint8Array, start: number, end: number): { boxes: Box[]; complete: boolean } {
+    const boxes = [...walkBoxes(bytes, start, end)];
+    const walkedTo = boxes.length > 0 ? boxes[boxes.length - 1].end : start;
+
+    return { boxes, complete: walkedTo === end };
 }
 
 function buildBox(type: string, payload: Uint8Array): Uint8Array {
