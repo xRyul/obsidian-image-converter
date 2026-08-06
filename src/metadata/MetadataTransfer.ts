@@ -108,15 +108,11 @@ export class MetadataTransfer {
         }
 
         const block = parseExifBlock(rawExif);
-        if (!block) {
+        if (!block || isEmptyBlock(block)) {
             return output;
         }
 
         const normalised = normalise(block, writer.readDimensions(outputBytes));
-        if (isEmptyBlock(normalised)) {
-            return output;
-        }
-
         const serialised = serialiseWithin(normalised, writer.maxExifBytes);
         if (!serialised) {
             return output;
