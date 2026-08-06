@@ -1,7 +1,7 @@
 // Byte helpers shared by the container readers and writers
 
 /** "Exif\0\0" - the JPEG APP1 marker. */
-const EXIF_PREFIX = [0x45, 0x78, 0x69, 0x66, 0x00, 0x00];
+export const EXIF_PREFIX: readonly number[] = [0x45, 0x78, 0x69, 0x66, 0x00, 0x00];
 
 /**
  * Concatenates chunks into a single new buffer.

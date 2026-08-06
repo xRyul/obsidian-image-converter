@@ -2,7 +2,7 @@
 // JPEG carries EXIF in an APP1 segment: "Exif\0\0" then the raw TIFF block.
 
 import { Dimensions } from "../types";
-import { concat, matchesAt } from "./bytes";
+import { concat, EXIF_PREFIX, matchesAt } from "./bytes";
 
 const MARKER_SOI = 0xd8;
 const MARKER_EOI = 0xd9;
@@ -10,9 +10,6 @@ const MARKER_SOS = 0xda;
 const MARKER_APP0 = 0xe0;
 const MARKER_APP1 = 0xe1;
 const MARKER_TEM = 0x01;
-
-/** "Exif\0\0" */
-const EXIF_PREFIX = [0x45, 0x78, 0x69, 0x66, 0x00, 0x00];
 
 /** An APP1 length field is 16 bits and counts itself; six bytes go to the prefix. */
 export const MAX_EXIF_BYTES = 65527;
