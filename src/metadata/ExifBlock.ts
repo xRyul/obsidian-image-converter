@@ -5,6 +5,8 @@ import { Dimensions, ExifBlock, ExifEntry, ExifIfd } from "./types";
 
 // --- Tags ---
 
+export const TAG_IMAGE_WIDTH = 256;
+export const TAG_IMAGE_LENGTH = 257;
 export const TAG_ORIENTATION = 274;
 export const TAG_EXIF_IFD_POINTER = 34665;
 export const TAG_GPS_IFD_POINTER = 34853;
@@ -310,6 +312,10 @@ export function normalise(block: ExifBlock, dimensions: Dimensions | null): Exif
     if (ifd0.has(TAG_ORIENTATION)) {
         ifd0.set(TAG_ORIENTATION, shortEntry(TAG_ORIENTATION, 1, littleEndian));
     }
+
+    // Dimensions are stale after resizing
+    ifd0.delete(TAG_IMAGE_WIDTH);
+    ifd0.delete(TAG_IMAGE_LENGTH);
 
     if (dimensions) {
         exif.set(TAG_PIXEL_X_DIMENSION, longEntry(TAG_PIXEL_X_DIMENSION, dimensions.width, littleEndian));
