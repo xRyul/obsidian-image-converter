@@ -1,6 +1,7 @@
 // ExifBlock.ts
 // Parses, normalises and re-serialises the TIFF block that every EXIF-carrying container wraps.
 
+import { viewOf } from "./containers/bytes";
 import { Dimensions, ExifBlock, ExifEntry, ExifIfd } from "./types";
 
 // --- Tags ---
@@ -70,7 +71,7 @@ export function parseExifBlock(bytes: Uint8Array): ExifBlock | null {
     }
 
     const littleEndian = !bigEndian;
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const view = viewOf(bytes);
 
     if (view.getUint16(2, littleEndian) !== TIFF_MAGIC) {
         return null;
@@ -160,12 +161,7 @@ function readPointer(ifd: ExifIfd, tag: number, littleEndian: boolean): number |
     if (!entry || entry.value.length < 4) {
         return null;
     }
-    const view = new DataView(
-        entry.value.buffer,
-        entry.value.byteOffset,
-        entry.value.byteLength
-    );
-    return view.getUint32(0, littleEndian);
+    return viewOf(entry.value).getUint32(0, littleEndian);
 }
 
 // --- Serialising ---

@@ -3,7 +3,7 @@
 // block with no "Exif\0\0" prefix.
 
 import { Dimensions } from "../types";
-import { ascii, concat, matchesAt, readFourCc, stripExifPrefix } from "./bytes";
+import { ascii, concat, matchesAt, readFourCc, stripExifPrefix, viewOf } from "./bytes";
 
 const SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
@@ -112,7 +112,7 @@ export function readDimensions(bytes: Uint8Array): Dimensions | null {
             return null;
         }
 
-        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        const view = viewOf(bytes);
         return {
             width: view.getUint32(chunk.dataStart, false),
             height: view.getUint32(chunk.dataStart + 4, false),
@@ -123,7 +123,7 @@ export function readDimensions(bytes: Uint8Array): Dimensions | null {
 }
 
 function* walkChunks(bytes: Uint8Array): Generator<Chunk> {
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const view = viewOf(bytes);
     let offset = SIGNATURE.length;
 
     while (offset + 12 <= bytes.length) {

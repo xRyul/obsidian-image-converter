@@ -5,7 +5,7 @@
 // canvas and flags, then append the EXIF chunk.
 
 import { Dimensions } from "../types";
-import { ascii, concat, matchesAt, readFourCc, stripExifPrefix } from "./bytes";
+import { ascii, concat, matchesAt, readFourCc, stripExifPrefix, viewOf } from "./bytes";
 
 const RIFF = [0x52, 0x49, 0x46, 0x46]; // "RIFF"
 const WEBP = [0x57, 0x45, 0x42, 0x50]; // "WEBP"
@@ -151,7 +151,7 @@ export function readDimensions(bytes: Uint8Array): Dimensions | null {
 
 function parseChunks(bytes: Uint8Array): Chunk[] {
     const chunks: Chunk[] = [];
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const view = viewOf(bytes);
     let offset = HEADER_SIZE;
 
     while (offset + 8 <= bytes.length) {
@@ -230,7 +230,7 @@ function readLosslessHeader(
         return null;
     }
 
-    const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+    const view = viewOf(payload);
     const bits = view.getUint32(1, true);
 
     return {
@@ -252,7 +252,7 @@ function readLossyHeader(payload: Uint8Array): Dimensions | null {
         return null;
     }
 
-    const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+    const view = viewOf(payload);
 
     return {
         width: view.getUint16(6, true) & 0x3fff,

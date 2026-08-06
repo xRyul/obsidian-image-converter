@@ -2,7 +2,7 @@
 // JPEG carries EXIF in an APP1 segment: "Exif\0\0" then the raw TIFF block.
 
 import { Dimensions } from "../types";
-import { concat, EXIF_PREFIX, matchesAt } from "./bytes";
+import { concat, EXIF_PREFIX, matchesAt, viewOf } from "./bytes";
 
 const MARKER_SOI = 0xd8;
 const MARKER_EOI = 0xd9;
@@ -120,7 +120,7 @@ export function readDimensions(bytes: Uint8Array): Dimensions | null {
             return null;
         }
 
-        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        const view = viewOf(bytes);
         // Payload is: precision (1 byte), height (2), width (2).
         return {
             height: view.getUint16(segment.payloadStart + 1, false),

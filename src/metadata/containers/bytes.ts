@@ -25,6 +25,33 @@ export function concat(parts: Uint8Array[]): Uint8Array {
 }
 
 /**
+ * Views a buffer through a DataView, respecting the offset a subarray sits at.
+ * @param bytes - The buffer to view.
+ * @returns A view covering exactly those bytes.
+ */
+export function viewOf(bytes: Uint8Array): DataView {
+    return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+}
+
+/**
+ * Compares two buffers byte for byte.
+ * @param left - The first buffer.
+ * @param right - The second buffer.
+ * @returns True if both hold the same bytes.
+ */
+export function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
+    if (left.length !== right.length) {
+        return false;
+    }
+    for (let i = 0; i < left.length; i++) {
+        if (left[i] !== right[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
  * Tests whether a byte sequence appears at a given offset.
  * @param bytes - The buffer to test.
  * @param offset - Where to start comparing.

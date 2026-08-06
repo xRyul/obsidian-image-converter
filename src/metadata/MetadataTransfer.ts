@@ -4,6 +4,7 @@
 
 import { Dimensions } from "./types";
 import { isEmptyBlock, normalise, parseExifBlock, serialiseWithin } from "./ExifBlock";
+import { equalBytes } from "./containers/bytes";
 import * as isobmff from "./containers/isobmff";
 import * as jpeg from "./containers/jpeg";
 import * as png from "./containers/png";
@@ -120,18 +121,6 @@ export class MetadataTransfer {
 
         return toArrayBuffer(writer.writeExif(outputBytes, serialised));
     }
-}
-
-function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
-    if (left.length !== right.length) {
-        return false;
-    }
-    for (let i = 0; i < left.length; i++) {
-        if (left[i] !== right[i]) {
-            return false;
-        }
-    }
-    return true;
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {

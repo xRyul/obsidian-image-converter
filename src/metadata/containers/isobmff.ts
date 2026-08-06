@@ -10,7 +10,7 @@
 // corrupt a file, so the result is verified before it is returned.
 
 import { Dimensions } from "../types";
-import { ascii, concat, readFourCc } from "./bytes";
+import { ascii, concat, equalBytes, readFourCc, viewOf } from "./bytes";
 
 /** Brands that indicate a still image we can read EXIF from. */
 const BRANDS = new Set(['heic', 'heix', 'hevc', 'hevx', 'mif1', 'msf1', 'avif', 'avis']);
@@ -844,10 +844,6 @@ function buildBox(type: string, payload: Uint8Array): Uint8Array {
     return out;
 }
 
-function viewOf(bytes: Uint8Array): DataView {
-    return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-}
-
 /** Reads a big-endian unsigned integer of 0, 4 or 8 bytes. */
 function readUint(view: DataView, offset: number, size: number): number {
     if (size === 0) {
@@ -881,16 +877,4 @@ function uint32(value: number): Uint8Array {
     const out = new Uint8Array(4);
     new DataView(out.buffer).setUint32(0, value, false);
     return out;
-}
-
-function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
-    if (left.length !== right.length) {
-        return false;
-    }
-    for (let i = 0; i < left.length; i++) {
-        if (left[i] !== right[i]) {
-            return false;
-        }
-    }
-    return true;
 }
