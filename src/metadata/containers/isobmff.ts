@@ -705,9 +705,6 @@ function buildItemReferences(
     }
 
     if (primary !== null) {
-        if (wideId && primary > 0xffffffff) {
-            throw new Error("ISOBMFF primary item ID is out of range");
-        }
         references.push(buildBox(REFERENCE_TYPE_EXIF, concat([
             wideId ? uint32(itemId) : uint16(itemId),
             uint16(1), // reference_count
@@ -895,6 +892,10 @@ function readUint(view: DataView, offset: number, size: number): number {
 }
 
 function uint16(value: number): Uint8Array {
+    if (value < 0 || value > 0xffff) {
+        throw new Error("ISOBMFF value does not fit a 16-bit field");
+    }
+
     const out = new Uint8Array(2);
     new DataView(out.buffer).setUint16(0, value, false);
     return out;
