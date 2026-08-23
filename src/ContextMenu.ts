@@ -11,6 +11,7 @@ import {
 	MenuItem,
 	MarkdownView,
 	Editor,
+	FileSystemAdapter,
 } from "obsidian";
 // eslint-disable-next-line import/no-nodejs-modules -- Required for path manipulation; Obsidian runs on Electron with Node.js support
 import * as path from "path";
@@ -385,6 +386,7 @@ export class ContextMenu extends Component {
 
 		if (!Platform.isMobile) {
 			this.addOpenInNewWindowMenuItem(menu, img);
+			this.addOpenWithDefaultAppMenuItem(menu, img);
 			menu.addSeparator();
 			this.addCutImageMenuItem(menu, event);
 		}
@@ -1268,6 +1270,39 @@ export class ContextMenu extends Component {
 						}
 					} catch (error) {
 						new Notice("Failed to open in new window");
+						console.error(error);
+					}
+				});
+		});
+	}
+
+	/*-----------------------------------------------------------------*/
+	/*                    OPEN WITH DEFAULT APP                        */
+	/*-----------------------------------------------------------------*/
+
+	/**
+	 * Adds the "Open with default app" menu item.
+	 * @param menu - The Menu object to add the item to.
+	 * @param img - The HTMLImageElement that was right-clicked.
+	 */
+	addOpenWithDefaultAppMenuItem(menu: Menu, img: HTMLImageElement) {
+		menu.addItem((item) => {
+			item.setTitle("Open with default app")
+				.setIcon("external-link")
+				.onClick(async () => {
+					try {
+						const imagePath =
+							this.folderAndFilenameManagement.getImagePath(img);
+						if (imagePath) {
+							const adapter = this.app.vault.adapter;
+							if (adapter instanceof FileSystemAdapter) {
+								const absolutePath =
+									adapter.getFilePath(imagePath);
+								window.open(absolutePath, "_external");
+							}
+						}
+					} catch (error) {
+						new Notice("Failed to open with default app");
 						console.error(error);
 					}
 				});
