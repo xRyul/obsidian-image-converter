@@ -61,8 +61,7 @@ export function makePngBytes(options: {
 
 /**
  * Create a minimal JPEG buffer with optional EXIF data
- * @param options - Configuration for the JPEG. `exif` is a raw EXIF block
- *                  (TIFF header + IFDs), as produced by exifBlockFrom().
+ * @param options - Configuration for the JPEG
  * @returns ArrayBuffer containing JPEG data
  */
 export function makeJpegBytes(options: {

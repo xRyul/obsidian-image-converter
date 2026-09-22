@@ -1,10 +1,34 @@
 /**
- * Spec-accurate PNG and WebP builders for the metadata container tests.
+ * Spec-accurate PNG, WebP and ISOBMFF (HEIC / AVIF) builders and inspectors for
+ * the metadata container tests.
  *
- * The builders in image.ts are intentionally loose (fake CRCs, a VP8 chunk with
- * no frame tag) because the tests using them only care about magic bytes. The
- * metadata writers parse these containers for real, so they need real ones.
+ * The builders in image.ts are not complete (fake CRCs, a VP8 chunk with no
+ * frame tag), because the tests that use them check only the magic bytes. The
+ * metadata writers parse the full container structure, so they need valid files.
  */
+
+function concat(parts: Uint8Array[]): Uint8Array {
+  const total = parts.reduce((sum, part) => sum + part.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
+}
+
+function fourCc(text: string): Uint8Array {
+  const out = new Uint8Array(4);
+  for (let i = 0; i < 4; i++) out[i] = text.charCodeAt(i);
+  return out;
+}
+
+function readFourCc(bytes: Uint8Array, offset: number): string {
+  return String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
+}
+
+// --- PNG --------------------------------------------------------------------
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
@@ -22,7 +46,7 @@ function crcTable(): Uint32Array {
 
 const TABLE = crcTable();
 
-export function crc32(bytes: Uint8Array): number {
+function crc32(bytes: Uint8Array): number {
   let crc = 0xffffffff;
   for (let i = 0; i < bytes.length; i++) {
     crc = TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
@@ -35,22 +59,11 @@ function pngChunk(type: string, data: Uint8Array): Uint8Array {
   const view = new DataView(chunk.buffer);
 
   view.setUint32(0, data.length, false);
-  for (let i = 0; i < 4; i++) chunk[4 + i] = type.charCodeAt(i);
+  chunk.set(fourCc(type), 4);
   chunk.set(data, 8);
   view.setUint32(8 + data.length, crc32(chunk.subarray(4, 8 + data.length)), false);
 
   return chunk;
-}
-
-function concat(parts: Uint8Array[]): Uint8Array {
-  const total = parts.reduce((sum, part) => sum + part.length, 0);
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const part of parts) {
-    out.set(part, offset);
-    offset += part.length;
-  }
-  return out;
 }
 
 /** A structurally valid PNG with correct chunk CRCs. */
@@ -107,7 +120,7 @@ export function pngChunkTypes(bytes: Uint8Array): string[] {
 
   while (offset + 12 <= bytes.length) {
     const length = view.getUint32(offset, false);
-    types.push(String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]));
+    types.push(readFourCc(bytes, offset + 4));
     offset = offset + 12 + length;
   }
 
@@ -121,7 +134,7 @@ function riffChunk(type: string, payload: Uint8Array): Uint8Array {
   const chunk = new Uint8Array(8 + payload.length + padding);
   const view = new DataView(chunk.buffer);
 
-  for (let i = 0; i < 4; i++) chunk[i] = type.charCodeAt(i);
+  chunk.set(fourCc(type), 0);
   view.setUint32(4, payload.length, true);
   chunk.set(payload, 8);
 
@@ -132,46 +145,50 @@ function riff(body: Uint8Array[]): Uint8Array {
   const bodyBytes = concat(body);
   const header = new Uint8Array(12);
 
-  header.set([0x52, 0x49, 0x46, 0x46], 0); // "RIFF"
+  header.set(fourCc('RIFF'), 0);
   new DataView(header.buffer).setUint32(4, 4 + bodyBytes.length, true);
-  header.set([0x57, 0x45, 0x42, 0x50], 8); // "WEBP"
+  header.set(fourCc('WEBP'), 8);
 
   return concat([header, bodyBytes]);
 }
 
-/** Simple lossy WebP: a bare `VP8 ` chunk, which is what canvas emits. */
-export function buildWebpLossy(width = 100, height = 80): Uint8Array {
+/** A lossy keyframe header: frame tag, start code, then the frame size. */
+function vp8Payload(width: number, height: number): Uint8Array {
   const payload = new Uint8Array(20);
   const view = new DataView(payload.buffer);
 
-  // 3-byte frame tag: keyframe (low bit clear).
-  payload[0] = 0x10;
-  payload[1] = 0x00;
-  payload[2] = 0x00;
-  // Start code.
-  payload[3] = 0x9d;
-  payload[4] = 0x01;
-  payload[5] = 0x2a;
+  payload[0] = 0x10; // 3-byte frame tag: keyframe (low bit clear)
+  payload.set([0x9d, 0x01, 0x2a], 3); // start code
   view.setUint16(6, width, true);
   view.setUint16(8, height, true);
 
-  return riff([riffChunk('VP8 ', payload)]);
+  return payload;
 }
 
-/** Simple lossless WebP: a bare `VP8L` chunk. */
-export function buildWebpLossless(width = 100, height = 80, hasAlpha = false): Uint8Array {
+/** Simple lossy WebP: one `VP8 ` chunk only. Canvas writes this format. */
+export function buildWebpLossy(options: { width?: number; height?: number } = {}): Uint8Array {
+  return riff([riffChunk('VP8 ', vp8Payload(options.width ?? 100, options.height ?? 80))]);
+}
+
+/** Simple lossless WebP: one `VP8L` chunk only. */
+export function buildWebpLossless(
+  options: { width?: number; height?: number; alpha?: boolean } = {}
+): Uint8Array {
+  const width = options.width ?? 100;
+  const height = options.height ?? 80;
+
   const payload = new Uint8Array(16);
   payload[0] = 0x2f; // VP8L signature
 
   const bits = ((width - 1) & 0x3fff)
     | (((height - 1) & 0x3fff) << 14)
-    | ((hasAlpha ? 1 : 0) << 28);
+    | ((options.alpha ? 1 : 0) << 28);
   new DataView(payload.buffer).setUint32(1, bits >>> 0, true);
 
   return riff([riffChunk('VP8L', payload)]);
 }
 
-/** Extended WebP that already has a VP8X chunk, optionally carrying EXIF. */
+/** Extended WebP that already has a VP8X chunk, with an optional EXIF chunk. */
 export function buildWebpExtended(
   options: { width?: number; height?: number; exif?: Uint8Array; alpha?: boolean } = {}
 ): Uint8Array {
@@ -183,16 +200,7 @@ export function buildWebpExtended(
   writeUint24(vp8x, 4, width - 1);
   writeUint24(vp8x, 7, height - 1);
 
-  const body = [riffChunk('VP8X', vp8x)];
-
-  const image = new Uint8Array(20);
-  image[0] = 0x10;
-  image[3] = 0x9d;
-  image[4] = 0x01;
-  image[5] = 0x2a;
-  new DataView(image.buffer).setUint16(6, width, true);
-  new DataView(image.buffer).setUint16(8, height, true);
-  body.push(riffChunk('VP8 ', image));
+  const body = [riffChunk('VP8X', vp8x), riffChunk('VP8 ', vp8Payload(width, height))];
 
   if (options.exif) {
     body.push(riffChunk('EXIF', options.exif));
@@ -201,34 +209,30 @@ export function buildWebpExtended(
   return riff(body);
 }
 
-/** Lists WebP chunk FourCCs in file order. */
-export function webpChunkTypes(bytes: Uint8Array): string[] {
+/** WebP chunks in file order, with the offset of each payload. */
+function webpChunks(bytes: Uint8Array): { type: string; payloadStart: number }[] {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const types: string[] = [];
+  const chunks: { type: string; payloadStart: number }[] = [];
   let offset = 12;
 
   while (offset + 8 <= bytes.length) {
     const size = view.getUint32(offset + 4, true);
-    types.push(String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]));
+    chunks.push({ type: readFourCc(bytes, offset), payloadStart: offset + 8 });
     offset += 8 + size + (size % 2);
   }
 
-  return types;
+  return chunks;
+}
+
+/** Lists WebP chunk FourCCs in file order. */
+export function webpChunkTypes(bytes: Uint8Array): string[] {
+  return webpChunks(bytes).map((chunk) => chunk.type);
 }
 
 /** Reads the VP8X flags byte, or null when the file is not extended. */
 export function webpVp8xFlags(bytes: Uint8Array): number | null {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let offset = 12;
-
-  while (offset + 8 <= bytes.length) {
-    const size = view.getUint32(offset + 4, true);
-    const type = String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
-    if (type === 'VP8X') return bytes[offset + 8];
-    offset += 8 + size + (size % 2);
-  }
-
-  return null;
+  const vp8x = webpChunks(bytes).find((chunk) => chunk.type === 'VP8X');
+  return vp8x ? bytes[vp8x.payloadStart] : null;
 }
 
 /** True when the RIFF size field matches the actual file length. */
@@ -244,12 +248,6 @@ function writeUint24(bytes: Uint8Array, offset: number, value: number): void {
 }
 
 // --- ISOBMFF (HEIC / AVIF) --------------------------------------------------
-
-function fourCc(text: string): Uint8Array {
-  const out = new Uint8Array(4);
-  for (let i = 0; i < 4; i++) out[i] = text.charCodeAt(i);
-  return out;
-}
 
 function u16be(value: number): Uint8Array {
   const out = new Uint8Array(2);
@@ -271,11 +269,11 @@ function box(type: string, payload: Uint8Array): Uint8Array {
   return out;
 }
 
-/** Item IDs the builder hands out, in the order the item table lists them. */
+/** Item IDs that the builder assigns, in item table order. */
 const IMAGE_ITEM_ID = 1;
 const EXIF_ITEM_ID = 2;
 
-/** Stand-in for coded image data, distinctive enough to spot if it moves. */
+/** Placeholder for coded image data, with a byte pattern a test can find if it moves. */
 function imageItemData(): Uint8Array {
   const data = new Uint8Array(48);
   for (let i = 0; i < data.length; i++) data[i] = (i * 7 + 3) & 0xff;
@@ -287,38 +285,39 @@ export interface IsobmffOptions {
   compatibleBrands?: string[];
   exif?: Uint8Array;
   tiffHeaderOffset?: number;
-  /** Give the EXIF item the wrong item_type, so the table has no EXIF in it. */
+  /** Give the EXIF item the wrong item_type, so the item table has no EXIF item. */
   omitExifItem?: boolean;
   /** Drop the `meta` box entirely. */
   omitMeta?: boolean;
   /**
-   * Box order. `mdat-first` keeps item data ahead of `meta`, so growing `meta`
-   * leaves its offsets alone; `meta-first` is what real encoders emit and is
-   * the layout that forces every offset to be patched.
+   * Box order. `mdat-first` puts item data before `meta`, so a larger `meta`
+   * does not move the data. `meta-first` is the order that real encoders
+   * write. With this order, the writer must update every item offset.
    */
   layout?: 'mdat-first' | 'meta-first';
   width?: number;
   height?: number;
   /** Quarter turns recorded in an `irot` property. */
   rotation?: 0 | 1 | 2 | 3;
-  /** Drop `pitm`, leaving the primary item unidentified. */
+  /** Drop `pitm`, so no item is marked as the primary item. */
   omitPrimaryItem?: boolean;
   /** Drop `iprp`, leaving no `ispe` to read dimensions from. */
   omitProperties?: boolean;
   /**
-   * Put a box whose declared size overruns `meta` just ahead of `iprp`, so a
-   * walk of the children stops there and never sees the boxes behind it.
+   * Put a box just before `iprp` with a declared size that goes past the end
+   * of `meta`. A walk of the children stops at this box and does not find the
+   * boxes after it.
    */
   unwalkableMetaChild?: boolean;
 }
 
 /**
- * A HEIC/AVIF file with a primary image item, its properties, and optionally an
- * EXIF item alongside.
+ * A HEIC/AVIF file with a primary image item, its properties, and an optional
+ * EXIF item.
  *
- * The `meta` box is sized with placeholder offsets and then rebuilt with real
- * ones. Every field in `iloc` has a fixed width, so the box comes out the same
- * length both times and one measuring pass is enough.
+ * The `meta` box is built first with placeholder offsets, then again with the
+ * real offsets. Every field in `iloc` has a fixed width, so both builds have
+ * the same length and one measuring pass is enough.
  */
 export function buildIsobmff(options: IsobmffOptions = {}): Uint8Array {
   const brand = options.brand ?? 'heic';
@@ -359,8 +358,8 @@ export function buildIsobmff(options: IsobmffOptions = {}): Uint8Array {
         new Uint8Array([2, 0, 0, 0]),
         u16be(EXIF_ITEM_ID),
         u16be(0),
-        // Deliberately wrong when omitExifItem is set, so the reader has an item
-        // table to walk but no EXIF in it.
+        // Wrong on purpose when omitExifItem is set. The reader then has an item
+        // table to walk, but no EXIF item in it.
         fourCc(options.omitExifItem ? 'mime' : 'Exif'),
         new Uint8Array([0]),
       ])));
@@ -408,7 +407,7 @@ export function buildIsobmff(options: IsobmffOptions = {}): Uint8Array {
 
     if (options.unwalkableMetaChild) {
       const free = box('free', new Uint8Array(4));
-      // Claims more bytes than it holds, which is where a walk gives up.
+      // Declares more bytes than it contains, so a box walk stops here.
       new DataView(free.buffer).setUint32(0, free.length + 64, false);
       children.push(free);
     }
@@ -459,7 +458,7 @@ function buildIprp(options: IsobmffOptions): Uint8Array {
 
   const ipco = box('ipco', concat(properties));
 
-  // One entry, associating every property with the image item.
+  // One entry, which associates every property with the image item.
   const associations = properties.map((_, index) => new Uint8Array([(index + 1) & 0x7f]));
   const ipma = box('ipma', concat([
     new Uint8Array([0, 0, 0, 0]),        // version 0, flags 0: 1-byte indices
@@ -472,7 +471,7 @@ function buildIprp(options: IsobmffOptions): Uint8Array {
   return box('iprp', concat([ipco, ipma]));
 }
 
-// --- ISOBMFF inspection, parsed independently of the code under test ---
+// --- ISOBMFF inspectors, which do not use the code under test -------------
 
 function isobmffBoxes(bytes: Uint8Array, start: number, end: number) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -483,7 +482,7 @@ function isobmffBoxes(bytes: Uint8Array, start: number, end: number) {
     const size = view.getUint32(offset, false);
     if (size < 8 || offset + size > end) break;
     boxes.push({
-      type: String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]),
+      type: readFourCc(bytes, offset + 4),
       payloadStart: offset + 8,
       end: offset + size,
     });
@@ -509,18 +508,13 @@ export function isobmffItems(bytes: Uint8Array): { itemId: number; itemType: str
     .filter((box) => box.type === 'infe')
     .map((infe) => ({
       itemId: view.getUint16(infe.payloadStart + 4, false),
-      itemType: String.fromCharCode(
-        bytes[infe.payloadStart + 8],
-        bytes[infe.payloadStart + 9],
-        bytes[infe.payloadStart + 10],
-        bytes[infe.payloadStart + 11]
-      ),
+      itemType: readFourCc(bytes, infe.payloadStart + 8),
     }));
 }
 
 /**
- * Resolves an item's bytes through `iloc`, for the fixed 4/4/0/0 field widths
- * both the builder and the writer emit.
+ * Finds an item's bytes through `iloc`. Supports only the fixed 4/4/0/0 field
+ * widths that the builder and the writer both use.
  */
 export function isobmffItemData(bytes: Uint8Array, itemId: number): Uint8Array | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);

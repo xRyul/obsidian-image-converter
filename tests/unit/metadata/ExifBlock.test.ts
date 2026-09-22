@@ -1,6 +1,5 @@
 /**
  * Unit tests for the TIFF/EXIF block parser, serialiser and normaliser.
- * Given-When-Then naming, AAA structure, real bytes throughout - no mocks.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -11,24 +10,8 @@ import {
   parseExifBlock,
   serialiseExifBlock,
   serialiseWithin,
-  TAG_ORIENTATION,
-  TAG_PIXEL_X_DIMENSION,
-  TAG_PIXEL_Y_DIMENSION,
-  TAG_USER_COMMENT,
 } from '../../../src/metadata/ExifBlock';
-import { exifBlockFrom, TAG } from '../../factories/exif';
-
-function shortValue(bytes: Uint8Array, bigEndian: boolean): number {
-  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint16(0, !bigEndian);
-}
-
-function longValue(bytes: Uint8Array, bigEndian: boolean): number {
-  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, !bigEndian);
-}
-
-function asciiValue(bytes: Uint8Array): string {
-  return String.fromCharCode(...bytes).replace(/\0+$/, '');
-}
+import { asciiValue, exifBlockFrom, longValue, shortValue, TAG } from '../../factories/exif';
 
 describe('ExifBlock', () => {
   describe('parseExifBlock', () => {
@@ -41,7 +24,7 @@ describe('ExifBlock', () => {
       expect(parsed!.bigEndian).toBe(false);
       expect(asciiValue(parsed!.ifd0.get(TAG.make)!.value)).toBe('TestCamera');
       expect(asciiValue(parsed!.ifd0.get(TAG.model)!.value)).toBe('TestModel');
-      expect(shortValue(parsed!.ifd0.get(TAG_ORIENTATION)!.value, false)).toBe(6);
+      expect(shortValue(parsed!.ifd0.get(TAG.orientation)!.value)).toBe(6);
     });
 
     it('Given a big-endian block, When parsed, Then endianness is detected and values decode', () => {
@@ -51,10 +34,10 @@ describe('ExifBlock', () => {
 
       expect(parsed!.bigEndian).toBe(true);
       expect(asciiValue(parsed!.ifd0.get(TAG.make)!.value)).toBe('BigEndianCam');
-      expect(shortValue(parsed!.ifd0.get(TAG_ORIENTATION)!.value, true)).toBe(3);
+      expect(shortValue(parsed!.ifd0.get(TAG.orientation)!.value, true)).toBe(3);
     });
 
-    it('Given a block with sub-IFDs, When parsed, Then Exif and GPS entries are followed', () => {
+    it('Given a block with sub-IFDs, When parsed, Then the Exif and GPS IFD entries are read', () => {
       const block = exifBlockFrom({
         make: 'Cam',
         dateTimeOriginal: '2024:01:02 03:04:05',
@@ -66,12 +49,12 @@ describe('ExifBlock', () => {
       const parsed = parseExifBlock(block);
 
       expect(asciiValue(parsed!.exif.get(TAG.dateTimeOriginal)!.value)).toBe('2024:01:02 03:04:05');
-      expect(shortValue(parsed!.exif.get(TAG.isoSpeedRatings)!.value, false)).toBe(400);
+      expect(shortValue(parsed!.exif.get(TAG.isoSpeedRatings)!.value)).toBe(400);
       expect(asciiValue(parsed!.gps.get(TAG.gpsLatitudeRef)!.value)).toBe('N');
       expect(parsed!.gps.get(TAG.gpsLatitude)!.count).toBe(3);
     });
 
-    it('Given sub-IFD pointers, When parsed, Then they are not exposed as ordinary tags', () => {
+    it('Given sub-IFD pointers, When parsed, Then they are not returned as tags', () => {
       const block = exifBlockFrom({ make: 'Cam', isoSpeedRatings: 100, gpsLatitudeRef: 'N' });
 
       const parsed = parseExifBlock(block);
@@ -85,7 +68,7 @@ describe('ExifBlock', () => {
       expect(parseExifBlock(new Uint8Array(2))).toBeNull();
     });
 
-    it('Given a truncated block, When parsed, Then it degrades instead of throwing', () => {
+    it('Given a truncated block, When parsed, Then it does not throw', () => {
       const block = exifBlockFrom({ make: 'Cam', model: 'Model' });
       const truncated = block.slice(0, block.length - 6);
 
@@ -94,7 +77,7 @@ describe('ExifBlock', () => {
   });
 
   describe('serialiseExifBlock', () => {
-    it('Given a parsed block, When re-serialised and parsed again, Then all values survive', () => {
+    it('Given a parsed block, When re-serialised and parsed again, Then all values are kept', () => {
       const original = exifBlockFrom({
         make: 'RoundTrip',
         model: 'Camera9000',
@@ -112,9 +95,9 @@ describe('ExifBlock', () => {
       expect(asciiValue(reparsed.ifd0.get(TAG.make)!.value)).toBe('RoundTrip');
       expect(asciiValue(reparsed.ifd0.get(TAG.model)!.value)).toBe('Camera9000');
       expect(asciiValue(reparsed.ifd0.get(TAG.software)!.value)).toBe('Firmware 1.2');
-      expect(shortValue(reparsed.ifd0.get(TAG_ORIENTATION)!.value, false)).toBe(8);
+      expect(shortValue(reparsed.ifd0.get(TAG.orientation)!.value)).toBe(8);
       expect(asciiValue(reparsed.exif.get(TAG.dateTimeOriginal)!.value)).toBe('2024:01:02 03:04:05');
-      expect(shortValue(reparsed.exif.get(TAG.isoSpeedRatings)!.value, false)).toBe(1600);
+      expect(shortValue(reparsed.exif.get(TAG.isoSpeedRatings)!.value)).toBe(1600);
       expect(asciiValue(reparsed.gps.get(TAG.gpsLatitudeRef)!.value)).toBe('W');
       expect(reparsed.gps.get(TAG.gpsLatitude)!.value).toEqual(parsed.gps.get(TAG.gpsLatitude)!.value);
     });
@@ -124,13 +107,11 @@ describe('ExifBlock', () => {
 
       const out = serialiseExifBlock(parsed);
 
-      expect(out[0]).toBe(0x4d);
-      expect(out[1]).toBe(0x4d);
       expect(parseExifBlock(out)!.bigEndian).toBe(true);
     });
 
     it('Given any block, When serialised, Then IFD0 declares no following IFD', () => {
-      // IFD1 holds the embedded thumbnail, which is stale after re-encoding.
+      // IFD1 holds the embedded thumbnail, which does not match the re-encoded image.
       const parsed = parseExifBlock(exifBlockFrom({ make: 'Cam', model: 'Model' }))!;
 
       const out = serialiseExifBlock(parsed);
@@ -166,12 +147,12 @@ describe('ExifBlock', () => {
 
   describe('normalise', () => {
     it('Given a rotated image, When normalised, Then Orientation becomes 1', () => {
-      // Canvas bakes rotation into the pixels; a surviving tag rotates twice.
+      // Canvas applies the rotation to the pixels. If the tag stays, viewers rotate twice.
       const parsed = parseExifBlock(exifBlockFrom({ orientation: 6, make: 'Cam' }))!;
 
       const result = normalise(parsed, null);
 
-      expect(shortValue(result.ifd0.get(TAG_ORIENTATION)!.value, false)).toBe(1);
+      expect(shortValue(result.ifd0.get(TAG.orientation)!.value)).toBe(1);
     });
 
     it('Given no Orientation tag, When normalised, Then none is added', () => {
@@ -179,7 +160,7 @@ describe('ExifBlock', () => {
 
       const result = normalise(parsed, null);
 
-      expect(result.ifd0.has(TAG_ORIENTATION)).toBe(false);
+      expect(result.ifd0.has(TAG.orientation)).toBe(false);
     });
 
     it('Given output dimensions, When normalised, Then pixel dimension tags match them', () => {
@@ -187,14 +168,14 @@ describe('ExifBlock', () => {
 
       const result = normalise(parsed, { width: 640, height: 480 });
 
-      expect(longValue(result.exif.get(TAG_PIXEL_X_DIMENSION)!.value, false)).toBe(640);
-      expect(longValue(result.exif.get(TAG_PIXEL_Y_DIMENSION)!.value, false)).toBe(480);
+      expect(longValue(result.exif.get(TAG.pixelXDimension)!.value)).toBe(640);
+      expect(longValue(result.exif.get(TAG.pixelYDimension)!.value)).toBe(480);
     });
 
     it('Given unknown dimensions, When normalised, Then stale pixel dimensions are dropped', () => {
       const parsed = parseExifBlock(exifBlockFrom({ make: 'Cam', isoSpeedRatings: 100 }))!;
-      parsed.exif.set(TAG_PIXEL_X_DIMENSION, {
-        tag: TAG_PIXEL_X_DIMENSION,
+      parsed.exif.set(TAG.pixelXDimension, {
+        tag: TAG.pixelXDimension,
         type: 4,
         count: 1,
         value: new Uint8Array([0x00, 0x10, 0x00, 0x00]),
@@ -202,10 +183,10 @@ describe('ExifBlock', () => {
 
       const result = normalise(parsed, null);
 
-      expect(result.exif.has(TAG_PIXEL_X_DIMENSION)).toBe(false);
+      expect(result.exif.has(TAG.pixelXDimension)).toBe(false);
     });
 
-    it('Given a block with metadata, When normalised, Then untouched IFDs pass through', () => {
+    it('Given a block with metadata, When normalised, Then the other tags are kept unchanged', () => {
       const parsed = parseExifBlock(exifBlockFrom({
         make: 'Cam',
         dateTimeOriginal: '2024:01:02 03:04:05',
@@ -220,27 +201,26 @@ describe('ExifBlock', () => {
       expect(asciiValue(result.gps.get(TAG.gpsLatitudeRef)!.value)).toBe('N');
     });
 
-    it('Given normalisation, When applied, Then the input block is not mutated', () => {
+    it('Given a rotated block, When normalised, Then the input block is not changed', () => {
       const parsed = parseExifBlock(exifBlockFrom({ orientation: 6, make: 'Cam' }))!;
 
       normalise(parsed, { width: 10, height: 10 });
 
-      expect(shortValue(parsed.ifd0.get(TAG_ORIENTATION)!.value, false)).toBe(6);
-      expect(parsed.exif.has(TAG_PIXEL_X_DIMENSION)).toBe(false);
+      expect(shortValue(parsed.ifd0.get(TAG.orientation)!.value)).toBe(6);
+      expect(parsed.exif.has(TAG.pixelXDimension)).toBe(false);
     });
   });
 
   describe('serialiseWithin', () => {
-    it('Given a block that fits, When serialised within a ceiling, Then it is returned whole', () => {
+    it('Given a block that fits, When serialised within a size limit, Then it is returned complete', () => {
       const parsed = parseExifBlock(exifBlockFrom({ make: 'Cam', model: 'Model' }))!;
 
       const out = serialiseWithin(parsed, 65527);
 
-      expect(out).not.toBeNull();
-      expect(parseExifBlock(out!)).not.toBeNull();
+      expect(out).toEqual(serialiseExifBlock(parsed));
     });
 
-    it('Given an oversized comment, When serialised within a ceiling, Then it is shed to fit', () => {
+    it('Given an oversized comment, When serialised within a size limit, Then the comment is removed to fit', () => {
       const parsed = parseExifBlock(exifBlockFrom({
         make: 'Cam',
         userComment: 'x'.repeat(3000),
@@ -250,7 +230,7 @@ describe('ExifBlock', () => {
 
       expect(out).not.toBeNull();
       expect(out!.length).toBeLessThanOrEqual(1024);
-      expect(parseExifBlock(out!)!.exif.has(TAG_USER_COMMENT)).toBe(false);
+      expect(parseExifBlock(out!)!.exif.has(TAG.userComment)).toBe(false);
       expect(asciiValue(parseExifBlock(out!)!.ifd0.get(TAG.make)!.value)).toBe('Cam');
     });
 

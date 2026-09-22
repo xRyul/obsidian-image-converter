@@ -34,7 +34,7 @@ export interface ExifSpec {
   gpsLatitudeRef?: string;
   gpsLatitude?: [number, number][];
   bigEndian?: boolean;
-  /** Arbitrary extra IFD0 tags as SHORTs, e.g. TIFF structural tags. */
+  /** Extra IFD0 tags as SHORT values, for example TIFF structural tags. */
   extraIfd0Shorts?: Record<number, number>;
 }
 
@@ -104,7 +104,7 @@ export function exifBlockFrom(spec: ExifSpec = {}): Uint8Array {
   return out;
 }
 
-/** Size of an IFD structure plus its out-of-line value data. */
+/** Size of an IFD, plus the value data stored outside its entries. */
 function ifdSize(entries: Entry[]): number {
   let size = 2 + entries.length * 12 + 4;
   for (const entry of entries) {
@@ -183,21 +183,19 @@ function rationalEntry(tag: number, values: [number, number][], little: boolean)
   return { tag, type: TYPE_RATIONAL, count: values.length, value: bytes };
 }
 
-/** Reads an ASCII tag straight out of a raw block, for assertions. */
-export function readAsciiTag(block: Uint8Array, ifdOffset: number, tag: number): string | null {
-  const little = block[0] === 0x49;
-  const view = new DataView(block.buffer, block.byteOffset, block.byteLength);
-  const count = view.getUint16(ifdOffset, little);
+// --- Entry value decoders, for assertions -----------------------------------
 
-  for (let i = 0; i < count; i++) {
-    const entryOffset = ifdOffset + 2 + i * 12;
-    if (view.getUint16(entryOffset, little) !== tag) continue;
+/** Decodes an ASCII entry value, dropping the NUL terminator. */
+export function asciiValue(bytes: Uint8Array): string {
+  return String.fromCharCode(...bytes).replace(/\0+$/, '');
+}
 
-    const length = view.getUint32(entryOffset + 4, little);
-    const start = length <= 4 ? entryOffset + 8 : view.getUint32(entryOffset + 8, little);
-    const raw = block.slice(start, start + length);
-    return String.fromCharCode(...raw).replace(/\0+$/, '');
-  }
+/** Decodes a SHORT entry value. */
+export function shortValue(bytes: Uint8Array, bigEndian = false): number {
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint16(0, !bigEndian);
+}
 
-  return null;
+/** Decodes a LONG entry value. */
+export function longValue(bytes: Uint8Array, bigEndian = false): number {
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, !bigEndian);
 }
