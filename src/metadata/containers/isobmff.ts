@@ -1,18 +1,24 @@
 // isobmff.ts
-// HEIC/HEIF and AVIF share the ISO base media file format, where metadata is an
-// item inside the `meta` box: `iinf` says what each item is, `iloc` says where
-// its bytes are, and `iref` ties an item to the image it describes.
+// HEIC/HEIF and AVIF use the ISO base media file format (ISOBMFF). In this
+// format, metadata is an item inside the `meta` box:
+//   - `iinf` tells what each item is.
+//   - `iloc` tells where the bytes of each item are.
+//   - `iref` links an item to the image that it describes.
 //
-// Writing means rebuilding those three boxes and appending the EXIF payload as a
-// new `mdat` at the end of the file, which leaves the existing image data where
-// it is. `meta` still grows, so every absolute item offset that sits after it
-// has to be patched by the same delta - the one step here that can silently
-// corrupt a file, so the result is verified before it is returned.
+// To write EXIF, the writer rebuilds these three boxes. It adds the EXIF
+// payload in a new `mdat` box at the end of the file, so the image data does
+// not move. But the `meta` box gets larger. Thus the writer must add the size
+// change (the delta) to each item offset after `meta`. An error in this step
+// can corrupt the file without a visible failure. Thus the writer makes sure
+// that the result is correct before it returns it.
 
 import { Dimensions } from "../types";
 import { ascii, concat, equalBytes, readFourCc, viewOf } from "./bytes";
 
-/** Brands that indicate a still image we can read EXIF from. */
+/**
+ * HEIF and AVIF brands, for still images and image sequences. The reader
+ * accepts all of them. The writer fails safely on a file with no `meta` box.
+ */
 const BRANDS = new Set(['heic', 'heix', 'hevc', 'hevx', 'mif1', 'msf1', 'avif', 'avis']);
 
 const ITEM_TYPE_EXIF = 'Exif';
@@ -20,8 +26,8 @@ const ITEM_TYPE_EXIF = 'Exif';
 const REFERENCE_TYPE_EXIF = 'cdsc';
 
 /**
- * Box sizes are 32-bit. Held to 31 bits so the `mdat` header cannot push the
- * payload over the limit.
+ * The box size field is 32 bits. This limit is 31 bits, so that the `mdat`
+ * header and the payload together cannot be larger than the field.
  */
 export const MAX_EXIF_BYTES = 0x7fffffff;
 
@@ -74,8 +80,8 @@ interface Location {
     baseOffset: number;
     extents: Extent[];
     /**
-     * True when the entry carries a non-zero extent_index, which only means
-     * anything alongside item protection. Readable, but not safe to rewrite.
+     * True when the entry has a non-zero extent_index. The reader can read
+     * this entry, but the writer cannot rewrite it safely.
      */
     indexed: boolean;
 }
@@ -184,9 +190,9 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
         throw new Error("ISOBMFF item table has entries that cannot be rewritten");
     }
 
-    // An item already holding EXIF is dropped from the tables. Its bytes stay in
-    // place as dead weight, which costs a little size but leaves every other
-    // item's offset alone.
+    // Remove an existing EXIF item from the tables. Its bytes stay in the file
+    // but nothing uses them. This makes the file a little larger, but the
+    // offsets of the other items do not change.
     const replaced = info.entries.find((entry) => entry.itemType === ITEM_TYPE_EXIF);
     const replacedId = replaced ? replaced.itemId : null;
     const keptEntries = info.entries.filter((entry) => entry.itemId !== replacedId);
@@ -199,13 +205,14 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
     const itemId = nextItemId(info.entries, locations);
     const payload = concat([uint32(0), exif]); // no gap before the TIFF header
 
-    // Boxes whose size does not depend on offsets we have yet to compute.
+    // The sizes of these boxes do not change when the offsets change.
     const newIinf = buildItemInfo(info, keptEntries, buildInfe(itemId));
     const newIref = buildItemReferences(bytes, meta, itemId, replacedId);
 
-    // An `iloc` box's size is fixed by its entry and extent counts, not by the
-    // values in it, so the meta box can be measured with placeholder offsets and
-    // the real ones filled in once the delta is known.
+    // The size of an `iloc` box depends only on the number of entries and
+    // extents, not on the values. Thus the writer measures the `meta` box with
+    // placeholder offsets first. It writes the real offsets when it knows the
+    // delta.
     const placeholder = keptLocations.concat([newLocation(itemId, 0, payload.length)]);
     const probe = buildMeta(bytes, meta, newIinf, buildLocations(placeholder), newIref);
 
@@ -659,8 +666,8 @@ function buildLocations(locations: Location[]): Uint8Array {
 }
 
 /**
- * Builds `iref`, adding a `cdsc` reference from the EXIF item to the primary
- * one. Readers largely ignore an Exif item that nothing binds to an image.
+ * Builds `iref`, and adds a `cdsc` reference from the EXIF item to the primary
+ * item. Most readers ignore an Exif item that is not linked to an image.
  *
  * @returns The box, or null when there is nothing to reference and no existing
  * box to preserve.
@@ -761,9 +768,9 @@ function buildMeta(
 }
 
 /**
- * Confirms every item the file already had still resolves to the same bytes.
- * Cheap next to the cost of handing back a file whose image data has been cut
- * loose from its offsets.
+ * Makes sure that each item in the old file points to the same bytes in the
+ * new file. This check is fast. A file with incorrect offsets loses its image
+ * data.
  */
 function itemsIntact(source: Uint8Array, before: Location[], output: Uint8Array): boolean {
     const meta = readMeta(output);

@@ -13,10 +13,11 @@ export interface ExifEntry {
 export type ExifIfd = Map<number, ExifEntry>;
 
 /**
- * A parsed EXIF block: the TIFF structure shared by every container that can
- * carry EXIF. Only the wrapper around it differs between JPEG, PNG and WebP.
+ * A parsed EXIF block. Every container that holds EXIF (JPEG, PNG, WebP,
+ * HEIC/AVIF and TIFF) uses this same TIFF structure. Only the wrapper around
+ * the block is different.
  *
- * IFD1 (the embedded thumbnail) is not retained
+ * The parser does not keep IFD1 (the embedded thumbnail).
  */
 export interface ExifBlock {
     /** Byte order of every value in this block. */

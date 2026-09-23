@@ -213,7 +213,8 @@ export function serialiseExifBlock(block: ExifBlock): Uint8Array {
         ifd0.set(TAG_GPS_IFD_POINTER, longEntry(TAG_GPS_IFD_POINTER, 0, littleEndian));
     }
 
-    // Lay out first: pointer entries need offsets only known once sizes settle.
+    // Calculate the position of each IFD first. The pointer entries must hold
+    // these positions, and they are known only when all sizes are known.
     let cursor = HEADER_SIZE;
     const layout = (ifd: ExifIfd): IfdPlan => {
         const structureOffset = cursor;
@@ -314,13 +315,18 @@ export function normalise(block: ExifBlock, dimensions: Dimensions | null): Exif
     const ifd0 = new Map(block.ifd0);
     const exif = new Map(block.exif);
 
-    // Canvas bakes orientation into the pixels, so a surviving tag rotates the
-    // image twice. An absent tag already means normal, so only rewrite what is there.
+    // When the pixels go through the canvas, the orientation is applied to
+    // them. If the old tag stays, viewers rotate the image a second time.
+    // A missing tag already means "normal", so change the tag only if it exists.
+    //
+    // Some paths do not use the canvas, so their pixels are not rotated:
+    // TIFF sources (UTIF), and pngquant or FFmpeg with no resize. These
+    // outputs also get Orientation 1. This is a known limitation.
     if (ifd0.has(TAG_ORIENTATION)) {
         ifd0.set(TAG_ORIENTATION, shortEntry(TAG_ORIENTATION, 1, littleEndian));
     }
 
-    // Dimensions are stale after resizing
+    // After a resize, these dimensions are incorrect.
     ifd0.delete(TAG_IMAGE_WIDTH);
     ifd0.delete(TAG_IMAGE_LENGTH);
 
@@ -328,7 +334,7 @@ export function normalise(block: ExifBlock, dimensions: Dimensions | null): Exif
         exif.set(TAG_PIXEL_X_DIMENSION, longEntry(TAG_PIXEL_X_DIMENSION, dimensions.width, littleEndian));
         exif.set(TAG_PIXEL_Y_DIMENSION, longEntry(TAG_PIXEL_Y_DIMENSION, dimensions.height, littleEndian));
     } else {
-        // Unknown output size: stale dimensions are worse than none.
+        // The output size is unknown. Incorrect dimensions are worse than none.
         exif.delete(TAG_PIXEL_X_DIMENSION);
         exif.delete(TAG_PIXEL_Y_DIMENSION);
     }
@@ -343,8 +349,9 @@ export function normalise(block: ExifBlock, dimensions: Dimensions | null): Exif
 }
 
 /**
- * Serialises within a byte ceiling, shedding the largest optional tags first.
- * Needed for JPEG, whose APP1 segment cannot exceed 64KB.
+ * Serialises within a byte limit. If the block is too large, this removes
+ * MakerNote, then UserComment, until the block fits. JPEG needs this because
+ * its APP1 segment cannot be larger than 64 KB.
  *
  * @param block - The block to write.
  * @param maxBytes - The container's hard limit.
