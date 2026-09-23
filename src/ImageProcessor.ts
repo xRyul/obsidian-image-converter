@@ -4,8 +4,8 @@ import { SupportedImageFormats } from "./SupportedImageFormats";
 // eslint-disable-next-line import/no-nodejs-modules -- Required for spawning external processes (FFmpeg, pngquant); Obsidian runs on Electron with Node.js support
 import { ChildProcess, spawn } from 'child_process';
 import { ConversionPreset, ImageConverterSettings, DEFAULT_SETTINGS } from "./ImageConverterSettings";
-import * as piexif from "piexifjs"; // Import piexif library
 import { normalizeExecutablePath } from "./utils/ffmpegPath";
+import { MetadataTransfer } from "./metadata/MetadataTransfer";
 
 // eslint-disable-next-line import/no-nodejs-modules -- Required for temporary file handling in FFmpeg processing; Obsidian runs on Electron with Node.js support
 import * as fs from 'fs/promises';
@@ -79,6 +79,7 @@ export class ImageProcessor {
     private detectedEncoder: AvifEncoder | null = null;
     private static encoderDetectionCache: Map<string, AvifEncoder | null> = new Map(); // Static cache shared across instances
     private encoderFallbackAttempted: boolean = false;
+    private metadataTransfer: MetadataTransfer = new MetadataTransfer();
 
     constructor(supportedImageFormats: SupportedImageFormats) {
         this.supportedImageFormats = supportedImageFormats;
@@ -498,29 +499,8 @@ export class ImageProcessor {
             settings
         );
 
-        if (format === "JPEG") {
-            try {
-                // Extract metadata from the original file
-                const metadata: piexif.ExifDict | undefined = await this.extractMetadata(file);
-
-                // Remove rotation property (Orientation tag in 0th IFD, tag 274)
-                if (metadata && metadata["0th"] && metadata["0th"][piexif.ImageIFD.Orientation]) {
-                    delete metadata["0th"][piexif.ImageIFD.Orientation];
-                }
-
-                const stringifiedMetadata = metadata && Object.keys(metadata).length > 0 ? piexif.dump(metadata) : "";
-
-                // Re-apply the metadata to the processed image
-                return await this.applyMetadata(processedImage, stringifiedMetadata);
-            } catch (exifError) {
-                console.error("JPEG EXIF handling error:", exifError);
-                // Per contract 1.8: on EXIF failure, return JPEG without EXIF; no throw
-                return processedImage;
-            }
-        }
-
-        return processedImage
-    }    
+        return this.metadataTransfer.transfer(file, processedImage);
+    }
 
     /**
      * Helper method to process an image file.
@@ -2250,58 +2230,4 @@ canvas.toBlob(
         return buffer;
     }
 
-    /**
-     * Extracts metadata from an image file.
-     * @param file - The image file as a Blob.
-     * @returns A Promise that resolves to the extracted metadata.
-     */
-    private async extractMetadata(file: Blob): Promise<piexif.ExifDict | undefined> {
-        const reader = new FileReader();
-        const fileDataUrl = await new Promise<string>((resolve, reject) => {
-            reader.onload = (e) => resolve(e.target?.result as string);
-            reader.onerror = () => reject(new Error("Failed to read file for metadata"));
-            reader.readAsDataURL(file);
-        });
-
-        try {
-            return piexif.load(fileDataUrl);
-        } catch {
-            return;
-        }
-    }
-
-    private async applyMetadata(
-        buffer: ArrayBuffer,
-        metadata: string
-    ): Promise<ArrayBuffer> {
-        try {
-            // Convert ArrayBuffer to Base64 string in chunks
-            const uint8Array = new Uint8Array(buffer);
-            let binaryString = '';
-            const chunkSize = 8192; // Process in chunks to avoid stack overflow
-            for (let i = 0; i < uint8Array.length; i += chunkSize) {
-                binaryString += String.fromCharCode.apply(
-                    null,
-                    uint8Array.subarray(i, i + chunkSize)
-                );
-            }
-            const base64Data = `data:image/jpeg;base64,${btoa(binaryString)}`;
-    
-            // Insert EXIF metadata using piexif
-            const updatedBase64 = piexif.insert(metadata, base64Data);
-    
-            // Convert the updated Base64 string back to an ArrayBuffer
-            const updatedBinaryString = atob(updatedBase64.split(',')[1]);
-            const updatedBuffer = new ArrayBuffer(updatedBinaryString.length);
-            const updatedUint8Array = new Uint8Array(updatedBuffer);
-            for (let i = 0; i < updatedBinaryString.length; i++) {
-                updatedUint8Array[i] = updatedBinaryString.charCodeAt(i);
-            }
-    
-            return updatedBuffer;
-        } catch (error) {
-            console.error("Error applying metadata:", error);
-            return buffer; // Return original if metadata application fails
-        }
-    }
 }
