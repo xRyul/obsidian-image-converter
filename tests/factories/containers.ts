@@ -100,13 +100,13 @@ export function pngChunkCrcsValid(bytes: Uint8Array): boolean {
 
   while (offset + 12 <= bytes.length) {
     const length = view.getUint32(offset, false);
-    const dataEnd = offset + 8 + length;
-    if (dataEnd + 4 > bytes.length) return false;
+    const payloadEnd = offset + 8 + length;
+    if (payloadEnd + 4 > bytes.length) return false;
 
-    const expected = view.getUint32(dataEnd, false);
-    if (crc32(bytes.subarray(offset + 4, dataEnd)) !== expected) return false;
+    const expected = view.getUint32(payloadEnd, false);
+    if (crc32(bytes.subarray(offset + 4, payloadEnd)) !== expected) return false;
 
-    offset = dataEnd + 4;
+    offset = payloadEnd + 4;
   }
 
   return true;

@@ -21,8 +21,8 @@ interface Chunk {
     start: number;
     /** Offset just past the chunk's CRC. */
     end: number;
-    dataStart: number;
-    dataEnd: number;
+    payloadStart: number;
+    payloadEnd: number;
 }
 
 /** True when the bytes open with the PNG signature. */
@@ -42,7 +42,7 @@ export function readExif(bytes: Uint8Array): Uint8Array | null {
 
     for (const chunk of walkChunks(bytes)) {
         if (chunk.type === CHUNK_EXIF) {
-            return stripExifPrefix(bytes.slice(chunk.dataStart, chunk.dataEnd));
+            return stripExifPrefix(bytes.slice(chunk.payloadStart, chunk.payloadEnd));
         }
     }
 
@@ -54,11 +54,15 @@ export function readExif(bytes: Uint8Array): Uint8Array | null {
  * @param bytes - The PNG file.
  * @param exif - The raw block to embed.
  * @returns A new PNG carrying the block.
- * @throws If the file is not a PNG, or the chunk walk never reaches IEND.
+ * @throws If the file is not a PNG, the block will not fit, or the chunk walk
+ *         never reaches IEND.
  */
 export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
     if (!isPng(bytes)) {
         throw new Error("Not a PNG");
+    }
+    if (exif.length > MAX_EXIF_BYTES) {
+        throw new Error("EXIF block is too large for a PNG chunk");
     }
 
     const parts: Uint8Array[] = [bytes.subarray(0, SIGNATURE.length)];
@@ -97,7 +101,7 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
 /**
  * Reads dimensions from a PNG's IHDR chunk.
  * @param bytes - The PNG file.
- * @returns The dimensions, or null if IHDR is missing.
+ * @returns The dimensions, or null if IHDR is missing or not valid.
  */
 export function readDimensions(bytes: Uint8Array): Dimensions | null {
     if (!isPng(bytes)) {
@@ -108,15 +112,18 @@ export function readDimensions(bytes: Uint8Array): Dimensions | null {
         if (chunk.type !== CHUNK_IHDR) {
             continue;
         }
-        if (chunk.dataStart + 8 > bytes.length) {
+        if (chunk.payloadStart + 8 > chunk.payloadEnd) {
             return null;
         }
 
         const view = viewOf(bytes);
-        return {
-            width: view.getUint32(chunk.dataStart, false),
-            height: view.getUint32(chunk.dataStart + 4, false),
-        };
+        const width = view.getUint32(chunk.payloadStart, false);
+        const height = view.getUint32(chunk.payloadStart + 4, false);
+        if (width === 0 || height === 0) {
+            return null;
+        }
+
+        return { width, height };
     }
 
     return null;
@@ -128,16 +135,16 @@ function* walkChunks(bytes: Uint8Array): Generator<Chunk> {
 
     while (offset + 12 <= bytes.length) {
         const length = view.getUint32(offset, false);
-        const dataStart = offset + 8;
-        const dataEnd = dataStart + length;
-        const end = dataEnd + 4;
+        const payloadStart = offset + 8;
+        const payloadEnd = payloadStart + length;
+        const end = payloadEnd + 4;
 
-        if (dataEnd > bytes.length || end > bytes.length) {
+        if (end > bytes.length) {
             return;
         }
 
         const type = readFourCc(bytes, offset + 4);
-        yield { type, start: offset, end, dataStart, dataEnd };
+        yield { type, start: offset, end, payloadStart, payloadEnd };
 
         if (type === CHUNK_IEND) {
             return;
