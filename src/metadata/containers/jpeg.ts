@@ -11,7 +11,10 @@ const MARKER_APP0 = 0xe0;
 const MARKER_APP1 = 0xe1;
 const MARKER_TEM = 0x01;
 
-/** An APP1 length field is 16 bits and counts itself; six bytes go to the prefix. */
+/**
+ * The APP1 length field is 16 bits, and the length includes the field itself
+ * (2 bytes). The "Exif\0\0" prefix uses 6 more bytes.
+ */
 export const MAX_EXIF_BYTES = 65527;
 
 interface Segment {
@@ -63,7 +66,7 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
         throw new Error("Not a JPEG");
     }
     if (exif.length > MAX_EXIF_BYTES) {
-        throw new Error("EXIF block exceeds the JPEG APP1 limit");
+        throw new Error("EXIF block is too large for a JPEG APP1 segment");
     }
 
     const parts: Uint8Array[] = [bytes.subarray(0, 2)]; // SOI
@@ -98,7 +101,7 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
 /**
  * Reads dimensions from a JPEG's start-of-frame segment.
  * @param bytes - The JPEG file.
- * @returns The dimensions, or null if no frame header was found.
+ * @returns The dimensions, or null if no valid frame header was found.
  */
 export function readDimensions(bytes: Uint8Array): Dimensions | null {
     if (!isJpeg(bytes)) {
@@ -116,16 +119,20 @@ export function readDimensions(bytes: Uint8Array): Dimensions | null {
         if (!isStartOfFrame) {
             continue;
         }
-        if (segment.payloadStart + 5 > bytes.length) {
+        if (segment.payloadStart + 5 > segment.end) {
             return null;
         }
 
         const view = viewOf(bytes);
         // Payload is: precision (1 byte), height (2), width (2).
-        return {
-            height: view.getUint16(segment.payloadStart + 1, false),
-            width: view.getUint16(segment.payloadStart + 3, false),
-        };
+        const height = view.getUint16(segment.payloadStart + 1, false);
+        const width = view.getUint16(segment.payloadStart + 3, false);
+        // A height of 0 means that a DNL segment after the scan gives the height.
+        if (width === 0 || height === 0) {
+            return null;
+        }
+
+        return { width, height };
     }
 
     return null;
