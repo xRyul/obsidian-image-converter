@@ -287,11 +287,13 @@ function readLossyHeader(payload: Uint8Array): Dimensions | null {
     }
 
     const view = viewOf(payload);
+    const width = view.getUint16(6, true) & 0x3fff;
+    const height = view.getUint16(8, true) & 0x3fff;
+    if (width === 0 || height === 0) {
+        return null;
+    }
 
-    return {
-        width: view.getUint16(6, true) & 0x3fff,
-        height: view.getUint16(8, true) & 0x3fff,
-    };
+    return { width, height };
 }
 
 function buildVp8xPayload(flags: number, canvas: Dimensions): Uint8Array {
