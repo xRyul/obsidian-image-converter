@@ -26,13 +26,17 @@ import {
   isobmffReferences,
   pngChunkCrcsValid,
   pngChunkTypes,
+  webpChunkPayload,
   webpChunkTypes,
   webpRiffSizeValid,
   webpVp8xFlags,
 } from '../../factories/containers';
 
+const FLAG_ICC = 0x20;
 const FLAG_ALPHA = 0x10;
 const FLAG_EXIF = 0x08;
+const FLAG_XMP = 0x04;
+const FLAG_ANIMATION = 0x02;
 
 // TIFF structural tags, which describe pixel storage in the source file only.
 const TAG_IMAGE_WIDTH = 256;
@@ -190,7 +194,27 @@ describe('PNG container', () => {
 });
 
 describe('WebP container', () => {
-  it('Given simple lossy WebP, When written, Then it is converted to extended (VP8X) format with the EXIF flag set', () => {
+  it('Given a WebP with an EXIF chunk, When read, Then the raw block is returned', () => {
+    const block = exifBlockFrom({ make: 'Cam' });
+
+    expect(webp.readExif(buildWebpExtended({ exif: block }))).toEqual(block);
+  });
+
+  it('Given a WebP without EXIF, When read, Then null is returned', () => {
+    expect(webp.readExif(buildWebpLossy())).toBeNull();
+  });
+
+  it('Given a WebP payload that starts with "Exif\\0\\0", When read, Then the prefix is removed', () => {
+    // Some encoders put the JPEG APP1 prefix in the chunk. The WebP specification does not.
+    const block = exifBlockFrom({ make: 'Cam' });
+    const prefixed = new Uint8Array(6 + block.length);
+    prefixed.set([0x45, 0x78, 0x69, 0x66, 0x00, 0x00], 0);
+    prefixed.set(block, 6);
+
+    expect(webp.readExif(buildWebpExtended({ exif: prefixed }))).toEqual(block);
+  });
+
+  it('Given simple lossy WebP, When written, Then it is converted to extended (VP8X) format with the EXIF flag set and the same dimensions', () => {
     const block = exifBlockFrom({ make: 'Cam', model: 'Model' });
 
     const out = webp.writeExif(buildWebpLossy({ width: 200, height: 150 }), block);
@@ -198,12 +222,49 @@ describe('WebP container', () => {
     expect(webp.readExif(out)).toEqual(block);
     expect(webpChunkTypes(out)[0]).toBe('VP8X');
     expect(webpVp8xFlags(out)! & FLAG_EXIF).toBe(FLAG_EXIF);
+    expect(webp.readDimensions(out)).toEqual({ width: 200, height: 150 });
     expect(webpRiffSizeValid(out)).toBe(true);
   });
 
-  it('Given simple lossy WebP, When written, Then the dimensions are kept', () => {
-    const out = webp.writeExif(buildWebpLossy({ width: 200, height: 150 }), exifBlockFrom({ make: 'Cam' }));
+  const simpleFormats = [
+    { label: 'lossy', build: buildWebpLossy, imageChunk: 'VP8 ' },
+    { label: 'lossless', build: buildWebpLossless, imageChunk: 'VP8L' },
+  ];
 
+  // The writer copies every chunk to a new file, so the image data must not change.
+  for (const { label, build, imageChunk } of simpleFormats) {
+    it(`Given simple ${label} WebP, When written, Then the image data is kept byte for byte`, () => {
+      const bytes = build();
+      const before = webpChunkPayload(bytes, imageChunk);
+
+      const out = webp.writeExif(bytes, exifBlockFrom({ make: 'Cam' }));
+
+      expect(before).not.toBeNull();
+      expect(webpChunkPayload(out, imageChunk)).toEqual(before);
+    });
+  }
+
+  it('Given extended WebP with ICCP and XMP chunks, When written, Then the chunks are in the order of the WebP specification', () => {
+    const iccp = new Uint8Array([1, 2, 3, 4, 5]);
+    const xmp = new Uint8Array([6, 7, 8]);
+    const bytes = buildWebpExtended({ iccp, xmp, exif: exifBlockFrom({ make: 'Old' }) });
+
+    const out = webp.writeExif(bytes, exifBlockFrom({ make: 'New' }));
+
+    expect(webpChunkTypes(out)).toEqual(['VP8X', 'ICCP', 'VP8 ', 'EXIF', 'XMP ']);
+    expect(webpChunkPayload(out, 'ICCP')).toEqual(iccp);
+    expect(webpChunkPayload(out, 'XMP ')).toEqual(xmp);
+    expect(webpVp8xFlags(out)! & FLAG_ICC).toBe(FLAG_ICC);
+    expect(webpVp8xFlags(out)! & FLAG_XMP).toBe(FLAG_XMP);
+  });
+
+  it('Given animated WebP, When written, Then the animation flag is kept and the EXIF chunk comes after the frames', () => {
+    const bytes = buildWebpExtended({ width: 200, height: 150, animated: true });
+
+    const out = webp.writeExif(bytes, exifBlockFrom({ make: 'Cam' }));
+
+    expect(webpChunkTypes(out)).toEqual(['VP8X', 'ANIM', 'ANMF', 'EXIF']);
+    expect(webpVp8xFlags(out)! & FLAG_ANIMATION).toBe(FLAG_ANIMATION);
     expect(webp.readDimensions(out)).toEqual({ width: 200, height: 150 });
   });
 
@@ -244,23 +305,77 @@ describe('WebP container', () => {
   });
 
   it('Given an odd-sized EXIF block, When written, Then the RIFF padding keeps the file valid', () => {
-    // exifBlockFrom pads its output to an even length, so remove one byte.
     const block = exifBlockFrom({ make: 'Cam' });
-    const odd = block.length % 2 === 0 ? block.slice(0, block.length - 1) : block;
+    const odd = block.slice(0, block.length - 1); // exifBlockFrom output has an even length
+    expect(odd.length % 2).toBe(1);
 
     const out = webp.writeExif(buildWebpLossy(), odd);
 
+    expect(webp.readExif(out)).toEqual(odd);
     expect(webpRiffSizeValid(out)).toBe(true);
-    expect(webpChunkTypes(out)).toContain('VP8 ');
-  });
-
-  it('Given a WebP without EXIF, When read, Then null is returned', () => {
-    expect(webp.readExif(buildWebpLossy())).toBeNull();
   });
 
   it('Given non-WebP bytes, When written, Then it throws', () => {
     expect(() => webp.writeExif(buildPng(), exifBlockFrom({ make: 'Cam' }))).toThrow();
   });
+
+  it('Given a WebP with a corrupt chunk size, When written, Then it throws instead of dropping the image data', () => {
+    const bytes = buildWebpExtended();
+    // The chunk size goes past the end of the file, so the reader stops after VP8X.
+    const damaged = damageWebpImageChunkSize(bytes);
+
+    expect(() => webp.writeExif(damaged, exifBlockFrom({ make: 'Cam' }))).toThrow(/fully parsed/);
+  });
+
+  it('Given a WebP with a corrupt chunk size, When read, Then the chunks before it are still read', () => {
+    const bytes = buildWebpExtended({ width: 200, height: 150 });
+
+    // VP8X comes before the damaged chunk and holds the canvas size.
+    expect(webp.readDimensions(damageWebpImageChunkSize(bytes))).toEqual({ width: 200, height: 150 });
+  });
+
+  it('Given a WebP truncated before the end of its RIFF data, When written, Then it throws', () => {
+    const old = exifBlockFrom({ make: 'Old' }); // even length, so no padding byte
+    const bytes = buildWebpExtended({ exif: old });
+    // Remove the whole EXIF chunk but keep the RIFF size, which still counts it.
+    const truncated = bytes.slice(0, bytes.length - (8 + old.length));
+
+    expect(() => webp.writeExif(truncated, exifBlockFrom({ make: 'Cam' }))).toThrow(/fully parsed/);
+  });
+
+  it('Given bytes after the RIFF data, When written, Then they are dropped', () => {
+    const bytes = buildWebpLossy();
+    // A full empty chunk. A reader that goes past the RIFF size reads it as a chunk.
+    const trailing = new Uint8Array(bytes.length + 8);
+    trailing.set(bytes, 0);
+    trailing.set([0x4a, 0x55, 0x4e, 0x4b, 0x00, 0x00, 0x00, 0x00], bytes.length); // "JUNK", size 0
+    const block = exifBlockFrom({ make: 'Cam' });
+
+    const out = webp.writeExif(trailing, block);
+
+    expect(webp.readExif(out)).toEqual(block);
+    expect(webpRiffSizeValid(out)).toBe(true);
+    expect(webpChunkTypes(out)).not.toContain('JUNK');
+  });
+
+  // Some encoders do not write the final padding byte. Some of them count the
+  // byte in the RIFF size, and some do not. Decoders accept both files.
+  for (const riffCountsPadding of [true, false]) {
+    const label = riffCountsPadding ? 'counts' : 'does not count';
+
+    it(`Given no padding byte after an odd final chunk and a RIFF size that ${label} it, When written, Then the block reads back`, () => {
+      const old = exifBlockFrom({ make: 'Old' });
+      const odd = old.slice(0, old.length - 1); // exifBlockFrom output has an even length
+      expect(odd.length % 2).toBe(1);
+      const bytes = removeWebpFinalPadding(buildWebpExtended({ exif: odd }), riffCountsPadding);
+      const block = exifBlockFrom({ make: 'New' });
+
+      const out = webp.writeExif(bytes, block);
+
+      expect(webp.readExif(out)).toEqual(block);
+      expect(webpRiffSizeValid(out)).toBe(true);
+    });
+  }
 });
 
 describe('ISOBMFF container (HEIC / AVIF)', () => {
@@ -563,7 +678,7 @@ function countApp1ExifSegments(bytes: Uint8Array): number {
 
 /**
  * Sets the 0xFF marker byte of the segment before the scan to zero, so the
- * segment walk stops before it reaches the scan.
+ * segment reader stops before it gets to the scan.
  */
 function damageJpegBeforeScan(bytes: Uint8Array): Uint8Array {
   const out = bytes.slice();
@@ -586,7 +701,7 @@ function damageJpegBeforeScan(bytes: Uint8Array): Uint8Array {
   throw new Error('fixture has no segment before the scan');
 }
 
-/** Gives the chunk following IDAT a length that runs past the end of the file. */
+/** Gives the chunk after IDAT a length that goes past the end of the file. */
 function damagePngLengthAfterIdat(bytes: Uint8Array): Uint8Array {
   const out = bytes.slice();
   const view = new DataView(out.buffer);
@@ -608,10 +723,50 @@ function damagePngLengthAfterIdat(bytes: Uint8Array): Uint8Array {
   throw new Error('fixture has no chunk after IDAT');
 }
 
+/** Gives the `VP8 ` chunk a size that goes past the end of the file. */
+function damageWebpImageChunkSize(bytes: Uint8Array): Uint8Array {
+  const out = bytes.slice();
+  const view = new DataView(out.buffer);
+  let offset = 12; // past the RIFF header
+
+  while (offset + 8 <= out.length) {
+    const size = view.getUint32(offset + 4, true);
+    const type = String.fromCharCode(out[offset], out[offset + 1], out[offset + 2], out[offset + 3]);
+
+    if (type === 'VP8 ') {
+      view.setUint32(offset + 4, 0x7fffffff, true);
+      return out;
+    }
+
+    offset += 8 + size + (size % 2);
+  }
+
+  throw new Error('fixture has no VP8 chunk');
+}
+
+/**
+ * Removes the padding byte after an odd-sized final chunk. If
+ * `riffCountsPadding` is false, the RIFF size changes to match the new length.
+ */
+function removeWebpFinalPadding(bytes: Uint8Array, riffCountsPadding: boolean): Uint8Array {
+  if ((bytes.length - 12) % 2 !== 0 || bytes[bytes.length - 1] !== 0) {
+    throw new Error('fixture does not end with a padding byte');
+  }
+
+  const out = bytes.slice(0, bytes.length - 1);
+  const view = new DataView(out.buffer);
+
+  if (!riffCountsPadding) {
+    view.setUint32(4, out.length - 8, true);
+  }
+
+  return out;
+}
+
 /**
  * Returns all bytes from the SOS marker to the end, that is, the compressed
- * scan data. If there is no SOS marker, it throws. An empty result would let a
- * comparison of two broken fixtures pass.
+ * scan data. If there is no SOS marker, it throws. The helper does not return
+ * an empty result, because two broken fixtures then compare as equal.
  */
 function tailFromScan(bytes: Uint8Array): Uint8Array {
   let offset = 2;

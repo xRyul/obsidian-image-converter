@@ -188,43 +188,90 @@ export function buildWebpLossless(
   return riff([riffChunk('VP8L', payload)]);
 }
 
-/** Extended WebP that already has a VP8X chunk, with an optional EXIF chunk. */
+/**
+ * Extended WebP that already has a VP8X chunk. The ICCP, EXIF and XMP chunks
+ * are optional. If `animated` is true, the image is one ANMF frame after an
+ * ANIM chunk, and not a `VP8 ` chunk at the top level.
+ */
 export function buildWebpExtended(
-  options: { width?: number; height?: number; exif?: Uint8Array; alpha?: boolean } = {}
+  options: {
+    width?: number;
+    height?: number;
+    exif?: Uint8Array;
+    alpha?: boolean;
+    iccp?: Uint8Array;
+    xmp?: Uint8Array;
+    animated?: boolean;
+  } = {}
 ): Uint8Array {
   const width = options.width ?? 100;
   const height = options.height ?? 80;
 
   const vp8x = new Uint8Array(10);
-  vp8x[0] = (options.alpha ? 0x10 : 0) | (options.exif ? 0x08 : 0);
+  vp8x[0] = (options.iccp ? 0x20 : 0)
+    | (options.alpha ? 0x10 : 0)
+    | (options.exif ? 0x08 : 0)
+    | (options.xmp ? 0x04 : 0)
+    | (options.animated ? 0x02 : 0);
   writeUint24(vp8x, 4, width - 1);
   writeUint24(vp8x, 7, height - 1);
 
-  const body = [riffChunk('VP8X', vp8x), riffChunk('VP8 ', vp8Payload(width, height))];
+  const body = [riffChunk('VP8X', vp8x)];
+
+  if (options.iccp) {
+    body.push(riffChunk('ICCP', options.iccp));
+  }
+
+  const image = riffChunk('VP8 ', vp8Payload(width, height));
+
+  if (options.animated) {
+    // ANIM: background colour (4 bytes) and loop count (2 bytes).
+    body.push(riffChunk('ANIM', new Uint8Array(6)));
+
+    // ANMF: X and Y offsets, frame width - 1, frame height - 1 and duration
+    // (3 bytes each), a flags byte, then the frame image data.
+    const frame = new Uint8Array(16 + image.length);
+    writeUint24(frame, 6, width - 1);
+    writeUint24(frame, 9, height - 1);
+    frame.set(image, 16);
+    body.push(riffChunk('ANMF', frame));
+  } else {
+    body.push(image);
+  }
 
   if (options.exif) {
     body.push(riffChunk('EXIF', options.exif));
   }
 
+  if (options.xmp) {
+    body.push(riffChunk('XMP ', options.xmp));
+  }
+
   return riff(body);
 }
 
-/** WebP chunks in file order, with the offset of each payload. */
-function webpChunks(bytes: Uint8Array): { type: string; payloadStart: number }[] {
+/** WebP chunks in file order, with the offset and size of each payload. */
+function webpChunks(bytes: Uint8Array): { type: string; payloadStart: number; size: number }[] {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const chunks: { type: string; payloadStart: number }[] = [];
+  const chunks: { type: string; payloadStart: number; size: number }[] = [];
   let offset = 12;
 
   while (offset + 8 <= bytes.length) {
     const size = view.getUint32(offset + 4, true);
-    chunks.push({ type: readFourCc(bytes, offset), payloadStart: offset + 8 });
+    chunks.push({ type: readFourCc(bytes, offset), payloadStart: offset + 8, size });
     offset += 8 + size + (size % 2);
   }
 
   return chunks;
 }
 
-/** Lists WebP chunk FourCCs in file order. */
+/** Returns a copy of the payload of the first chunk of this type, or null if there is none. */
+export function webpChunkPayload(bytes: Uint8Array, type: string): Uint8Array | null {
+  const chunk = webpChunks(bytes).find((candidate) => candidate.type === type);
+  return chunk ? bytes.slice(chunk.payloadStart, chunk.payloadStart + chunk.size) : null;
+}
+
+/** Lists the WebP chunk types in file order. */
 export function webpChunkTypes(bytes: Uint8Array): string[] {
   return webpChunks(bytes).map((chunk) => chunk.type);
 }

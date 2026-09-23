@@ -1,8 +1,9 @@
 // webp.ts
-// WebP carries EXIF in an `EXIF` RIFF chunk, but only the extended file format
-// has anywhere to put one. Canvas emits simple WebP (a bare VP8 or VP8L chunk),
-// so writing means promoting the file: prepend a VP8X chunk describing the
-// canvas and flags, then append the EXIF chunk.
+// WebP keeps EXIF in an `EXIF` RIFF chunk. Only the extended file format can
+// hold this chunk. Canvas writes simple WebP, which has one VP8 or VP8L chunk
+// only. To add EXIF, the writer changes the file to the extended format. It
+// puts a VP8X chunk first, with the canvas size and flags, and adds the EXIF
+// chunk after the image data.
 
 import { Dimensions } from "../types";
 import { ascii, concat, equalBytes, matchesAt, readFourCc, stripExifPrefix, viewOf } from "./bytes";
@@ -28,18 +29,21 @@ const FLAG_ANIMATION = 0x02;
 const HEADER_SIZE = 12;
 const VP8X_PAYLOAD_SIZE = 10;
 
-/** WebP dimensions are stored as 24-bit fields, so this is a hard format limit. */
+/** VP8X keeps the canvas size in 24-bit fields. The format cannot go past this limit. */
 const MAX_DIMENSION = 1 << 24;
 
-/** A RIFF chunk's size field is a 32-bit value. */
+/** The size field of a RIFF chunk is 32 bits. */
 export const MAX_EXIF_BYTES = 0xffffffff;
+
+const MAX_RIFF_SIZE = 0xffffffff;
 
 interface Chunk {
     type: string;
-    payload: Uint8Array;
+    payloadStart: number;
+    payloadEnd: number;
 }
 
-/** True when the bytes are a RIFF container declaring WEBP. */
+/** True when the bytes are a RIFF file of type WEBP. */
 export function isWebp(bytes: Uint8Array): boolean {
     return bytes.length >= HEADER_SIZE
         && matchesAt(bytes, 0, RIFF)
@@ -56,9 +60,9 @@ export function readExif(bytes: Uint8Array): Uint8Array | null {
         return null;
     }
 
-    for (const chunk of parseChunks(bytes)) {
+    for (const chunk of parseChunks(bytes).chunks) {
         if (chunk.type === CHUNK_EXIF) {
-            return stripExifPrefix(chunk.payload);
+            return stripExifPrefix(bytes.slice(chunk.payloadStart, chunk.payloadEnd));
         }
     }
 
@@ -66,25 +70,32 @@ export function readExif(bytes: Uint8Array): Uint8Array | null {
 }
 
 /**
- * Writes an EXIF block into a WebP, promoting a simple file to the extended
- * format if needed and replacing any existing block.
+ * Writes an EXIF block into a WebP and replaces any existing block. If the
+ * file is simple WebP, the writer changes it to the extended format.
  *
  * @param bytes - The WebP file.
  * @param exif - The raw block to embed.
- * @returns A new WebP carrying the block.
- * @throws If the file cannot be parsed or the result fails its own round trip.
+ * @returns A new WebP that holds the block.
+ * @throws If the file cannot be fully parsed, or if the block does not read
+ *         back from the result.
  */
 export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
     if (!isWebp(bytes)) {
         throw new Error("Not a WebP");
     }
+    if (exif.length > MAX_EXIF_BYTES) {
+        throw new Error("EXIF block is too large for a RIFF chunk");
+    }
 
-    const chunks = parseChunks(bytes);
+    const { chunks, complete } = parseChunks(bytes);
     if (chunks.length === 0) {
         throw new Error("WebP has no chunks");
     }
+    if (!complete) {
+        throw new Error("WebP chunks could not be fully parsed");
+    }
 
-    const canvas = readCanvas(chunks);
+    const canvas = readCanvas(bytes, chunks);
     if (!canvas) {
         throw new Error("Could not determine WebP canvas size");
     }
@@ -95,7 +106,7 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
     const has = (type: string) => chunks.some((chunk) => chunk.type === type);
 
     let flags = FLAG_EXIF;
-    if (hasAlpha(chunks)) {
+    if (hasAlpha(bytes, chunks)) {
         flags |= FLAG_ALPHA;
     }
     if (has(CHUNK_ICCP)) {
@@ -108,27 +119,28 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
         flags |= FLAG_ANIMATION;
     }
 
-    // Spec chunk order: VP8X, [ICCP], image data, [EXIF], [XMP].
+    // The WebP specification gives this chunk order: VP8X, [ICCP], image data,
+    // [EXIF], [XMP].
     const body: Uint8Array[] = [buildChunk(CHUNK_VP8X, buildVp8xPayload(flags, canvas))];
 
     for (const chunk of chunks) {
         if (chunk.type === CHUNK_VP8X || chunk.type === CHUNK_EXIF || chunk.type === CHUNK_XMP) {
             continue;
         }
-        body.push(buildChunk(chunk.type, chunk.payload));
+        body.push(buildChunk(chunk.type, payloadOf(bytes, chunk)));
     }
 
     body.push(buildChunk(CHUNK_EXIF, exif));
 
     for (const chunk of chunks) {
         if (chunk.type === CHUNK_XMP) {
-            body.push(buildChunk(CHUNK_XMP, chunk.payload));
+            body.push(buildChunk(CHUNK_XMP, payloadOf(bytes, chunk)));
         }
     }
 
     const out = buildRiff(body);
 
-    // This writer restructures the container, so it verifies its own output.
+    // This writer changes the structure of the file, so it checks its own output.
     const roundTripped = readExif(out);
     if (!roundTripped || !equalBytes(roundTripped, exif)) {
         throw new Error("WebP EXIF round trip failed");
@@ -138,57 +150,78 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
 }
 
 /**
- * Reads the canvas size from a WebP's VP8X header or image bitstream.
+ * Reads the canvas size from the VP8X chunk or the image data of a WebP.
  * @param bytes - The WebP file.
- * @returns The dimensions, or null if no bitstream could be read.
+ * @returns The dimensions, or null if no chunk gives a size.
  */
 export function readDimensions(bytes: Uint8Array): Dimensions | null {
     if (!isWebp(bytes)) {
         return null;
     }
-    return readCanvas(parseChunks(bytes));
+    return readCanvas(bytes, parseChunks(bytes).chunks);
 }
 
-function parseChunks(bytes: Uint8Array): Chunk[] {
+/**
+ * Reads the chunks inside the RIFF size. `complete` is true when the chunks
+ * fill all of that size. Bytes after the RIFF size are not part of the WebP,
+ * so the reader ignores them.
+ */
+function parseChunks(bytes: Uint8Array): { chunks: Chunk[]; complete: boolean } {
     const chunks: Chunk[] = [];
     const view = viewOf(bytes);
+    const riffEnd = 8 + view.getUint32(4, true);
+    const end = Math.min(riffEnd, bytes.length);
     let offset = HEADER_SIZE;
 
-    while (offset + 8 <= bytes.length) {
+    while (offset + 8 <= end) {
         const type = readFourCc(bytes, offset);
         const size = view.getUint32(offset + 4, true);
         const payloadStart = offset + 8;
         const payloadEnd = payloadStart + size;
 
-        if (payloadEnd > bytes.length) {
+        if (payloadEnd > end) {
             break;
         }
 
-        chunks.push({ type, payload: bytes.slice(payloadStart, payloadEnd) });
+        // A chunk with an odd size has one padding byte after it.
+        const next = payloadEnd + (size % 2);
 
-        // RIFF chunks are padded to an even length.
-        offset = payloadEnd + (size % 2);
+        chunks.push({ type, payloadStart, payloadEnd });
+
+        offset = next;
     }
 
-    return chunks;
+    // Some encoders do not write the padding byte after an odd-sized final
+    // chunk. Their RIFF size can count that byte or not. Accept both files.
+    const complete = offset === riffEnd || offset === riffEnd + 1;
+
+    return { chunks, complete };
 }
 
-function readCanvas(chunks: Chunk[]): Dimensions | null {
+/** A view of a chunk's payload. It does not copy the bytes. */
+function payloadOf(bytes: Uint8Array, chunk: Chunk): Uint8Array {
+    return bytes.subarray(chunk.payloadStart, chunk.payloadEnd);
+}
+
+function readCanvas(bytes: Uint8Array, chunks: Chunk[]): Dimensions | null {
     for (const chunk of chunks) {
-        if (chunk.type === CHUNK_VP8X && chunk.payload.length >= VP8X_PAYLOAD_SIZE) {
-            return {
-                width: readUint24(chunk.payload, 4) + 1,
-                height: readUint24(chunk.payload, 7) + 1,
-            };
+        if (chunk.type === CHUNK_VP8X) {
+            const payload = payloadOf(bytes, chunk);
+            if (payload.length >= VP8X_PAYLOAD_SIZE) {
+                return {
+                    width: readUint24(payload, 4) + 1,
+                    height: readUint24(payload, 7) + 1,
+                };
+            }
         }
         if (chunk.type === CHUNK_VP8L) {
-            const lossless = readLosslessHeader(chunk.payload);
+            const lossless = readLosslessHeader(payloadOf(bytes, chunk));
             if (lossless) {
                 return { width: lossless.width, height: lossless.height };
             }
         }
         if (chunk.type === CHUNK_VP8) {
-            const lossy = readLossyHeader(chunk.payload);
+            const lossy = readLossyHeader(payloadOf(bytes, chunk));
             if (lossy) {
                 return lossy;
             }
@@ -198,18 +231,19 @@ function readCanvas(chunks: Chunk[]): Dimensions | null {
     return null;
 }
 
-function hasAlpha(chunks: Chunk[]): boolean {
+function hasAlpha(bytes: Uint8Array, chunks: Chunk[]): boolean {
     for (const chunk of chunks) {
         if (chunk.type === CHUNK_ALPH) {
             return true;
         }
-        if (chunk.type === CHUNK_VP8X && chunk.payload.length >= VP8X_PAYLOAD_SIZE) {
-            if ((chunk.payload[0] & FLAG_ALPHA) !== 0) {
+        if (chunk.type === CHUNK_VP8X) {
+            const payload = payloadOf(bytes, chunk);
+            if (payload.length >= VP8X_PAYLOAD_SIZE && (payload[0] & FLAG_ALPHA) !== 0) {
                 return true;
             }
         }
         if (chunk.type === CHUNK_VP8L) {
-            const lossless = readLosslessHeader(chunk.payload);
+            const lossless = readLosslessHeader(payloadOf(bytes, chunk));
             if (lossless?.hasAlpha) {
                 return true;
             }
@@ -220,7 +254,7 @@ function hasAlpha(chunks: Chunk[]): boolean {
 }
 
 /**
- * VP8L header: a 0x2F signature byte, then 32 bits packing width-1 (14 bits),
+ * VP8L header: a 0x2F signature byte, then 32 bits that hold width-1 (14 bits),
  * height-1 (14 bits), an alpha flag and a version.
  */
 function readLosslessHeader(
@@ -272,8 +306,8 @@ function buildVp8xPayload(flags: number, canvas: Dimensions): Uint8Array {
 }
 
 function buildChunk(type: string, payload: Uint8Array): Uint8Array {
-    // RIFF chunks are padded to an even length; the size field records the
-    // true payload length, not the padded one.
+    // A chunk with an odd size gets one padding byte after it. The size field
+    // gives the payload length without the padding byte.
     const padding = payload.length % 2;
     const chunk = new Uint8Array(8 + payload.length + padding);
     const view = new DataView(chunk.buffer);
@@ -289,6 +323,10 @@ function buildRiff(body: Uint8Array[]): Uint8Array {
     let bodyLength = 0;
     for (const chunk of body) {
         bodyLength += chunk.length;
+    }
+
+    if (4 + bodyLength > MAX_RIFF_SIZE) {
+        throw new Error("WebP is too large for a RIFF file");
     }
 
     const header = new Uint8Array(HEADER_SIZE);
