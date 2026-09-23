@@ -1,11 +1,28 @@
 // tiff.ts
-// A TIFF file is itself a TIFF block, so there is no wrapper to unpick. But its
-// IFD0 mixes descriptive metadata with tags describing pixel storage in that
-// file - StripOffsets and friends, pointing at ranges the converted image will
-// not have. Hence an allowlist of descriptive tags rather than a denylist of
-// structural ones. The sub-IFDs are pure metadata and pass through whole.
+// A TIFF file is itself a TIFF block, so there is no wrapper to remove. But
+// IFD0 of a TIFF file also holds tags that tell where the pixels are in that
+// file (for example, StripOffsets). These tags point to data that the
+// converted image does not have. Thus the reader keeps only a list of known
+// descriptive tags, and removes all other IFD0 tags. The sub-IFDs hold only
+// metadata, so the reader keeps them complete.
 
-import { isEmptyBlock, parseExifBlock, serialiseExifBlock } from "../ExifBlock";
+import {
+    isEmptyBlock,
+    parseExifBlock,
+    serialiseExifBlock,
+    TAG_ARTIST,
+    TAG_COPYRIGHT,
+    TAG_DATE_TIME,
+    TAG_HOST_COMPUTER,
+    TAG_IMAGE_DESCRIPTION,
+    TAG_MAKE,
+    TAG_MODEL,
+    TAG_ORIENTATION,
+    TAG_RESOLUTION_UNIT,
+    TAG_SOFTWARE,
+    TAG_X_RESOLUTION,
+    TAG_Y_RESOLUTION,
+} from "../ExifBlock";
 import { matchesAt } from "./bytes";
 
 const LITTLE_ENDIAN_HEADER = [0x49, 0x49, 0x2a, 0x00]; // "II" + 42
@@ -13,18 +30,18 @@ const BIG_ENDIAN_HEADER = [0x4d, 0x4d, 0x00, 0x2a];    // "MM" + 42
 
 /** Descriptive IFD0 tags worth carrying into a converted image. */
 const DESCRIPTIVE_IFD0_TAGS = new Set([
-    270,   // ImageDescription
-    271,   // Make
-    272,   // Model
-    274,   // Orientation
-    282,   // XResolution
-    283,   // YResolution
-    296,   // ResolutionUnit
-    305,   // Software
-    306,   // DateTime
-    315,   // Artist
-    316,   // HostComputer
-    33432, // Copyright
+    TAG_IMAGE_DESCRIPTION,
+    TAG_MAKE,
+    TAG_MODEL,
+    TAG_ORIENTATION,
+    TAG_X_RESOLUTION,
+    TAG_Y_RESOLUTION,
+    TAG_RESOLUTION_UNIT,
+    TAG_SOFTWARE,
+    TAG_DATE_TIME,
+    TAG_ARTIST,
+    TAG_HOST_COMPUTER,
+    TAG_COPYRIGHT,
 ]);
 
 /** True when the bytes open with a TIFF header in either byte order. */
@@ -38,7 +55,9 @@ export function isTiff(bytes: Uint8Array): boolean {
  * how pixels are stored in the source file.
  *
  * @param bytes - The TIFF file.
- * @returns The raw block, or null if nothing descriptive remains.
+ * @returns A new block that holds only the descriptive tags, or null if no
+ *          descriptive tags remain. Other readers return the raw bytes from
+ *          the file, but this reader must remove tags, so it builds a new block.
  */
 export function readExif(bytes: Uint8Array): Uint8Array | null {
     if (!isTiff(bytes)) {

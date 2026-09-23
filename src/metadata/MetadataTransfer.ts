@@ -58,13 +58,19 @@ const ISOBMFF_CODEC: ContainerWriter = {
     maxExifBytes: isobmff.MAX_EXIF_BYTES,
 };
 
-/** Source containers. TIFF is a read-only format we only convert from. */
+/** TIFF: read as a source only. The converter never writes TIFF. */
+const TIFF_READER: ContainerReader = {
+    matches: tiff.isTiff,
+    readExif: tiff.readExif,
+};
+
+/** Source containers. */
 const READERS: ContainerReader[] = [
     JPEG_CODEC,
     PNG_CODEC,
     WEBP_CODEC,
     ISOBMFF_CODEC,
-    { matches: tiff.isTiff, readExif: tiff.readExif },
+    TIFF_READER,
 ];
 
 /** Output containers we can write metadata into. */
@@ -73,7 +79,7 @@ const WRITERS: ContainerWriter[] = [JPEG_CODEC, PNG_CODEC, WEBP_CODEC, ISOBMFF_C
 export class MetadataTransfer {
     /**
      * Transfers metadata from the source image into the converted one.
-	 * Failure path returns the output unchanged.
+     * If a step fails, this returns the output unchanged.
      *
      * @param source - The original image.
      * @param output - The converted bytes.
@@ -92,7 +98,8 @@ export class MetadataTransfer {
         const outputBytes = new Uint8Array(output);
         const sourceBytes = new Uint8Array(await source.arrayBuffer());
 
-        // Returns unmodified for no-op conversions and error fallbacks.
+        // If the output is the source file unchanged (no conversion, or a
+        // fallback after an error), it already has its metadata.
         if (equalBytes(sourceBytes, outputBytes)) {
             return output;
         }
