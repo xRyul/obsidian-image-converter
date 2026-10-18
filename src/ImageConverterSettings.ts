@@ -120,6 +120,7 @@ export interface GlobalPreset {
 
 // Interface for settings
 export interface ImageConverterSettings {
+    excludedFolders: string;
     folderPresets: FolderPreset[];
     selectedFolderPreset: string;
     filenamePresets: FilenamePreset[];
@@ -236,6 +237,7 @@ export interface ImageConverterSettings {
 // --- Default Settings ---
 
 export const DEFAULT_SETTINGS: ImageConverterSettings = {
+    excludedFolders: "",
     folderPresets: [
         { type: "DEFAULT", name: "Default (Obsidian setting)" },
         { type: "ROOT", name: "Root folder" },
@@ -605,6 +607,19 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                     });
             });
 
+
+        new Setting(containerEl)
+            .setName("Excluded folders")
+            .setDesc("Vault-relative folders to exclude from image processing and link updates, including all subfolders. Enter one folder per line.")
+            .addTextArea(text => {
+                text.setPlaceholder("Research\narchive/originals")
+                    .setValue(this.plugin.settings.excludedFolders)
+                    .onChange(async value => {
+                        this.plugin.settings.excludedFolders = value;
+                        await this.plugin.saveSettings();
+                    });
+                text.inputEl.setAttr('spellcheck', 'false');
+            });
 
         new Setting(containerEl)
             .setName("Never process these filenames")

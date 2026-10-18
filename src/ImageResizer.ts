@@ -1,3 +1,4 @@
+import { isPathExcluded } from './ExcludedFolders';
 import { Editor, MarkdownView, EditorPosition, EditorChange, Debouncer, debounce, Component } from "obsidian";
 import ImageConverterPlugin from "./main";
 import { ImagePositionData } from './ImageAlignmentManager';
@@ -281,6 +282,10 @@ export class ImageResizer extends Component {
     }
 
     attachView(markdownView: MarkdownView) { // Accept MarkdownView
+        if (isPathExcluded(markdownView.file?.path, this.plugin.settings)) {
+            this.detachView();
+            return;
+        }
         if (this.markdownView === markdownView && this.viewScope) {
             this.editor = markdownView.editor;
             return;
@@ -1589,6 +1594,8 @@ export class ImageResizer extends Component {
         updateTarget?: MarkdownLinkUpdateTarget
     ) {
         if (!this.markdownView || (!this.editor && !updateTarget)) return;
+        if (isPathExcluded(updateTarget?.notePath ?? this.markdownView.file?.path, this.plugin.settings) ||
+            isPathExcluded(this.plugin.folderAndFilenameManagement?.getImagePath?.(image), this.plugin.settings)) return;
 
         // Check if we're in reading mode
         const state = this.markdownView.getState();

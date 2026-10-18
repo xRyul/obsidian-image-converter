@@ -1,3 +1,4 @@
+import { isPathExcluded } from './ExcludedFolders';
 // FolderAndFilenameManagement.ts
 import { TFile, TFolder, App, normalizePath, Notice, FileSystemAdapter, Platform } from "obsidian";
 // eslint-disable-next-line import/no-nodejs-modules -- Required for path manipulation; Obsidian runs on Electron with Node.js support
@@ -255,6 +256,7 @@ export class FolderAndFilenameManagement {
      * // Folders "/NewFolder" and "/NewFolder/Subfolder" will be created.
      */
     async ensureFolderExists(path: string): Promise<void> {
+        if (isPathExcluded(path, this.settings)) throw new Error("The destination folder is excluded.");
         const normalizedPath = normalizePath(path);
         if (!(await this.app.vault.adapter.exists(normalizedPath))) {
             const folders = normalizedPath.split('/').filter(Boolean);
@@ -787,6 +789,7 @@ export class FolderAndFilenameManagement {
      * @returns A Promise that resolves to true if the rename was successful, false otherwise.
      */
     async safeRenameFile(file: TFile, newPath: string): Promise<boolean> {
+        if (isPathExcluded(file.path, this.settings) || isPathExcluded(newPath, this.settings)) return false;
         const basePath = path.dirname(newPath);
         const newName = path.basename(newPath);
         const tempPath = normalizePath(path.join(basePath, `temp-${Date.now()}-${newName}`));

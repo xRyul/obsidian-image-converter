@@ -1,3 +1,4 @@
+import { isPathExcluded } from './ExcludedFolders';
 import {
 	Menu,
 	View,
@@ -260,6 +261,8 @@ export class ContextMenu extends Component {
 		if (!(img instanceof HTMLImageElement)) {
 			return null;
 		}
+		if (isPathExcluded(this.app.workspace.getActiveFile()?.path, this.plugin.settings) ||
+			isPathExcluded(this.getImagePathSafe(img), this.plugin.settings)) return null;
 
 		if (!img.closest(".markdown-source-view")) {
 			return null;
@@ -311,6 +314,8 @@ export class ContextMenu extends Component {
 		if (!img) {
 			return;
 		}
+		if (isPathExcluded(this.app.workspace.getActiveFile()?.path, this.plugin.settings) ||
+			isPathExcluded(this.getImagePathSafe(img), this.plugin.settings)) return;
 
 		// Skip Excalidraw images
 		if (this.plugin.supportedImageFormats.isExcalidrawImage(img)) {
@@ -377,6 +382,8 @@ export class ContextMenu extends Component {
 		activeFile: TFile,
 		event: MouseEvent
 	) {
+		if (isPathExcluded(activeFile.path, this.plugin.settings) ||
+			isPathExcluded(this.getImagePathSafe(img), this.plugin.settings)) return;
 		this.currentMenu = menu;
 
 		this.addRenameAndMoveInputs(menu, img, activeFile);
@@ -1170,6 +1177,7 @@ export class ContextMenu extends Component {
 						obsidianVaultPathForRename
 					);
 					if (abstractFile instanceof TFile) {
+						if (isPathExcluded(abstractFile.path, this.plugin.settings) || isPathExcluded(newPath, this.plugin.settings)) return;
 						await this.folderAndFilenameManagement.ensureFolderExists(
 							newDirectoryPath
 						);
@@ -1192,6 +1200,7 @@ export class ContextMenu extends Component {
 					const abstractFile =
 						this.app.vault.getAbstractFileByPath(oldPath);
 					if (abstractFile instanceof TFile) {
+						if (isPathExcluded(abstractFile.path, this.plugin.settings) || isPathExcluded(newPath, this.plugin.settings)) return;
 						await this.folderAndFilenameManagement.ensureFolderExists(
 							newDirectoryPath
 						);
@@ -1212,6 +1221,7 @@ export class ContextMenu extends Component {
 								);
 							}
 						} else {
+							if (isPathExcluded(abstractFile.path, this.plugin.settings) || isPathExcluded(newPath, this.plugin.settings)) return;
 							await this.app.fileManager.renameFile(
 								abstractFile,
 								newPath
@@ -2061,7 +2071,7 @@ export class ContextMenu extends Component {
 							  }) || matchingFiles[0];
 
 					if (file instanceof TFile) {
-						new Crop(this.app, file).open();
+						new Crop(this.app, file, imagePath => isPathExcluded(imagePath, this.plugin.settings)).open();
 					} else {
 						new Notice("Unable to locate image file");
 					}
@@ -2374,6 +2384,7 @@ export class ContextMenu extends Component {
 					const imageFile =
 						this.app.vault.getAbstractFileByPath(imagePath);
 					if (imageFile instanceof TFile) {
+						if (isPathExcluded(imageFile.path, this.plugin.settings)) return;
 						// Use FileManager.trashFile instead of direct deletion so that Obsidian's
 						// file deletion settings are honored (e.g., "Move to system trash" vs
 						// "Permanently delete").

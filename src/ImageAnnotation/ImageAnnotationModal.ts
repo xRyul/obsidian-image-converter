@@ -1,3 +1,4 @@
+import { isPathExcluded } from '../ExcludedFolders';
 import {
     App,
     Modal,
@@ -241,7 +242,7 @@ export class ImageAnnotationModal extends Modal {
         });
 
         this.backgroundManager = new BackgroundManager(getCanvas, this.componentContainer);
-        this.imageExporter = new ImageExporter(this.app);
+        this.imageExporter = new ImageExporter(this.app, filePath => isPathExcluded(filePath, this.plugin.settings));
     }
 
     private setupToolbar(container: HTMLElement): void {

@@ -75,3 +75,19 @@ MIT License - see [LICENSE](LICENSE)
 
 - Original inspiration from [musug's plugin](https://github.com/musug/obsidian-paste-png-to-jpeg)
 - [FabricJS](https://fabricjs.com/) for annotation capabilities
+
+
+### Global excluded folders
+
+Use **Settings → Image Converter → Excluded folders** to keep selected folders out of the plugin's image operations. Enter one vault-relative folder path per line, for example:
+
+```text
+Research
+Archive/Originals
+```
+
+Entries are case-sensitive and include all subfolders. `Research` does not match `Research notes`. Leave the setting empty to retain the existing behavior. Folder paths are literal; no glob or regular expression syntax is needed.
+
+Exclusions apply to notes and images when collecting batch candidates (current note, folder, linked images, and whole vault), updating Markdown or Canvas links, dropping or pasting images, creating destination folders, renaming/moving/deleting images, single-image processing, cropping, annotation export, alignment, and resizing. Excluded source notes are skipped even when they reference images elsewhere; excluded images are skipped even when referenced by another note. Dialog image counts also respect the global exclusions.
+
+This setting controls Image Converter's operations. It does not make a folder read-only or disable Obsidian's own automatic link updates or other plugins.

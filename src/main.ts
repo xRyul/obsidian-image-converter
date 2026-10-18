@@ -9,6 +9,7 @@ import {
     MarkdownView
 } from "obsidian";
 import { SupportedImageFormats } from "./SupportedImageFormats";
+import { isPathExcluded } from "./ExcludedFolders";
 import { FolderAndFilenameManagement } from "./FolderAndFilenameManagement";
 import { ImageProcessor } from "./ImageProcessor";
 import { VariableProcessor } from "./VariableProcessor";
@@ -85,6 +86,10 @@ export default class ImageConverterPlugin extends Plugin {
 
     private attachImageResizerToMarkdownView(markdownView: MarkdownView, refreshLayout = false) {
         if (!this.settings.isImageResizeEnbaled || !this.imageResizer) return;
+        if (isPathExcluded(markdownView.file?.path, this.settings)) {
+            this.imageResizer.detachView();
+            return;
+        }
 
         if (refreshLayout) {
             this.imageResizer.onLayoutChange(markdownView);
@@ -421,6 +426,9 @@ export default class ImageConverterPlugin extends Plugin {
     async saveSettings() {
         await this.saveData(this.settings);
         this.updateBodyStateClasses();
+        if (isPathExcluded(this.app.workspace.getActiveFile()?.path, this.settings)) {
+            this.imageResizer?.detachView();
+        }
     }
 
     // Command to open settings tab
@@ -479,6 +487,10 @@ export default class ImageConverterPlugin extends Plugin {
     }
 
     private validateAttachmentPath(vaultPath: string): boolean {
+        if (isPathExcluded(vaultPath, this.settings)) {
+            new Notice('Image not added: the destination folder is excluded.');
+            return false;
+        }
         const violation = this.folderAndFilenameManagement.getWindowsPathLengthViolation(vaultPath);
         if (!violation) {
             return true;
@@ -498,6 +510,7 @@ export default class ImageConverterPlugin extends Plugin {
         this.registerEvent(
             this.app.workspace.on("editor-drop", async (evt: DragEvent, editor: Editor) => {
                 if (evt.defaultPrevented) return;
+                if (isPathExcluded(this.app.workspace.getActiveFile()?.path, this.settings)) return;
 
                 if (!evt.dataTransfer) {
                     console.warn("DataTransfer object is null initially. Cannot process drop event.");
@@ -536,6 +549,7 @@ export default class ImageConverterPlugin extends Plugin {
         this.registerEvent(
             this.app.workspace.on("editor-paste", async (evt: ClipboardEvent, editor: Editor) => {
                 if (evt.defaultPrevented) return;
+                if (isPathExcluded(this.app.workspace.getActiveFile()?.path, this.settings)) return;
 
                 if (!evt.clipboardData) {
                     console.warn("ClipboardData object is null. Cannot process paste event.");
@@ -584,6 +598,7 @@ export default class ImageConverterPlugin extends Plugin {
         if (supportedFiles.length === 0) return;
 
         const activeFile = this.app.workspace.getActiveFile();
+        if (isPathExcluded(activeFile?.path, this.settings)) return;
         if (!activeFile) {
             new Notice('No active file detected');
             return;
@@ -929,6 +944,7 @@ export default class ImageConverterPlugin extends Plugin {
         if (supportedFiles.length === 0) return;
 
         const activeFile = this.app.workspace.getActiveFile();
+        if (isPathExcluded(activeFile?.path, this.settings)) return;
         if (!activeFile) {
             new Notice('No active file detected');
             return;
@@ -1267,6 +1283,7 @@ export default class ImageConverterPlugin extends Plugin {
         selectedResizePreset?: NonDestructiveResizePreset
     ) {
         const activeFile = this.app.workspace.getActiveFile();
+        if (isPathExcluded(activeFile?.path, this.settings) || isPathExcluded(linkPath, this.settings)) return;
 
         // Use the passed presets or fall back to the plugin settings
         const linkFormatPresetToUse = selectedLinkFormatPreset || this.settings.linkFormatSettings.linkFormatPresets.find(

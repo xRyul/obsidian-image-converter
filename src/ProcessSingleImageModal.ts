@@ -1,3 +1,4 @@
+import { isPathExcluded } from './ExcludedFolders';
 // ProcessSingleImageModal.ts
 import { App, Modal, Notice, TFile, Setting, MarkdownView } from "obsidian";
 import ImageConverterPlugin from "./main";
@@ -686,6 +687,8 @@ export class ProcessSingleImageModal extends Modal {
         }
     }
     private async processImage() {
+        if (isPathExcluded(this.imageFile.path, this.plugin.settings) ||
+            isPathExcluded(this.app.workspace.getActiveFile()?.path, this.plugin.settings)) return;
         //No Changes needed
         try {
             const fileBuffer = await this.app.vault.readBinary(this.imageFile);
@@ -702,6 +705,7 @@ export class ProcessSingleImageModal extends Modal {
             }
 
             const fullPath: string = this.plugin.folderAndFilenameManagement.combinePath(destinationPath, newFilename);
+            if (isPathExcluded(fullPath, this.plugin.settings)) return;
 
             // Get Conversion Preset
             const conversionPreset = this.plugin.getPresetByName(

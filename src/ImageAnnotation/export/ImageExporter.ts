@@ -58,10 +58,10 @@ function getFabricImageElement(image: unknown): unknown {
 }
 
 export class ImageExporter {
-    constructor(private app: App) {}
+    constructor(private app: App, private isExcluded: (filePath: string) => boolean = () => false) {}
 
     async save(canvas: Canvas, file: TFile): Promise<boolean> {
-        if (!canvas) return false;
+        if (!canvas || this.isExcluded(file.path)) return false;
 
         try {
             const originalStacking = canvas.preserveObjectStacking;

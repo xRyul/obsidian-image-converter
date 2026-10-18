@@ -1,3 +1,4 @@
+import { isPathExcluded } from './ExcludedFolders';
 import { App, Component, Menu, TFile } from 'obsidian';
 import ImageConverterPlugin from './main';
 import { ImageAlignmentManager, ImagePositionData } from './ImageAlignmentManager';
@@ -210,13 +211,14 @@ export class ImageAlignment extends Component {
      */
     async updateImageAlignment(img: HTMLImageElement, options: ImageAlignmentOptions) {
         const activeFile = this.app.workspace.getActiveFile();
-        if (!activeFile) return;
+        if (!activeFile || isPathExcluded(activeFile.path, this.plugin.settings)) return;
 
         const src = img.getAttribute('src');
         if (!src) return;
 
         // Use getRelativePath to normalize the src before saving
         const relativeSrc = this.imageAlignmentManager.getRelativePath(src);
+        if (isPathExcluded(relativeSrc, this.plugin.settings)) return;
 
         // --- Apply Visual Changes to IMG ---
         img.removeClass('image-position-left');

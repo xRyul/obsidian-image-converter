@@ -1,3 +1,4 @@
+import { isPathExcluded } from './ExcludedFolders';
 /* eslint-disable obsidianmd/ui/sentence-case */
 // ProcessCurrentNote.ts
 import {
@@ -563,6 +564,10 @@ export class ProcessCurrentNote extends Modal {
 
     private async updateImageCounts() {
         if (!this.activeFile) return;
+        if (isPathExcluded(this.activeFile.path, this.plugin.settings)) {
+            this.imageCount = this.processedCount = this.skippedCount = 0;
+            return;
+        }
 
         const skipFormats = this.plugin.settings.ProcessCurrentNoteSkipFormats
             .toLowerCase()
@@ -578,7 +583,7 @@ export class ProcessCurrentNote extends Modal {
 
         if (this.activeFile.extension === 'canvas') {
             const canvasData = JSON.parse(await this.app.vault.read(this.activeFile)) as CanvasData;
-            const images = this.getImagePathsFromCanvas(canvasData);
+            const images = this.getImagePathsFromCanvas(canvasData).filter(imagePath => !isPathExcluded(imagePath, this.plugin.settings));
             this.imageCount = images.length;
             this.processedCount = images.filter(imagePath => {
                 if (matchesIgnoreFolders(imagePath)) {
@@ -670,9 +675,9 @@ export class ProcessCurrentNote extends Modal {
     private getLinkedImageFiles(file: TFile): TFile[] {
         const { resolvedLinks } = this.app.metadataCache;
         const linksInCurrentNote = resolvedLinks[file.path];
-        return Object.keys(linksInCurrentNote)
+        return Object.keys(linksInCurrentNote ?? {})
             .map(link => this.app.vault.getAbstractFileByPath(link))
-            .filter((file): file is TFile => file instanceof TFile && this.plugin.supportedImageFormats.isSupported(undefined, file.name));
+            .filter((file): file is TFile => file instanceof TFile && !isPathExcluded(file.path, this.plugin.settings) && this.plugin.supportedImageFormats.isSupported(undefined, file.name));
     }
 
     private updateCountDisplays() {

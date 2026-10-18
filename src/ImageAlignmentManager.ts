@@ -1,3 +1,4 @@
+import { isPathExcluded } from './ExcludedFolders';
 import {
 	App,
 	Menu,
@@ -409,6 +410,8 @@ export class ImageAlignmentManager {
 		height?: string,
 		wrap = false
 	) {
+		if (isPathExcluded(notePath, this.plugin.settings) ||
+			isPathExcluded(this.getRelativePath(imageSrc), this.plugin.settings)) return;
 		// Update in-memory cache SYNCHRONOUSLY (outside lock) for immediate UI consistency.
 		// This is intentional: rapid alignment changes need instant cache reads without
 		// waiting for disk I/O. The lock only serializes disk writes, not memory updates.
@@ -632,6 +635,7 @@ export class ImageAlignmentManager {
 	}
 
 	public async applyAlignmentsToNote(notePath: string) {
+		if (isPathExcluded(notePath, this.plugin.settings)) return;
 		try {
 			// console.log("applyAlignmentsToNote")
 			await this.lock.acquire("applyAlignments", async () => {

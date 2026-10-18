@@ -1,3 +1,4 @@
+import { isPathExcluded } from './ExcludedFolders';
 // NEW: ProcessFolderModal.ts
 import {
     App,
@@ -780,8 +781,10 @@ export class ProcessFolderModal extends Modal {
     }> {
         const directImages: TFile[] = [];
         const linkedImages: TFile[] = [];
+        if (isPathExcluded(folder.path, this.plugin.settings)) return { directImages, linkedImages };
 
         for (const file of folder.children) {
+            if (isPathExcluded(file.path, this.plugin.settings)) continue;
             if (file instanceof TFolder) {
                 if (recursive) {
                     // Recursive case: process subfolders
@@ -833,10 +836,14 @@ export class ProcessFolderModal extends Modal {
             "selectedImageSource:",
             selectedImageSource
         );
-        return { directImages, linkedImages };
+        return {
+            directImages: directImages.filter(file => !isPathExcluded(file.path, this.plugin.settings)),
+            linkedImages: linkedImages.filter(file => !isPathExcluded(file.path, this.plugin.settings))
+        };
     }
 
     async getImagesFromMarkdownFile(markdownFile: TFile): Promise<TFile[]> {
+        if (isPathExcluded(markdownFile.path, this.plugin.settings)) return [];
         console.debug("Getting images from Markdown file:", markdownFile.path);
         const images: TFile[] = [];
         const content = await this.app.vault.read(markdownFile);
@@ -887,7 +894,7 @@ export class ProcessFolderModal extends Modal {
             "Images found in Markdown file:",
             images.map((file) => file.path)
         );
-        return images;
+        return images.filter(image => !isPathExcluded(image.path, this.plugin.settings));
     }
 
     // Helper function to extract image names from Markdown content (both Wiki and Markdown links)
@@ -921,6 +928,7 @@ export class ProcessFolderModal extends Modal {
     }
 
     async getImagesFromCanvasFile(file: TFile): Promise<TFile[]> {
+        if (isPathExcluded(file.path, this.plugin.settings)) return [];
         const images: TFile[] = [];
         const content = await this.app.vault.read(file);
         
@@ -929,7 +937,7 @@ export class ProcessFolderModal extends Modal {
             canvasData = JSON.parse(content) as CanvasData;
         } catch (error) {
             console.warn(`Failed to parse canvas file: ${file.path}`, error);
-            return images;
+            return images.filter(image => !isPathExcluded(image.path, this.plugin.settings));
         }
 
         if (canvasData.nodes && Array.isArray(canvasData.nodes)) {
@@ -948,7 +956,7 @@ export class ProcessFolderModal extends Modal {
             }
         }
 
-        return images;
+        return images.filter(image => !isPathExcluded(image.path, this.plugin.settings));
     }
 
     private updateCountDisplays(counts: {

@@ -1,3 +1,4 @@
+import { isPathExcluded } from './ExcludedFolders';
 // BatchImageProcessor.ts
 import { App, TFile, TFolder, Notice } from 'obsidian';
 import ImageConverterPlugin from './main';
@@ -47,6 +48,7 @@ export class BatchImageProcessor {
     }
     
     async processImagesInNote(noteFile: TFile): Promise<void> {
+        if (isPathExcluded(noteFile.path, this.plugin.settings)) return;
 
         try {
             const {
@@ -237,6 +239,7 @@ export class BatchImageProcessor {
 
 
     private async getImageFilesFromCanvas(canvasFile: TFile): Promise<TFile[]> {
+        if (isPathExcluded(canvasFile.path, this.plugin.settings)) return [];
         const canvasContent = await this.app.vault.read(canvasFile);
         const canvasData = JSON.parse(canvasContent) as CanvasData;
         const linkedFiles: TFile[] = [];
@@ -245,7 +248,7 @@ export class BatchImageProcessor {
             for (const node of nodes) {
                 if (node.type === 'file' && node.file) {
                     const file = this.app.vault.getAbstractFileByPath(node.file);
-                    if (file instanceof TFile && this.plugin.supportedImageFormats.isSupported(undefined, file.name)) {
+                    if (file instanceof TFile && !isPathExcluded(file.path, this.plugin.settings) && this.plugin.supportedImageFormats.isSupported(undefined, file.name)) {
                         linkedFiles.push(file);
                     }
                 }
@@ -263,16 +266,18 @@ export class BatchImageProcessor {
     }
 
     private getLinkedImageFiles(noteFile: TFile): TFile[] {
+        if (isPathExcluded(noteFile.path, this.plugin.settings)) return [];
         const { resolvedLinks } = this.app.metadataCache;
         const linksInCurrentNote = resolvedLinks[noteFile.path];
 
-        return Object.keys(linksInCurrentNote)
+        return Object.keys(linksInCurrentNote ?? {})
             .map(link => this.app.vault.getAbstractFileByPath(link))
-            .filter((file): file is TFile => file instanceof TFile && this.plugin.supportedImageFormats.isSupported(undefined, file.name));
+            .filter((file): file is TFile => file instanceof TFile && !isPathExcluded(file.path, this.plugin.settings) && this.plugin.supportedImageFormats.isSupported(undefined, file.name));
     }
 
 
     async processImagesInFolder(folderPath: string, recursive: boolean): Promise<void> {
+        if (isPathExcluded(folderPath, this.plugin.settings)) return;
         // ... (logic from old processFolderImages, updated to use imageProcessor.processImage)
         try {
             const folder = this.app.vault.getAbstractFileByPath(folderPath);
@@ -400,6 +405,7 @@ export class BatchImageProcessor {
     }
 
     async processLinkedImagesInFolder(folderPath: string, recursive: boolean): Promise<void> {
+        if (isPathExcluded(folderPath, this.plugin.settings)) return;
         try {
             const folder = this.app.vault.getAbstractFileByPath(folderPath);
             if (!(folder instanceof TFolder)) {
@@ -450,7 +456,7 @@ export class BatchImageProcessor {
                 return recursive ? (prefix === '' ? true : normalized.startsWith(prefix)) : isImmediateChild(normalized);
             };
 
-            const noteFiles = allFiles.filter((file) => (file.extension === 'md' || file.extension === 'canvas') && inScope(file.path));
+            const noteFiles = allFiles.filter((file) => !isPathExcluded(file.path, this.plugin.settings) && (file.extension === 'md' || file.extension === 'canvas') && inScope(file.path));
 
             // Build image set and reverse index of references
             const imageMap = new Map<string, TFile>();
@@ -610,6 +616,7 @@ export class BatchImageProcessor {
         };
 
         return allFiles.filter((file) => {
+            if (isPathExcluded(file.path, this.plugin.settings)) return false;
             if (!this.plugin.supportedImageFormats.isSupported(undefined, file.name)) return false;
             const normalized = file.path.replace(/\\/g, '/');
             if (recursive) {
@@ -794,7 +801,7 @@ export class BatchImageProcessor {
 
     // Add helper methods like getAllImageFiles, shouldProcessImage, etc. (update accordingly)
     async getAllImageFiles(): Promise<TFile[]> {
-        const allFiles = this.app.vault.getFiles();
+        const allFiles = this.app.vault.getFiles().filter(file => !isPathExcluded(file.path, this.plugin.settings));
         const imageFiles = allFiles.filter(file =>
             this.plugin.supportedImageFormats.isSupported(undefined, file.name)
         );
@@ -810,7 +817,7 @@ export class BatchImageProcessor {
             const canvasImages = await this.getImagesFromCanvas(canvasFile);
             for (const imagePath of canvasImages) {
                 const imageFile = this.app.vault.getAbstractFileByPath(imagePath);
-                if (imageFile instanceof TFile && this.plugin.supportedImageFormats.isSupported(undefined, imageFile.name)) {
+                if (imageFile instanceof TFile && !isPathExcluded(imageFile.path, this.plugin.settings) && this.plugin.supportedImageFormats.isSupported(undefined, imageFile.name)) {
                     if (!imageFiles.find(existing => existing.path === imageFile.path)) {
                         imageFiles.push(imageFile);
                     }
@@ -822,13 +829,14 @@ export class BatchImageProcessor {
     }
 
     async getImagesFromCanvas(file: TFile): Promise<string[]> {
+        if (isPathExcluded(file.path, this.plugin.settings)) return [];
         const images: string[] = [];
         const content = await this.app.vault.read(file);
         const canvasData = JSON.parse(content) as CanvasData;
 
         if (canvasData.nodes && Array.isArray(canvasData.nodes)) {
             for (const node of canvasData.nodes) {
-                if (node.type === "file" && node.file) {
+                if (node.type === "file" && node.file && !isPathExcluded(node.file, this.plugin.settings)) {
                     images.push(node.file);
                 }
             }
@@ -838,6 +846,7 @@ export class BatchImageProcessor {
     }
 
     shouldProcessImage(image: TFile, isKeepOriginalFormat: boolean, targetFormat: string, skipFormats: string[], skipImagesInTargetFormat: boolean): boolean {
+        if (isPathExcluded(image.path, this.plugin.settings)) return false;
         const effectiveTargetFormat = isKeepOriginalFormat
             ? image.extension
             : targetFormat;
@@ -881,6 +890,7 @@ export class BatchImageProcessor {
         oldPath: string,
         newPath: string
     ): Promise<void> {
+        if (isPathExcluded(noteFile.path, this.plugin.settings)) return;
         const oldLinkText = this.escapeRegexCharacters(oldPath);
         const content = await this.app.vault.read(noteFile);
         // Use direct replacement string to avoid escaping characters in the new path
@@ -901,6 +911,7 @@ export class BatchImageProcessor {
         oldPath: string,
         newPath: string
     ) {
+            if (isPathExcluded(canvasFile.path, this.plugin.settings)) return;
             try {
                 const content = await this.app.vault.read(canvasFile);
                 const canvasData = JSON.parse(content) as CanvasData;

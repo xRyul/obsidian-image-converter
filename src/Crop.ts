@@ -49,7 +49,7 @@ export class Crop extends Modal {
 	private currentPanX = 0;
 	private currentPanY = 0;
 
-	constructor(app: App, imageFile: TFile) {
+	constructor(app: App, imageFile: TFile, private isExcluded: (filePath: string) => boolean = () => false) {
 		super(app);
 		this.imageFile = imageFile;
 		this.componentContainer.load();
@@ -798,6 +798,7 @@ export class Crop extends Modal {
     }
 
 	async saveImage() {
+		if (this.isExcluded(this.imageFile.path)) return;
 		try {
 			const originalCanvas = document.createElement('canvas');
 			const originalCtx = originalCanvas.getContext('2d');
