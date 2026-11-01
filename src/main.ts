@@ -561,8 +561,17 @@ export default class ImageConverterPlugin extends Plugin {
                 );
 
                 if (hasSupportedItems) {
-                    evt.preventDefault();
-                    await this.handlePaste(itemData, editor, cursor);
+                    // Spreadsheet copies (Excel, Numbers, Google Sheets) put a rendered
+                    // image AND the table itself on the clipboard. Let those fall through
+                    // to the default paste so they become text/Markdown instead of an image.
+                    const html = evt.clipboardData.getData?.("text/html") ?? "";
+                    const plainText = evt.clipboardData.getData?.("text/plain") ?? "";
+                    const hasTableContent = html.includes("<table") || plainText.includes("\t");
+
+                    if (!hasTableContent) {
+                        evt.preventDefault();
+                        await this.handlePaste(itemData, editor, cursor);
+                    }
                 }
             })
         );
