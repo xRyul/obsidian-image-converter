@@ -24,19 +24,19 @@ export class ProcessCurrentNote extends Modal {
     private imageCount = 0;
     private processedCount = 0;
     private skippedCount = 0;
-    private imageCountDisplay: HTMLSpanElement;
-    private processedCountDisplay: HTMLSpanElement;
-    private skippedCountDisplay: HTMLSpanElement;
+    private imageCountDisplay!: HTMLSpanElement;
+    private processedCountDisplay!: HTMLSpanElement;
+    private skippedCountDisplay!: HTMLSpanElement;
 
     private enlargeReduceSettings: Setting | null = null;
     private resizeInputSettings: Setting | null = null;
     submitButton: ButtonComponent | null = null;
     private resizeInputsDiv: HTMLDivElement | null = null;
     private enlargeReduceDiv: HTMLDivElement | null = null;
-    convertToSetting: Setting;
-    skipFormatsSetting: Setting;
-    resizeModeSetting: Setting;
-    skipTargetFormatSetting: Setting;
+    convertToSetting!: Setting;
+    skipFormatsSetting!: Setting;
+    resizeModeSetting!: Setting;
+    skipTargetFormatSetting!: Setting;
 
     constructor(
         app: App,

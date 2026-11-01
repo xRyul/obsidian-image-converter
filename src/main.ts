@@ -40,7 +40,7 @@ import {
 import { PresetSelectionModal } from "./PresetSelectionModal";
 
 export default class ImageConverterPlugin extends Plugin {
-    settings!: ImageConverterSettings;
+    declare settings: ImageConverterSettings;
 
     // Check supported image formats
     supportedImageFormats!: SupportedImageFormats;

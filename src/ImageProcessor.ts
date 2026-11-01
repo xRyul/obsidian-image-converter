@@ -75,7 +75,7 @@ export class ImageProcessor {
 
     supportedImageFormats: SupportedImageFormats
     private preset: ConversionPreset | undefined;
-    private settings: ImageConverterSettings;
+    private settings!: ImageConverterSettings;
     private detectedEncoder: AvifEncoder | null = null;
     private static encoderDetectionCache: Map<string, AvifEncoder | null> = new Map(); // Static cache shared across instances
     private encoderFallbackAttempted: boolean = false;
@@ -2282,7 +2282,7 @@ canvas.toBlob(
             for (let i = 0; i < uint8Array.length; i += chunkSize) {
                 binaryString += String.fromCharCode.apply(
                     null,
-                    uint8Array.subarray(i, i + chunkSize)
+                    Array.from(uint8Array.subarray(i, i + chunkSize))
                 );
             }
             const base64Data = `data:image/jpeg;base64,${btoa(binaryString)}`;

@@ -41,9 +41,9 @@ export class ProcessFolderModal extends Modal {
     private imageCount = 0;
     private processedCount = 0;
     private skippedCount = 0;
-    private imageCountDisplay: HTMLSpanElement;
-    private processedCountDisplay: HTMLSpanElement;
-    private skippedCountDisplay: HTMLSpanElement;
+    private imageCountDisplay!: HTMLSpanElement;
+    private processedCountDisplay!: HTMLSpanElement;
+    private skippedCountDisplay!: HTMLSpanElement;
 
     // --- Description Updating ---
     private updateImageSourceDescription:
