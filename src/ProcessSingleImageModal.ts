@@ -27,14 +27,14 @@ export interface SingleImageModalSettings {
 
 export class ProcessSingleImageModal extends Modal {
     private imageFile: TFile;
-    private modalSettings: SingleImageModalSettings;
+    private modalSettings!: SingleImageModalSettings;
     private previewImageUrl: string | null = null;
-    private previewContainer: HTMLDivElement;
+    private previewContainer!: HTMLDivElement;
 
     // --- Dedicated containers for each section ---
-    private conversionSettingsContainer: HTMLDivElement;
-    private resizeSettingsContainer: HTMLDivElement;
-    private buttonContainer: HTMLDivElement;
+    private conversionSettingsContainer!: HTMLDivElement;
+    private resizeSettingsContainer!: HTMLDivElement;
+    private buttonContainer!: HTMLDivElement;
 
     constructor(app: App, private plugin: ImageConverterPlugin, file: TFile) {
         super(app);
