@@ -176,3 +176,98 @@ describe('activeDocument body state compatibility', () => {
     expect(popoutDocument.body.classList.contains('image-captions-enabled')).toBe(false);
   });
 });
+
+describe('editor-paste spreadsheet table fallthrough (issues #311/#440)', () => {
+  let originalMobile: boolean;
+
+  beforeEach(() => {
+    originalMobile = Platform.isMobile;
+    Platform.isMobile = false;
+  });
+
+  afterEach(() => {
+    Platform.isMobile = originalMobile;
+  });
+
+  function makePasteEvent(clipboardData: any) {
+    return {
+      defaultPrevented: false,
+      clipboardData,
+      preventDefault: vi.fn(),
+    };
+  }
+
+  function makeEditor() {
+    return { getCursor: vi.fn(() => ({ line: 0, ch: 0 })) };
+  }
+
+  function makeClipboardData(getDataImpl: (type: string) => string) {
+    const imageFile = makeImageFile();
+    return {
+      items: [{ kind: 'file', type: 'image/png', getAsFile: () => imageFile }],
+      getData: getDataImpl,
+    };
+  }
+
+  it('Given clipboard has image + HTML table, When pasting, Then the plugin does NOT intercept', async () => {
+    const { app, plugin } = makePluginForDropPaste();
+    const handlePaste = vi.fn().mockResolvedValue(undefined);
+    (plugin as any).handlePaste = handlePaste;
+    (plugin as any).dropPasteRegisterEvents();
+    const handler = getRegisteredWorkspaceHandler(app, 'editor-paste');
+
+    const event = makePasteEvent(makeClipboardData((type: string) =>
+      type === 'text/html' ? '<table><tr><td>a</td><td>b</td></tr></table>' : ''
+    ));
+    await handler(event, makeEditor());
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(handlePaste).not.toHaveBeenCalled();
+  });
+
+  it('Given clipboard has image + tab-separated text, When pasting, Then the plugin does NOT intercept', async () => {
+    const { app, plugin } = makePluginForDropPaste();
+    const handlePaste = vi.fn().mockResolvedValue(undefined);
+    (plugin as any).handlePaste = handlePaste;
+    (plugin as any).dropPasteRegisterEvents();
+    const handler = getRegisteredWorkspaceHandler(app, 'editor-paste');
+
+    const event = makePasteEvent(makeClipboardData((type: string) =>
+      type === 'text/plain' ? 'col1\tcol2\nval1\tval2' : ''
+    ));
+    await handler(event, makeEditor());
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(handlePaste).not.toHaveBeenCalled();
+  });
+
+  it('Given clipboard has image + non-table HTML (browser copy image), When pasting, Then the plugin DOES intercept', async () => {
+    const { app, plugin } = makePluginForDropPaste();
+    const handlePaste = vi.fn().mockResolvedValue(undefined);
+    (plugin as any).handlePaste = handlePaste;
+    (plugin as any).dropPasteRegisterEvents();
+    const handler = getRegisteredWorkspaceHandler(app, 'editor-paste');
+
+    const event = makePasteEvent(makeClipboardData((type: string) =>
+      type === 'text/html' ? '<img src="https://example.com/cat.png">' : ''
+    ));
+    await handler(event, makeEditor());
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(handlePaste).toHaveBeenCalled();
+  });
+
+  it('Given clipboard has image only, When pasting, Then the plugin DOES intercept', async () => {
+    const { app, plugin } = makePluginForDropPaste();
+    const handlePaste = vi.fn().mockResolvedValue(undefined);
+    (plugin as any).handlePaste = handlePaste;
+    (plugin as any).dropPasteRegisterEvents();
+    const handler = getRegisteredWorkspaceHandler(app, 'editor-paste');
+
+    const event = makePasteEvent(makeClipboardData(() => ''));
+    await handler(event, makeEditor());
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(handlePaste).toHaveBeenCalled();
+  });
+});
