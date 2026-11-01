@@ -167,3 +167,84 @@ describe('BatchImageProcessor — Folder processing (recursive, skipFormats)', (
     expect(contentAfter).toContain('SubSubfolder2-1757527917825.webp');
   });
 });
+describe('BatchImageProcessor — revert to original when output is larger', () => {
+  let app: any;
+  let plugin: any;
+  let imageProcessor: any;
+  let folderAndFilenameManagement: any;
+  let aPng: any; let bJpg: any;
+  let binaryContents: Map<string, ArrayBuffer>;
+
+  beforeEach(() => {
+    const folderA = fakeTFolder({ path: 'images', name: 'images' });
+    aPng = fakeTFile({ path: 'images/a.png' });
+    bJpg = fakeTFile({ path: 'images/b.jpg' });
+    (folderA as any).children = [aPng, bJpg];
+
+    binaryContents = new Map<string, ArrayBuffer>([
+      ['images/a.png', new ArrayBuffer(100)],
+      ['images/b.jpg', new ArrayBuffer(100)]
+    ]);
+
+    const vault = fakeVault({ files: [aPng, bJpg], folders: [folderA], binaryContents }) as any;
+    app = fakeApp({ vault, metadataCache: { resolvedLinks: {} } as any }) as any;
+    app.fileManager = {
+      renameFile: vi.fn(async (file: any, newPath: string) => {
+        await app.vault.rename(file, newPath);
+      })
+    };
+
+    plugin = makePluginStub();
+    plugin.settings.revertToOriginalIfLarger = true;
+    plugin.settings.minimumCompressionSavingsInKB = 0;
+
+    imageProcessor = {
+      // PNG output balloons to 200 bytes; JPG shrinks to 4 bytes
+      processImage: vi.fn(async (blob: Blob) =>
+        blob.type.includes('png') ? new ArrayBuffer(200) : new ArrayBuffer(4))
+    };
+
+    folderAndFilenameManagement = {
+      handleNameConflicts: vi.fn(async (_dir: string, name: string) => name)
+    };
+  });
+
+  it('Given revert enabled, When processed output is larger, Then the file is left untouched', async () => {
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
+
+    await bip.processImagesInFolder('images', false);
+
+    // a.png (larger output) must not be renamed or rewritten; b.jpg processed normally
+    const renamedPaths = (app.fileManager.renameFile as any).mock.calls.map((args: any[]) => args[0].basename);
+    expect(renamedPaths).toEqual(['b']);
+
+    expect(app.vault.modifyBinary).toHaveBeenCalledTimes(1);
+    expect(binaryContents.get('images/a.png')?.byteLength).toBe(100);
+    expect(binaryContents.get('images/b.webp')?.byteLength).toBe(4);
+  });
+
+  it('Given revert enabled with a minimum savings threshold, When savings are below it, Then the file is skipped', async () => {
+    plugin.settings.minimumCompressionSavingsInKB = 30;
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
+
+    await bip.processImagesInFolder('images', false);
+
+    // Even the 4-byte JPG output saves only 96 bytes (< 30 KB), so nothing is written
+    expect(app.fileManager.renameFile).not.toHaveBeenCalled();
+    expect(app.vault.modifyBinary).not.toHaveBeenCalled();
+    expect(binaryContents.get('images/a.png')?.byteLength).toBe(100);
+    expect(binaryContents.get('images/b.jpg')?.byteLength).toBe(100);
+  });
+
+  it('Given revert disabled, When processed output is larger, Then the file is still written', async () => {
+    plugin.settings.revertToOriginalIfLarger = false;
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
+
+    await bip.processImagesInFolder('images', false);
+
+    const renamedPaths = (app.fileManager.renameFile as any).mock.calls.map((args: any[]) => args[0].basename);
+    expect(renamedPaths.sort()).toEqual(['a', 'b']);
+    expect(binaryContents.get('images/a.webp')?.byteLength).toBe(200);
+    expect(binaryContents.get('images/b.webp')?.byteLength).toBe(4);
+  });
+});
