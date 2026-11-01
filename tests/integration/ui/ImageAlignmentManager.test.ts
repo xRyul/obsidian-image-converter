@@ -1055,3 +1055,55 @@ describe('ImageAlignmentManager (integration-lite) — 12.x behaviors', () => {
     });
   });
 });
+
+describe('ImageAlignmentManager — cleanCache correctness and scan count (issue #396)', () => {
+  let app: any;
+  let plugin: any;
+  let manager: ImageAlignmentManager;
+
+  beforeEach(async () => {
+    const note = fakeTFile({ path: 'Notes/n1.md', name: 'n1.md', extension: 'md' });
+    const imgA = fakeTFile({ path: 'images/a.png' });
+    const imgB = fakeTFile({ path: 'images/b.png' });
+    const vault = fakeVault({ files: [note, imgA, imgB] });
+    app = fakeApp({ vault });
+    plugin = new ImageConverterPlugin(app as any, { id: 'image-converter', dir: '/plugins/image-converter' } as any);
+    plugin.manifest = { id: 'image-converter', dir: '/plugins/image-converter' } as any;
+    plugin.settings = {
+      isImageAlignmentEnabled: true,
+      imageAlignmentDefaultAlignment: 'none',
+      imageAlignmentCacheLocation: 'plugin',
+      imageAlignmentCacheCleanupInterval: 0,
+    } as any;
+    const supported = new SupportedImageFormats(app as any);
+    manager = new ImageAlignmentManager(app as any, plugin, supported);
+    await manager.loadCache();
+  });
+
+  it('keeps valid entries, drops stale entries and missing notes, and lists vault files once', async () => {
+    const validHash = manager.getImageHash('Notes/n1.md', 'images/a.png');
+    const staleHash = manager.getImageHash('Notes/n1.md', 'images/deleted.png');
+    const orphanHash = manager.getImageHash('Notes/gone.md', 'images/a.png');
+
+    manager.cache = {
+      'Notes/n1.md': {
+        [validHash]: { position: 'left', wrap: false },
+        [staleHash]: { position: 'right', wrap: false },
+      },
+      'Notes/gone.md': {
+        [orphanHash]: { position: 'left', wrap: false },
+      },
+    };
+
+    const getFilesSpy = vi.spyOn(app.vault, 'getFiles');
+    await manager.cleanCache();
+
+    // Valid entry kept under its note; stale entry dropped; missing note removed entirely
+    expect(Object.keys(manager.cache)).toEqual(['Notes/n1.md']);
+    expect(manager.cache['Notes/n1.md'][validHash]).toEqual({ position: 'left', wrap: false });
+    expect(manager.cache['Notes/n1.md'][staleHash]).toBeUndefined();
+
+    // Regression guard: the vault must not be re-listed once per cached entry
+    expect(getFilesSpy.mock.calls.length).toBeLessThanOrEqual(1);
+  });
+});
