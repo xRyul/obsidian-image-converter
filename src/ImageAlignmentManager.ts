@@ -699,40 +699,34 @@ export class ImageAlignmentManager {
 			const cleanupStart = Date.now();
 			const newCache: ImageAlignmentCache = {};
 
+			// List and filter vault files once, instead of re-scanning the whole
+			// vault for every cached hash (which made cleanup O(entries x files)
+			// and blocked the main thread for seconds in large vaults).
+			const imageFiles = this.app.vault.getFiles().filter(file =>
+				this.supportedImageFormats.isSupported(undefined, file.name)
+			);
+
 			for (const notePath in this.cache) {
 				// Check if note still exists
 				const noteFile = this.app.vault.getAbstractFileByPath(notePath);
 				if (!noteFile) continue;
 
+				// Hash every existing image in this note's context once, then
+				// cached-entry membership checks are O(1) Set lookups.
+				// getImageHash() is bypassed deliberately: for a real vault path
+				// getRelativePath() resolves to the same string, but would scan
+				// all vault files on every call.
+				const existingHashes = new Set<string>();
+				for (const file of imageFiles) {
+					existingHashes.add(
+						murmurHash3128(`${notePath}:${file.path}`, 0)
+					);
+				}
+
 				newCache[notePath] = {};
 
 				for (const imageHash in this.cache[notePath]) {
-					let imageExists = false;
-
-					// Iterate through all files in the vault
-					const allFiles = this.app.vault.getFiles();
-					for (const file of allFiles) {
-						if (
-							this.supportedImageFormats.isSupported(
-								undefined,
-								file.name
-							)
-						) {
-							// Calculate the hash for each image in the context of the current note
-							const currentImageHash = this.getImageHash(
-								notePath,
-								file.path
-							);
-
-							// Check if the calculated hash matches the one in the cache
-							if (currentImageHash === imageHash) {
-								imageExists = true;
-								break; // No need to check other files if found
-							}
-						}
-					}
-
-					if (imageExists) {
+					if (existingHashes.has(imageHash)) {
 						newCache[notePath][imageHash] =
 							this.cache[notePath][imageHash];
 					}
