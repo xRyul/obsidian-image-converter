@@ -33,7 +33,7 @@
 		"@vitest/ui": "^3.2.4",
 		"builtin-modules": "3.3.0",
 		"esbuild": "^0.25.9",
-		"eslint": "^9.35.0",
+		"eslint": "^10.14.0",
 		"eslint-plugin-obsidianmd": "^0.3.0",
 		"fabric": "^6.5.0",
 		"globals": "^16.3.0",
@@ -42,6 +42,7 @@
 		"sortablejs": "^1.15.6",
 		"tslib": "2.4.0",
 		"typescript": "^5.9.2",
+		"typescript-eslint": "^8.72.1",
 		"vitest": "^3.2.4"
 	},
 	"dependencies": {
