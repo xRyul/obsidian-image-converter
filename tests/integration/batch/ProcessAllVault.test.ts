@@ -233,6 +233,19 @@ describe('BatchImageProcessor — Vault-wide orchestration', () => {
     const secondRun = await runOnce();
     expect(secondRun).toEqual(firstRun);
   });
+
+  it('Given revertToOriginalIfLarger enabled, When processed output is larger, Then vault files are left untouched', async () => {
+    plugin.settings.revertToOriginalIfLarger = true;
+    plugin.settings.minimumCompressionSavingsInKB = 0;
+    imageProcessor.processImage.mockImplementation(async (_blob: Blob) => new ArrayBuffer(2048));
+
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
+    await bip.processAllVaultImages();
+
+    // Every processed output (2048 bytes) is larger than the originals (0 bytes), so nothing is renamed or rewritten
+    expect(app.fileManager.renameFile).not.toHaveBeenCalled();
+    expect(app.vault.modifyBinary).not.toHaveBeenCalled();
+  });
 });
 
 function makePlugin(app: App) {
@@ -380,4 +393,5 @@ describe('ProcessAllVaultModal UI basics (Phase 7: 10.1–10.7 subset)', () => {
     // Assert processor invoked; runtime rename behavior validated in BatchImageProcessor tests
     expect((processor as any).processAllVaultImages).toHaveBeenCalled();
   });
+
 });

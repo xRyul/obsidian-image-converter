@@ -45,7 +45,32 @@ export class BatchImageProcessor {
         }
         return file;
     }
-    
+
+    /** Returns the configured minimum compression savings in bytes (default 30 KB). */
+    private getMinSavingsBytes(): number {
+        const minSavingsKB = this.plugin.settings.minimumCompressionSavingsInKB;
+        return (typeof minSavingsKB === 'number' && minSavingsKB >= 0 ? minSavingsKB : 30) * 1024;
+    }
+
+    /**
+     * Returns true when "revert to original if larger" is enabled and the processed
+     * output fails to beat the original by the configured minimum savings.
+     * Mirrors the check used by the paste/drop path in main.ts.
+     */
+    private shouldKeepOriginal(originalSize: number, processedSize: number): boolean {
+        return this.plugin.settings.revertToOriginalIfLarger === true
+            && processedSize + this.getMinSavingsBytes() > originalSize;
+    }
+
+    /** Shows a summary notice for files skipped because they failed the savings threshold. */
+    private notifySkippedLarger(count: number): void {
+        if (count <= 0) {
+            return;
+        }
+        const minSavingsKB = this.plugin.settings.minimumCompressionSavingsInKB ?? 30;
+        new Notice(`${count} image(s) kept their original file: size reduction was less than ${minSavingsKB} KB.`);
+    }
+
     async processImagesInNote(noteFile: TFile): Promise<void> {
 
         try {
@@ -146,6 +171,7 @@ export class BatchImageProcessor {
             }
 
             let imageCount = 0;
+            let skippedLargerCount = 0;
             const statusBarItemEl = this.plugin.addStatusBarItem();
             const startTime = Date.now();
 
@@ -179,6 +205,13 @@ export class BatchImageProcessor {
                         enlargeOrReduce as EnlargeReduce,
                         allowLargerFiles
                     );
+
+                    // Leave the original file untouched when the processed output
+                    // does not beat it by the configured minimum savings
+                    if (this.shouldKeepOriginal(imageData.byteLength, processedImageData.byteLength)) {
+                        skippedLargerCount++;
+                        continue;
+                    }
 
                     // Rename first so the extension matches the processed bytes
                     if (oldPath !== newFilePath) {
@@ -224,6 +257,7 @@ export class BatchImageProcessor {
 
             const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
             statusBarItemEl.setText(`Finished processing ${imageCount} images, total time: ${totalTime} seconds`);
+            this.notifySkippedLarger(skippedLargerCount);
             window.setTimeout(() => {
                 statusBarItemEl.remove();
             }, 5000);
@@ -323,6 +357,7 @@ export class BatchImageProcessor {
             }
 
             let imageCount = 0;
+            let skippedLargerCount = 0;
             const statusBarItemEl = this.plugin.addStatusBarItem();
             const startTime = Date.now();
             const totalImages = filesToProcess.length;
@@ -354,6 +389,13 @@ export class BatchImageProcessor {
                         enlargeOrReduce as EnlargeReduce,
                         allowLargerFiles
                     );
+
+                    // Leave the original file untouched when the processed output
+                    // does not beat it by the configured minimum savings
+                    if (this.shouldKeepOriginal(imageData.byteLength, processedImageData.byteLength)) {
+                        skippedLargerCount++;
+                        continue;
+                    }
 
                     if (oldPath !== newFilePath) {
                         await this.app.fileManager.renameFile(image, newFilePath);
@@ -389,6 +431,7 @@ export class BatchImageProcessor {
 
             const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
             statusBarItemEl.setText(`Finished processing ${imageCount} images, total time: ${totalTime} seconds`);
+            this.notifySkippedLarger(skippedLargerCount);
             window.setTimeout(() => {
                 statusBarItemEl.remove();
             }, 5000);
@@ -493,6 +536,7 @@ export class BatchImageProcessor {
             }
 
             let imageCount = 0;
+            let skippedLargerCount = 0;
             const statusBarItemEl = this.plugin.addStatusBarItem();
             const startTime = Date.now();
             const totalImages = filesToProcess.length;
@@ -524,6 +568,13 @@ export class BatchImageProcessor {
                         enlargeOrReduce as EnlargeReduce,
                         allowLargerFiles
                     );
+
+                    // Leave the original file untouched when the processed output
+                    // does not beat it by the configured minimum savings
+                    if (this.shouldKeepOriginal(imageData.byteLength, processedImageData.byteLength)) {
+                        skippedLargerCount++;
+                        continue;
+                    }
 
                     // Resolve conflicts similar to vault-wide behavior
                     if (image.path !== targetPath && this.app.vault.getAbstractFileByPath(targetPath)) {
@@ -584,6 +635,7 @@ export class BatchImageProcessor {
 
             const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
             statusBarItemEl.setText(`Finished processing ${imageCount} images, total time: ${totalTime} seconds`);
+            this.notifySkippedLarger(skippedLargerCount);
             window.setTimeout(() => { statusBarItemEl.remove(); }, 5000);
         } catch (error) {
             console.error('Error processing linked images in folder:', error);
@@ -692,6 +744,7 @@ export class BatchImageProcessor {
             }
 
             let imageCount = 0;
+            let skippedLargerCount = 0;
             const statusBarItemEl = this.plugin.addStatusBarItem();
             const startTime = Date.now();
             const totalImages = filesToProcess.length;
@@ -722,6 +775,13 @@ export class BatchImageProcessor {
                         enlargeOrReduce as EnlargeReduce,
                         allowLargerFiles
                     );
+
+                    // Leave the original file untouched when the processed output
+                    // does not beat it by the configured minimum savings
+                    if (this.shouldKeepOriginal(imageData.byteLength, processedImageData.byteLength)) {
+                        skippedLargerCount++;
+                        continue;
+                    }
 
                     // Construct the new file path based on conversion settings
                     // When outputFormat is ORIGINAL, keep the original filename (no rename)
@@ -783,6 +843,7 @@ export class BatchImageProcessor {
             statusBarItemEl.setText(
                 `Finished processing ${imageCount} images, total time: ${totalTime} seconds`
             );
+            this.notifySkippedLarger(skippedLargerCount);
             window.setTimeout(() => {
                 statusBarItemEl.remove();
             }, 5000);
