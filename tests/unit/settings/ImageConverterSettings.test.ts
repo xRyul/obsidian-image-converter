@@ -293,6 +293,109 @@ describe('Settings defaults, global preset application, and field constraints (1
     tab = new ImageConverterSettingTab(app, plugin);
   });
 
+  it.each(['folder', 'filename', 'conversion', 'linkformat', 'resize'] as const)(
+    '%s cards remain visible and selectable while another preset is being edited', async (category) => {
+      const presets = {
+        folder: plugin.settings.folderPresets,
+        filename: plugin.settings.filenamePresets,
+        conversion: plugin.settings.conversionPresets,
+        linkformat: plugin.settings.linkFormatSettings.linkFormatPresets,
+        resize: plugin.settings.nonDestructiveResizeSettings.resizePresets,
+      }[category];
+      const custom = { ...presets[0], name: 'Card A' };
+      (presets as any[]).push(custom);
+      const saveSpy = vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
+      tab.activeTab = category;
+      tab.display();
+      const findCard = (name: string) => Array.from(tab.containerEl.querySelectorAll<HTMLElement>(
+        '.image-converter-preset-card:not(.image-converter-add-new-preset)'
+      )).find(card => card.querySelector('.image-converter-preset-card-title')?.textContent === name)!;
+      const a = findCard(custom.name);
+      const b = findCard(presets[0].name);
+
+      click(a.querySelector('.image-converter-preset-card-actions button'));
+      await Promise.resolve();
+      const form = tab.formContainer.querySelector('.image-converter-preset-form');
+      expect(form).toBeTruthy();
+      expect(saveSpy).not.toHaveBeenCalled(); // Editing is not selection.
+
+      click(b);
+      await Promise.resolve();
+      expect(findCard(custom.name)).toBe(a);
+      expect(tab.formContainer.querySelector('.image-converter-preset-form')).toBe(form);
+      expect(b.classList.contains('image-converter-active-preset')).toBe(true);
+      click(a);
+      await Promise.resolve();
+      expect(a.classList.contains('image-converter-active-preset')).toBe(true);
+      expect(b.classList.contains('image-converter-active-preset')).toBe(false);
+      click(b);
+      await Promise.resolve();
+      expect(b.classList.contains('image-converter-active-preset')).toBe(true);
+
+      // A later full redraw must also render the edited card, not an empty shell.
+      tab.display();
+      expect(findCard(custom.name)?.querySelector('.image-converter-preset-card-actions button')).toBeTruthy();
+      expect(tab.formContainer.classList.contains('visible')).toBe(true);
+      expect(tab.containerEl.querySelectorAll('.image-converter-preset-form')).toHaveLength(1);
+    }
+  );
+
+  it('preserves filename form input and preview DOM when selecting a neighboring card', async () => {
+    plugin.settings.filenamePresets.push({ name: 'Card A', customTemplate: '{imagename}', skipRenamePatterns: '' });
+    vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
+    tab.activeTab = 'filename';
+    tab.display();
+    const cards = Array.from(tab.containerEl.querySelectorAll<HTMLElement>('.image-converter-preset-card'));
+    const a = cards.find(card => card.querySelector('.image-converter-preset-card-title')?.textContent === 'Card A')!;
+    click(a.querySelector('.image-converter-preset-card-actions button'));
+    const input = tab.formContainer.querySelector<HTMLInputElement>('.image-converter-custom-template-setting-wrapper input')!;
+    input.value = '{notename}-draft';
+    input.dispatchEvent(new Event('change'));
+    const b = cards.find(card => card.querySelector('.image-converter-preset-card-title')?.textContent === 'Keep original name')!;
+    const preview = b.querySelector('.image-converter-summary-example');
+
+    click(b);
+    await Promise.resolve();
+
+    expect(tab.formContainer.querySelector('.image-converter-custom-template-setting-wrapper input')).toBe(input);
+    expect(input.value).toBe('{notename}-draft');
+    expect(b.querySelector('.image-converter-summary-example')).toBe(preview);
+  });
+
+  it('delete button does not activate its card or save settings before confirmation', async () => {
+    plugin.settings.filenamePresets.push({ name: 'Card A', customTemplate: '{imagename}', skipRenamePatterns: '' });
+    const selected = plugin.settings.selectedFilenamePreset;
+    const saveSpy = vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
+    tab.activeTab = 'filename';
+    tab.display();
+    const a = Array.from(tab.containerEl.querySelectorAll('.image-converter-preset-card'))
+      .find(card => card.querySelector('.image-converter-preset-card-title')?.textContent === 'Card A')!;
+
+    click(a.querySelector('.image-converter-preset-card-actions button.danger'));
+    await Promise.resolve();
+
+    expect(plugin.settings.selectedFilenamePreset).toBe(selected);
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it('switching from adding to editing keeps a single edit form after a redraw', () => {
+    plugin.settings.filenamePresets.push({ name: 'Card A', customTemplate: '{imagename}', skipRenamePatterns: '' });
+    tab.activeTab = 'filename';
+    tab.display();
+    click(tab.containerEl.querySelector('.image-converter-add-new-preset'));
+    expect(tab.presetUIState.filename.newPreset).toBeTruthy();
+    const a = Array.from(tab.containerEl.querySelectorAll('.image-converter-preset-card'))
+      .find(card => card.querySelector('.image-converter-preset-card-title')?.textContent === 'Card A')!;
+    click(a.querySelector('.image-converter-preset-card-actions button'));
+
+    tab.display();
+
+    expect(tab.presetUIState.filename.newPreset).toBeNull();
+    expect(tab.containerEl.querySelectorAll('.image-converter-preset-form')).toHaveLength(1);
+    expect(tab.formContainer.querySelector<HTMLInputElement>('input')?.value).toBe('Card A');
+    expect(tab.formContainer.querySelector('.image-converter-form-buttons button.cta')?.textContent).toBe('Save');
+  });
+
   it('11.11 Auto-detect FFmpeg populates preset and modal settings', async () => {
     const adapter = (app.vault.adapter as any);
     adapter.getBasePath = vi.fn(() => '/vault');
