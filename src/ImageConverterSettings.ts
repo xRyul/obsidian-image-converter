@@ -1492,13 +1492,11 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
         // Add all default cards
         for (const preset of presets) {
-            const isEditing = uiState.editingPreset === preset;
             const isActive = preset.name === this.getSelectedPresetName(activePresetSetting); // Use helper function here
             this.renderPresetCard(
                 cardsContainer,
                 preset,
                 activePresetSetting,
-                isEditing,
                 isActive,
                 uiState
             );
@@ -1526,6 +1524,16 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 activePresetSetting,
                 uiState
             );
+            this.formContainer.addClass("visible");
+        }
+
+        // Editing uses the separate form below the grid; the card remains usable.
+        const editingPreset = uiState.editingPreset ?? presets.find(
+            preset => this.editingPresetKey === this.getPresetKey(preset)
+        );
+        if (!uiState.newPreset && editingPreset) {
+            this.renderPresetForm(this.formContainer, editingPreset, false, activePresetSetting, uiState);
+            this.formContainer.addClass("visible");
         }
     }
 
@@ -1584,7 +1592,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         containerEl: HTMLElement,
         preset: T,
         activePresetSetting: ActivePresetSetting,
-        isEditing: boolean,
         isActive: boolean,
         uiState: PresetCategoryUIState<T>
     ): void {
@@ -1596,21 +1603,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 } ${isActive ? "image-converter-active-preset" : ""}`,
         });
 
-        const presetKey = this.getPresetKey(preset);
-        const isEditingExpanded = this.editingPresetKey === presetKey;
-
-        if (isEditing || isEditingExpanded) {
-            // Render the form in the form container
-            this.renderPresetForm(
-                this.formContainer, // Render in the dedicated form container
-                preset,
-                false,
-                activePresetSetting,
-                uiState
-            );
-            return; // Skip rendering the regular card content
-        }
-
         // Preset Name and Summary
         const cardHeader = card.createDiv("image-converter-preset-card-header");
         cardHeader.createEl("span", {
@@ -1621,6 +1613,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
         if (!this.isDefaultPreset(preset, activePresetSetting)) {
             const actionsContainer = cardHeader.createDiv("image-converter-preset-card-actions");
+            actionsContainer.onClickEvent(event => event.stopPropagation());
 
             // Edit Button
             new ButtonComponent(actionsContainer)
@@ -1710,7 +1703,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
         // Activate Preset on Click
         card.onClickEvent(async () => {
-            if (!isActive) {
+            const globalPresetChanged = this.updateSelectedGlobalPreset(activePresetSetting, preset.name);
+            if (preset.name !== this.getSelectedPresetName(activePresetSetting) || globalPresetChanged) {
                 switch (activePresetSetting) {
                     case "selectedFolderPreset":
                         this.plugin.settings.selectedFolderPreset = preset.name;
@@ -1728,8 +1722,12 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         this.plugin.settings.nonDestructiveResizeSettings.selectedResizePreset = preset.name;
                         break;
                 }
+                // Preserve the grid, previews and edit form instead of rebuilding the tab.
+                containerEl.querySelectorAll(".image-converter-active-preset").forEach(
+                    activeCard => activeCard.removeClass("image-converter-active-preset")
+                );
+                card.addClass("image-converter-active-preset");
                 await this.plugin.saveSettings();
-                this.display();
             }
         });
     }
@@ -1754,6 +1752,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
         // No need to set isFormExpanded here
         this.editingPresetKey = isNew ? "new" : this.getPresetKey(preset);
+        uiState.editingPreset = isNew ? null : preset;
+        uiState.newPreset = isNew ? preset : null;
 
         // Clear and render the form
         this.formContainer.empty();
@@ -3781,6 +3781,25 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 );
             }
         }
+    }
+
+    /** Update only the clicked category in the selected global preset, leaving other combinations unchanged. */
+    private updateSelectedGlobalPreset(activePresetSetting: ActivePresetSetting, presetName: string): boolean {
+        const { settings } = this.plugin;
+        const globalPreset = settings.globalPresets.find(preset => preset.name === settings.selectedGlobalPreset);
+        if (!settings.selectedGlobalPreset || !globalPreset) return false;
+
+        const globalPresetKeys: Record<ActivePresetSetting, keyof Omit<GlobalPreset, "name">> = {
+            selectedFolderPreset: "folderPreset",
+            selectedFilenamePreset: "filenamePreset",
+            selectedConversionPreset: "conversionPreset",
+            selectedLinkFormatPreset: "linkFormatPreset",
+            selectedResizePreset: "resizePreset",
+        };
+        const key = globalPresetKeys[activePresetSetting];
+        if (globalPreset[key] === presetName) return false;
+        globalPreset[key] = presetName;
+        return true;
     }
 
     private getSelectedPresetName(activePresetSetting: ActivePresetSetting): string | undefined {
