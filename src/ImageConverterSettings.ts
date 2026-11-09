@@ -1703,7 +1703,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
         // Activate Preset on Click
         card.onClickEvent(async () => {
-            if (preset.name !== this.getSelectedPresetName(activePresetSetting)) {
+            const globalPresetChanged = this.updateSelectedGlobalPreset(activePresetSetting, preset.name);
+            if (preset.name !== this.getSelectedPresetName(activePresetSetting) || globalPresetChanged) {
                 switch (activePresetSetting) {
                     case "selectedFolderPreset":
                         this.plugin.settings.selectedFolderPreset = preset.name;
@@ -3780,6 +3781,25 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 );
             }
         }
+    }
+
+    /** Update only the clicked category in the selected global preset, leaving other combinations unchanged. */
+    private updateSelectedGlobalPreset(activePresetSetting: ActivePresetSetting, presetName: string): boolean {
+        const { settings } = this.plugin;
+        const globalPreset = settings.globalPresets.find(preset => preset.name === settings.selectedGlobalPreset);
+        if (!settings.selectedGlobalPreset || !globalPreset) return false;
+
+        const globalPresetKeys: Record<ActivePresetSetting, keyof Omit<GlobalPreset, "name">> = {
+            selectedFolderPreset: "folderPreset",
+            selectedFilenamePreset: "filenamePreset",
+            selectedConversionPreset: "conversionPreset",
+            selectedLinkFormatPreset: "linkFormatPreset",
+            selectedResizePreset: "resizePreset",
+        };
+        const key = globalPresetKeys[activePresetSetting];
+        if (globalPreset[key] === presetName) return false;
+        globalPreset[key] = presetName;
+        return true;
     }
 
     private getSelectedPresetName(activePresetSetting: ActivePresetSetting): string | undefined {

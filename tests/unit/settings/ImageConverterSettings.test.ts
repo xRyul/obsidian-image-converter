@@ -290,7 +290,95 @@ describe('Settings defaults, global preset application, and field constraints (1
     plugin = new ImageConverterPlugin(app, { id: 'image-converter' } as any);
     vi.spyOn(plugin as any, 'loadData').mockResolvedValue(undefined);
     await plugin.loadSettings();
+    // Card clicks now update nested global presets; keep shared defaults isolated between tests.
+    plugin.settings = JSON.parse(JSON.stringify(plugin.settings));
     tab = new ImageConverterSettingTab(app, plugin);
+  });
+
+  it.each([
+    ['folder', 'folderPreset'],
+    ['filename', 'filenamePreset'],
+    ['conversion', 'conversionPreset'],
+    ['linkformat', 'linkFormatPreset'],
+    ['resize', 'resizePreset'],
+  ] as const)('%s card selection persists in the selected global preset after switching away and reloading', async (category, key) => {
+    const original = { ...plugin.settings.globalPresets[0] };
+    const target = { ...original, name: 'Custom combination' };
+    const other = { ...original, name: 'Other combination' };
+    plugin.settings.globalPresets = [target, other];
+    const presets = {
+      folder: plugin.settings.folderPresets,
+      filename: plugin.settings.filenamePresets,
+      conversion: plugin.settings.conversionPresets,
+      linkformat: plugin.settings.linkFormatSettings.linkFormatPresets,
+      resize: plugin.settings.nonDestructiveResizeSettings.resizePresets,
+    }[category];
+    const cardPreset = { ...presets[0], name: 'New card' };
+    (presets as any[]).push(cardPreset);
+    let stored: any;
+    vi.spyOn(plugin, 'saveData').mockImplementation(async data => { stored = JSON.parse(JSON.stringify(data)); });
+    tab.activeTab = category;
+    tab.display();
+    const selectGlobal = async (name: string) => {
+      changeSelect(tab.containerEl.querySelector<HTMLSelectElement>('.image-converter-global-preset-container select')!, name);
+      await vi.waitFor(() => expect(tab.containerEl.querySelector<HTMLSelectElement>('.image-converter-global-preset-container select')!.value).toBe(name));
+      await Promise.resolve();
+    };
+    await selectGlobal(target.name);
+    const card = Array.from(tab.containerEl.querySelectorAll('.image-converter-preset-card'))
+      .find(card => card.querySelector('.image-converter-preset-card-title')?.textContent === cardPreset.name)!;
+
+    click(card);
+    await vi.waitFor(() => expect(stored.globalPresets[0][key]).toBe(cardPreset.name));
+
+    expect(target).toEqual({ ...original, name: target.name, [key]: cardPreset.name });
+    expect(other).toEqual({ ...original, name: other.name });
+    expect(tab.containerEl.contains(card)).toBe(true);
+    await selectGlobal(other.name);
+    await selectGlobal(target.name);
+    expect(card.classList.contains('image-converter-active-preset')).toBe(true);
+    expect(tab.containerEl.querySelector('.image-converter-active-preset .image-converter-preset-card-title')?.textContent).toBe(cardPreset.name);
+    vi.mocked(plugin.loadData).mockImplementation(async () => stored);
+    await plugin.loadSettings();
+    tab.display();
+    expect(plugin.settings.globalPresets[0][key]).toBe(cardPreset.name);
+    expect(tab.containerEl.querySelector('.image-converter-active-preset .image-converter-preset-card-title')?.textContent).toBe(cardPreset.name);
+  });
+
+  it.each(['', 'missing combination'])('does not change any global preset when the selection is %s', async selected => {
+    const before = JSON.parse(JSON.stringify(plugin.settings.globalPresets));
+    plugin.settings.selectedGlobalPreset = selected;
+    plugin.settings.selectedFolderPreset = 'Default (Obsidian setting)';
+    const saveSpy = vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
+    tab.display();
+    const card = Array.from(tab.containerEl.querySelectorAll('.image-converter-preset-card'))
+      .find(card => card.querySelector('.image-converter-preset-card-title')?.textContent === 'Root folder')!;
+
+    click(card);
+    await Promise.resolve();
+
+    expect(plugin.settings.selectedFolderPreset).toBe('Root folder');
+    expect(plugin.settings.globalPresets).toEqual(before);
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('clicking the already selected card synchronizes an out-of-date global preset', async () => {
+    plugin.settings.selectedFolderPreset = 'Root folder';
+    const target = plugin.settings.globalPresets[0];
+    plugin.settings.selectedGlobalPreset = target.name;
+    const saveSpy = vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
+    tab.display();
+    const card = Array.from(tab.containerEl.querySelectorAll('.image-converter-preset-card'))
+      .find(card => card.querySelector('.image-converter-preset-card-title')?.textContent === 'Root folder')!;
+
+    click(card);
+    await Promise.resolve();
+
+    expect(target.folderPreset).toBe('Root folder');
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    click(card);
+    await Promise.resolve();
+    expect(saveSpy).toHaveBeenCalledTimes(1);
   });
 
   it.each(['folder', 'filename', 'conversion', 'linkformat', 'resize'] as const)(
