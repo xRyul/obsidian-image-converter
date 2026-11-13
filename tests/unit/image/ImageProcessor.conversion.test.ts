@@ -36,16 +36,10 @@ import { setMockImageSize, failNextImageLoad } from '../../helpers/test-setup';
 import { 
   fakeCanvas
 } from '../../factories/canvas';
-import { exifBlockFrom } from '../../factories/exif';
+import { asciiValue, exifBlockFrom, shortValue, TAG } from '../../factories/exif';
 import { fakeNotice } from '../../factories/obsidian';
-import { parseExifBlock, TAG_ORIENTATION } from '../../../src/metadata/ExifBlock';
+import { parseExifBlock } from '../../../src/metadata/ExifBlock';
 import { readExif as readJpegExif } from '../../../src/metadata/containers/jpeg';
-
-const readAscii = (bytes: Uint8Array): string =>
-  String.fromCharCode(...bytes).replace(/\0+$/, '');
-
-const readShort = (bytes: Uint8Array): number =>
-  new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint16(0, true);
 
 // Mock dependencies
 // The obsidian mock is already configured in vitest.config.ts via alias
@@ -315,8 +309,8 @@ describe('ImageProcessor - Conversion Tests', () => {
     });
 
     // Test 1.7
-    // Byte-level correctness of the reader/writer is covered in
-    // tests/unit/metadata; here we only assert the pipeline wires them up.
+    // The tests in tests/unit/metadata check the bytes that the readers and
+    // writers make. This test only makes sure that the pipeline uses them.
     it('Given JPEG with EXIF, When re-encoding, Then EXIF is carried over with Orientation normalised', async () => {
       // Arrange
       const exifData = exifBlockFrom({
@@ -344,10 +338,10 @@ describe('ImageProcessor - Conversion Tests', () => {
       expect(raw).not.toBeNull();
 
       const block = parseExifBlock(raw!)!;
-      expect(readAscii(block.ifd0.get(271)!.value)).toBe('TestCamera');
-      expect(readAscii(block.ifd0.get(272)!.value)).toBe('TestModel');
-      // Canvas already baked the rotation into the pixels.
-      expect(readShort(block.ifd0.get(TAG_ORIENTATION)!.value)).toBe(1);
+      expect(asciiValue(block.ifd0.get(TAG.make)!.value)).toBe('TestCamera');
+      expect(asciiValue(block.ifd0.get(TAG.model)!.value)).toBe('TestModel');
+      // Canvas applied the rotation to the pixels.
+      expect(shortValue(block.ifd0.get(TAG.orientation)!.value)).toBe(1);
     });
 
     // Test 1.8

@@ -25,6 +25,7 @@ import {
   isobmffMetaChildTypes,
   isobmffReferences,
   pngChunkCrcsValid,
+  pngChunkPayload,
   pngChunkTypes,
   webpChunkPayload,
   webpChunkTypes,
@@ -58,9 +59,14 @@ describe('JPEG container', () => {
     expect(jpeg.readExif(bytes)).toBeNull();
   });
 
+  it('Given a non-JPEG file, When matched, Then it is rejected', () => {
+    expect(jpeg.isJpeg(buildPng())).toBe(false);
+    expect(jpeg.isJpeg(new Uint8Array(4))).toBe(false);
+  });
+
   it('Given a JPEG without EXIF, When written, Then the block reads back', () => {
     const bytes = new Uint8Array(makeJpegBytes({}));
-    const block = exifBlockFrom({ make: 'Written', model: 'Model' });
+    const block = exifBlockFrom({ make: 'Cam', model: 'Model' });
 
     const out = jpeg.writeExif(bytes, block);
 
@@ -89,7 +95,7 @@ describe('JPEG container', () => {
     expect(out[3]).toBe(0xe0); // APP0
   });
 
-  it('Given a JPEG, When written, Then scan data is preserved byte for byte', () => {
+  it('Given a JPEG, When written, Then the image data is kept byte for byte', () => {
     const bytes = new Uint8Array(makeJpegBytes({}));
 
     const out = jpeg.writeExif(bytes, exifBlockFrom({ make: 'Cam' }));
@@ -108,23 +114,28 @@ describe('JPEG container', () => {
     expect(() => jpeg.writeExif(buildPng(), exifBlockFrom({ make: 'Cam' }))).toThrow();
   });
 
-  it('Given a JPEG with a damaged segment before the scan, When written, Then it throws instead of dropping the scan', () => {
+  it('Given a JPEG with a damaged marker before the scan, When written, Then it throws instead of dropping the image data', () => {
     const bytes = new Uint8Array(makeJpegBytes({}));
-    // Damage the first byte of a marker, so the segment walk stops before SOS.
-    const damaged = damageJpegBeforeScan(bytes);
 
-    expect(() => jpeg.writeExif(damaged, exifBlockFrom({ make: 'Cam' }))).toThrow();
+    expect(() => jpeg.writeExif(damageJpegScanMarker(bytes), exifBlockFrom({ make: 'Cam' }))).toThrow();
   });
 
-  it('Given a JPEG, When dimensions are read, Then SOF values are returned', () => {
-    const bytes = new Uint8Array(makeJpegBytes({ w: 321, h: 123 }));
+  it('Given a JPEG with a damaged marker before the scan, When read, Then the segments before it are still read', () => {
+    const bytes = new Uint8Array(makeJpegBytes({ width: 321, height: 123 }));
+
+    // SOF0 comes before the damaged marker and holds the image size.
+    expect(jpeg.readDimensions(damageJpegScanMarker(bytes))).toEqual({ width: 321, height: 123 });
+  });
+
+  it('Given a JPEG, When dimensions are read, Then the SOF values are returned', () => {
+    const bytes = new Uint8Array(makeJpegBytes({ width: 321, height: 123 }));
 
     expect(jpeg.readDimensions(bytes)).toEqual({ width: 321, height: 123 });
   });
 });
 
 describe('PNG container', () => {
-  it('Given a PNG with an eXIf chunk, When read, Then the raw block is returned', () => {
+  it('Given a PNG with EXIF, When read, Then the raw block is returned', () => {
     const block = exifBlockFrom({ make: 'Cam' });
 
     expect(png.readExif(buildPng({ exif: block }))).toEqual(block);
@@ -134,34 +145,8 @@ describe('PNG container', () => {
     expect(png.readExif(buildPng())).toBeNull();
   });
 
-  it('Given a PNG, When written, Then the block reads back and CRCs stay valid', () => {
-    const block = exifBlockFrom({ make: 'Cam', model: 'Model' });
-
-    const out = png.writeExif(buildPng(), block);
-
-    expect(png.readExif(out)).toEqual(block);
-    expect(pngChunkCrcsValid(out)).toBe(true);
-  });
-
-  it('Given a PNG, When written, Then eXIf sits between IHDR and IDAT', () => {
-    const out = png.writeExif(buildPng(), exifBlockFrom({ make: 'Cam' }));
-
-    const types = pngChunkTypes(out);
-    expect(types.indexOf('eXIf')).toBeGreaterThan(types.indexOf('IHDR'));
-    expect(types.indexOf('eXIf')).toBeLessThan(types.indexOf('IDAT'));
-  });
-
-  it('Given a PNG with EXIF, When written, Then the old chunk is replaced not duplicated', () => {
-    const withExif = buildPng({ exif: exifBlockFrom({ make: 'Old' }) });
-    const replacement = exifBlockFrom({ make: 'New', model: 'Replacement' });
-
-    const out = png.writeExif(withExif, replacement);
-
-    expect(png.readExif(out)).toEqual(replacement);
-    expect(pngChunkTypes(out).filter((type) => type === 'eXIf')).toHaveLength(1);
-  });
-
-  it('Given a PNG payload wrongly prefixed with "Exif\\0\\0", When read, Then the prefix is stripped', () => {
+  it('Given a PNG payload that starts with "Exif\\0\\0", When read, Then the prefix is removed', () => {
+    // Some encoders put the JPEG APP1 prefix in the chunk. The PNG specification does not.
     const block = exifBlockFrom({ make: 'Cam' });
     const prefixed = new Uint8Array(6 + block.length);
     prefixed.set([0x45, 0x78, 0x69, 0x66, 0x00, 0x00], 0);
@@ -170,20 +155,63 @@ describe('PNG container', () => {
     expect(png.readExif(buildPng({ exif: prefixed }))).toEqual(block);
   });
 
-  it('Given a PNG, When dimensions are read, Then IHDR values are returned', () => {
-    expect(png.readDimensions(buildPng({ width: 320, height: 240 }))).toEqual({ width: 320, height: 240 });
+  it('Given a non-PNG file, When matched, Then it is rejected', () => {
+    expect(png.isPng(buildWebpLossy())).toBe(false);
+    expect(png.isPng(new Uint8Array(4))).toBe(false);
+  });
+
+  it('Given a PNG without EXIF, When written, Then the block reads back and the CRCs stay valid', () => {
+    const block = exifBlockFrom({ make: 'Cam', model: 'Model' });
+
+    const out = png.writeExif(buildPng(), block);
+
+    expect(png.readExif(out)).toEqual(block);
+    expect(pngChunkCrcsValid(out)).toBe(true);
+  });
+
+  it('Given a PNG, When written, Then eXIf is between IHDR and IDAT', () => {
+    const out = png.writeExif(buildPng(), exifBlockFrom({ make: 'Cam' }));
+
+    const types = pngChunkTypes(out);
+    expect(types.indexOf('eXIf')).toBeGreaterThan(types.indexOf('IHDR'));
+    expect(types.indexOf('eXIf')).toBeLessThan(types.indexOf('IDAT'));
+  });
+
+  it('Given a PNG with EXIF, When written, Then the old chunk is replaced not duplicated', () => {
+    const bytes = buildPng({ exif: exifBlockFrom({ make: 'Old' }) });
+    const replacement = exifBlockFrom({ make: 'New', model: 'Replacement' });
+
+    const out = png.writeExif(bytes, replacement);
+
+    expect(png.readExif(out)).toEqual(replacement);
+    expect(pngChunkTypes(out).filter((type) => type === 'eXIf')).toHaveLength(1);
+  });
+
+  it('Given a PNG, When written, Then the image data is kept byte for byte', () => {
+    const bytes = buildPng();
+    const before = pngChunkPayload(bytes, 'IDAT');
+
+    const out = png.writeExif(bytes, exifBlockFrom({ make: 'Cam' }));
+
+    expect(before).not.toBeNull();
+    expect(pngChunkPayload(out, 'IDAT')).toEqual(before);
   });
 
   it('Given non-PNG bytes, When written, Then it throws', () => {
     expect(() => png.writeExif(buildWebpLossy(), exifBlockFrom({ make: 'Cam' }))).toThrow();
   });
 
-  it('Given a PNG with a corrupt chunk after IDAT, When written, Then it throws instead of dropping IEND', () => {
+  it('Given a PNG with a damaged chunk after IDAT, When written, Then it throws instead of dropping IEND', () => {
     const bytes = buildPng();
-    // A chunk length past the end of the file stops the walk before IEND.
-    const damaged = damagePngLengthAfterIdat(bytes);
 
-    expect(() => png.writeExif(damaged, exifBlockFrom({ make: 'Cam' }))).toThrow();
+    expect(() => png.writeExif(damagePngChunkAfterIdat(bytes), exifBlockFrom({ make: 'Cam' }))).toThrow();
+  });
+
+  it('Given a PNG with a damaged chunk after IDAT, When read, Then the chunks before it are still read', () => {
+    const bytes = buildPng({ width: 321, height: 123 });
+
+    // IHDR comes before the damaged chunk and holds the image size.
+    expect(png.readDimensions(damagePngChunkAfterIdat(bytes))).toEqual({ width: 321, height: 123 });
   });
 
   it('Given a PNG truncated before IEND, When written, Then it throws', () => {
@@ -191,10 +219,14 @@ describe('PNG container', () => {
 
     expect(() => png.writeExif(bytes.slice(0, bytes.length - 12), exifBlockFrom({ make: 'Cam' }))).toThrow();
   });
+
+  it('Given a PNG, When dimensions are read, Then the IHDR values are returned', () => {
+    expect(png.readDimensions(buildPng({ width: 321, height: 123 }))).toEqual({ width: 321, height: 123 });
+  });
 });
 
 describe('WebP container', () => {
-  it('Given a WebP with an EXIF chunk, When read, Then the raw block is returned', () => {
+  it('Given a WebP with EXIF, When read, Then the raw block is returned', () => {
     const block = exifBlockFrom({ make: 'Cam' });
 
     expect(webp.readExif(buildWebpExtended({ exif: block }))).toEqual(block);
@@ -214,7 +246,12 @@ describe('WebP container', () => {
     expect(webp.readExif(buildWebpExtended({ exif: prefixed }))).toEqual(block);
   });
 
-  it('Given simple lossy WebP, When written, Then it is converted to extended (VP8X) format with the EXIF flag set and the same dimensions', () => {
+  it('Given a non-WebP file, When matched, Then it is rejected', () => {
+    expect(webp.isWebp(buildPng())).toBe(false);
+    expect(webp.isWebp(new Uint8Array(4))).toBe(false);
+  });
+
+  it('Given simple lossy WebP, When written, Then it changes to the extended (VP8X) format with the EXIF flag and the same dimensions', () => {
     const block = exifBlockFrom({ make: 'Cam', model: 'Model' });
 
     const out = webp.writeExif(buildWebpLossy({ width: 200, height: 150 }), block);
@@ -287,18 +324,18 @@ describe('WebP container', () => {
     expect(webpVp8xFlags(out)! & FLAG_ALPHA).toBe(0);
   });
 
-  it('Given already-extended WebP, When written, Then EXIF is replaced not duplicated', () => {
-    const existing = buildWebpExtended({ exif: exifBlockFrom({ make: 'Old' }) });
-    const replacement = exifBlockFrom({ make: 'New', model: 'Model' });
+  it('Given a WebP with EXIF, When written, Then the old chunk is replaced not duplicated', () => {
+    const bytes = buildWebpExtended({ exif: exifBlockFrom({ make: 'Old' }) });
+    const replacement = exifBlockFrom({ make: 'New', model: 'Replacement' });
 
-    const out = webp.writeExif(existing, replacement);
+    const out = webp.writeExif(bytes, replacement);
 
     expect(webp.readExif(out)).toEqual(replacement);
     expect(webpChunkTypes(out).filter((type) => type === 'EXIF')).toHaveLength(1);
     expect(webpChunkTypes(out).filter((type) => type === 'VP8X')).toHaveLength(1);
   });
 
-  it('Given extended WebP with alpha, When written, Then the existing alpha flag is kept', () => {
+  it('Given extended WebP with alpha, When written, Then the alpha flag is kept', () => {
     const out = webp.writeExif(buildWebpExtended({ alpha: true }), exifBlockFrom({ make: 'Cam' }));
 
     expect(webpVp8xFlags(out)! & FLAG_ALPHA).toBe(FLAG_ALPHA);
@@ -319,19 +356,17 @@ describe('WebP container', () => {
     expect(() => webp.writeExif(buildPng(), exifBlockFrom({ make: 'Cam' }))).toThrow();
   });
 
-  it('Given a WebP with a corrupt chunk size, When written, Then it throws instead of dropping the image data', () => {
+  it('Given a WebP with a damaged image chunk, When written, Then it throws instead of dropping the image data', () => {
     const bytes = buildWebpExtended();
-    // The chunk size goes past the end of the file, so the reader stops after VP8X.
-    const damaged = damageWebpImageChunkSize(bytes);
 
-    expect(() => webp.writeExif(damaged, exifBlockFrom({ make: 'Cam' }))).toThrow(/fully parsed/);
+    expect(() => webp.writeExif(damageWebpImageChunk(bytes), exifBlockFrom({ make: 'Cam' }))).toThrow(/fully parsed/);
   });
 
-  it('Given a WebP with a corrupt chunk size, When read, Then the chunks before it are still read', () => {
-    const bytes = buildWebpExtended({ width: 200, height: 150 });
+  it('Given a WebP with a damaged image chunk, When read, Then the chunks before it are still read', () => {
+    const bytes = buildWebpExtended({ width: 321, height: 123 });
 
     // VP8X comes before the damaged chunk and holds the canvas size.
-    expect(webp.readDimensions(damageWebpImageChunkSize(bytes))).toEqual({ width: 200, height: 150 });
+    expect(webp.readDimensions(damageWebpImageChunk(bytes))).toEqual({ width: 321, height: 123 });
   });
 
   it('Given a WebP truncated before the end of its RIFF data, When written, Then it throws', () => {
@@ -343,7 +378,7 @@ describe('WebP container', () => {
     expect(() => webp.writeExif(truncated, exifBlockFrom({ make: 'Cam' }))).toThrow(/fully parsed/);
   });
 
-  it('Given bytes after the RIFF data, When written, Then they are dropped', () => {
+  it('Given bytes after the RIFF data, When written, Then they are removed', () => {
     const bytes = buildWebpLossy();
     // A full empty chunk. A reader that goes past the RIFF size reads it as a chunk.
     const trailing = new Uint8Array(bytes.length + 8);
@@ -376,16 +411,20 @@ describe('WebP container', () => {
       expect(webpRiffSizeValid(out)).toBe(true);
     });
   }
+
+  it('Given a WebP, When dimensions are read, Then the VP8 values are returned', () => {
+    expect(webp.readDimensions(buildWebpLossy({ width: 321, height: 123 }))).toEqual({ width: 321, height: 123 });
+  });
 });
 
 describe('ISOBMFF container (HEIC / AVIF)', () => {
-  it('Given a HEIC with an EXIF item, When read, Then the raw block is returned', () => {
+  it('Given a HEIC with EXIF, When read, Then the raw block is returned', () => {
     const block = exifBlockFrom({ make: 'Phone', model: 'Camera', dateTimeOriginal: '2024:05:06 07:08:09' });
 
     expect(isobmff.readExif(buildIsobmff({ brand: 'heic', exif: block }))).toEqual(block);
   });
 
-  it('Given a non-zero TIFF header offset, When read, Then padding is skipped', () => {
+  it('Given a non-zero TIFF header offset, When read, Then the padding is skipped', () => {
     const block = exifBlockFrom({ make: 'Phone' });
 
     expect(isobmff.readExif(buildIsobmff({ exif: block, tiffHeaderOffset: 6 }))).toEqual(block);
@@ -405,7 +444,7 @@ describe('ISOBMFF container (HEIC / AVIF)', () => {
     expect(isobmff.readExif(file)).toBeNull();
   });
 
-  it('Given a truncated file, When read, Then null is returned', () => {
+  it('Given a HEIC truncated before the end of its meta box, When read, Then null is returned', () => {
     const file = buildIsobmff({ exif: exifBlockFrom({ make: 'Phone' }) });
 
     expect(isobmff.readExif(file.slice(0, file.length - 20))).toBeNull();
@@ -421,7 +460,8 @@ describe('ISOBMFF container (HEIC / AVIF)', () => {
   });
 
   it('Given a HEIF brand only in the compatible list, When matched, Then it is accepted', () => {
-    // Real HEIC files often declare mif1 as major brand with heic alongside.
+    // The major brand can be a brand that is not HEIF. The reader must also
+    // look at the compatible brands.
     const file = buildIsobmff({ brand: 'mp42', compatibleBrands: ['mp42', 'heic'] });
 
     expect(isobmff.isIsobmff(file)).toBe(true);
@@ -433,7 +473,7 @@ describe('ISOBMFF container (HEIC / AVIF)', () => {
   // a larger meta box moves the data, and every offset in iloc must change.
   for (const layout of layouts) {
     describe(`${layout} layout`, () => {
-      it('Given no EXIF item, When written, Then the block reads back', () => {
+      it('Given an AVIF without EXIF, When written, Then the block reads back', () => {
         const file = buildIsobmff({ brand: 'avif', layout });
         const block = exifBlockFrom({ make: 'Cam', model: 'Model' });
 
@@ -443,7 +483,7 @@ describe('ISOBMFF container (HEIC / AVIF)', () => {
         expect(isobmff.isIsobmff(out)).toBe(true);
       });
 
-      it('Given an image item, When written, Then its data is unchanged', () => {
+      it('Given an AVIF, When written, Then the image data is kept byte for byte', () => {
         const file = buildIsobmff({ brand: 'avif', layout });
         const before = isobmffItemData(file, 1);
 
@@ -453,7 +493,7 @@ describe('ISOBMFF container (HEIC / AVIF)', () => {
         expect(isobmffItemData(out, 1)).toEqual(before);
       });
 
-      it('Given an EXIF item already present, When written, Then it is replaced not duplicated', () => {
+      it('Given a HEIC with EXIF, When written, Then the old item is replaced not duplicated', () => {
         const file = buildIsobmff({ brand: 'heic', layout, exif: exifBlockFrom({ make: 'Old' }) });
         const replacement = exifBlockFrom({ make: 'New', model: 'Replacement' });
 
@@ -465,7 +505,7 @@ describe('ISOBMFF container (HEIC / AVIF)', () => {
     });
   }
 
-  it('Given a file with EXIF written, When references are read, Then a cdsc reference links EXIF to the primary item', () => {
+  it('Given an AVIF, When written, Then a cdsc reference links the EXIF item to the primary item', () => {
     const file = buildIsobmff({ brand: 'avif', layout: 'meta-first' });
 
     const out = isobmff.writeExif(file, exifBlockFrom({ make: 'Cam' }));
@@ -479,7 +519,7 @@ describe('ISOBMFF container (HEIC / AVIF)', () => {
     });
   });
 
-  it('Given an EXIF item being replaced, When written, Then its old reference is removed', () => {
+  it('Given a HEIC with EXIF, When written, Then the old reference is removed', () => {
     const file = buildIsobmff({ brand: 'heic', exif: exifBlockFrom({ make: 'Old' }) });
 
     const out = isobmff.writeExif(file, exifBlockFrom({ make: 'New' }));
@@ -487,41 +527,13 @@ describe('ISOBMFF container (HEIC / AVIF)', () => {
     expect(isobmffReferences(out).filter((reference) => reference.type === 'cdsc')).toHaveLength(1);
   });
 
-  it('Given a file with EXIF written, When boxes are read, Then the EXIF data is in a new mdat at the end', () => {
+  it('Given an AVIF, When written, Then the EXIF data is in a new mdat at the end', () => {
     const file = buildIsobmff({ brand: 'avif', layout: 'meta-first' });
 
     const out = isobmff.writeExif(file, exifBlockFrom({ make: 'Cam' }));
 
     expect(isobmffBoxTypes(out)).toEqual(['ftyp', 'meta', 'mdat', 'mdat']);
     expect(isobmffMetaChildTypes(out)).toEqual(['hdlr', 'pitm', 'iinf', 'iref', 'iloc', 'iprp']);
-  });
-
-  it('Given a file with no meta box, When written, Then it throws', () => {
-    const file = buildIsobmff({ brand: 'avif', omitMeta: true });
-
-    expect(() => isobmff.writeExif(file, exifBlockFrom({ make: 'Cam' }))).toThrow();
-  });
-
-  it('Given non-ISOBMFF bytes, When written, Then it throws', () => {
-    expect(() => isobmff.writeExif(buildPng(), exifBlockFrom({ make: 'Cam' }))).toThrow();
-  });
-
-  it('Given a meta child box with an invalid size, When written, Then it throws instead of dropping the boxes after it', () => {
-    const file = buildIsobmff({ brand: 'avif', unwalkableMetaChild: true });
-
-    // Without this check, the writer returns a file with no iprp box, and so no
-    // decoder configuration. That file passes every other check in the writer.
-    expect(() => isobmff.writeExif(file, exifBlockFrom({ make: 'Cam' }))).toThrow(/fully parsed/);
-  });
-
-  it('Given a meta child box with an invalid size, When read, Then the boxes before it are still read', () => {
-    const block = exifBlockFrom({ make: 'Cam' });
-    const file = buildIsobmff({ brand: 'heic', exif: block, unwalkableMetaChild: true });
-
-    expect(isobmff.readExif(file)).toEqual(block);
-    // iprp comes after the invalid box, so the reader does not find it. This is
-    // the box that a rewrite would drop.
-    expect(isobmff.readDimensions(file)).toBeNull();
   });
 
   it('Given an oversized block, When written, Then it throws instead of truncating', () => {
@@ -531,7 +543,41 @@ describe('ISOBMFF container (HEIC / AVIF)', () => {
     expect(() => isobmff.writeExif(file, huge)).toThrow();
   });
 
-  it('Given a primary item, When dimensions are read, Then its ispe values are returned', () => {
+  it('Given non-ISOBMFF bytes, When written, Then it throws', () => {
+    expect(() => isobmff.writeExif(buildPng(), exifBlockFrom({ make: 'Cam' }))).toThrow();
+  });
+
+  it('Given a HEIC with no meta box, When written, Then it throws', () => {
+    const file = buildIsobmff({ brand: 'heic', omitMeta: true });
+
+    expect(() => isobmff.writeExif(file, exifBlockFrom({ make: 'Cam' }))).toThrow();
+  });
+
+  it('Given a HEIC with a damaged meta child box, When written, Then it throws instead of dropping the boxes after it', () => {
+    const file = buildIsobmff({ brand: 'heic', unwalkableMetaChild: true });
+
+    // Without this check, the writer returns a file with no iprp box, and so no
+    // decoder configuration. That file passes every other check in the writer.
+    expect(() => isobmff.writeExif(file, exifBlockFrom({ make: 'Cam' }))).toThrow(/fully parsed/);
+  });
+
+  it('Given a HEIC with a damaged meta child box, When read, Then the boxes before it are still read', () => {
+    const block = exifBlockFrom({ make: 'Cam' });
+    const file = buildIsobmff({ brand: 'heic', exif: block, unwalkableMetaChild: true });
+
+    expect(isobmff.readExif(file)).toEqual(block);
+    // iprp comes after the damaged box, so the reader does not find it. This is
+    // the box that a rewrite would drop.
+    expect(isobmff.readDimensions(file)).toBeNull();
+  });
+
+  it('Given a HEIC truncated before the end of its meta box, When written, Then it throws', () => {
+    const file = buildIsobmff({ exif: exifBlockFrom({ make: 'Phone' }) });
+
+    expect(() => isobmff.writeExif(file.slice(0, file.length - 20), exifBlockFrom({ make: 'Cam' }))).toThrow();
+  });
+
+  it('Given an AVIF, When dimensions are read, Then the ispe values of the primary item are returned', () => {
     const file = buildIsobmff({ brand: 'avif', width: 321, height: 123 });
 
     expect(isobmff.readDimensions(file)).toEqual({ width: 321, height: 123 });
@@ -551,28 +597,28 @@ describe('ISOBMFF container (HEIC / AVIF)', () => {
   });
 
   it('Given no property association, When dimensions are read, Then the first ispe is used', () => {
-    const file = buildIsobmff({ brand: 'avif', width: 640, height: 480, omitPrimaryItem: true });
+    const file = buildIsobmff({ brand: 'avif', width: 321, height: 123, omitPrimaryItem: true });
 
-    expect(isobmff.readDimensions(file)).toEqual({ width: 640, height: 480 });
+    expect(isobmff.readDimensions(file)).toEqual({ width: 321, height: 123 });
   });
 
-  it('Given no properties at all, When dimensions are read, Then null is returned', () => {
+  it('Given no properties, When dimensions are read, Then null is returned', () => {
     const file = buildIsobmff({ brand: 'avif', omitProperties: true });
 
     expect(isobmff.readDimensions(file)).toBeNull();
   });
 
-  it('Given a file with EXIF written, When dimensions are read, Then they are unchanged', () => {
-    const file = buildIsobmff({ brand: 'avif', width: 200, height: 150, layout: 'meta-first' });
+  it('Given an AVIF, When written, Then the dimensions are kept', () => {
+    const file = buildIsobmff({ brand: 'avif', width: 321, height: 123, layout: 'meta-first' });
 
     const out = isobmff.writeExif(file, exifBlockFrom({ make: 'Cam' }));
 
-    expect(isobmff.readDimensions(out)).toEqual({ width: 200, height: 150 });
+    expect(isobmff.readDimensions(out)).toEqual({ width: 321, height: 123 });
   });
 });
 
 describe('TIFF container', () => {
-  it('Given a TIFF, When read, Then descriptive tags are kept', () => {
+  it('Given a TIFF, When read, Then the descriptive tags are kept', () => {
     const file = exifBlockFrom({
       make: 'Scanner',
       model: 'Model',
@@ -590,7 +636,7 @@ describe('TIFF container', () => {
     expect(asciiValue(parsed.exif.get(TAG.dateTimeOriginal)!.value)).toBe('2024:05:06 07:08:09');
   });
 
-  it('Given a TIFF, When read, Then structural tags are dropped', () => {
+  it('Given a TIFF, When read, Then the structural tags are removed', () => {
     // These tags point at byte ranges in the source file. Those ranges do not
     // exist in the converted image.
     const file = exifBlockFrom({
@@ -625,7 +671,7 @@ describe('TIFF container', () => {
     expect(parsed.gps.get(TAG.gpsLatitude)!.count).toBe(3);
   });
 
-  it('Given a big-endian TIFF, When read, Then endianness is preserved', () => {
+  it('Given a big-endian TIFF, When read, Then the byte order is kept', () => {
     const file = exifBlockFrom({ make: 'Scanner', bigEndian: true });
 
     expect(parseExifBlock(tiff.readExif(file)!)!.bigEndian).toBe(true);
@@ -644,7 +690,7 @@ describe('TIFF container', () => {
     expect(tiff.isTiff(new Uint8Array([0x49, 0x49, 0x00, 0x00]))).toBe(false);
   });
 
-  it('Given both byte orders, When matched, Then each is recognised', () => {
+  it('Given a TIFF in each byte order, When matched, Then it is accepted', () => {
     expect(tiff.isTiff(exifBlockFrom({ make: 'Cam' }))).toBe(true);
     expect(tiff.isTiff(exifBlockFrom({ make: 'Cam', bigEndian: true }))).toBe(true);
   });
@@ -677,10 +723,10 @@ function countApp1ExifSegments(bytes: Uint8Array): number {
 }
 
 /**
- * Sets the 0xFF marker byte of the segment before the scan to zero, so the
- * segment reader stops before it gets to the scan.
+ * Sets the 0xFF byte of the SOS marker to zero, so the segment reader stops
+ * before it gets to the scan.
  */
-function damageJpegBeforeScan(bytes: Uint8Array): Uint8Array {
+function damageJpegScanMarker(bytes: Uint8Array): Uint8Array {
   const out = bytes.slice();
   let offset = 2;
 
@@ -702,7 +748,7 @@ function damageJpegBeforeScan(bytes: Uint8Array): Uint8Array {
 }
 
 /** Gives the chunk after IDAT a length that goes past the end of the file. */
-function damagePngLengthAfterIdat(bytes: Uint8Array): Uint8Array {
+function damagePngChunkAfterIdat(bytes: Uint8Array): Uint8Array {
   const out = bytes.slice();
   const view = new DataView(out.buffer);
   let offset = 8; // past the signature
@@ -724,7 +770,7 @@ function damagePngLengthAfterIdat(bytes: Uint8Array): Uint8Array {
 }
 
 /** Gives the `VP8 ` chunk a size that goes past the end of the file. */
-function damageWebpImageChunkSize(bytes: Uint8Array): Uint8Array {
+function damageWebpImageChunk(bytes: Uint8Array): Uint8Array {
   const out = bytes.slice();
   const view = new DataView(out.buffer);
   let offset = 12; // past the RIFF header

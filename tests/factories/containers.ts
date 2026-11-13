@@ -93,7 +93,7 @@ export function buildPng(options: { width?: number; height?: number; exif?: Uint
   return concat(parts);
 }
 
-/** Verifies every chunk CRC in a PNG. */
+/** True when every chunk CRC in a PNG is correct. */
 export function pngChunkCrcsValid(bytes: Uint8Array): boolean {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let offset = PNG_SIGNATURE.length;
@@ -112,19 +112,30 @@ export function pngChunkCrcsValid(bytes: Uint8Array): boolean {
   return true;
 }
 
-/** Lists PNG chunk types in file order. */
-export function pngChunkTypes(bytes: Uint8Array): string[] {
+/** PNG chunks in file order, with the offset and size of each payload. */
+function pngChunks(bytes: Uint8Array): { type: string; payloadStart: number; size: number }[] {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const types: string[] = [];
+  const chunks: { type: string; payloadStart: number; size: number }[] = [];
   let offset = PNG_SIGNATURE.length;
 
   while (offset + 12 <= bytes.length) {
-    const length = view.getUint32(offset, false);
-    types.push(readFourCc(bytes, offset + 4));
-    offset = offset + 12 + length;
+    const size = view.getUint32(offset, false);
+    chunks.push({ type: readFourCc(bytes, offset + 4), payloadStart: offset + 8, size });
+    offset = offset + 12 + size;
   }
 
-  return types;
+  return chunks;
+}
+
+/** Returns a copy of the payload of the first chunk of this type, or null if there is none. */
+export function pngChunkPayload(bytes: Uint8Array, type: string): Uint8Array | null {
+  const chunk = pngChunks(bytes).find((candidate) => candidate.type === type);
+  return chunk ? bytes.slice(chunk.payloadStart, chunk.payloadStart + chunk.size) : null;
+}
+
+/** Lists PNG chunk types in file order. */
+export function pngChunkTypes(bytes: Uint8Array): string[] {
+  return pngChunks(bytes).map((chunk) => chunk.type);
 }
 
 // --- WebP -------------------------------------------------------------------

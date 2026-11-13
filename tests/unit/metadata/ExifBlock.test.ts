@@ -15,7 +15,7 @@ import { asciiValue, exifBlockFrom, longValue, shortValue, TAG } from '../../fac
 
 describe('ExifBlock', () => {
   describe('parseExifBlock', () => {
-    it('Given a little-endian block, When parsed, Then IFD0 tags are readable', () => {
+    it('Given a little-endian block, When parsed, Then the IFD0 tags are read', () => {
       const block = exifBlockFrom({ make: 'TestCamera', model: 'TestModel', orientation: 6 });
 
       const parsed = parseExifBlock(block);
@@ -27,7 +27,7 @@ describe('ExifBlock', () => {
       expect(shortValue(parsed!.ifd0.get(TAG.orientation)!.value)).toBe(6);
     });
 
-    it('Given a big-endian block, When parsed, Then endianness is detected and values decode', () => {
+    it('Given a big-endian block, When parsed, Then the byte order is found and the values decode', () => {
       const block = exifBlockFrom({ make: 'BigEndianCam', orientation: 3, bigEndian: true });
 
       const parsed = parseExifBlock(block);
@@ -102,7 +102,7 @@ describe('ExifBlock', () => {
       expect(reparsed.gps.get(TAG.gpsLatitude)!.value).toEqual(parsed.gps.get(TAG.gpsLatitude)!.value);
     });
 
-    it('Given a big-endian block, When re-serialised, Then endianness is preserved', () => {
+    it('Given a big-endian block, When re-serialised, Then the byte order is kept', () => {
       const parsed = parseExifBlock(exifBlockFrom({ make: 'BE', orientation: 3, bigEndian: true }))!;
 
       const out = serialiseExifBlock(parsed);
@@ -110,7 +110,7 @@ describe('ExifBlock', () => {
       expect(parseExifBlock(out)!.bigEndian).toBe(true);
     });
 
-    it('Given any block, When serialised, Then IFD0 declares no following IFD', () => {
+    it('Given any block, When serialised, Then IFD0 points to no next IFD', () => {
       // IFD1 holds the embedded thumbnail, which does not match the re-encoded image.
       const parsed = parseExifBlock(exifBlockFrom({ make: 'Cam', model: 'Model' }))!;
 
@@ -123,7 +123,7 @@ describe('ExifBlock', () => {
       expect(nextIfdOffset).toBe(0);
     });
 
-    it('Given entries out of order, When serialised, Then tags are written ascending', () => {
+    it('Given entries out of order, When serialised, Then the tags are written in ascending order', () => {
       const parsed = parseExifBlock(exifBlockFrom({
         software: 'S',
         make: 'M',
@@ -163,7 +163,7 @@ describe('ExifBlock', () => {
       expect(result.ifd0.has(TAG.orientation)).toBe(false);
     });
 
-    it('Given output dimensions, When normalised, Then pixel dimension tags match them', () => {
+    it('Given output dimensions, When normalised, Then the pixel dimension tags match them', () => {
       const parsed = parseExifBlock(exifBlockFrom({ make: 'Cam', isoSpeedRatings: 100 }))!;
 
       const result = normalise(parsed, { width: 640, height: 480 });
@@ -172,7 +172,7 @@ describe('ExifBlock', () => {
       expect(longValue(result.exif.get(TAG.pixelYDimension)!.value)).toBe(480);
     });
 
-    it('Given unknown dimensions, When normalised, Then stale pixel dimensions are dropped', () => {
+    it('Given unknown dimensions, When normalised, Then the old pixel dimension tags are removed', () => {
       const parsed = parseExifBlock(exifBlockFrom({ make: 'Cam', isoSpeedRatings: 100 }))!;
       parsed.exif.set(TAG.pixelXDimension, {
         tag: TAG.pixelXDimension,
@@ -234,7 +234,7 @@ describe('ExifBlock', () => {
       expect(asciiValue(parseExifBlock(out!)!.ifd0.get(TAG.make)!.value)).toBe('Cam');
     });
 
-    it('Given a block that cannot be shrunk enough, When serialised, Then null is returned', () => {
+    it('Given a block that cannot be made small enough, When serialised within a size limit, Then null is returned', () => {
       const parsed = parseExifBlock(exifBlockFrom({ make: 'A'.repeat(2000) }))!;
 
       expect(serialiseWithin(parsed, 64)).toBeNull();
