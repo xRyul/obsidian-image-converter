@@ -1,11 +1,11 @@
 /**
- * Unit tests for MetadataTransfer. MetadataTransfer decides if metadata is
+ * Unit tests for transferMetadata. transferMetadata decides if metadata is
  * written, and which output container it is written into.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
-import { MetadataTransfer } from '../../../src/metadata/MetadataTransfer';
+import { transferMetadata } from '../../../src/metadata/transferMetadata';
 import { parseExifBlock } from '../../../src/metadata/ExifBlock';
 import * as isobmff from '../../../src/metadata/containers/isobmff';
 import * as jpeg from '../../../src/metadata/containers/jpeg';
@@ -36,9 +36,7 @@ const richExif = () => exifBlockFrom({
   gpsLatitude: [[51, 1], [30, 1], [0, 1]],
 });
 
-describe('MetadataTransfer', () => {
-  const transfer = new MetadataTransfer();
-
+describe('transferMetadata', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -49,7 +47,7 @@ describe('MetadataTransfer', () => {
     const source = blobOf(bytes);
     const output = bufferOf(bytes);
 
-    const result = await transfer.transfer(source, output);
+    const result = await transferMetadata(source, output);
 
     const block = parseExifBlock(jpeg.readExif(new Uint8Array(result))!)!;
     expect(shortValue(block.ifd0.get(TAG.orientation)!.value)).toBe(6);
@@ -59,7 +57,7 @@ describe('MetadataTransfer', () => {
     const source = blobOf(makeJpegBytes({ exif: richExif() }));
     const output = bufferOf(buildWebpLossy());
 
-    const result = await transfer.transfer(source, output);
+    const result = await transferMetadata(source, output);
 
     const block = parseExifBlock(webp.readExif(new Uint8Array(result))!)!;
     expect(shortValue(block.ifd0.get(TAG.orientation)!.value)).toBe(1);
@@ -69,7 +67,7 @@ describe('MetadataTransfer', () => {
     const source = blobOf(makeJpegBytes({ exif: richExif() }));
     const output = bufferOf(buildWebpLossy());
 
-    const result = await transfer.transfer(source, output, false);
+    const result = await transferMetadata(source, output, false);
 
     const block = parseExifBlock(webp.readExif(new Uint8Array(result))!)!;
     expect(shortValue(block.ifd0.get(TAG.orientation)!.value)).toBe(6);
@@ -79,7 +77,7 @@ describe('MetadataTransfer', () => {
     const source = blobOf(makeJpegBytes({ exif: richExif() }));
     const output = bufferOf(buildWebpLossy());
 
-    const result = await transfer.transfer(source, output);
+    const result = await transferMetadata(source, output);
 
     const block = parseExifBlock(webp.readExif(new Uint8Array(result))!)!;
     expect(asciiValue(block.gps.get(TAG.gpsLatitudeRef)!.value)).toBe('N');
@@ -91,7 +89,7 @@ describe('MetadataTransfer', () => {
     const source = blobOf(makeJpegBytes({ exif: richExif() }));
     const output = bufferOf(new Uint8Array(makeJpegBytes({ width: 800, height: 600 })));
 
-    const result = await transfer.transfer(source, output);
+    const result = await transferMetadata(source, output);
 
     const block = parseExifBlock(jpeg.readExif(new Uint8Array(result))!)!;
     expect(asciiValue(block.ifd0.get(TAG.make)!.value)).toBe('TestCamera');
@@ -102,7 +100,7 @@ describe('MetadataTransfer', () => {
     const source = blobOf(makeJpegBytes({ exif: richExif() }));
     const output = bufferOf(buildPng({ width: 640, height: 480 }));
 
-    const result = await transfer.transfer(source, output);
+    const result = await transferMetadata(source, output);
 
     const block = parseExifBlock(png.readExif(new Uint8Array(result))!)!;
     expect(asciiValue(block.ifd0.get(TAG.make)!.value)).toBe('TestCamera');
@@ -113,7 +111,7 @@ describe('MetadataTransfer', () => {
     const source = blobOf(makeJpegBytes({ exif: richExif() }));
     const output = bufferOf(buildWebpLossy({ width: 200, height: 150 }));
 
-    const result = await transfer.transfer(source, output);
+    const result = await transferMetadata(source, output);
 
     const block = parseExifBlock(webp.readExif(new Uint8Array(result))!)!;
     expect(asciiValue(block.ifd0.get(TAG.make)!.value)).toBe('TestCamera');
@@ -126,7 +124,7 @@ describe('MetadataTransfer', () => {
     const source = blobOf(makeJpegBytes({ exif: richExif() }));
     const output = bufferOf(buildIsobmff({ brand: 'avif', layout: 'meta-first', width: 200, height: 150 }));
 
-    const result = await transfer.transfer(source, output);
+    const result = await transferMetadata(source, output);
 
     const block = parseExifBlock(isobmff.readExif(new Uint8Array(result))!)!;
     expect(asciiValue(block.ifd0.get(TAG.make)!.value)).toBe('TestCamera');
@@ -139,7 +137,7 @@ describe('MetadataTransfer', () => {
     const source = blobOf(buildPng({ exif: richExif() }));
     const output = bufferOf(buildWebpLossy());
 
-    const result = await transfer.transfer(source, output);
+    const result = await transferMetadata(source, output);
 
     const block = parseExifBlock(webp.readExif(new Uint8Array(result))!)!;
     expect(asciiValue(block.ifd0.get(TAG.make)!.value)).toBe('TestCamera');
@@ -150,7 +148,7 @@ describe('MetadataTransfer', () => {
     const source = blobOf(buildWebpExtended({ exif: richExif() }));
     const output = bufferOf(buildPng());
 
-    const result = await transfer.transfer(source, output);
+    const result = await transferMetadata(source, output);
 
     const block = parseExifBlock(png.readExif(new Uint8Array(result))!)!;
     expect(asciiValue(block.ifd0.get(TAG.make)!.value)).toBe('TestCamera');
@@ -162,7 +160,7 @@ describe('MetadataTransfer', () => {
     const source = blobOf(buildIsobmff({ brand: 'heic', exif: richExif() }));
     const output = bufferOf(buildWebpLossy());
 
-    const result = await transfer.transfer(source, output);
+    const result = await transferMetadata(source, output);
 
     const block = parseExifBlock(webp.readExif(new Uint8Array(result))!)!;
     expect(asciiValue(block.ifd0.get(TAG.make)!.value)).toBe('TestCamera');
@@ -177,7 +175,7 @@ describe('MetadataTransfer', () => {
     }));
     const output = bufferOf(buildPng());
 
-    const result = await transfer.transfer(source, output);
+    const result = await transferMetadata(source, output);
 
     const block = parseExifBlock(png.readExif(new Uint8Array(result))!)!;
     expect(asciiValue(block.ifd0.get(TAG.make)!.value)).toBe('Scanner');
@@ -191,7 +189,7 @@ describe('MetadataTransfer', () => {
     const source = blobOf(makeJpegBytes({}));
     const output = bufferOf(buildWebpLossy());
 
-    const result = await transfer.transfer(source, output);
+    const result = await transferMetadata(source, output);
 
     expect(result).toBe(output);
   });
@@ -200,7 +198,7 @@ describe('MetadataTransfer', () => {
     const source = blobOf(new Uint8Array([0x42, 0x4d, 0x36, 0x00, 0x00, 0x00, 0x00, 0x00])); // BMP
     const output = bufferOf(buildWebpLossy());
 
-    const result = await transfer.transfer(source, output);
+    const result = await transferMetadata(source, output);
 
     expect(result).toBe(output);
   });
@@ -209,7 +207,7 @@ describe('MetadataTransfer', () => {
     const source = blobOf(makeJpegBytes({ exif: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]) }));
     const output = bufferOf(buildWebpLossy());
 
-    const result = await transfer.transfer(source, output);
+    const result = await transferMetadata(source, output);
 
     expect(result).toBe(output);
   });
@@ -218,7 +216,7 @@ describe('MetadataTransfer', () => {
     const source = blobOf(makeJpegBytes({ exif: richExif() }));
     const output = bufferOf(new Uint8Array([0x42, 0x4d, 0x36, 0x00, 0x00, 0x00, 0x00, 0x00])); // BMP
 
-    const result = await transfer.transfer(source, output);
+    const result = await transferMetadata(source, output);
 
     expect(result).toBe(output);
   });
@@ -232,7 +230,7 @@ describe('MetadataTransfer', () => {
     const source = blobOf(makeJpegBytes({ exif: richExif() }));
     const output = bufferOf(headerOnly);
 
-    const result = await transfer.transfer(source, output);
+    const result = await transferMetadata(source, output);
 
     expect(new Uint8Array(result)).toEqual(headerOnly);
     expect(warn).toHaveBeenCalled();

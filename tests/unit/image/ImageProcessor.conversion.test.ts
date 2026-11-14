@@ -39,6 +39,7 @@ import {
 import { asciiValue, exifBlockFrom, shortValue, TAG } from '../../factories/exif';
 import { fakeNotice } from '../../factories/obsidian';
 import { parseExifBlock } from '../../../src/metadata/ExifBlock';
+import * as metadataTransfer from '../../../src/metadata/transferMetadata';
 import { readExif as readJpegExif } from '../../../src/metadata/containers/jpeg';
 
 // Mock dependencies
@@ -356,7 +357,7 @@ describe('ImageProcessor - Conversion Tests', () => {
       const output = new ArrayBuffer(4);
       vi.spyOn(processor as any, 'processImageHelper').mockResolvedValue(output);
       const transferSpy = vi
-        .spyOn((processor as any).metadataTransfer, 'transfer')
+        .spyOn(metadataTransfer, 'transferMetadata')
         .mockResolvedValue(output);
       const inputBlob = new Blob([new Uint8Array([...header, 0, 0, 0, 0, 0, 0, 0, 0])]);
 

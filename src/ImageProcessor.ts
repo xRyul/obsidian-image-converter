@@ -5,7 +5,7 @@ import { SupportedImageFormats } from "./SupportedImageFormats";
 import { ChildProcess, spawn } from 'child_process';
 import { ConversionPreset, ImageConverterSettings, DEFAULT_SETTINGS } from "./ImageConverterSettings";
 import { normalizeExecutablePath } from "./utils/ffmpegPath";
-import { MetadataTransfer } from "./metadata/MetadataTransfer";
+import { transferMetadata } from "./metadata/transferMetadata";
 import { parseExifBlock, readOrientation } from "./metadata/ExifBlock";
 import { transformCanvas, transformForOrientation } from "./utils/canvasTransform";
 
@@ -81,7 +81,6 @@ export class ImageProcessor {
     private detectedEncoder: AvifEncoder | null = null;
     private static encoderDetectionCache: Map<string, AvifEncoder | null> = new Map(); // Static cache shared across instances
     private encoderFallbackAttempted: boolean = false;
-    private metadataTransfer: MetadataTransfer = new MetadataTransfer();
 
     constructor(supportedImageFormats: SupportedImageFormats) {
         this.supportedImageFormats = supportedImageFormats;
@@ -502,7 +501,7 @@ export class ImageProcessor {
         );
 
         const orientationApplied = await this.orientationApplied(file, format, resizeMode);
-        return this.metadataTransfer.transfer(file, processedImage, orientationApplied);
+        return transferMetadata(file, processedImage, orientationApplied);
     }
 
     /**
