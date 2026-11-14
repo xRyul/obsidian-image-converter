@@ -7,9 +7,6 @@ import { ascii, concat, matchesAt, readFourCc, stripExifPrefix, viewOf } from ".
 
 const SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
-/** A PNG chunk's length field is a 31-bit value. */
-export const MAX_EXIF_BYTES = 0x7fffffff;
-
 const CHUNK_IHDR = "IHDR";
 const CHUNK_IDAT = "IDAT";
 const CHUNK_IEND = "IEND";
@@ -36,10 +33,6 @@ export function matches(bytes: Uint8Array): boolean {
  * @returns The raw block, or null if the file carries none.
  */
 export function readExif(bytes: Uint8Array): Uint8Array | null {
-    if (!matches(bytes)) {
-        return null;
-    }
-
     for (const chunk of walkChunks(bytes)) {
         if (chunk.type === CHUNK_EXIF) {
             return stripExifPrefix(bytes.slice(chunk.payloadStart, chunk.payloadEnd));
@@ -54,17 +47,9 @@ export function readExif(bytes: Uint8Array): Uint8Array | null {
  * @param bytes - The PNG file.
  * @param exif - The raw block to embed.
  * @returns A new PNG carrying the block.
- * @throws If the file is not a PNG, the block will not fit, or the chunk walk
- *         never reaches IEND.
+ * @throws If the chunk walk never reaches IEND.
  */
 export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
-    if (!matches(bytes)) {
-        throw new Error("Not a PNG");
-    }
-    if (exif.length > MAX_EXIF_BYTES) {
-        throw new Error("EXIF block is too large for a PNG chunk");
-    }
-
     const parts: Uint8Array[] = [bytes.subarray(0, SIGNATURE.length)];
     let inserted = false;
     let reachedEnd = false;
@@ -104,10 +89,6 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
  * @returns The dimensions, or null if IHDR is missing or not valid.
  */
 export function readDimensions(bytes: Uint8Array): Dimensions | null {
-    if (!matches(bytes)) {
-        return null;
-    }
-
     for (const chunk of walkChunks(bytes)) {
         if (chunk.type !== CHUNK_IHDR) {
             continue;

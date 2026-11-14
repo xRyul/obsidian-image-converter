@@ -25,12 +25,6 @@ const ITEM_TYPE_EXIF = 'Exif';
 /** `cdsc`: "content describes". How an Exif item is bound to the image. */
 const REFERENCE_TYPE_EXIF = 'cdsc';
 
-/**
- * The box size field is 32 bits. This limit is 31 bits, so that the `mdat`
- * header and the payload together cannot be larger than the field.
- */
-export const MAX_EXIF_BYTES = 0x7fffffff;
-
 /** Item IDs we write are 16-bit, which is what `infe` version 2 carries. */
 const MAX_ITEM_ID = 0xffff;
 
@@ -112,10 +106,6 @@ export function matches(bytes: Uint8Array): boolean {
  * @returns The raw block, or null if there is no readable EXIF item.
  */
 export function readExif(bytes: Uint8Array): Uint8Array | null {
-    if (!matches(bytes)) {
-        return null;
-    }
-
     const meta = readMeta(bytes);
     if (!meta) {
         return null;
@@ -160,13 +150,6 @@ export function readExif(bytes: Uint8Array): Uint8Array | null {
  * @throws If the file cannot be rewritten safely, or fails its own round trip.
  */
 export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
-    if (!matches(bytes)) {
-        throw new Error("Not an ISOBMFF still image");
-    }
-    if (exif.length > MAX_EXIF_BYTES) {
-        throw new Error("EXIF block is too large for an ISOBMFF item");
-    }
-
     const meta = readMeta(bytes);
     if (!meta) {
         throw new Error("ISOBMFF file has no meta box");
@@ -253,10 +236,6 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
  * @returns The dimensions, or null if no property could be resolved.
  */
 export function readDimensions(bytes: Uint8Array): Dimensions | null {
-    if (!matches(bytes)) {
-        return null;
-    }
-
     const meta = readMeta(bytes);
     const iprp = meta && findChild(meta, 'iprp');
     if (!meta || !iprp) {

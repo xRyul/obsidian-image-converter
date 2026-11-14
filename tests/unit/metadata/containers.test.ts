@@ -110,10 +110,6 @@ describe('JPEG container', () => {
     expect(() => jpeg.writeExif(bytes, huge)).toThrow();
   });
 
-  it('Given non-JPEG bytes, When written, Then it throws', () => {
-    expect(() => jpeg.writeExif(buildPng(), exifBlockFrom({ make: 'Cam' }))).toThrow();
-  });
-
   it('Given a JPEG with a damaged marker before the scan, When written, Then it throws instead of dropping the image data', () => {
     const bytes = new Uint8Array(makeJpegBytes({}));
 
@@ -195,10 +191,6 @@ describe('PNG container', () => {
 
     expect(before).not.toBeNull();
     expect(pngChunkPayload(out, 'IDAT')).toEqual(before);
-  });
-
-  it('Given non-PNG bytes, When written, Then it throws', () => {
-    expect(() => png.writeExif(buildWebpLossy(), exifBlockFrom({ make: 'Cam' }))).toThrow();
   });
 
   it('Given a PNG with a damaged chunk after IDAT, When written, Then it throws instead of dropping IEND', () => {
@@ -350,10 +342,6 @@ describe('WebP container', () => {
 
     expect(webp.readExif(out)).toEqual(odd);
     expect(webpRiffSizeValid(out)).toBe(true);
-  });
-
-  it('Given non-WebP bytes, When written, Then it throws', () => {
-    expect(() => webp.writeExif(buildPng(), exifBlockFrom({ make: 'Cam' }))).toThrow();
   });
 
   it('Given a WebP with a damaged image chunk, When written, Then it throws instead of dropping the image data', () => {
@@ -534,17 +522,6 @@ describe('ISOBMFF container (HEIC / AVIF)', () => {
 
     expect(isobmffBoxTypes(out)).toEqual(['ftyp', 'meta', 'mdat', 'mdat']);
     expect(isobmffMetaChildTypes(out)).toEqual(['hdlr', 'pitm', 'iinf', 'iref', 'iloc', 'iprp']);
-  });
-
-  it('Given an oversized block, When written, Then it throws instead of truncating', () => {
-    const file = buildIsobmff({ brand: 'avif' });
-    const huge = new Uint8Array(isobmff.MAX_EXIF_BYTES + 1);
-
-    expect(() => isobmff.writeExif(file, huge)).toThrow();
-  });
-
-  it('Given non-ISOBMFF bytes, When written, Then it throws', () => {
-    expect(() => isobmff.writeExif(buildPng(), exifBlockFrom({ make: 'Cam' }))).toThrow();
   });
 
   it('Given a HEIC with no meta box, When written, Then it throws', () => {

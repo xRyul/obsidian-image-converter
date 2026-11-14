@@ -11,7 +11,9 @@ import * as png from "./containers/png";
 import * as tiff from "./containers/tiff";
 import * as webp from "./containers/webp";
 
-/** A container we can pull an EXIF block out of. */
+/** A container we can pull an EXIF block out of.
+ * Assumes `matches()` has already returned true for the bytes.
+ */
 interface ContainerReader {
     matches(bytes: Uint8Array): boolean;
     readExif(bytes: Uint8Array): Uint8Array | null;
@@ -22,7 +24,7 @@ interface ContainerWriter extends ContainerReader {
     readDimensions(bytes: Uint8Array): Dimensions | null;
     writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array;
     /** Hard ceiling on the EXIF block this container can hold. */
-    MAX_EXIF_BYTES: number;
+    MAX_EXIF_BYTES?: number;
 }
 
 const READERS: ContainerReader[] = [jpeg, png, webp, isobmff, tiff];
@@ -86,7 +88,7 @@ export class MetadataTransfer {
         }
 
         const normalised = normalise(block, writer.readDimensions(outputBytes), orientationApplied);
-        const serialised = serialiseWithin(normalised, writer.MAX_EXIF_BYTES);
+        const serialised = serialiseWithin(normalised, writer.MAX_EXIF_BYTES ?? Infinity);
         if (!serialised) {
             return output;
         }

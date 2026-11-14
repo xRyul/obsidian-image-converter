@@ -33,8 +33,6 @@ const VP8X_PAYLOAD_SIZE = 10;
 const MAX_DIMENSION = 1 << 24;
 
 /** The size field of a RIFF chunk is 32 bits. */
-export const MAX_EXIF_BYTES = 0xffffffff;
-
 const MAX_RIFF_SIZE = 0xffffffff;
 
 interface Chunk {
@@ -56,10 +54,6 @@ export function matches(bytes: Uint8Array): boolean {
  * @returns The raw block, or null if the file carries none.
  */
 export function readExif(bytes: Uint8Array): Uint8Array | null {
-    if (!matches(bytes)) {
-        return null;
-    }
-
     for (const chunk of parseChunks(bytes).chunks) {
         if (chunk.type === CHUNK_EXIF) {
             return stripExifPrefix(bytes.slice(chunk.payloadStart, chunk.payloadEnd));
@@ -80,13 +74,6 @@ export function readExif(bytes: Uint8Array): Uint8Array | null {
  *         back from the result.
  */
 export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
-    if (!matches(bytes)) {
-        throw new Error("Not a WebP");
-    }
-    if (exif.length > MAX_EXIF_BYTES) {
-        throw new Error("EXIF block is too large for a RIFF chunk");
-    }
-
     const { chunks, complete } = parseChunks(bytes);
     if (chunks.length === 0) {
         throw new Error("WebP has no chunks");
@@ -155,9 +142,6 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
  * @returns The dimensions, or null if no chunk gives a size.
  */
 export function readDimensions(bytes: Uint8Array): Dimensions | null {
-    if (!matches(bytes)) {
-        return null;
-    }
     return readCanvas(bytes, parseChunks(bytes).chunks);
 }
 

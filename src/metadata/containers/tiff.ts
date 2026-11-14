@@ -60,10 +60,6 @@ export function matches(bytes: Uint8Array): boolean {
  *          the file, but this reader must remove tags, so it builds a new block.
  */
 export function readExif(bytes: Uint8Array): Uint8Array | null {
-    if (!matches(bytes)) {
-        return null;
-    }
-
     const block = parseExifBlock(bytes);
     if (!block) {
         return null;

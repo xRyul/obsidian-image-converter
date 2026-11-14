@@ -38,10 +38,6 @@ export function matches(bytes: Uint8Array): boolean {
  * @returns The raw block, or null if the file carries none.
  */
 export function readExif(bytes: Uint8Array): Uint8Array | null {
-    if (!matches(bytes)) {
-        return null;
-    }
-
     for (const segment of walkSegments(bytes)) {
         if (segment.marker === MARKER_APP1 && hasExifPrefix(bytes, segment.payloadStart)) {
             return bytes.slice(segment.payloadStart + EXIF_PREFIX.length, segment.end);
@@ -58,13 +54,10 @@ export function readExif(bytes: Uint8Array): Uint8Array | null {
  * @param bytes - The JPEG file.
  * @param exif - The raw block to embed.
  * @returns A new JPEG carrying the block.
- * @throws If the file is not a JPEG, the block will not fit, or the segment
- *         walk never reaches the scan.
+ * @throws If the block will not fit, or the segment walk never reaches the
+ *         scan.
  */
 export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
-    if (!matches(bytes)) {
-        throw new Error("Not a JPEG");
-    }
     if (exif.length > MAX_EXIF_BYTES) {
         throw new Error("EXIF block is too large for a JPEG APP1 segment");
     }
@@ -104,10 +97,6 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
  * @returns The dimensions, or null if no valid frame header was found.
  */
 export function readDimensions(bytes: Uint8Array): Dimensions | null {
-    if (!matches(bytes)) {
-        return null;
-    }
-
     for (const segment of walkSegments(bytes)) {
         // SOF0..SOF15, excluding DHT (0xC4), JPG (0xC8) and DAC (0xCC).
         const isStartOfFrame = segment.marker >= 0xc0
