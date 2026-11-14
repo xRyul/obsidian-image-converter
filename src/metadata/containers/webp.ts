@@ -50,7 +50,6 @@ export function matches(bytes: Uint8Array): boolean {
 
 /**
  * Reads the EXIF block out of a WebP's `EXIF` chunk.
- * @param bytes - The WebP file.
  * @returns The raw block, or null if the file carries none.
  */
 export function readExif(bytes: Uint8Array): Uint8Array | null {
@@ -67,9 +66,6 @@ export function readExif(bytes: Uint8Array): Uint8Array | null {
  * Writes an EXIF block into a WebP and replaces any existing block. If the
  * file is simple WebP, the writer changes it to the extended format.
  *
- * @param bytes - The WebP file.
- * @param exif - The raw block to embed.
- * @returns A new WebP that holds the block.
  * @throws If the file cannot be fully parsed, or if the block does not read
  *         back from the result.
  */
@@ -138,7 +134,6 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
 
 /**
  * Reads the canvas size from the VP8X chunk or the image data of a WebP.
- * @param bytes - The WebP file.
  * @returns The dimensions, or null if no chunk gives a size.
  */
 export function readDimensions(bytes: Uint8Array): Dimensions | null {

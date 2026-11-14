@@ -51,7 +51,6 @@ const HEADER_SIZE = 8;
  * Parses a raw EXIF block. Corrupt individual tags are skipped rather than
  * failing the whole parse, since partial metadata beats none.
  *
- * @param bytes - A TIFF header followed by its IFDs.
  * @returns The parsed block, or null if this is not a TIFF structure.
  */
 export function parseExifBlock(bytes: Uint8Array): ExifBlock | null {
@@ -160,9 +159,6 @@ interface IfdPlan {
 /**
  * Serialises a block back to TIFF bytes, recomputing every offset. Endianness
  * is preserved so the opaque value bytes stay valid.
- *
- * @param block - The block to write.
- * @returns A TIFF header followed by its IFDs.
  */
 export function serialiseExifBlock(block: ExifBlock): Uint8Array {
     const littleEndian = !block.bigEndian;
@@ -278,7 +274,6 @@ function writeIfd(
 /**
  * Rewrites the tags that stop being true once an image is re-encoded.
  *
- * @param block - The block to normalise.
  * @param dimensions - Size of the encoded output, or null when unknown.
  * @param orientationApplied - True when the conversion rotated the pixels to
  *        match the Orientation tag. False when the pixels are as stored in the
@@ -295,12 +290,8 @@ export function normalise(
     const ifd0 = new Map(block.ifd0);
     const exif = new Map(block.exif);
 
-    // If the conversion rotated the pixels, the old tag makes viewers rotate
-    // the image a second time. A missing tag already means "normal", so change
-    // the tag only if it exists.
-    //
-    // If the conversion did not rotate the pixels, the old tag is still
-    // correct, so it stays. The caller knows which case applies.
+    // Rotated pixels with the old tag make viewers rotate the image a second
+    // time. A missing tag already means "normal", so none is added.
     if (orientationApplied && ifd0.has(TAG_ORIENTATION)) {
         ifd0.set(TAG_ORIENTATION, shortEntry(TAG_ORIENTATION, 1, littleEndian));
     }
@@ -332,8 +323,6 @@ export function normalise(
  * MakerNote, then UserComment, until the block fits. JPEG needs this because
  * its APP1 segment cannot be larger than 64 KB.
  *
- * @param block - The block to write.
- * @param maxBytes - The container's hard limit.
  * @returns The serialised block, or null if even a stripped block will not fit.
  */
 export function serialiseWithin(block: ExifBlock, maxBytes: number): Uint8Array | null {
@@ -361,7 +350,6 @@ export function serialiseWithin(block: ExifBlock, maxBytes: number): Uint8Array 
 
 /**
  * Reads the Orientation tag of a block.
- * @param block - The block to read.
  * @returns The value (1 to 8), or 1 if the tag is absent or not valid.
  */
 export function readOrientation(block: ExifBlock): number {

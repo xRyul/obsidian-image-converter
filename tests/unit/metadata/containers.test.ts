@@ -787,9 +787,9 @@ function removeWebpFinalPadding(bytes: Uint8Array, riffCountsPadding: boolean): 
 }
 
 /**
- * Returns all bytes from the SOS marker to the end, that is, the compressed
- * scan data. If there is no SOS marker, it throws. The helper does not return
- * an empty result, because two broken fixtures then compare as equal.
+ * Returns all bytes from the SOS marker to the end (the compressed scan
+ * data). Throws if there is no SOS marker, so that two broken fixtures cannot
+ * compare as equal.
  */
 function tailFromScan(bytes: Uint8Array): Uint8Array {
   let offset = 2;

@@ -1,10 +1,9 @@
 // tiff.ts
-// A TIFF file is itself a TIFF block, so there is no wrapper to remove. But
-// IFD0 of a TIFF file also holds tags that tell where the pixels are in that
-// file (for example, StripOffsets). These tags point to data that the
-// converted image does not have. Thus the reader keeps only a list of known
-// descriptive tags, and removes all other IFD0 tags. The sub-IFDs hold only
-// metadata, so the reader keeps them complete.
+// A TIFF file is itself a TIFF block, so there is no wrapper to remove. IFD0
+// of a TIFF file also holds tags that tell where the pixels are in that file
+// (for example, StripOffsets). These tags point to data that the converted
+// image does not have. The reader keeps only a list of known descriptive IFD0
+// tags. The sub-IFDs hold only metadata, so the reader keeps them complete.
 
 import { isEmptyBlock, parseExifBlock, serialiseExifBlock } from "../ExifBlock";
 import {
@@ -52,10 +51,8 @@ export function matches(bytes: Uint8Array): boolean {
  * Reads descriptive metadata out of a TIFF, discarding the tags that describe
  * how pixels are stored in the source file.
  *
- * @param bytes - The TIFF file.
- * @returns A new block that holds only the descriptive tags, or null if no
- *          descriptive tags remain. Other readers return the raw bytes from
- *          the file, but this reader must remove tags, so it builds a new block.
+ * @returns A new, re-serialised block that holds only the descriptive tags,
+ *          or null if no descriptive tags remain.
  */
 export function readExif(bytes: Uint8Array): Uint8Array | null {
     const block = parseExifBlock(bytes);

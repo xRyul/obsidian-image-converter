@@ -1,6 +1,6 @@
 // transferMetadata.ts
 // Reads the EXIF block out of the source image, normalises it for the re-encoded pixels,
-// and writes it into whatever container actually came out of the conversion.
+// and writes it into the container that the conversion produced.
 
 import { Dimensions } from "./types";
 import { isEmptyBlock, normalise, parseExifBlock, serialiseWithin } from "./ExifBlock";
@@ -36,12 +36,9 @@ const WRITERS: ContainerWriter[] = [jpeg, png, webp, isobmff];
  * Transfers metadata from the source image into the converted one.
  * If a step fails, this returns the output unchanged.
  *
- * @param source - The original image.
- * @param output - The converted bytes.
  * @param orientationApplied - True when the conversion rotated the pixels
  *        to match the Orientation tag of the source. If false, the tag
  *        keeps its value.
- * @returns The output, with metadata attached where possible.
  */
 export async function transferMetadata(
     source: Blob,

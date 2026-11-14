@@ -156,7 +156,6 @@ describe('transferMetadata', () => {
   });
 
   it('Given a HEIC source, When metadata is transferred, Then EXIF is written to the output', async () => {
-    // Phone photos are the most common source of detailed EXIF.
     const source = blobOf(buildIsobmff({ brand: 'heic', exif: richExif() }));
     const output = bufferOf(buildWebpLossy());
 

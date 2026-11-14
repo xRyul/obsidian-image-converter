@@ -29,7 +29,6 @@ export function matches(bytes: Uint8Array): boolean {
 
 /**
  * Reads the EXIF block out of a PNG's `eXIf` chunk.
- * @param bytes - The PNG file.
  * @returns The raw block, or null if the file carries none.
  */
 export function readExif(bytes: Uint8Array): Uint8Array | null {
@@ -44,9 +43,6 @@ export function readExif(bytes: Uint8Array): Uint8Array | null {
 
 /**
  * Writes an EXIF block into a PNG, replacing any existing one.
- * @param bytes - The PNG file.
- * @param exif - The raw block to embed.
- * @returns A new PNG carrying the block.
  * @throws If the chunk walk never reaches IEND.
  */
 export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
@@ -85,7 +81,6 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
 
 /**
  * Reads dimensions from a PNG's IHDR chunk.
- * @param bytes - The PNG file.
  * @returns The dimensions, or null if IHDR is missing or not valid.
  */
 export function readDimensions(bytes: Uint8Array): Dimensions | null {

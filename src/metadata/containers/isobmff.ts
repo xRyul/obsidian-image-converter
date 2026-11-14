@@ -5,12 +5,11 @@
 //   - `iloc` tells where the bytes of each item are.
 //   - `iref` links an item to the image that it describes.
 //
-// To write EXIF, the writer rebuilds these three boxes. It adds the EXIF
-// payload in a new `mdat` box at the end of the file, so the image data does
-// not move. But the `meta` box gets larger. Thus the writer must add the size
-// change (the delta) to each item offset after `meta`. An error in this step
-// can corrupt the file without a visible failure. Thus the writer makes sure
-// that the result is correct before it returns it.
+// To write EXIF, the writer rebuilds these three boxes and appends the EXIF
+// payload in a new `mdat` box, so the existing image data is copied
+// unchanged. The `meta` box grows, so each item offset after `meta` moves by
+// that growth (the delta). A wrong offset corrupts the file with no visible
+// failure, so the writer verifies its output before it returns it.
 
 import { Dimensions } from "../types";
 import { ascii, concat, equalBytes, readFourCc, viewOf } from "./bytes";
@@ -102,7 +101,6 @@ export function matches(bytes: Uint8Array): boolean {
 
 /**
  * Reads the EXIF block out of the `Exif` item of a HEIC, HEIF or AVIF file.
- * @param bytes - The image file.
  * @returns The raw block, or null if there is no readable EXIF item.
  */
 export function readExif(bytes: Uint8Array): Uint8Array | null {
@@ -144,9 +142,6 @@ export function readExif(bytes: Uint8Array): Uint8Array | null {
  * Writes an EXIF block into a HEIC, HEIF or AVIF file, replacing any item
  * already there.
  *
- * @param bytes - The image file.
- * @param exif - The raw block to embed.
- * @returns A new file carrying the block.
  * @throws If the file cannot be rewritten safely, or fails its own round trip.
  */
 export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
@@ -173,9 +168,8 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
         throw new Error("ISOBMFF item table has entries that cannot be rewritten");
     }
 
-    // Remove an existing EXIF item from the tables. Its bytes stay in the file
-    // but nothing uses them. This makes the file a little larger, but the
-    // offsets of the other items do not change.
+    // Remove an existing EXIF item from the tables only. Its bytes stay in the
+    // file, unreferenced, so the offsets of the other items do not change.
     const replaced = info.entries.find((entry) => entry.itemType === ITEM_TYPE_EXIF);
     const replacedId = replaced ? replaced.itemId : null;
     const keptEntries = info.entries.filter((entry) => entry.itemId !== replacedId);
@@ -193,9 +187,8 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
     const newIref = buildItemReferences(bytes, meta, itemId, replacedId);
 
     // The size of an `iloc` box depends only on the number of entries and
-    // extents, not on the values. Thus the writer measures the `meta` box with
-    // placeholder offsets first. It writes the real offsets when it knows the
-    // delta.
+    // extents, not on the values. Measure `meta` with placeholder offsets
+    // first, then write the real offsets once the delta is known.
     const placeholder = keptLocations.concat([newLocation(itemId, 0, payload.length)]);
     const probe = buildMeta(bytes, meta, newIinf, buildLocations(placeholder), newIref);
 
@@ -232,7 +225,6 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
 
 /**
  * Reads the primary item's dimensions from its `ispe` property.
- * @param bytes - The image file.
  * @returns The dimensions, or null if no property could be resolved.
  */
 export function readDimensions(bytes: Uint8Array): Dimensions | null {
@@ -333,8 +325,8 @@ function parseItemInfo(bytes: Uint8Array, iinf: Box): ItemInfo | null {
     const version = bytes[iinf.payloadStart];
     const flags = bytes.slice(iinf.payloadStart + 1, iinf.payloadStart + 4);
 
-    // entry_count is 16-bit in version 0 and 32-bit above it. The count itself
-    // is redundant here: the `infe` boxes that follow are walked directly.
+    // entry_count is 16-bit in version 0 and 32-bit above it. It is skipped:
+    // the `infe` boxes that follow are walked directly.
     const entriesStart = iinf.payloadStart + 4 + (version === 0 ? 2 : 4);
     if (entriesStart > iinf.end) {
         return null;
@@ -748,8 +740,7 @@ function buildMeta(
 
 /**
  * Makes sure that each item in the old file points to the same bytes in the
- * new file. This check is fast. A file with incorrect offsets loses its image
- * data.
+ * new file. A file with incorrect offsets loses its image data.
  */
 function itemsIntact(source: Uint8Array, before: Location[], output: Uint8Array): boolean {
     const meta = readMeta(output);
@@ -834,9 +825,7 @@ function* walkBoxes(bytes: Uint8Array, start: number, end: number): Generator<Bo
     }
 }
 
-/**
- * Walks a range and reports whether the boxes it found cover all of it.
- */
+/** Walks a range and reports whether the boxes it found cover all of it. */
 function walkAll(bytes: Uint8Array, start: number, end: number): { boxes: Box[]; complete: boolean } {
     const boxes = [...walkBoxes(bytes, start, end)];
     const walkedTo = boxes.length > 0 ? boxes[boxes.length - 1].end : start;

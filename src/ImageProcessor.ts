@@ -517,9 +517,6 @@ export class ImageProcessor {
      * - pngquant with no resize: the only path that does not rotate. pngquant
      *   gets the source bytes directly, unless a decoder ran first.
      *
-     * @param file - The source image.
-     * @param format - The requested output format.
-     * @param resizeMode - The requested resize mode.
      * @returns True when the output pixels are upright.
      */
     private async orientationApplied(

@@ -26,7 +26,6 @@ const ORIENTATION_TRANSFORMS: ReadonlyMap<number, CanvasTransform> = new Map([
 
 /**
  * Gives the transform that makes an image with this EXIF Orientation upright.
- * @param orientation - The value of the Orientation tag (1 to 8).
  * @returns The transform, or null if the pixels are already upright or the
  *          value is not valid.
  */
@@ -41,9 +40,6 @@ export function transformForOrientation(orientation: number): CanvasTransform | 
  * height exchanged. For all other angles, it keeps the size of the source, so
  * the corners of the image can be cut off.
  *
- * @param source - The canvas to draw.
- * @param transform - The rotation and flip to apply.
- * @returns A new canvas that holds the transformed image.
  * @throws If the browser gives no 2D context.
  */
 export function transformCanvas(

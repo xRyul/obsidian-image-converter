@@ -12,8 +12,8 @@ const MARKER_APP1 = 0xe1;
 const MARKER_TEM = 0x01;
 
 /**
- * The APP1 length field is 16 bits, and the length includes the field itself
- * (2 bytes). The "Exif\0\0" prefix uses 6 more bytes.
+ * The 16-bit APP1 length (65535) minus the length field itself (2 bytes) and
+ * the "Exif\0\0" prefix (6 bytes).
  */
 export const MAX_EXIF_BYTES = 65527;
 
@@ -34,7 +34,6 @@ export function matches(bytes: Uint8Array): boolean {
 
 /**
  * Reads the EXIF block out of a JPEG's APP1 segment.
- * @param bytes - The JPEG file.
  * @returns The raw block, or null if the file carries none.
  */
 export function readExif(bytes: Uint8Array): Uint8Array | null {
@@ -51,9 +50,6 @@ export function readExif(bytes: Uint8Array): Uint8Array | null {
  * Writes an EXIF block into a JPEG, replacing any existing one. A leading JFIF
  * APP0 segment stays directly after the start-of-image marker.
  *
- * @param bytes - The JPEG file.
- * @param exif - The raw block to embed.
- * @returns A new JPEG carrying the block.
  * @throws If the block will not fit, or the segment walk never reaches the
  *         scan.
  */
@@ -93,7 +89,6 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
 
 /**
  * Reads dimensions from a JPEG's start-of-frame segment.
- * @param bytes - The JPEG file.
  * @returns The dimensions, or null if no valid frame header was found.
  */
 export function readDimensions(bytes: Uint8Array): Dimensions | null {
