@@ -1,311 +1,6 @@
-/**
- * Spec-accurate PNG, WebP and ISOBMFF (HEIC / AVIF) builders and inspectors for
- * the metadata container tests.
- *
- * The builders in image.ts are not complete (fake CRCs, a VP8 chunk with no
- * frame tag), because the tests that use them check only the magic bytes. The
- * metadata writers parse the full container structure, so they need valid files.
- */
+/** A spec-accurate HEIC / AVIF builder, with inspectors that do not use the code under test. */
 
-function concat(parts: Uint8Array[]): Uint8Array {
-  const total = parts.reduce((sum, part) => sum + part.length, 0);
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const part of parts) {
-    out.set(part, offset);
-    offset += part.length;
-  }
-  return out;
-}
-
-function fourCc(text: string): Uint8Array {
-  const out = new Uint8Array(4);
-  for (let i = 0; i < 4; i++) out[i] = text.charCodeAt(i);
-  return out;
-}
-
-function readFourCc(bytes: Uint8Array, offset: number): string {
-  return String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
-}
-
-// --- PNG --------------------------------------------------------------------
-
-const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-
-function crcTable(): Uint32Array {
-  const table = new Uint32Array(256);
-  for (let i = 0; i < 256; i++) {
-    let value = i;
-    for (let bit = 0; bit < 8; bit++) {
-      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-    }
-    table[i] = value >>> 0;
-  }
-  return table;
-}
-
-const TABLE = crcTable();
-
-function crc32(bytes: Uint8Array): number {
-  let crc = 0xffffffff;
-  for (let i = 0; i < bytes.length; i++) {
-    crc = TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function pngChunk(type: string, data: Uint8Array): Uint8Array {
-  const chunk = new Uint8Array(12 + data.length);
-  const view = new DataView(chunk.buffer);
-
-  view.setUint32(0, data.length, false);
-  chunk.set(fourCc(type), 4);
-  chunk.set(data, 8);
-  view.setUint32(8 + data.length, crc32(chunk.subarray(4, 8 + data.length)), false);
-
-  return chunk;
-}
-
-/** A structurally valid PNG with correct chunk CRCs. */
-export function buildPng(options: { width?: number; height?: number; exif?: Uint8Array } = {}): Uint8Array {
-  const width = options.width ?? 100;
-  const height = options.height ?? 80;
-
-  const ihdr = new Uint8Array(13);
-  const ihdrView = new DataView(ihdr.buffer);
-  ihdrView.setUint32(0, width, false);
-  ihdrView.setUint32(4, height, false);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 2; // colour type: RGB
-
-  const parts: Uint8Array[] = [
-    new Uint8Array(PNG_SIGNATURE),
-    pngChunk('IHDR', ihdr),
-  ];
-
-  if (options.exif) {
-    parts.push(pngChunk('eXIf', options.exif));
-  }
-
-  parts.push(pngChunk('IDAT', new Uint8Array([0x78, 0x9c, 0x62, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01])));
-  parts.push(pngChunk('IEND', new Uint8Array(0)));
-
-  return concat(parts);
-}
-
-/** True when every chunk CRC in a PNG is correct. */
-export function pngChunkCrcsValid(bytes: Uint8Array): boolean {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let offset = PNG_SIGNATURE.length;
-
-  while (offset + 12 <= bytes.length) {
-    const length = view.getUint32(offset, false);
-    const payloadEnd = offset + 8 + length;
-    if (payloadEnd + 4 > bytes.length) return false;
-
-    const expected = view.getUint32(payloadEnd, false);
-    if (crc32(bytes.subarray(offset + 4, payloadEnd)) !== expected) return false;
-
-    offset = payloadEnd + 4;
-  }
-
-  return true;
-}
-
-/** PNG chunks in file order, with the offset and size of each payload. */
-function pngChunks(bytes: Uint8Array): { type: string; payloadStart: number; size: number }[] {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const chunks: { type: string; payloadStart: number; size: number }[] = [];
-  let offset = PNG_SIGNATURE.length;
-
-  while (offset + 12 <= bytes.length) {
-    const size = view.getUint32(offset, false);
-    chunks.push({ type: readFourCc(bytes, offset + 4), payloadStart: offset + 8, size });
-    offset = offset + 12 + size;
-  }
-
-  return chunks;
-}
-
-/** Returns a copy of the payload of the first chunk of this type, or null if there is none. */
-export function pngChunkPayload(bytes: Uint8Array, type: string): Uint8Array | null {
-  const chunk = pngChunks(bytes).find((candidate) => candidate.type === type);
-  return chunk ? bytes.slice(chunk.payloadStart, chunk.payloadStart + chunk.size) : null;
-}
-
-/** Lists PNG chunk types in file order. */
-export function pngChunkTypes(bytes: Uint8Array): string[] {
-  return pngChunks(bytes).map((chunk) => chunk.type);
-}
-
-// --- WebP -------------------------------------------------------------------
-
-function riffChunk(type: string, payload: Uint8Array): Uint8Array {
-  const padding = payload.length % 2;
-  const chunk = new Uint8Array(8 + payload.length + padding);
-  const view = new DataView(chunk.buffer);
-
-  chunk.set(fourCc(type), 0);
-  view.setUint32(4, payload.length, true);
-  chunk.set(payload, 8);
-
-  return chunk;
-}
-
-function riff(body: Uint8Array[]): Uint8Array {
-  const bodyBytes = concat(body);
-  const header = new Uint8Array(12);
-
-  header.set(fourCc('RIFF'), 0);
-  new DataView(header.buffer).setUint32(4, 4 + bodyBytes.length, true);
-  header.set(fourCc('WEBP'), 8);
-
-  return concat([header, bodyBytes]);
-}
-
-/** A lossy keyframe header: frame tag, start code, then the frame size. */
-function vp8Payload(width: number, height: number): Uint8Array {
-  const payload = new Uint8Array(20);
-  const view = new DataView(payload.buffer);
-
-  payload[0] = 0x10; // 3-byte frame tag: keyframe (low bit clear)
-  payload.set([0x9d, 0x01, 0x2a], 3); // start code
-  view.setUint16(6, width, true);
-  view.setUint16(8, height, true);
-
-  return payload;
-}
-
-/** Simple lossy WebP: one `VP8 ` chunk only. Canvas writes this format. */
-export function buildWebpLossy(options: { width?: number; height?: number } = {}): Uint8Array {
-  return riff([riffChunk('VP8 ', vp8Payload(options.width ?? 100, options.height ?? 80))]);
-}
-
-/** Simple lossless WebP: one `VP8L` chunk only. */
-export function buildWebpLossless(
-  options: { width?: number; height?: number; alpha?: boolean } = {}
-): Uint8Array {
-  const width = options.width ?? 100;
-  const height = options.height ?? 80;
-
-  const payload = new Uint8Array(16);
-  payload[0] = 0x2f; // VP8L signature
-
-  const bits = ((width - 1) & 0x3fff)
-    | (((height - 1) & 0x3fff) << 14)
-    | ((options.alpha ? 1 : 0) << 28);
-  new DataView(payload.buffer).setUint32(1, bits >>> 0, true);
-
-  return riff([riffChunk('VP8L', payload)]);
-}
-
-/**
- * Extended WebP that already has a VP8X chunk. The ICCP, EXIF and XMP chunks
- * are optional. If `animated` is true, the image is one ANMF frame after an
- * ANIM chunk, and not a `VP8 ` chunk at the top level.
- */
-export function buildWebpExtended(
-  options: {
-    width?: number;
-    height?: number;
-    exif?: Uint8Array;
-    alpha?: boolean;
-    iccp?: Uint8Array;
-    xmp?: Uint8Array;
-    animated?: boolean;
-  } = {}
-): Uint8Array {
-  const width = options.width ?? 100;
-  const height = options.height ?? 80;
-
-  const vp8x = new Uint8Array(10);
-  vp8x[0] = (options.iccp ? 0x20 : 0)
-    | (options.alpha ? 0x10 : 0)
-    | (options.exif ? 0x08 : 0)
-    | (options.xmp ? 0x04 : 0)
-    | (options.animated ? 0x02 : 0);
-  writeUint24(vp8x, 4, width - 1);
-  writeUint24(vp8x, 7, height - 1);
-
-  const body = [riffChunk('VP8X', vp8x)];
-
-  if (options.iccp) {
-    body.push(riffChunk('ICCP', options.iccp));
-  }
-
-  const image = riffChunk('VP8 ', vp8Payload(width, height));
-
-  if (options.animated) {
-    // ANIM: background colour (4 bytes) and loop count (2 bytes).
-    body.push(riffChunk('ANIM', new Uint8Array(6)));
-
-    // ANMF: X and Y offsets, frame width - 1, frame height - 1 and duration
-    // (3 bytes each), a flags byte, then the frame image data.
-    const frame = new Uint8Array(16 + image.length);
-    writeUint24(frame, 6, width - 1);
-    writeUint24(frame, 9, height - 1);
-    frame.set(image, 16);
-    body.push(riffChunk('ANMF', frame));
-  } else {
-    body.push(image);
-  }
-
-  if (options.exif) {
-    body.push(riffChunk('EXIF', options.exif));
-  }
-
-  if (options.xmp) {
-    body.push(riffChunk('XMP ', options.xmp));
-  }
-
-  return riff(body);
-}
-
-/** WebP chunks in file order, with the offset and size of each payload. */
-function webpChunks(bytes: Uint8Array): { type: string; payloadStart: number; size: number }[] {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const chunks: { type: string; payloadStart: number; size: number }[] = [];
-  let offset = 12;
-
-  while (offset + 8 <= bytes.length) {
-    const size = view.getUint32(offset + 4, true);
-    chunks.push({ type: readFourCc(bytes, offset), payloadStart: offset + 8, size });
-    offset += 8 + size + (size % 2);
-  }
-
-  return chunks;
-}
-
-/** Returns a copy of the payload of the first chunk of this type, or null if there is none. */
-export function webpChunkPayload(bytes: Uint8Array, type: string): Uint8Array | null {
-  const chunk = webpChunks(bytes).find((candidate) => candidate.type === type);
-  return chunk ? bytes.slice(chunk.payloadStart, chunk.payloadStart + chunk.size) : null;
-}
-
-/** Lists the WebP chunk types in file order. */
-export function webpChunkTypes(bytes: Uint8Array): string[] {
-  return webpChunks(bytes).map((chunk) => chunk.type);
-}
-
-/** Reads the VP8X flags byte, or null when the file is not extended. */
-export function webpVp8xFlags(bytes: Uint8Array): number | null {
-  const vp8x = webpChunks(bytes).find((chunk) => chunk.type === 'VP8X');
-  return vp8x ? bytes[vp8x.payloadStart] : null;
-}
-
-/** True when the RIFF size field matches the actual file length. */
-export function webpRiffSizeValid(bytes: Uint8Array): boolean {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  return view.getUint32(4, true) === bytes.length - 8;
-}
-
-function writeUint24(bytes: Uint8Array, offset: number, value: number): void {
-  bytes[offset] = value & 0xff;
-  bytes[offset + 1] = (value >> 8) & 0xff;
-  bytes[offset + 2] = (value >> 16) & 0xff;
-}
-
-// --- ISOBMFF (HEIC / AVIF) --------------------------------------------------
+import { ascii, concat, readFourCc } from '../../../src/metadata/containers/bytes';
 
 function u16be(value: number): Uint8Array {
   const out = new Uint8Array(2);
@@ -322,7 +17,7 @@ function u32be(value: number): Uint8Array {
 function box(type: string, payload: Uint8Array): Uint8Array {
   const out = new Uint8Array(8 + payload.length);
   new DataView(out.buffer).setUint32(0, out.length, false);
-  out.set(fourCc(type), 4);
+  out.set(ascii(type), 4);
   out.set(payload, 8);
   return out;
 }
@@ -380,7 +75,7 @@ export interface IsobmffOptions {
 export function buildIsobmff(options: IsobmffOptions = {}): Uint8Array {
   const brand = options.brand ?? 'heic';
   const compatible = options.compatibleBrands ?? [brand, 'mif1'];
-  const ftyp = box('ftyp', concat([fourCc(brand), u32be(0), ...compatible.map(fourCc)]));
+  const ftyp = box('ftyp', concat([ascii(brand), u32be(0), ...compatible.map(ascii)]));
 
   const imageData = imageItemData();
   const headerOffset = options.tiffHeaderOffset ?? 0;
@@ -402,7 +97,7 @@ export function buildIsobmff(options: IsobmffOptions = {}): Uint8Array {
         new Uint8Array([2, 0, 0, 0]),    // version 2, flags
         u16be(IMAGE_ITEM_ID),
         u16be(0),                        // item_protection_index
-        fourCc('av01'),
+        ascii('av01'),
         new Uint8Array([0]),             // item_name
       ])),
     ];
@@ -418,7 +113,7 @@ export function buildIsobmff(options: IsobmffOptions = {}): Uint8Array {
         u16be(0),
         // Wrong on purpose when omitExifItem is set. The reader then has an item
         // table to walk, but no EXIF item in it.
-        fourCc(options.omitExifItem ? 'mime' : 'Exif'),
+        ascii(options.omitExifItem ? 'mime' : 'Exif'),
         new Uint8Array([0]),
       ])));
       locations.push(itemLocation(
@@ -432,7 +127,7 @@ export function buildIsobmff(options: IsobmffOptions = {}): Uint8Array {
       box('hdlr', concat([
         new Uint8Array([0, 0, 0, 0]),
         u32be(0),
-        fourCc('pict'),
+        ascii('pict'),
         new Uint8Array(12),
         new Uint8Array([0]),
       ])),
@@ -529,7 +224,7 @@ function buildIprp(options: IsobmffOptions): Uint8Array {
   return box('iprp', concat([ipco, ipma]));
 }
 
-// --- ISOBMFF inspectors, which do not use the code under test -------------
+// --- Inspectors ---
 
 function isobmffBoxes(bytes: Uint8Array, start: number, end: number) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
