@@ -65,6 +65,16 @@ describe('MetadataTransfer', () => {
     expect(shortValue(block.ifd0.get(TAG.orientation)!.value)).toBe(1);
   });
 
+  it('Given a conversion that did not rotate the pixels, When metadata is transferred, Then Orientation keeps its value', async () => {
+    const source = blobOf(makeJpegBytes({ exif: richExif() }));
+    const output = bufferOf(buildWebpLossy());
+
+    const result = await transfer.transfer(source, output, false);
+
+    const block = parseExifBlock(webp.readExif(new Uint8Array(result))!)!;
+    expect(shortValue(block.ifd0.get(TAG.orientation)!.value)).toBe(6);
+  });
+
   it('Given a source with GPS, When metadata is transferred, Then the GPS data is kept', async () => {
     const source = blobOf(makeJpegBytes({ exif: richExif() }));
     const output = bufferOf(buildWebpLossy());

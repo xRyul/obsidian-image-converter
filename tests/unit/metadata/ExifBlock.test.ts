@@ -8,6 +8,7 @@ import {
   isEmptyBlock,
   normalise,
   parseExifBlock,
+  readOrientation,
   serialiseExifBlock,
   serialiseWithin,
 } from '../../../src/metadata/ExifBlock';
@@ -155,6 +156,15 @@ describe('ExifBlock', () => {
       expect(shortValue(result.ifd0.get(TAG.orientation)!.value)).toBe(1);
     });
 
+    it('Given pixels that were not rotated, When normalised, Then Orientation keeps its value', () => {
+      // pngquant leaves the pixels as stored, so the tag is still correct.
+      const parsed = parseExifBlock(exifBlockFrom({ orientation: 6, make: 'Cam' }))!;
+
+      const result = normalise(parsed, null, false);
+
+      expect(shortValue(result.ifd0.get(TAG.orientation)!.value)).toBe(6);
+    });
+
     it('Given no Orientation tag, When normalised, Then none is added', () => {
       const parsed = parseExifBlock(exifBlockFrom({ make: 'Cam' }))!;
 
@@ -238,6 +248,26 @@ describe('ExifBlock', () => {
       const parsed = parseExifBlock(exifBlockFrom({ make: 'A'.repeat(2000) }))!;
 
       expect(serialiseWithin(parsed, 64)).toBeNull();
+    });
+  });
+
+  describe('readOrientation', () => {
+    it.each([false, true])('Given an Orientation tag (big-endian: %s), When read, Then its value is returned', (bigEndian) => {
+      const parsed = parseExifBlock(exifBlockFrom({ orientation: 6, bigEndian }))!;
+
+      expect(readOrientation(parsed)).toBe(6);
+    });
+
+    it('Given no Orientation tag, When read, Then the result is 1', () => {
+      const parsed = parseExifBlock(exifBlockFrom({ make: 'Cam' }))!;
+
+      expect(readOrientation(parsed)).toBe(1);
+    });
+
+    it('Given an Orientation outside 1 to 8, When read, Then the result is 1', () => {
+      const parsed = parseExifBlock(exifBlockFrom({ orientation: 9 }))!;
+
+      expect(readOrientation(parsed)).toBe(1);
     });
   });
 

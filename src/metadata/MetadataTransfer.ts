@@ -83,18 +83,29 @@ export class MetadataTransfer {
      *
      * @param source - The original image.
      * @param output - The converted bytes.
+     * @param orientationApplied - True when the conversion rotated the pixels
+     *        to match the Orientation tag of the source. If false, the tag
+     *        keeps its value.
      * @returns The output, with metadata attached where possible.
      */
-    async transfer(source: Blob, output: ArrayBuffer): Promise<ArrayBuffer> {
+    async transfer(
+        source: Blob,
+        output: ArrayBuffer,
+        orientationApplied = true
+    ): Promise<ArrayBuffer> {
         try {
-            return await this.run(source, output);
+            return await this.run(source, output, orientationApplied);
         } catch (error) {
             console.warn("Image Converter: could not preserve metadata", error);
             return output;
         }
     }
 
-    private async run(source: Blob, output: ArrayBuffer): Promise<ArrayBuffer> {
+    private async run(
+        source: Blob,
+        output: ArrayBuffer,
+        orientationApplied: boolean
+    ): Promise<ArrayBuffer> {
         const outputBytes = new Uint8Array(output);
         const sourceBytes = new Uint8Array(await source.arrayBuffer());
 
@@ -120,7 +131,7 @@ export class MetadataTransfer {
             return output;
         }
 
-        const normalised = normalise(block, writer.readDimensions(outputBytes));
+        const normalised = normalise(block, writer.readDimensions(outputBytes), orientationApplied);
         const serialised = serialiseWithin(normalised, writer.maxExifBytes);
         if (!serialised) {
             return output;

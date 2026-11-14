@@ -6,6 +6,8 @@ import { ChildProcess, spawn } from 'child_process';
 import { ConversionPreset, ImageConverterSettings, DEFAULT_SETTINGS } from "./ImageConverterSettings";
 import { normalizeExecutablePath } from "./utils/ffmpegPath";
 import { MetadataTransfer } from "./metadata/MetadataTransfer";
+import { parseExifBlock, readOrientation } from "./metadata/ExifBlock";
+import { transformCanvas, transformForOrientation } from "./utils/canvasTransform";
 
 // eslint-disable-next-line import/no-nodejs-modules -- Required for temporary file handling in FFmpeg processing; Obsidian runs on Electron with Node.js support
 import * as fs from 'fs/promises';
@@ -499,7 +501,40 @@ export class ImageProcessor {
             settings
         );
 
-        return this.metadataTransfer.transfer(file, processedImage);
+        const orientationApplied = await this.orientationApplied(file, format, resizeMode);
+        return this.metadataTransfer.transfer(file, processedImage, orientationApplied);
+    }
+
+    /**
+     * Tells whether the pipeline rotates the pixels to match the EXIF
+     * Orientation tag of the source. The metadata transfer uses the answer to
+     * decide between Orientation 1 and the original value.
+     *
+     * - Canvas: Chromium applies the orientation when it decodes the image.
+     * - HEIC: heic-to applies the rotation of the file when it decodes.
+     * - TIFF: `handleTiff` applies the orientation after UTIF decodes.
+     * - FFmpeg: applies the orientation itself (autorotate). This was verified
+     *   with FFmpeg 9.0 and a JPEG source. Older versions possibly do not.
+     * - pngquant with no resize: the only path that does not rotate. pngquant
+     *   gets the source bytes directly, unless a decoder ran first.
+     *
+     * @param file - The source image.
+     * @param format - The requested output format.
+     * @param resizeMode - The requested resize mode.
+     * @returns True when the output pixels are upright.
+     */
+    private async orientationApplied(
+        file: Blob,
+        format: 'WEBP' | 'JPEG' | 'PNG' | 'ORIGINAL' | 'NONE' | 'PNGQUANT' | 'AVIF',
+        resizeMode: ResizeMode
+    ): Promise<boolean> {
+        if (format !== 'PNGQUANT' || resizeMode !== 'None') {
+            return true;
+        }
+
+        // TIFF and HEIC sources are decoded, and rotated, before pngquant.
+        const mimeType = await this.supportedImageFormats.getMimeTypeFromFile(file);
+        return ['image/tiff', 'image/tif', 'image/heic', 'image/heif'].includes(mimeType);
     }
 
     /**
@@ -682,9 +717,15 @@ if (format === 'ORIGINAL') {
             imageData.data.set(rgba);
             ctx.putImageData(imageData, 0, 0);
 
+            // UTIF returns the pixels as stored. Apply the Orientation tag
+            // here, so that all decoders in the pipeline give upright pixels.
+            const block = parseExifBlock(new Uint8Array(binary));
+            const transform = block ? transformForOrientation(readOrientation(block)) : null;
+            const uprightCanvas = transform ? transformCanvas(canvas, transform) : canvas;
+
             // Convert canvas to Blob
             return new Promise<Blob>((resolve, reject) => {
-                canvas.toBlob((blob) => {
+                uprightCanvas.toBlob((blob) => {
                     if (blob) {
                         resolve(blob);
                     } else {

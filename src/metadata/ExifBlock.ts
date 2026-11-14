@@ -307,22 +307,28 @@ function writeIfd(
  *
  * @param block - The block to normalise.
  * @param dimensions - Size of the encoded output, or null when unknown.
+ * @param orientationApplied - True when the conversion rotated the pixels to
+ *        match the Orientation tag. False when the pixels are as stored in the
+ *        source.
  * @returns A new block; the input is left untouched.
  */
-export function normalise(block: ExifBlock, dimensions: Dimensions | null): ExifBlock {
+export function normalise(
+    block: ExifBlock,
+    dimensions: Dimensions | null,
+    orientationApplied = true
+): ExifBlock {
     const littleEndian = !block.bigEndian;
 
     const ifd0 = new Map(block.ifd0);
     const exif = new Map(block.exif);
 
-    // When the pixels go through the canvas, the orientation is applied to
-    // them. If the old tag stays, viewers rotate the image a second time.
-    // A missing tag already means "normal", so change the tag only if it exists.
+    // If the conversion rotated the pixels, the old tag makes viewers rotate
+    // the image a second time. A missing tag already means "normal", so change
+    // the tag only if it exists.
     //
-    // Some paths do not use the canvas, so their pixels are not rotated:
-    // TIFF sources (UTIF), and pngquant or FFmpeg with no resize. These
-    // outputs also get Orientation 1. This is a known limitation.
-    if (ifd0.has(TAG_ORIENTATION)) {
+    // If the conversion did not rotate the pixels, the old tag is still
+    // correct, so it stays. The caller knows which case applies.
+    if (orientationApplied && ifd0.has(TAG_ORIENTATION)) {
         ifd0.set(TAG_ORIENTATION, shortEntry(TAG_ORIENTATION, 1, littleEndian));
     }
 
@@ -378,6 +384,21 @@ export function serialiseWithin(block: ExifBlock, maxBytes: number): Uint8Array 
     }
 
     return null;
+}
+
+/**
+ * Reads the Orientation tag of a block.
+ * @param block - The block to read.
+ * @returns The value (1 to 8), or 1 if the tag is absent or not valid.
+ */
+export function readOrientation(block: ExifBlock): number {
+    const entry = block.ifd0.get(TAG_ORIENTATION);
+    if (!entry || entry.type !== TYPE_SHORT || entry.value.length < 2) {
+        return 1;
+    }
+
+    const orientation = viewOf(entry.value).getUint16(0, !block.bigEndian);
+    return orientation >= 1 && orientation <= 8 ? orientation : 1;
 }
 
 /** True when a block carries no tags worth writing. */

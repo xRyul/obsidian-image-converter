@@ -344,6 +344,29 @@ describe('ImageProcessor - Conversion Tests', () => {
       expect(shortValue(block.ifd0.get(TAG.orientation)!.value)).toBe(1);
     });
 
+    it.each([
+      // [case, header bytes, format, resize mode, expected]
+      ['a JPEG through canvas', [0xff, 0xd8, 0xff, 0xe0], 'WEBP', 'None', true],
+      ['a TIFF source', [0x49, 0x49, 0x2a, 0x00], 'WEBP', 'None', true],
+      ['a TIFF source through pngquant with no resize', [0x49, 0x49, 0x2a, 0x00], 'PNGQUANT', 'None', true],
+      ['pngquant with no resize', [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 'PNGQUANT', 'None', false],
+      ['pngquant with resize', [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 'PNGQUANT', 'Fit', true],
+    ] as const)('Given %s, When processing, Then the transfer is told if the pixels were rotated', async (_case, header, format, resizeMode, expected) => {
+      // Arrange
+      const output = new ArrayBuffer(4);
+      vi.spyOn(processor as any, 'processImageHelper').mockResolvedValue(output);
+      const transferSpy = vi
+        .spyOn((processor as any).metadataTransfer, 'transfer')
+        .mockResolvedValue(output);
+      const inputBlob = new Blob([new Uint8Array([...header, 0, 0, 0, 0, 0, 0, 0, 0])]);
+
+      // Act
+      await processor.processImage(inputBlob, format, 0.85, 1.0, resizeMode, 100, 100, 100, 'Auto', true);
+
+      // Assert
+      expect(transferSpy).toHaveBeenCalledWith(inputBlob, output, expected);
+    });
+
     // Test 1.8
     it('Given unreadable EXIF in the source, When converting, Then the image is returned without EXIF and no throw', async () => {
       // Arrange
