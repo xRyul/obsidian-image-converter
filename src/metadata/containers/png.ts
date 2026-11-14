@@ -26,7 +26,7 @@ interface Chunk {
 }
 
 /** True when the bytes open with the PNG signature. */
-export function isPng(bytes: Uint8Array): boolean {
+export function matches(bytes: Uint8Array): boolean {
     return matchesAt(bytes, 0, SIGNATURE);
 }
 
@@ -36,7 +36,7 @@ export function isPng(bytes: Uint8Array): boolean {
  * @returns The raw block, or null if the file carries none.
  */
 export function readExif(bytes: Uint8Array): Uint8Array | null {
-    if (!isPng(bytes)) {
+    if (!matches(bytes)) {
         return null;
     }
 
@@ -58,7 +58,7 @@ export function readExif(bytes: Uint8Array): Uint8Array | null {
  *         never reaches IEND.
  */
 export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
-    if (!isPng(bytes)) {
+    if (!matches(bytes)) {
         throw new Error("Not a PNG");
     }
     if (exif.length > MAX_EXIF_BYTES) {
@@ -104,7 +104,7 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
  * @returns The dimensions, or null if IHDR is missing or not valid.
  */
 export function readDimensions(bytes: Uint8Array): Dimensions | null {
-    if (!isPng(bytes)) {
+    if (!matches(bytes)) {
         return null;
     }
 

@@ -60,8 +60,8 @@ describe('JPEG container', () => {
   });
 
   it('Given a non-JPEG file, When matched, Then it is rejected', () => {
-    expect(jpeg.isJpeg(buildPng())).toBe(false);
-    expect(jpeg.isJpeg(new Uint8Array(4))).toBe(false);
+    expect(jpeg.matches(buildPng())).toBe(false);
+    expect(jpeg.matches(new Uint8Array(4))).toBe(false);
   });
 
   it('Given a JPEG without EXIF, When written, Then the block reads back', () => {
@@ -71,7 +71,7 @@ describe('JPEG container', () => {
     const out = jpeg.writeExif(bytes, block);
 
     expect(jpeg.readExif(out)).toEqual(block);
-    expect(jpeg.isJpeg(out)).toBe(true);
+    expect(jpeg.matches(out)).toBe(true);
   });
 
   it('Given a JPEG with EXIF, When written, Then the old segment is replaced not duplicated', () => {
@@ -156,8 +156,8 @@ describe('PNG container', () => {
   });
 
   it('Given a non-PNG file, When matched, Then it is rejected', () => {
-    expect(png.isPng(buildWebpLossy())).toBe(false);
-    expect(png.isPng(new Uint8Array(4))).toBe(false);
+    expect(png.matches(buildWebpLossy())).toBe(false);
+    expect(png.matches(new Uint8Array(4))).toBe(false);
   });
 
   it('Given a PNG without EXIF, When written, Then the block reads back and the CRCs stay valid', () => {
@@ -247,8 +247,8 @@ describe('WebP container', () => {
   });
 
   it('Given a non-WebP file, When matched, Then it is rejected', () => {
-    expect(webp.isWebp(buildPng())).toBe(false);
-    expect(webp.isWebp(new Uint8Array(4))).toBe(false);
+    expect(webp.matches(buildPng())).toBe(false);
+    expect(webp.matches(new Uint8Array(4))).toBe(false);
   });
 
   it('Given simple lossy WebP, When written, Then it changes to the extended (VP8X) format with the EXIF flag and the same dimensions', () => {
@@ -451,12 +451,12 @@ describe('ISOBMFF container (HEIC / AVIF)', () => {
   });
 
   it('Given a non-ISOBMFF file, When matched, Then it is rejected', () => {
-    expect(isobmff.isIsobmff(buildPng())).toBe(false);
-    expect(isobmff.isIsobmff(new Uint8Array(4))).toBe(false);
+    expect(isobmff.matches(buildPng())).toBe(false);
+    expect(isobmff.matches(new Uint8Array(4))).toBe(false);
   });
 
   it('Given an ftyp with no supported brand, When matched, Then it is rejected', () => {
-    expect(isobmff.isIsobmff(buildIsobmff({ brand: 'qt  ', compatibleBrands: ['qt  '] }))).toBe(false);
+    expect(isobmff.matches(buildIsobmff({ brand: 'qt  ', compatibleBrands: ['qt  '] }))).toBe(false);
   });
 
   it('Given a HEIF brand only in the compatible list, When matched, Then it is accepted', () => {
@@ -464,7 +464,7 @@ describe('ISOBMFF container (HEIC / AVIF)', () => {
     // look at the compatible brands.
     const file = buildIsobmff({ brand: 'mp42', compatibleBrands: ['mp42', 'heic'] });
 
-    expect(isobmff.isIsobmff(file)).toBe(true);
+    expect(isobmff.matches(file)).toBe(true);
   });
 
   const layouts = ['mdat-first', 'meta-first'] as const;
@@ -480,7 +480,7 @@ describe('ISOBMFF container (HEIC / AVIF)', () => {
         const out = isobmff.writeExif(file, block);
 
         expect(isobmff.readExif(out)).toEqual(block);
-        expect(isobmff.isIsobmff(out)).toBe(true);
+        expect(isobmff.matches(out)).toBe(true);
       });
 
       it('Given an AVIF, When written, Then the image data is kept byte for byte', () => {
@@ -686,13 +686,13 @@ describe('TIFF container', () => {
   });
 
   it('Given a non-TIFF file, When matched, Then it is rejected', () => {
-    expect(tiff.isTiff(buildPng())).toBe(false);
-    expect(tiff.isTiff(new Uint8Array([0x49, 0x49, 0x00, 0x00]))).toBe(false);
+    expect(tiff.matches(buildPng())).toBe(false);
+    expect(tiff.matches(new Uint8Array([0x49, 0x49, 0x00, 0x00]))).toBe(false);
   });
 
   it('Given a TIFF in each byte order, When matched, Then it is accepted', () => {
-    expect(tiff.isTiff(exifBlockFrom({ make: 'Cam' }))).toBe(true);
-    expect(tiff.isTiff(exifBlockFrom({ make: 'Cam', bigEndian: true }))).toBe(true);
+    expect(tiff.matches(exifBlockFrom({ make: 'Cam' }))).toBe(true);
+    expect(tiff.matches(exifBlockFrom({ make: 'Cam', bigEndian: true }))).toBe(true);
   });
 });
 

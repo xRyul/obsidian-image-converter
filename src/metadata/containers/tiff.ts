@@ -45,7 +45,7 @@ const DESCRIPTIVE_IFD0_TAGS = new Set([
 ]);
 
 /** True when the bytes open with a TIFF header in either byte order. */
-export function isTiff(bytes: Uint8Array): boolean {
+export function matches(bytes: Uint8Array): boolean {
     return matchesAt(bytes, 0, LITTLE_ENDIAN_HEADER)
         || matchesAt(bytes, 0, BIG_ENDIAN_HEADER);
 }
@@ -60,7 +60,7 @@ export function isTiff(bytes: Uint8Array): boolean {
  *          the file, but this reader must remove tags, so it builds a new block.
  */
 export function readExif(bytes: Uint8Array): Uint8Array | null {
-    if (!isTiff(bytes)) {
+    if (!matches(bytes)) {
         return null;
     }
 

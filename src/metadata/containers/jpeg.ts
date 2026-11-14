@@ -28,7 +28,7 @@ interface Segment {
 }
 
 /** True when the bytes open with a JPEG start-of-image marker. */
-export function isJpeg(bytes: Uint8Array): boolean {
+export function matches(bytes: Uint8Array): boolean {
     return bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === MARKER_SOI;
 }
 
@@ -38,7 +38,7 @@ export function isJpeg(bytes: Uint8Array): boolean {
  * @returns The raw block, or null if the file carries none.
  */
 export function readExif(bytes: Uint8Array): Uint8Array | null {
-    if (!isJpeg(bytes)) {
+    if (!matches(bytes)) {
         return null;
     }
 
@@ -62,7 +62,7 @@ export function readExif(bytes: Uint8Array): Uint8Array | null {
  *         walk never reaches the scan.
  */
 export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
-    if (!isJpeg(bytes)) {
+    if (!matches(bytes)) {
         throw new Error("Not a JPEG");
     }
     if (exif.length > MAX_EXIF_BYTES) {
@@ -104,7 +104,7 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
  * @returns The dimensions, or null if no valid frame header was found.
  */
 export function readDimensions(bytes: Uint8Array): Dimensions | null {
-    if (!isJpeg(bytes)) {
+    if (!matches(bytes)) {
         return null;
     }
 

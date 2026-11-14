@@ -22,59 +22,13 @@ interface ContainerWriter extends ContainerReader {
     readDimensions(bytes: Uint8Array): Dimensions | null;
     writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array;
     /** Hard ceiling on the EXIF block this container can hold. */
-    maxExifBytes: number;
+    MAX_EXIF_BYTES: number;
 }
 
-const JPEG_CODEC: ContainerWriter = {
-    matches: jpeg.isJpeg,
-    readExif: jpeg.readExif,
-    readDimensions: jpeg.readDimensions,
-    writeExif: jpeg.writeExif,
-    maxExifBytes: jpeg.MAX_EXIF_BYTES,
-};
-
-const PNG_CODEC: ContainerWriter = {
-    matches: png.isPng,
-    readExif: png.readExif,
-    readDimensions: png.readDimensions,
-    writeExif: png.writeExif,
-    maxExifBytes: png.MAX_EXIF_BYTES,
-};
-
-const WEBP_CODEC: ContainerWriter = {
-    matches: webp.isWebp,
-    readExif: webp.readExif,
-    readDimensions: webp.readDimensions,
-    writeExif: webp.writeExif,
-    maxExifBytes: webp.MAX_EXIF_BYTES,
-};
-
-/** HEIC, HEIF and AVIF: read as a source, written when ffmpeg emits AVIF. */
-const ISOBMFF_CODEC: ContainerWriter = {
-    matches: isobmff.isIsobmff,
-    readExif: isobmff.readExif,
-    readDimensions: isobmff.readDimensions,
-    writeExif: isobmff.writeExif,
-    maxExifBytes: isobmff.MAX_EXIF_BYTES,
-};
-
-/** TIFF: read as a source only. The converter never writes TIFF. */
-const TIFF_READER: ContainerReader = {
-    matches: tiff.isTiff,
-    readExif: tiff.readExif,
-};
-
-/** Source containers. */
-const READERS: ContainerReader[] = [
-    JPEG_CODEC,
-    PNG_CODEC,
-    WEBP_CODEC,
-    ISOBMFF_CODEC,
-    TIFF_READER,
-];
+const READERS: ContainerReader[] = [jpeg, png, webp, isobmff, tiff];
 
 /** Output containers we can write metadata into. */
-const WRITERS: ContainerWriter[] = [JPEG_CODEC, PNG_CODEC, WEBP_CODEC, ISOBMFF_CODEC];
+const WRITERS: ContainerWriter[] = [jpeg, png, webp, isobmff];
 
 export class MetadataTransfer {
     /**
@@ -132,7 +86,7 @@ export class MetadataTransfer {
         }
 
         const normalised = normalise(block, writer.readDimensions(outputBytes), orientationApplied);
-        const serialised = serialiseWithin(normalised, writer.maxExifBytes);
+        const serialised = serialiseWithin(normalised, writer.MAX_EXIF_BYTES);
         if (!serialised) {
             return output;
         }

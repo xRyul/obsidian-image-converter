@@ -87,7 +87,7 @@ interface Location {
 }
 
 /** True when the bytes declare an ISOBMFF still-image brand we can read. */
-export function isIsobmff(bytes: Uint8Array): boolean {
+export function matches(bytes: Uint8Array): boolean {
     const ftyp = findBox(bytes, 0, bytes.length, 'ftyp');
     if (!ftyp) {
         return false;
@@ -112,7 +112,7 @@ export function isIsobmff(bytes: Uint8Array): boolean {
  * @returns The raw block, or null if there is no readable EXIF item.
  */
 export function readExif(bytes: Uint8Array): Uint8Array | null {
-    if (!isIsobmff(bytes)) {
+    if (!matches(bytes)) {
         return null;
     }
 
@@ -160,7 +160,7 @@ export function readExif(bytes: Uint8Array): Uint8Array | null {
  * @throws If the file cannot be rewritten safely, or fails its own round trip.
  */
 export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
-    if (!isIsobmff(bytes)) {
+    if (!matches(bytes)) {
         throw new Error("Not an ISOBMFF still image");
     }
     if (exif.length > MAX_EXIF_BYTES) {
@@ -253,7 +253,7 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
  * @returns The dimensions, or null if no property could be resolved.
  */
 export function readDimensions(bytes: Uint8Array): Dimensions | null {
-    if (!isIsobmff(bytes)) {
+    if (!matches(bytes)) {
         return null;
     }
 

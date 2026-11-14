@@ -44,7 +44,7 @@ interface Chunk {
 }
 
 /** True when the bytes are a RIFF file of type WEBP. */
-export function isWebp(bytes: Uint8Array): boolean {
+export function matches(bytes: Uint8Array): boolean {
     return bytes.length >= HEADER_SIZE
         && matchesAt(bytes, 0, RIFF)
         && matchesAt(bytes, 8, WEBP);
@@ -56,7 +56,7 @@ export function isWebp(bytes: Uint8Array): boolean {
  * @returns The raw block, or null if the file carries none.
  */
 export function readExif(bytes: Uint8Array): Uint8Array | null {
-    if (!isWebp(bytes)) {
+    if (!matches(bytes)) {
         return null;
     }
 
@@ -80,7 +80,7 @@ export function readExif(bytes: Uint8Array): Uint8Array | null {
  *         back from the result.
  */
 export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
-    if (!isWebp(bytes)) {
+    if (!matches(bytes)) {
         throw new Error("Not a WebP");
     }
     if (exif.length > MAX_EXIF_BYTES) {
@@ -155,7 +155,7 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
  * @returns The dimensions, or null if no chunk gives a size.
  */
 export function readDimensions(bytes: Uint8Array): Dimensions | null {
-    if (!isWebp(bytes)) {
+    if (!matches(bytes)) {
         return null;
     }
     return readCanvas(bytes, parseChunks(bytes).chunks);
