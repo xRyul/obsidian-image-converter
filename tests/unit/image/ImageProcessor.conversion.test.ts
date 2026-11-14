@@ -21,7 +21,6 @@ vi.mock('fs/promises');
 vi.mock('os');
 vi.mock('path');
 vi.mock('sortablejs');
-vi.mock('piexifjs');
 vi.mock('@/main');
 
 import { ImageProcessor } from '../../../src/ImageProcessor';
@@ -37,8 +36,11 @@ import { setMockImageSize, failNextImageLoad } from '../../helpers/test-setup';
 import { 
   fakeCanvas
 } from '../../factories/canvas';
-import { exifFrom } from '../../factories/exif';
+import { asciiValue, exifBlockFrom, shortValue, TAG } from '../../factories/exif';
 import { fakeNotice } from '../../factories/obsidian';
+import { parseExifBlock } from '../../../src/metadata/ExifBlock';
+import * as metadataTransfer from '../../../src/metadata/transferMetadata';
+import { readExif as readJpegExif } from '../../../src/metadata/containers/jpeg';
 
 // Mock dependencies
 // The obsidian mock is already configured in vitest.config.ts via alias
@@ -308,22 +310,20 @@ describe('ImageProcessor - Conversion Tests', () => {
     });
 
     // Test 1.7
-    it('Given JPEG with EXIF, When re-encoding, Then EXIF from original is injected with Orientation removed', async () => {
+    // The tests in tests/unit/metadata check the bytes that the readers and
+    // writers make. This test only makes sure that the pipeline uses them.
+    it('Given JPEG with EXIF, When re-encoding, Then EXIF is carried over with Orientation normalised', async () => {
       // Arrange
-      const exifData = exifFrom({ 
-        Orientation: 6, // Rotated
-        Make: 'TestCamera',
-        Model: 'TestModel'
+      const exifData = exifBlockFrom({
+        orientation: 6, // Rotated
+        make: 'TestCamera',
+        model: 'TestModel'
       });
       const inputBytes = makeJpegBytes({ w: 100, h: 100, exif: exifData });
       const inputBlob = makeImageBlob(inputBytes, 'image/jpeg');
-      
-      // Mock piexif to verify orientation removal
-      const mockExtractMetadata = vi.spyOn(processor as any, 'extractMetadata');
-      const mockApplyMetadata = vi.spyOn(processor as any, 'applyMetadata');
-      
+
       // Act
-      await processor.processImage(
+      const result = await processor.processImage(
         inputBlob,
         'JPEG',
         0.85,
@@ -335,19 +335,49 @@ describe('ImageProcessor - Conversion Tests', () => {
       );
       
       // Assert
-      expect(mockExtractMetadata).toHaveBeenCalled();
-      expect(mockApplyMetadata).toHaveBeenCalled();
+      const raw = readJpegExif(new Uint8Array(result));
+      expect(raw).not.toBeNull();
+
+      const block = parseExifBlock(raw!)!;
+      expect(asciiValue(block.ifd0.get(TAG.make)!.value)).toBe('TestCamera');
+      expect(asciiValue(block.ifd0.get(TAG.model)!.value)).toBe('TestModel');
+      // Canvas applied the rotation to the pixels.
+      expect(shortValue(block.ifd0.get(TAG.orientation)!.value)).toBe(1);
     });
 
-    // Test 1.8  
-    it('Given JPEG EXIF injection failure, When applying metadata fails, Then returns JPEG without EXIF and no throw', async () => {
+    it.each([
+      // [case, header bytes, format, resize mode, expected]
+      ['a JPEG through canvas', [0xff, 0xd8, 0xff, 0xe0], 'WEBP', 'None', true],
+      ['a TIFF source', [0x49, 0x49, 0x2a, 0x00], 'WEBP', 'None', true],
+      ['a TIFF source through pngquant with no resize', [0x49, 0x49, 0x2a, 0x00], 'PNGQUANT', 'None', true],
+      ['pngquant with no resize', [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 'PNGQUANT', 'None', false],
+      ['pngquant with resize', [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 'PNGQUANT', 'Fit', true],
+    ] as const)('Given %s, When processing, Then the transfer is told if the pixels were rotated', async (_case, header, format, resizeMode, expected) => {
       // Arrange
-      const inputBytes = makeJpegBytes({ w: 100, h: 100 });
+      const output = new ArrayBuffer(4);
+      vi.spyOn(processor as any, 'processImageHelper').mockResolvedValue(output);
+      const transferSpy = vi
+        .spyOn(metadataTransfer, 'transferMetadata')
+        .mockResolvedValue(output);
+      const inputBlob = new Blob([new Uint8Array([...header, 0, 0, 0, 0, 0, 0, 0, 0])]);
+
+      // Act
+      await processor.processImage(inputBlob, format, 0.85, 1.0, resizeMode, 100, 100, 100, 'Auto', true);
+
+      // Assert
+      expect(transferSpy).toHaveBeenCalledWith(inputBlob, output, expected);
+    });
+
+    // Test 1.8
+    it('Given unreadable EXIF in the source, When converting, Then the image is returned without EXIF and no throw', async () => {
+      // Arrange
+      const inputBytes = makeJpegBytes({
+        w: 100,
+        h: 100,
+        exif: new Uint8Array([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08])
+      });
       const inputBlob = makeImageBlob(inputBytes, 'image/jpeg');
-      
-      // Mock metadata application to fail
-      vi.spyOn(processor as any, 'applyMetadata').mockRejectedValue(new Error('EXIF insert failed'));
-      
+
       // Act
       const result = await processor.processImage(
         inputBlob,
