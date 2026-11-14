@@ -6,10 +6,8 @@
 // descriptive tags, and removes all other IFD0 tags. The sub-IFDs hold only
 // metadata, so the reader keeps them complete.
 
+import { isEmptyBlock, parseExifBlock, serialiseExifBlock } from "../ExifBlock";
 import {
-    isEmptyBlock,
-    parseExifBlock,
-    serialiseExifBlock,
     TAG_ARTIST,
     TAG_COPYRIGHT,
     TAG_DATE_TIME,
@@ -22,7 +20,7 @@ import {
     TAG_SOFTWARE,
     TAG_X_RESOLUTION,
     TAG_Y_RESOLUTION,
-} from "../ExifBlock";
+} from "../tags";
 import { matchesAt } from "./bytes";
 
 const LITTLE_ENDIAN_HEADER = [0x49, 0x49, 0x2a, 0x00]; // "II" + 42

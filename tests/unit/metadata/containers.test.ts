@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { parseExifBlock } from '../../../src/metadata/ExifBlock';
+import { TAG_IMAGE_WIDTH } from '../../../src/metadata/tags';
 import * as isobmff from '../../../src/metadata/containers/isobmff';
 import * as jpeg from '../../../src/metadata/containers/jpeg';
 import * as png from '../../../src/metadata/containers/png';
@@ -40,7 +41,6 @@ const FLAG_XMP = 0x04;
 const FLAG_ANIMATION = 0x02;
 
 // TIFF structural tags, which describe pixel storage in the source file only.
-const TAG_IMAGE_WIDTH = 256;
 const TAG_COMPRESSION = 259;
 const TAG_STRIP_OFFSETS = 273;
 const TAG_STRIP_BYTE_COUNTS = 279;

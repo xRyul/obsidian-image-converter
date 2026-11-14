@@ -2,18 +2,31 @@
  * Builds real EXIF blocks (TIFF header + IFDs) for tests.
  */
 
+import {
+  TAG_EXIF_IFD_POINTER,
+  TAG_GPS_IFD_POINTER,
+  TAG_MAKE,
+  TAG_MODEL,
+  TAG_ORIENTATION,
+  TAG_PIXEL_X_DIMENSION,
+  TAG_PIXEL_Y_DIMENSION,
+  TAG_SOFTWARE,
+  TAG_USER_COMMENT,
+} from '../../src/metadata/tags';
+
 export const TAG = {
-  make: 271,
-  model: 272,
-  orientation: 274,
-  software: 305,
-  exifIfdPointer: 34665,
-  gpsIfdPointer: 34853,
+  make: TAG_MAKE,
+  model: TAG_MODEL,
+  orientation: TAG_ORIENTATION,
+  software: TAG_SOFTWARE,
+  exifIfdPointer: TAG_EXIF_IFD_POINTER,
+  gpsIfdPointer: TAG_GPS_IFD_POINTER,
+  userComment: TAG_USER_COMMENT,
+  pixelXDimension: TAG_PIXEL_X_DIMENSION,
+  pixelYDimension: TAG_PIXEL_Y_DIMENSION,
+  // Tags that only the tests use.
   isoSpeedRatings: 34855,
   dateTimeOriginal: 36867,
-  userComment: 37510,
-  pixelXDimension: 40962,
-  pixelYDimension: 40963,
   gpsLatitudeRef: 1,
   gpsLatitude: 2,
 } as const;
