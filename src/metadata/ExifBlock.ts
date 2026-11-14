@@ -92,26 +92,21 @@ export function parseExifBlock(bytes: Uint8Array): ExifBlock | null {
 
     const ifd0 = readIfd(bytes, view, ifd0Offset, littleEndian);
 
-    const exifPointer = readPointer(ifd0, TAG_EXIF_IFD_POINTER, littleEndian);
-    const gpsPointer = readPointer(ifd0, TAG_GPS_IFD_POINTER, littleEndian);
+    // Follows a pointer tag to its sub-IFD.
+    const readSubIfd = (parent: ExifIfd, tag: number): ExifIfd => {
+        const pointer = parent.get(tag);
+		// Sub-IFD pointers are structural and regenerated on serialise.
+        parent.delete(tag);
+        if (!pointer || pointer.value.length < 4) {
+            return new Map();
+        }
+        const offset = viewOf(pointer.value).getUint32(0, littleEndian);
+        return readIfd(bytes, view, offset, littleEndian);
+    };
 
-    const exif = exifPointer === null
-        ? new Map<number, ExifEntry>()
-        : readIfd(bytes, view, exifPointer, littleEndian);
-
-    const gps = gpsPointer === null
-        ? new Map<number, ExifEntry>()
-        : readIfd(bytes, view, gpsPointer, littleEndian);
-
-    const interopPointer = readPointer(exif, TAG_INTEROP_IFD_POINTER, littleEndian);
-    const interop = interopPointer === null
-        ? new Map<number, ExifEntry>()
-        : readIfd(bytes, view, interopPointer, littleEndian);
-
-    // Sub-IFD pointers are structural and regenerated on serialise.
-    ifd0.delete(TAG_EXIF_IFD_POINTER);
-    ifd0.delete(TAG_GPS_IFD_POINTER);
-    exif.delete(TAG_INTEROP_IFD_POINTER);
+    const exif = readSubIfd(ifd0, TAG_EXIF_IFD_POINTER);
+    const gps = readSubIfd(ifd0, TAG_GPS_IFD_POINTER);
+    const interop = readSubIfd(exif, TAG_INTEROP_IFD_POINTER);
 
     return { bigEndian, ifd0, exif, gps, interop };
 }
@@ -166,15 +161,6 @@ function readIfd(
     return ifd;
 }
 
-/** Reads a sub-IFD pointer tag as a plain offset, or null if absent/malformed. */
-function readPointer(ifd: ExifIfd, tag: number, littleEndian: boolean): number | null {
-    const entry = ifd.get(tag);
-    if (!entry || entry.value.length < 4) {
-        return null;
-    }
-    return viewOf(entry.value).getUint32(0, littleEndian);
-}
-
 // --- Serialising ---
 
 interface IfdPlan {
@@ -198,23 +184,22 @@ export function serialiseExifBlock(block: ExifBlock): Uint8Array {
     const gps = new Map(block.gps);
     const interop = new Map(block.interop);
 
-    // Structural pointers are always regenerated, never carried over.
-    ifd0.delete(TAG_EXIF_IFD_POINTER);
-    ifd0.delete(TAG_GPS_IFD_POINTER);
-    exif.delete(TAG_INTEROP_IFD_POINTER);
+    const setPointer = (parent: ExifIfd, tag: number, offset: number): void => {
+        parent.set(tag, longEntry(tag, offset, littleEndian));
+    };
+	
+    const link = (parent: ExifIfd, tag: number, child: ExifIfd): void => {
+        parent.delete(tag);
+        if (child.size > 0) {
+            setPointer(parent, tag, 0);
+        }
+    };
 
-    if (interop.size > 0) {
-        exif.set(TAG_INTEROP_IFD_POINTER, longEntry(TAG_INTEROP_IFD_POINTER, 0, littleEndian));
-    }
-    if (exif.size > 0) {
-        ifd0.set(TAG_EXIF_IFD_POINTER, longEntry(TAG_EXIF_IFD_POINTER, 0, littleEndian));
-    }
-    if (gps.size > 0) {
-        ifd0.set(TAG_GPS_IFD_POINTER, longEntry(TAG_GPS_IFD_POINTER, 0, littleEndian));
-    }
+    // Interop goes first: its pointer can make an empty Exif IFD non-empty.
+    link(exif, TAG_INTEROP_IFD_POINTER, interop);
+    link(ifd0, TAG_EXIF_IFD_POINTER, exif);
+    link(ifd0, TAG_GPS_IFD_POINTER, gps);
 
-    // Calculate the position of each IFD first. The pointer entries must hold
-    // these positions, and they are known only when all sizes are known.
     let cursor = HEADER_SIZE;
     const layout = (ifd: ExifIfd): IfdPlan => {
         const structureOffset = cursor;
@@ -228,20 +213,20 @@ export function serialiseExifBlock(block: ExifBlock): Uint8Array {
         return { ifd, structureOffset, dataOffset };
     };
 
-    const ifd0Plan = layout(ifd0);
-    const exifPlan = exif.size > 0 ? layout(exif) : null;
-    const interopPlan = interop.size > 0 ? layout(interop) : null;
-    const gpsPlan = gps.size > 0 ? layout(gps) : null;
+    // Places a sub-IFD and writes its position into the pointer of the parent.
+    const layoutChild = (parent: ExifIfd, tag: number, child: ExifIfd): IfdPlan | null => {
+        if (child.size === 0) {
+            return null;
+        }
+        const plan = layout(child);
+        setPointer(parent, tag, plan.structureOffset);
+        return plan;
+    };
 
-    if (exifPlan) {
-        ifd0.set(TAG_EXIF_IFD_POINTER, longEntry(TAG_EXIF_IFD_POINTER, exifPlan.structureOffset, littleEndian));
-    }
-    if (gpsPlan) {
-        ifd0.set(TAG_GPS_IFD_POINTER, longEntry(TAG_GPS_IFD_POINTER, gpsPlan.structureOffset, littleEndian));
-    }
-    if (interopPlan) {
-        exif.set(TAG_INTEROP_IFD_POINTER, longEntry(TAG_INTEROP_IFD_POINTER, interopPlan.structureOffset, littleEndian));
-    }
+    const ifd0Plan = layout(ifd0);
+    const exifPlan = layoutChild(ifd0, TAG_EXIF_IFD_POINTER, exif);
+    const interopPlan = layoutChild(exif, TAG_INTEROP_IFD_POINTER, interop);
+    const gpsPlan = layoutChild(ifd0, TAG_GPS_IFD_POINTER, gps);
 
     const out = new Uint8Array(cursor);
     const outView = new DataView(out.buffer);
