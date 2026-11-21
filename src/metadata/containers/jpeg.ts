@@ -58,6 +58,19 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
         throw new Error("EXIF block is too large for a JPEG APP1 segment");
     }
 
+    return rebuild(bytes, exif);
+}
+
+/**
+ * Removes every EXIF block from a JPEG.
+ * @throws If the segment walk never reaches the scan.
+ */
+export function removeExif(bytes: Uint8Array): Uint8Array {
+    return rebuild(bytes, null);
+}
+
+/** Copies the segments without any EXIF block, and adds `exif` if it is given. */
+function rebuild(bytes: Uint8Array, exif: Uint8Array | null): Uint8Array {
     const parts: Uint8Array[] = [bytes.subarray(0, 2)]; // SOI
 
     const segments = [...walkSegments(bytes)];
@@ -69,7 +82,9 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
         index = 1;
     }
 
-    parts.push(buildApp1(exif));
+    if (exif) {
+        parts.push(buildApp1(exif));
+    }
 
     for (; index < segments.length; index++) {
         const segment = segments[index];

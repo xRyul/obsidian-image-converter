@@ -24,6 +24,7 @@ vi.mock('sortablejs');
 vi.mock('@/main');
 
 import { ImageProcessor } from '../../../src/ImageProcessor';
+import { DEFAULT_SETTINGS } from '../../../src/ImageConverterSettings';
 import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
 import { 
   makePngBytes, 
@@ -365,7 +366,7 @@ describe('ImageProcessor - Conversion Tests', () => {
       await processor.processImage(inputBlob, format, 0.85, 1.0, resizeMode, 100, 100, 100, 'Auto', true);
 
       // Assert
-      expect(transferSpy).toHaveBeenCalledWith(inputBlob, output, expected);
+      expect(transferSpy).toHaveBeenCalledWith(inputBlob, output, expected, 'keep-all');
     });
 
     // Test 1.8
@@ -656,6 +657,23 @@ describe('ImageProcessor - Conversion Tests', () => {
       expect(asciiValue(block.ifd0.get(TAG.model)!.value)).toBe('TestModel');
       // Canvas applied the rotation to the pixels.
       expect(shortValue(block.ifd0.get(TAG.orientation)!.value)).toBe(1);
+    });
+
+    it.each([
+      ['ORIGINAL', 'None'],
+      ['NONE', 'Fit'],
+      ['NONE', 'None'],
+    ] as const)('Given the setting to remove all metadata, When a JPEG is processed as %s with resize %s, Then the output has no camera tags', async (format, resizeMode) => {
+      // Arrange
+      const exifData = exifBlockFrom({ make: 'TestCamera', model: 'TestModel' });
+      const inputBlob = makeImageBlob(makeJpegBytes({ w: 200, h: 200, exif: exifData }), 'image/jpeg');
+      const settings = { ...DEFAULT_SETTINGS, metadataMode: 'strip-all' as const };
+
+      // Act
+      const result = await processor.processImage(inputBlob, format, 0.8, 1.0, resizeMode, 100, 100, 100, 'Auto', true, undefined, settings);
+
+      // Assert
+      expect(readJpegExif(new Uint8Array(result))).toBeNull();
     });
 
     it.each([

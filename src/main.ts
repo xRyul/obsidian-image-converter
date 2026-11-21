@@ -25,6 +25,7 @@ import { ProcessFolderModal } from "./ProcessFolderModal";
 import { ProcessCurrentNote } from "./ProcessCurrentNote";
 import { ProcessAllVaultModal } from "./ProcessAllVaultModal"
 import { ImageCaptionManager } from "./ImageCaptionManager"
+import { transferMetadata } from "./metadata/transferMetadata";
 
 // Settings tab and all DEFAULTS
 import {
@@ -845,7 +846,8 @@ export default class ImageConverterPlugin extends Plugin {
                                 this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
                                 new Notice(`Using original image for "${file.name}" because size reduction was less than ${minSavingsKB} KB.`);
 
-                                const fileBuffer = await file.arrayBuffer();
+                                // The original keeps only the metadata that the setting allows.
+                                const fileBuffer = await transferMetadata(file, await file.arrayBuffer(), true, this.settings.metadataMode);
                                 tfile = await this.app.vault.createBinary(newFullPath, fileBuffer);
                             } else {
                                 // Processed image is smaller OR user doesn't want to revert
@@ -1189,7 +1191,8 @@ export default class ImageConverterPlugin extends Plugin {
                                 this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
                                 new Notice(`Using original image for "${file.name}" because size reduction was less than ${minSavingsKB} KB.`);
 
-                                const fileBuffer = await file.arrayBuffer();
+                                // The original keeps only the metadata that the setting allows.
+                                const fileBuffer = await transferMetadata(file, await file.arrayBuffer(), true, this.settings.metadataMode);
                                 tfile = await this.app.vault.createBinary(newFullPath, fileBuffer);
                             } else {
                                 // Processed image is smaller OR user doesn't want to revert

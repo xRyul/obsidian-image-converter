@@ -145,6 +145,19 @@ export function readExif(bytes: Uint8Array): Uint8Array | null {
  * @throws If the file cannot be rewritten safely, or fails its own round trip.
  */
 export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
+    return rebuild(bytes, exif);
+}
+
+/**
+ * Removes every EXIF item from a HEIC, HEIF or AVIF file.
+ * @throws If the file cannot be rewritten safely.
+ */
+export function removeExif(bytes: Uint8Array): Uint8Array {
+    return rebuild(bytes, null);
+}
+
+/** Rebuilds the item tables without the EXIF items, and adds `exif` if it is given. */
+function rebuild(bytes: Uint8Array, exif: Uint8Array | null): Uint8Array {
     const meta = readMeta(bytes);
     if (!meta) {
         throw new Error("ISOBMFF file has no meta box");
@@ -168,37 +181,48 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
         throw new Error("ISOBMFF item table has entries that cannot be rewritten");
     }
 
-    // Remove an existing EXIF item from the tables only. Its bytes stay in the
-    // file, unreferenced, so the offsets of the other items do not change.
-    const replaced = info.entries.find((entry) => entry.itemType === ITEM_TYPE_EXIF);
-    const replacedId = replaced ? replaced.itemId : null;
-    const keptEntries = info.entries.filter((entry) => entry.itemId !== replacedId);
-    const keptLocations = locations.filter((entry) => entry.itemId !== replacedId);
+    // Remove the existing EXIF items from the tables. Their bytes stay in the
+    // file, so the offsets of the other items do not change, but they are
+    // overwritten with zeros: unreferenced bytes still hold the location.
+    const removedIds = new Set(info.entries
+        .filter((entry) => entry.itemType === ITEM_TYPE_EXIF)
+        .map((entry) => entry.itemId));
+    if (!exif && removedIds.size === 0) {
+        return bytes;
+    }
+
+    const keptEntries = info.entries.filter((entry) => !removedIds.has(entry.itemId));
+    const keptLocations = locations.filter((entry) => !removedIds.has(entry.itemId));
+    const removedLocations = locations.filter((entry) => removedIds.has(entry.itemId));
 
     if (keptLocations.some((entry) => entry.indexed)) {
         throw new Error("ISOBMFF items use extent indices, which cannot be rewritten");
     }
 
-    const itemId = nextItemId(info.entries, locations);
-    const payload = concat([uint32(0), exif]); // no gap before the TIFF header
+    const added = exif
+        ? { itemId: nextItemId(info.entries, locations), payload: concat([uint32(0), exif]) } // no gap before the TIFF header
+        : null;
 
     // The sizes of these boxes do not change when the offsets change.
-    const newIinf = buildItemInfo(info, keptEntries, buildInfe(itemId));
-    const newIref = buildItemReferences(bytes, meta, itemId, replacedId);
+    const newIinf = buildItemInfo(info, keptEntries, added && buildInfe(added.itemId));
+    const newIref = buildItemReferences(bytes, meta, added && added.itemId, removedIds);
 
     // The size of an `iloc` box depends only on the number of entries and
     // extents, not on the values. Measure `meta` with placeholder offsets
     // first, then write the real offsets once the delta is known.
-    const placeholder = keptLocations.concat([newLocation(itemId, 0, payload.length)]);
+    const placeholder = added
+        ? keptLocations.concat([newLocation(added.itemId, 0, added.payload.length)])
+        : keptLocations;
     const probe = buildMeta(bytes, meta, newIinf, buildLocations(placeholder), newIref);
 
     const oldMetaLength = meta.box.end - meta.box.start;
     const delta = probe.length - oldMetaLength;
     const exifOffset = bytes.length + delta + 8; // past the appended mdat header
 
-    const patched = keptLocations
-        .map((entry) => shiftLocation(entry, meta.box.end, delta))
-        .concat([newLocation(itemId, exifOffset, payload.length)]);
+    const shifted = keptLocations.map((entry) => shiftLocation(entry, meta.box.end, delta));
+    const patched = added
+        ? shifted.concat([newLocation(added.itemId, exifOffset, added.payload.length)])
+        : shifted;
     const finalMeta = buildMeta(bytes, meta, newIinf, buildLocations(patched), newIref);
 
     if (finalMeta.length !== probe.length) {
@@ -209,11 +233,18 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
         bytes.subarray(0, meta.box.start),
         finalMeta,
         bytes.subarray(meta.box.end),
-        buildBox('mdat', payload),
+        ...(added ? [buildBox('mdat', added.payload)] : []),
     ]);
 
+    for (const location of removedLocations) {
+        eraseItem(out, location, meta.box, delta);
+    }
+
     const roundTripped = readExif(out);
-    if (!roundTripped || !equalBytes(roundTripped, exif)) {
+    const roundTripOk = exif
+        ? roundTripped !== null && equalBytes(roundTripped, exif)
+        : roundTripped === null;
+    if (!roundTripOk) {
         throw new Error("ISOBMFF EXIF round trip failed");
     }
     if (!itemsIntact(bytes, keptLocations, out)) {
@@ -221,6 +252,31 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
     }
 
     return out;
+}
+
+/**
+ * Overwrites the bytes of a removed item with zeros. Only file offsets
+ * (construction method 0) outside `meta` are erased: `meta` is rebuilt, so
+ * an offset inside it no longer points at the item.
+ */
+function eraseItem(out: Uint8Array, location: Location, oldMeta: Box, delta: number): void {
+    if (location.constructionMethod !== 0) {
+        return;
+    }
+
+    for (const extent of location.extents) {
+        const start = location.baseOffset + extent.offset;
+        const end = start + extent.length;
+        if (end > oldMeta.start && start < oldMeta.end) {
+            throw new Error("ISOBMFF EXIF item overlaps the meta box");
+        }
+
+        const shift = start >= oldMeta.end ? delta : 0;
+        if (end + shift > out.length) {
+            throw new Error("ISOBMFF EXIF item runs past the end of the file");
+        }
+        out.fill(0, start + shift, end + shift);
+    }
 }
 
 /**
@@ -594,15 +650,14 @@ function buildInfe(itemId: number): Uint8Array {
     ]));
 }
 
-function buildItemInfo(info: ItemInfo, kept: ItemEntry[], added: Uint8Array): Uint8Array {
-    const count = kept.length + 1;
+function buildItemInfo(info: ItemInfo, kept: ItemEntry[], added: Uint8Array | null): Uint8Array {
+    const entries = added ? [...kept.map((entry) => entry.bytes), added] : kept.map((entry) => entry.bytes);
 
     return buildBox('iinf', concat([
         new Uint8Array([info.version]),
         info.flags,
-        info.version === 0 ? uint16(count) : uint32(count),
-        ...kept.map((entry) => entry.bytes),
-        added,
+        info.version === 0 ? uint16(entries.length) : uint32(entries.length),
+        ...entries,
     ]));
 }
 
@@ -644,8 +699,9 @@ function buildLocations(locations: Location[]): Uint8Array {
 }
 
 /**
- * Builds `iref`, and adds a `cdsc` reference from the EXIF item to the primary
- * item. Most readers ignore an Exif item that is not linked to an image.
+ * Builds `iref` without the references from removed items, and adds a `cdsc`
+ * reference from the new EXIF item to the primary item. Most readers ignore an
+ * Exif item that is not linked to an image.
  *
  * @returns The box, or null when there is nothing to reference and no existing
  * box to preserve.
@@ -653,11 +709,11 @@ function buildLocations(locations: Location[]): Uint8Array {
 function buildItemReferences(
     bytes: Uint8Array,
     meta: Meta,
-    itemId: number,
-    replacedId: number | null
+    itemId: number | null,
+    removedIds: Set<number>
 ): Uint8Array | null {
     const existing = findChild(meta, 'iref');
-    const primary = readPrimaryItemId(bytes, meta);
+    const primary = itemId === null ? null : readPrimaryItemId(bytes, meta);
 
     if (!existing && primary === null) {
         return null;
@@ -676,12 +732,12 @@ function buildItemReferences(
                 continue;
             }
 
-            // References from the item being replaced go with it. Nothing points
-            // *to* an Exif item, so the target lists are left alone.
+            // References from a removed item go with it. Nothing points *to* an
+            // Exif item, so the target lists are left alone.
             const from = wideId
                 ? view.getUint32(reference.payloadStart, false)
                 : view.getUint16(reference.payloadStart, false);
-            if (from === replacedId) {
+            if (removedIds.has(from)) {
                 continue;
             }
 
@@ -689,7 +745,7 @@ function buildItemReferences(
         }
     }
 
-    if (primary !== null) {
+    if (itemId !== null && primary !== null) {
         references.push(buildBox(REFERENCE_TYPE_EXIF, concat([
             wideId ? uint32(itemId) : uint16(itemId),
             uint16(1), // reference_count

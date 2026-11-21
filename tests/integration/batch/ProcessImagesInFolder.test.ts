@@ -166,4 +166,25 @@ describe('BatchImageProcessor — Folder processing (recursive, skipFormats)', (
     expect(contentAfter).toContain('SubSubfolder2-1757522743837.webp');
     expect(contentAfter).toContain('SubSubfolder2-1757527917825.webp');
   });
+
+  it.each([
+    ['processImagesInFolder', 'images'],
+    ['processLinkedImagesInFolder', 'notes'],
+  ] as const)('Given the metadata setting, When %s runs, Then processImage receives the plugin settings', async (method, folderPath) => {
+    // Linked mode processes the images that the notes in the folder link to.
+    const notesFolder = fakeTFolder({ path: 'notes', name: 'notes' });
+    const vault = fakeVault({ files: [note, aPng], folders: [folderA, notesFolder] }) as any;
+    await vault.modify(note, '![](images/a.png)');
+    app = fakeApp({ vault, metadataCache: { resolvedLinks: { [note.path]: { [aPng.path]: 1 } } } as any }) as any;
+    app.fileManager = { renameFile: vi.fn(async (file: any, newPath: string) => { await app.vault.rename(file, newPath); }) };
+    plugin.settings.metadataMode = 'strip-location';
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
+
+    await bip[method](folderPath, false);
+
+    expect(imageProcessor.processImage).toHaveBeenCalled();
+    for (const call of imageProcessor.processImage.mock.calls) {
+      expect(call[11]).toBe(plugin.settings);
+    }
+  });
 });

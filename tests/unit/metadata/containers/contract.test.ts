@@ -39,6 +39,7 @@ interface Fixture {
     matches(bytes: Uint8Array): boolean;
     readExif(bytes: Uint8Array): Uint8Array | null;
     writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array;
+    removeExif(bytes: Uint8Array): Uint8Array;
     readDimensions(bytes: Uint8Array): Dimensions | null;
   };
   build: (options?: BuildOptions) => Uint8Array;
@@ -140,5 +141,35 @@ describe.each(fixtures)('$name container contract', ({ container, build, foreign
 
   it('Given a file, When dimensions are read, Then the values in the image header are returned', () => {
     expect(container.readDimensions(build({ width: 321, height: 123 }))).toEqual({ width: 321, height: 123 });
+  });
+
+  it('Given a file with EXIF, When the EXIF is removed, Then no block is left and the image data is kept byte for byte', () => {
+    const bytes = build({ exif: exifBlockFrom({ make: 'Cam', gpsLatitudeRef: 'N' }) });
+    const before = imageData(bytes);
+
+    const out = container.removeExif(bytes);
+
+    expect(container.readExif(out)).toBeNull();
+    expect(exifCount(out)).toBe(0);
+    expect(container.matches(out)).toBe(true);
+    expect(imageData(out)).toEqual(before);
+  });
+
+  it('Given a file with EXIF, When the EXIF is removed, Then the camera and location bytes are gone from the file', () => {
+    const bytes = build({ exif: exifBlockFrom({ make: 'SecretCam', gpsLatitudeRef: 'N' }) });
+
+    const out = container.removeExif(bytes);
+
+    expect(new TextDecoder('latin1').decode(out)).not.toContain('SecretCam');
+  });
+
+  it('Given a file without EXIF, When the EXIF is removed, Then the file reads the same', () => {
+    const bytes = build();
+
+    const out = container.removeExif(bytes);
+
+    expect(container.readExif(out)).toBeNull();
+    expect(imageData(out)).toEqual(imageData(bytes));
+    expect(container.readDimensions(out)).toEqual(container.readDimensions(bytes));
   });
 });

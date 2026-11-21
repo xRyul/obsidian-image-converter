@@ -107,6 +107,22 @@ describe('BatchImageProcessor orchestration', () => {
     expect(content).toContain(newPath);
   });
 
+  it('Given the metadata setting, When images in a note are processed, Then processImage receives the plugin settings', async () => {
+    // The metadata setting is read from these settings. Without them, batch
+    // jobs would always keep all metadata.
+    app.metadataCache.resolvedLinks[note.path] = { [imgA.path]: 1 };
+    plugin.settings.metadataMode = 'strip-all';
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor, folderAndFilenameManagement);
+    await app.vault.modify(note, '![alt](images/a.png)');
+
+    await bip.processImagesInNote(note);
+
+    expect(imageProcessor.processImage).toHaveBeenCalledTimes(1);
+    const settingsArg = imageProcessor.processImage.mock.calls[0][11];
+    expect(settingsArg).toBe(plugin.settings);
+    expect(settingsArg.metadataMode).toBe('strip-all');
+  });
+
   it('4.1 Sequential processing across multiple files and progress updates', async () => {
     const bip = new BatchImageProcessor(app, plugin, imageProcessor, folderAndFilenameManagement);
     await app.vault.modify(note, '![a](images/a.png) and ![b](images/b.jpg)');

@@ -115,6 +115,20 @@ describe('WebP container', () => {
     expect(webpRiffSizeValid(out)).toBe(true);
   });
 
+  it('Given extended WebP with EXIF and alpha, When the EXIF is removed, Then the EXIF flag is cleared and the other flags are kept', () => {
+    const bytes = buildWebpExtended({ exif: exifBlockFrom({ make: 'Cam' }), alpha: true });
+
+    const out = webp.removeExif(bytes);
+
+    expect(webpVp8xFlags(out)! & FLAG_EXIF).toBe(0);
+    expect(webpVp8xFlags(out)! & FLAG_ALPHA).toBe(FLAG_ALPHA);
+    expect(webpRiffSizeValid(out)).toBe(true);
+  });
+
+  it('Given a WebP with a damaged image chunk, When the EXIF is removed, Then it throws instead of dropping the image data', () => {
+    expect(() => webp.removeExif(damageWebpImageChunk(buildWebpExtended({ exif: exifBlockFrom({ make: 'Cam' }) })))).toThrow();
+  });
+
   it('Given a WebP with a damaged image chunk, When written, Then it throws instead of dropping the image data', () => {
     const bytes = buildWebpExtended();
 

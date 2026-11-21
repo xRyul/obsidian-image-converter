@@ -133,6 +133,38 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
 }
 
 /**
+ * Removes the EXIF chunk from a WebP, and clears the EXIF flag in VP8X.
+ * @throws If the file cannot be fully parsed.
+ */
+export function removeExif(bytes: Uint8Array): Uint8Array {
+    const { chunks, complete } = parseChunks(bytes);
+    if (chunks.length === 0) {
+        throw new Error("WebP has no chunks");
+    }
+    if (!complete) {
+        throw new Error("WebP chunks could not be fully parsed");
+    }
+
+    const body: Uint8Array[] = [];
+    for (const chunk of chunks) {
+        if (chunk.type === CHUNK_EXIF) {
+            continue;
+        }
+
+        const payload = payloadOf(bytes, chunk);
+        if (chunk.type === CHUNK_VP8X && payload.length > 0) {
+            const flags = payload.slice();
+            flags[0] &= ~FLAG_EXIF;
+            body.push(buildChunk(CHUNK_VP8X, flags));
+        } else {
+            body.push(buildChunk(chunk.type, payload));
+        }
+    }
+
+    return buildRiff(body);
+}
+
+/**
  * Reads the canvas size from the VP8X chunk or the image data of a WebP.
  * @returns The dimensions, or null if no chunk gives a size.
  */

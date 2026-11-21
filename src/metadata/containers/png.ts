@@ -46,8 +46,21 @@ export function readExif(bytes: Uint8Array): Uint8Array | null {
  * @throws If the chunk walk never reaches IEND.
  */
 export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
+    return rebuild(bytes, exif);
+}
+
+/**
+ * Removes every EXIF block from a PNG.
+ * @throws If the chunk walk never reaches IEND.
+ */
+export function removeExif(bytes: Uint8Array): Uint8Array {
+    return rebuild(bytes, null);
+}
+
+/** Copies the chunks without any `eXIf`, and adds `exif` if it is given. */
+function rebuild(bytes: Uint8Array, exif: Uint8Array | null): Uint8Array {
     const parts: Uint8Array[] = [bytes.subarray(0, SIGNATURE.length)];
-    let inserted = false;
+    let pending = exif;
     let reachedEnd = false;
 
     for (const chunk of walkChunks(bytes)) {
@@ -56,9 +69,9 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
         }
 
         // eXIf must sit between IHDR and the image data.
-        if (!inserted && (chunk.type === CHUNK_IDAT || chunk.type === CHUNK_IEND)) {
-            parts.push(buildChunk(CHUNK_EXIF, exif));
-            inserted = true;
+        if (pending && (chunk.type === CHUNK_IDAT || chunk.type === CHUNK_IEND)) {
+            parts.push(buildChunk(CHUNK_EXIF, pending));
+            pending = null;
         }
 
         parts.push(bytes.subarray(chunk.start, chunk.end));
@@ -68,7 +81,7 @@ export function writeExif(bytes: Uint8Array, exif: Uint8Array): Uint8Array {
         }
     }
 
-    if (!inserted) {
+    if (pending) {
         throw new Error("PNG has no IDAT or IEND chunk");
     }
 

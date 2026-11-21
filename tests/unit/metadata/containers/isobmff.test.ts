@@ -86,6 +86,16 @@ describe('ISOBMFF container (HEIC / AVIF)', () => {
     expect(isobmffReferences(out).filter((reference) => reference.type === 'cdsc')).toHaveLength(1);
   });
 
+  it('Given a HEIC with EXIF, When the EXIF is removed, Then its item and reference are gone and no mdat is added', () => {
+    const file = buildIsobmff({ brand: 'heic', layout: 'meta-first', exif: exifBlockFrom({ make: 'Cam' }) });
+
+    const out = isobmff.removeExif(file);
+
+    expect(isobmffItems(out).map((item) => item.itemType)).toEqual(['av01']);
+    expect(isobmffReferences(out).filter((reference) => reference.type === 'cdsc')).toHaveLength(0);
+    expect(isobmffBoxTypes(out)).toEqual(['ftyp', 'meta', 'mdat']);
+  });
+
   it('Given an AVIF, When written, Then the EXIF data is in a new mdat at the end', () => {
     const file = buildIsobmff({ brand: 'avif', layout: 'meta-first' });
 

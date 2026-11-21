@@ -531,6 +531,35 @@ describe('Settings defaults, global preset application, and field constraints (1
     });
   });
 
+  it('Given the metadata dropdown, When an option is chosen, Then the setting is saved', async () => {
+    tab.display();
+    const save = vi.spyOn(plugin, 'saveSettings').mockResolvedValue();
+
+    const metadataSelect = Array.from(tab.containerEl.querySelectorAll('select'))
+      .find((select) => select.querySelector('option[value="strip-location"]'));
+
+    expect(metadataSelect).toBeTruthy();
+    expect(metadataSelect!.value).toBe('keep-all');
+    expect(Array.from(metadataSelect!.options).map((option) => option.value)).toEqual(['keep-all', 'strip-location', 'strip-all']);
+
+    changeSelect(metadataSelect!, 'strip-all');
+
+    await vi.waitFor(() => {
+      expect(plugin.settings.metadataMode).toBe('strip-all');
+      expect(save).toHaveBeenCalled();
+    });
+  });
+
+  it('Given settings saved before the metadata setting existed, When loadSettings, Then all metadata is kept', async () => {
+    const app2 = makeAppWithStorage();
+    const plugin2 = new ImageConverterPlugin(app2, { id: 'image-converter' } as any);
+    vi.spyOn(plugin2 as any, 'loadData').mockResolvedValue({ selectedFolderPreset: 'Root folder' });
+
+    await plugin2.loadSettings();
+
+    expect(plugin2.settings.metadataMode).toBe('keep-all');
+  });
+
   it('11.9 Safe defaults on missing fields: shallow merge preserves defaults for unspecified fields', async () => {
     // Simulate stored settings with only a couple of overrides
     const app2 = makeAppWithStorage();

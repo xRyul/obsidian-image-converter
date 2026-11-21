@@ -177,7 +177,9 @@ export class BatchImageProcessor {
                         desiredHeight,
                         desiredLength,
                         enlargeOrReduce as EnlargeReduce,
-                        allowLargerFiles
+                        allowLargerFiles,
+                        undefined,
+                        this.plugin.settings
                     );
 
                     // Rename first so the extension matches the processed bytes
@@ -352,7 +354,9 @@ export class BatchImageProcessor {
                         desiredHeight,
                         desiredLength,
                         enlargeOrReduce as EnlargeReduce,
-                        allowLargerFiles
+                        allowLargerFiles,
+                        undefined,
+                        this.plugin.settings
                     );
 
                     if (oldPath !== newFilePath) {
@@ -522,7 +526,9 @@ export class BatchImageProcessor {
                         desiredHeight,
                         desiredLength,
                         enlargeOrReduce as EnlargeReduce,
-                        allowLargerFiles
+                        allowLargerFiles,
+                        undefined,
+                        this.plugin.settings
                     );
 
                     // Resolve conflicts similar to vault-wide behavior
@@ -720,7 +726,9 @@ export class BatchImageProcessor {
                         desiredHeight,
                         desiredLength,
                         enlargeOrReduce as EnlargeReduce,
-                        allowLargerFiles
+                        allowLargerFiles,
+                        undefined,
+                        this.plugin.settings
                     );
 
                     // Construct the new file path based on conversion settings

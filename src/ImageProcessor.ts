@@ -468,7 +468,9 @@ export class ImageProcessor {
      * @param desiredLongestEdge - The desired longest edge for resizing.
      * @param enlargeOrReduce - Whether to enlarge or reduce the image during resizing.
      * @param allowLargerFiles - Whether to allow output files larger than the original.
+     * @param settings - Plugin settings. `metadataMode` decides which EXIF the output keeps.
      * @returns A Promise that resolves to the processed image as an ArrayBuffer.
+     * @throws If the metadata setting asks to remove EXIF and it cannot be removed.
      */
     async processImage(
         file: Blob,
@@ -501,7 +503,8 @@ export class ImageProcessor {
         );
 
         const orientationApplied = await this.orientationApplied(file, format, resizeMode);
-        return transferMetadata(file, processedImage, orientationApplied);
+        const metadataMode = settings?.metadataMode ?? DEFAULT_SETTINGS.metadataMode;
+        return transferMetadata(file, processedImage, orientationApplied, metadataMode);
     }
 
     /**

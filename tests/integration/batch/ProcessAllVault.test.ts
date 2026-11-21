@@ -108,6 +108,18 @@ describe('BatchImageProcessor — Vault-wide orchestration', () => {
     expect(oldPaths.some((pathStr: string) => pathStr.endsWith('images/dup.png')) || newPaths.some((pathStr: string) => pathStr.endsWith('images/dup.webp'))).toBe(true);
   });
 
+  it('Given the metadata setting, When processing vault-wide, Then processImage receives the plugin settings', async () => {
+    plugin.settings.metadataMode = 'strip-all';
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
+
+    await bip.processAllVaultImages();
+
+    expect(imageProcessor.processImage).toHaveBeenCalled();
+    for (const call of imageProcessor.processImage.mock.calls) {
+      expect(call[11]).toBe(plugin.settings);
+    }
+  });
+
   it('4.12 Given convertTo set, When renaming, Then new filenames use target extension and conflicts handled', async () => {
     const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
 

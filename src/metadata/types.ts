@@ -37,3 +37,12 @@ export interface Dimensions {
     width: number;
     height: number;
 }
+
+/**
+ * Which metadata a converted image keeps.
+ * - keep-all: every tag the source has.
+ * - strip-location: every tag except the GPS sub-IFD.
+ * - strip-all: no EXIF. Only Orientation is kept, when the pixels were not
+ *   rotated, so the image does not show on its side.
+ */
+export type MetadataMode = "keep-all" | "strip-location" | "strip-all";

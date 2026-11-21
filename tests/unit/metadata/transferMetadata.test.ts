@@ -5,7 +5,7 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
-import { transferMetadata } from '../../../src/metadata/transferMetadata';
+import { removeMetadata, transferMetadata } from '../../../src/metadata/transferMetadata';
 import { parseExifBlock } from '../../../src/metadata/ExifBlock';
 import * as isobmff from '../../../src/metadata/containers/isobmff';
 import * as jpeg from '../../../src/metadata/containers/jpeg';
@@ -233,5 +233,112 @@ describe('transferMetadata', () => {
 
     expect(new Uint8Array(result)).toEqual(headerOnly);
     expect(warn).toHaveBeenCalled();
+  });
+
+  // --- metadata setting -----------------------------------------------------
+
+  describe('metadata mode', () => {
+    it('Given strip-location, When metadata is transferred, Then the GPS data is removed and the other tags are kept', async () => {
+      const source = blobOf(makeJpegBytes({ exif: richExif() }));
+      const output = bufferOf(buildWebpLossy());
+
+      const result = await transferMetadata(source, output, true, 'strip-location');
+
+      const block = parseExifBlock(webp.readExif(new Uint8Array(result))!)!;
+      expect(block.gps.size).toBe(0);
+      expect(block.ifd0.has(TAG.gpsIfdPointer)).toBe(false);
+      expect(asciiValue(block.ifd0.get(TAG.make)!.value)).toBe('TestCamera');
+      expect(asciiValue(block.exif.get(TAG.dateTimeOriginal)!.value)).toBe('2024:01:02 03:04:05');
+    });
+
+    it('Given strip-all, When metadata is transferred, Then the output has no EXIF', async () => {
+      const source = blobOf(makeJpegBytes({ exif: richExif() }));
+      const output = bufferOf(buildWebpLossy());
+
+      const result = await transferMetadata(source, output, true, 'strip-all');
+
+      expect(webp.readExif(new Uint8Array(result))).toBeNull();
+    });
+
+    it('Given strip-all and an output that already has EXIF, When metadata is transferred, Then that EXIF is removed', async () => {
+      // An encoder can write its own EXIF block. strip-all must not keep it.
+      const source = blobOf(makeJpegBytes({ exif: richExif() }));
+      const output = bufferOf(buildPng({ exif: exifBlockFrom({ make: 'EncoderTag' }) }));
+
+      const result = await transferMetadata(source, output, true, 'strip-all');
+
+      expect(png.readExif(new Uint8Array(result))).toBeNull();
+    });
+
+    it('Given strip-all and pixels that were not rotated, When metadata is transferred, Then only Orientation is kept', async () => {
+      // pngquant with no resize keeps the pixels as stored. Without the tag,
+      // a portrait photo would show on its side.
+      const source = blobOf(buildPng({ exif: richExif() }));
+      const output = bufferOf(buildPng({ width: 64, height: 48 }));
+
+      const result = await transferMetadata(source, output, false, 'strip-all');
+
+      const block = parseExifBlock(png.readExif(new Uint8Array(result))!)!;
+      expect([...block.ifd0.keys()]).toEqual([TAG.orientation]);
+      expect(shortValue(block.ifd0.get(TAG.orientation)!.value)).toBe(6);
+      expect(block.exif.size + block.gps.size + block.interop.size).toBe(0);
+    });
+
+    it('Given strip-all and the source bytes returned unchanged, When metadata is transferred, Then the EXIF is removed except Orientation', async () => {
+      // NONE with no resize, or a fallback after an error, returns the source bytes.
+      const bytes = new Uint8Array(makeJpegBytes({ exif: richExif() }));
+
+      const result = await transferMetadata(blobOf(bytes), bufferOf(bytes), true, 'strip-all');
+
+      const block = parseExifBlock(jpeg.readExif(new Uint8Array(result))!)!;
+      expect([...block.ifd0.keys()]).toEqual([TAG.orientation]);
+      expect(shortValue(block.ifd0.get(TAG.orientation)!.value)).toBe(6);
+    });
+
+    it('Given strip-location and the source bytes returned unchanged, When metadata is transferred, Then only the GPS data is removed', async () => {
+      const bytes = new Uint8Array(makeJpegBytes({ exif: richExif() }));
+
+      const result = await transferMetadata(blobOf(bytes), bufferOf(bytes), true, 'strip-location');
+
+      const block = parseExifBlock(jpeg.readExif(new Uint8Array(result))!)!;
+      expect(block.gps.size).toBe(0);
+      expect(shortValue(block.ifd0.get(TAG.orientation)!.value)).toBe(6);
+      expect(asciiValue(block.ifd0.get(TAG.make)!.value)).toBe('TestCamera');
+    });
+
+    it('Given strip-location and an unchanged source with no GPS, When metadata is transferred, Then the bytes are returned as they are', async () => {
+      const bytes = new Uint8Array(makeJpegBytes({ exif: exifBlockFrom({ make: 'TestCamera' }) }));
+      const output = bufferOf(bytes);
+
+      const result = await transferMetadata(blobOf(bytes), output, true, 'strip-location');
+
+      expect(result).toBe(output);
+    });
+
+    it('Given strip-all and an output that the writer rejects, When metadata is transferred, Then it throws so the image is not saved', async () => {
+      // A WebP whose EXIF reads, but whose XMP chunk after it is cut short.
+      // The file cannot be rebuilt, so the EXIF can be neither written nor removed.
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const source = blobOf(makeJpegBytes({ exif: richExif() }));
+      const output = buildWebpExtended({ exif: exifBlockFrom({ make: 'EncoderTag' }), xmp: new Uint8Array(16) });
+      const truncated = output.slice(0, output.length - 2);
+      expect(webp.readExif(truncated)).not.toBeNull();
+
+      await expect(transferMetadata(source, bufferOf(truncated), true, 'strip-all')).rejects.toThrow();
+    });
+  });
+
+  describe('removeMetadata', () => {
+    it('Given an image without EXIF, When removed, Then the same buffer is returned', () => {
+      const output = bufferOf(buildWebpLossy());
+
+      expect(removeMetadata(output)).toBe(output);
+    });
+
+    it('Given a TIFF with EXIF, When removed, Then it throws: there is no writer for TIFF', () => {
+      const tiffBytes = exifBlockFrom({ make: 'Scanner' });
+
+      expect(() => removeMetadata(bufferOf(tiffBytes))).toThrow();
+    });
   });
 });

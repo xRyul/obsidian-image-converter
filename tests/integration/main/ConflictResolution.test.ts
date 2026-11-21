@@ -2,6 +2,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import ImageConverterPlugin from '../../../src/main';
 import { fakeApp, fakeVault, fakeTFile, fakePluginManifest } from '../../factories/obsidian';
+import { exifBlockFrom } from '../../factories/exif';
+import { makeJpegBytes } from '../../factories/image';
+import { readExif as readJpegExif } from '../../../src/metadata/containers/jpeg';
 
 function makeFile(name: string, type: string, size = 8): File {
   const buf = new Uint8Array(size).map((_, i) => (i % 256));
@@ -146,5 +149,43 @@ describe('Conflict resolution and overwrite safety (Phase 9: 27.2)', () => {
     expect(pathArg).toBe('images/x.webp');
     expect(bufferArg.byteLength).toBe(file.size);
     expect(bufferArg.byteLength).toBeGreaterThan(processedBuffer.byteLength);
+  });
+
+  it('Given the setting to remove all metadata, When the original is used because savings are too small, Then the saved original has no EXIF', async () => {
+    const { app, plugin } = setupPluginWithNote();
+
+    await plugin.loadSettings();
+    await plugin.onload();
+
+    (plugin as any).settings.modalBehavior = 'never';
+    (plugin as any).settings.metadataMode = 'strip-all';
+    (plugin as any).settings.selectedConversionPreset = 'WEBP (75, no resizing)';
+    const selectedPreset = (plugin as any).settings.conversionPresets.find((preset: any) => preset.name === 'WEBP (75, no resizing)');
+    selectedPreset.revertToOriginalIfLarger = true;
+    selectedPreset.minimumCompressionSavingsInKB = 1;
+
+    const original = new Uint8Array(makeJpegBytes({ w: 10, h: 10, exif: exifBlockFrom({ make: 'TestCamera', gpsLatitudeRef: 'N' }) }));
+    (plugin as any).imageProcessor = { processImage: vi.fn(async () => new ArrayBuffer(original.length)) };
+    (plugin as any).showSizeComparisonNotification = vi.fn();
+    (plugin as any).linkFormatter = { formatLink: vi.fn(async (path: string) => `![](/${path})`) };
+
+    vi.spyOn((plugin as any).folderAndFilenameManagement, 'determineDestination').mockResolvedValue({
+      destinationPath: 'images',
+      newFilename: 'x.webp'
+    });
+
+    const editor = {
+      getCursor: () => ({ line: 0, ch: 0 }),
+      replaceRange: vi.fn(),
+      setCursor: vi.fn(),
+    } as any;
+
+    const file = new File([original], 'x.jpg', { type: 'image/jpeg' });
+    const items = [{ kind: 'file', type: 'image/jpeg', file }];
+
+    await (plugin as any).handlePaste(items, editor, { line: 0, ch: 0 });
+
+    const [, bufferArg] = (app.vault.createBinary as any).mock.calls[0] as [string, ArrayBuffer];
+    expect(readJpegExif(new Uint8Array(bufferArg))).toBeNull();
   });
 });

@@ -17,6 +17,7 @@ import { ToolPreset } from "./ImageAnnotation";
 import { SingleImageModalSettings } from './ProcessSingleImageModal';
 import { findFfmpegExecutablePath, normalizeExecutablePath } from "./utils/ffmpegPath";
 import { addInfoIcon } from "./utils/settingInfo";
+import { MetadataMode } from "./metadata/types";
 
 import Sortable from "sortablejs";
 
@@ -213,6 +214,7 @@ export interface ImageConverterSettings {
     enableContextMenu: boolean;
 
     showSpaceSavedNotification: boolean;
+    metadataMode: MetadataMode;
     revertToOriginalIfLarger: boolean;
     minimumCompressionSavingsInKB: number;
 
@@ -412,6 +414,7 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
     enableContextMenu: true,
 
     showSpaceSavedNotification: true,
+    metadataMode: "keep-all",
     revertToOriginalIfLarger: false,
     minimumCompressionSavingsInKB: 30,
 
@@ -628,6 +631,21 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 })
             );
+
+        new Setting(containerEl)
+            .setName("Image metadata")
+            .then((setting) => addInfoIcon(setting, "EXIF metadata such as camera, capture date and GPS location. It applies to every image the plugin converts, compresses or resizes, and to an original that it keeps because the converted file was larger. Images that a skip pattern or 'Never process these filenames' excludes are saved as they are."))
+            .addDropdown((dropdown) => {
+                dropdown
+                    .addOption("keep-all", "Keep all")
+                    .addOption("strip-location", "Keep all except location")
+                    .addOption("strip-all", "Remove all")
+                    .setValue(this.plugin.settings.metadataMode)
+                    .onChange(async (value: MetadataMode) => {
+                        this.plugin.settings.metadataMode = value;
+                        await this.plugin.saveSettings();
+                    });
+            });
 
 
         new Setting(containerEl)
