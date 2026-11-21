@@ -77,7 +77,12 @@ export function parseExifBlock(bytes: Uint8Array): ExifBlock | null {
 
     const ifd0Offset = view.getUint32(4, littleEndian);
 
-    const ifd0 = readIfd(bytes, view, ifd0Offset, littleEndian);
+    // In a valid block each value has its own bytes, so the values cannot add
+    // up to more than the block. Entries that share bytes can: 65,535 entries
+    // that point at the same 4 MB would ask for 256 GB of copies.
+    const budget = { remaining: bytes.length };
+
+    const ifd0 = readIfd(bytes, view, ifd0Offset, littleEndian, budget);
 
     // Follows a pointer tag to its sub-IFD.
     const readSubIfd = (parent: ExifIfd, tag: number): ExifIfd => {
@@ -88,7 +93,7 @@ export function parseExifBlock(bytes: Uint8Array): ExifBlock | null {
             return new Map();
         }
         const offset = viewOf(pointer.value).getUint32(0, littleEndian);
-        return readIfd(bytes, view, offset, littleEndian);
+        return readIfd(bytes, view, offset, littleEndian, budget);
     };
 
     const exif = readSubIfd(ifd0, TAG_EXIF_IFD_POINTER);
@@ -102,7 +107,8 @@ function readIfd(
     bytes: Uint8Array,
     view: DataView,
     offset: number,
-    littleEndian: boolean
+    littleEndian: boolean,
+    budget: { remaining: number }
 ): ExifIfd {
     const ifd: ExifIfd = new Map();
 
@@ -135,11 +141,17 @@ function readIfd(
         if (byteLength <= 4) {
             value = bytes.slice(entryOffset + 8, entryOffset + 8 + byteLength);
         } else {
+            // Skips only this value. Inline values, such as the sub-IFD
+            // pointers, sit in the entry itself and are still read.
+            if (byteLength > budget.remaining) {
+                continue;
+            }
             const valueOffset = view.getUint32(entryOffset + 8, littleEndian);
             if (valueOffset + byteLength > bytes.length) {
                 continue;
             }
             value = bytes.slice(valueOffset, valueOffset + byteLength);
+            budget.remaining -= byteLength;
         }
 
         ifd.set(tag, { tag, type, count, value });

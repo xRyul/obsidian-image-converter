@@ -12,7 +12,14 @@ import {
   serialiseExifBlock,
   serialiseWithin,
 } from '../../../src/metadata/ExifBlock';
-import { asciiValue, exifBlockFrom, longValue, shortValue, TAG } from '../../factories/exif';
+import {
+  asciiValue,
+  exifBlockFrom,
+  exifBlockWithSharedValue,
+  longValue,
+  shortValue,
+  TAG,
+} from '../../factories/exif';
 
 describe('ExifBlock', () => {
   describe('parseExifBlock', () => {
@@ -74,6 +81,24 @@ describe('ExifBlock', () => {
       const truncated = block.slice(0, block.length - 6);
 
       expect(() => parseExifBlock(truncated)).not.toThrow();
+    });
+
+    it('Given many entries that share one value, When parsed, Then the copies stay within the size of the block', () => {
+      // 2,000 entries that point at the same 256 KB would copy 500 MB.
+      const block = exifBlockWithSharedValue({ entryCount: 2000, valueLength: 256 * 1024, isoSpeedRatings: 800 });
+
+      const parsed = parseExifBlock(block);
+
+      const copied = [...parsed!.ifd0.values()].reduce((total, entry) => total + entry.value.length, 0);
+      expect(copied).toBeLessThanOrEqual(block.length);
+    });
+
+    it('Given many entries that share one value, When parsed, Then the sub-IFD after them is still read', () => {
+      const block = exifBlockWithSharedValue({ entryCount: 50, valueLength: 64 * 1024, isoSpeedRatings: 800 });
+
+      const parsed = parseExifBlock(block);
+
+      expect(shortValue(parsed!.exif.get(TAG.isoSpeedRatings)!.value)).toBe(800);
     });
   });
 

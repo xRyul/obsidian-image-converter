@@ -196,6 +196,56 @@ function rationalEntry(tag: number, values: [number, number][], little: boolean)
   return { tag, type: TYPE_RATIONAL, count: values.length, value: bytes };
 }
 
+/**
+ * A block whose IFD0 has many entries that all point at the same value bytes,
+ * followed by an Exif IFD pointer. A valid block never shares value bytes, so
+ * this is the shape of a crafted file.
+ */
+export function exifBlockWithSharedValue(spec: {
+  entryCount: number;
+  valueLength: number;
+  isoSpeedRatings: number;
+}): Uint8Array {
+  const little = true;
+  const TYPE_UNDEFINED = 7;
+
+  const ifd0Offset = 8;
+  const ifd0Size = 2 + (spec.entryCount + 1) * 12 + 4;
+  const exifOffset = ifd0Offset + ifd0Size;
+  const exifSize = 2 + 12 + 4;
+  const valueOffset = exifOffset + exifSize;
+
+  const out = new Uint8Array(valueOffset + spec.valueLength);
+  const view = new DataView(out.buffer);
+
+  out[0] = 0x49;
+  out[1] = 0x49;
+  view.setUint16(2, 42, little);
+  view.setUint32(4, ifd0Offset, little);
+
+  view.setUint16(ifd0Offset, spec.entryCount + 1, little);
+  let entryOffset = ifd0Offset + 2;
+  for (let i = 0; i < spec.entryCount; i++) {
+    view.setUint16(entryOffset, 1000 + i, little);
+    view.setUint16(entryOffset + 2, TYPE_UNDEFINED, little);
+    view.setUint32(entryOffset + 4, spec.valueLength, little);
+    view.setUint32(entryOffset + 8, valueOffset, little);
+    entryOffset += 12;
+  }
+  view.setUint16(entryOffset, TAG.exifIfdPointer, little);
+  view.setUint16(entryOffset + 2, TYPE_LONG, little);
+  view.setUint32(entryOffset + 4, 1, little);
+  view.setUint32(entryOffset + 8, exifOffset, little);
+
+  view.setUint16(exifOffset, 1, little);
+  view.setUint16(exifOffset + 2, TAG.isoSpeedRatings, little);
+  view.setUint16(exifOffset + 4, TYPE_SHORT, little);
+  view.setUint32(exifOffset + 6, 1, little);
+  view.setUint16(exifOffset + 10, spec.isoSpeedRatings, little);
+
+  return out;
+}
+
 // --- Entry value decoders, for assertions -----------------------------------
 
 /** Decodes an ASCII entry value, dropping the NUL terminator. */
