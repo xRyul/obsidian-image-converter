@@ -724,79 +724,62 @@ export class ProcessSingleImageModal extends Modal {
             }
 
             const originalSize = this.imageFile.stat.size;
-            let processedImageBuffer: ArrayBuffer | undefined;
 
-            // --- Handle NONE and ORIGINAL formats, and resizing ---
-            if (this.modalSettings.outputFormat === "NONE" && this.modalSettings.resizeMode !== "None") {
-                // No conversion, BUT resizing is needed.
-                processedImageBuffer = await this.plugin.imageProcessor.resizeImage(
-                    imageFile,
-                    this.modalSettings.resizeMode,
-                    this.modalSettings.desiredWidth,
-                    this.modalSettings.desiredHeight,
-                    this.modalSettings.desiredLongestEdge,
-                    this.modalSettings.enlargeOrReduce
-                );
-            } else if (this.modalSettings.outputFormat === "ORIGINAL") {
-                // Compress using the original format.
-                processedImageBuffer = await this.plugin.imageProcessor.compressOriginalImage(
-                    imageFile,
-                    this.modalSettings.quality / 100,
-                    this.modalSettings.resizeMode,
-                    this.modalSettings.desiredWidth,
-                    this.modalSettings.desiredHeight,
-                    this.modalSettings.desiredLongestEdge,
-                    this.modalSettings.enlargeOrReduce
-                );
-
-            } else {
-                // All other conversion cases (WEBP, JPEG, PNG, etc.)
-                // Pass pngquant settings if applicable
-                processedImageBuffer = await this.plugin.imageProcessor.processImage(
-                    imageFile,
-                    this.modalSettings.outputFormat,
-                    this.modalSettings.outputFormat === "AVIF" ? 100 : this.modalSettings.quality / 100, // Pass 100 for quality, it is ignored,
-                    this.modalSettings.colorDepth,
-                    this.modalSettings.resizeMode,
-                    this.modalSettings.desiredWidth,
-                    this.modalSettings.desiredHeight,
-                    this.modalSettings.desiredLongestEdge,
-                    this.modalSettings.enlargeOrReduce,
-                    this.modalSettings.allowLargerFiles,
-                    this.modalSettings.outputFormat === "PNGQUANT" ? { // Pass a dummy preset with pngquant settings
-                        name: "temp",
-                        outputFormat: "PNGQUANT",
-                        quality: 100,
-                        colorDepth: 1,
-                        resizeMode: "None",
-                        desiredWidth: 0,
-                        desiredHeight: 0,
-                        desiredLongestEdge: 0,
-                        enlargeOrReduce: "Auto",
-                        allowLargerFiles: false,
-                        skipConversionPatterns: "",
-                        pngquantExecutablePath: this.modalSettings.pngquantExecutablePath,
-                        pngquantQuality: this.modalSettings.pngquantQuality,
-                    } : this.modalSettings.outputFormat === "AVIF" ? {
-                        name: "temp", // Dummy name
-                        outputFormat: "AVIF",
-                        quality: 100,
-                        colorDepth: 1,
-                        resizeMode: "None",
-                        desiredWidth: 0,
-                        desiredHeight: 0,
-                        desiredLongestEdge: 0,
-                        enlargeOrReduce: "Auto",
-                        allowLargerFiles: false,
-                        skipConversionPatterns: "",
-                        ffmpegExecutablePath: this.modalSettings.ffmpegExecutablePath,
-                        ffmpegCrf: this.modalSettings.ffmpegCrf,
-                        ffmpegPreset: this.modalSettings.ffmpegPreset,
-                        detectedEncoder: this.modalSettings.detectedEncoder,
-                    } : undefined,
-                    this.plugin.settings
-                );
+            // AVIF ignores quality. "None" resizes without compressing.
+            let quality = this.modalSettings.quality / 100;
+            if (this.modalSettings.outputFormat === "AVIF") {
+                quality = 100;
+            } else if (this.modalSettings.outputFormat === "NONE") {
+                quality = 1;
             }
+
+            // Every format, NONE and ORIGINAL included, goes through processImage so
+            // that the EXIF metadata of the source is kept.
+            // Pass pngquant settings if applicable
+            const processedImageBuffer = await this.plugin.imageProcessor.processImage(
+                imageFile,
+                this.modalSettings.outputFormat,
+                quality,
+                this.modalSettings.colorDepth,
+                this.modalSettings.resizeMode,
+                this.modalSettings.desiredWidth,
+                this.modalSettings.desiredHeight,
+                this.modalSettings.desiredLongestEdge,
+                this.modalSettings.enlargeOrReduce,
+                this.modalSettings.allowLargerFiles,
+                this.modalSettings.outputFormat === "PNGQUANT" ? { // Pass a dummy preset with pngquant settings
+                    name: "temp",
+                    outputFormat: "PNGQUANT",
+                    quality: 100,
+                    colorDepth: 1,
+                    resizeMode: "None",
+                    desiredWidth: 0,
+                    desiredHeight: 0,
+                    desiredLongestEdge: 0,
+                    enlargeOrReduce: "Auto",
+                    allowLargerFiles: false,
+                    skipConversionPatterns: "",
+                    pngquantExecutablePath: this.modalSettings.pngquantExecutablePath,
+                    pngquantQuality: this.modalSettings.pngquantQuality,
+                } : this.modalSettings.outputFormat === "AVIF" ? {
+                    name: "temp", // Dummy name
+                    outputFormat: "AVIF",
+                    quality: 100,
+                    colorDepth: 1,
+                    resizeMode: "None",
+                    desiredWidth: 0,
+                    desiredHeight: 0,
+                    desiredLongestEdge: 0,
+                    enlargeOrReduce: "Auto",
+                    allowLargerFiles: false,
+                    skipConversionPatterns: "",
+                    ffmpegExecutablePath: this.modalSettings.ffmpegExecutablePath,
+                    ffmpegCrf: this.modalSettings.ffmpegCrf,
+                    ffmpegPreset: this.modalSettings.ffmpegPreset,
+                    detectedEncoder: this.modalSettings.detectedEncoder,
+                } : undefined,
+                this.plugin.settings
+            );
 
 
             // --- File Creation/Replacement ---

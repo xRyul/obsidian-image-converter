@@ -637,6 +637,28 @@ describe('ImageProcessor - Conversion Tests', () => {
     });
   });
 
+  describe('EXIF in ORIGINAL and NONE', () => {
+    it.each([
+      ['ORIGINAL', 'None'],
+      ['ORIGINAL', 'Fit'],
+      ['NONE', 'Fit'],
+    ] as const)('Given a JPEG with EXIF, When processed as %s with resize %s, Then the EXIF is kept', async (format, resizeMode) => {
+      // Arrange
+      const exifData = exifBlockFrom({ make: 'TestCamera', model: 'TestModel', orientation: 6 });
+      const inputBlob = makeImageBlob(makeJpegBytes({ w: 200, h: 200, exif: exifData }), 'image/jpeg');
+
+      // Act
+      const result = await processor.processImage(inputBlob, format, 0.8, 1.0, resizeMode, 100, 100, 100, 'Auto', true);
+
+      // Assert
+      const block = parseExifBlock(readJpegExif(new Uint8Array(result))!)!;
+      expect(asciiValue(block.ifd0.get(TAG.make)!.value)).toBe('TestCamera');
+      expect(asciiValue(block.ifd0.get(TAG.model)!.value)).toBe('TestModel');
+      // Canvas applied the rotation to the pixels.
+      expect(shortValue(block.ifd0.get(TAG.orientation)!.value)).toBe(1);
+    });
+  });
+
   describe('Quality and Color Depth Parameters', () => {
     // Test 1.15
     it('Given quality parameter, When encoding WEBP/JPEG, Then encoders receive expected quality', async () => {

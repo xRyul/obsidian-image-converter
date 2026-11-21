@@ -719,4 +719,53 @@ describe('ProcessSingleImageModal UI flows (Phase 7: 7.1–7.14 subset)', () => 
 
     consoleErrorSpy.mockRestore();
   });
+
+  it.each([
+    // [output format, resize mode, quality passed to processImage]
+    ['ORIGINAL', 'None', 0.8],
+    ['ORIGINAL', 'Fit', 0.8],
+    ['NONE', 'Fit', 1],
+  ] as const)('7.16 Process action with %s and resize %s goes through processImage, which keeps EXIF', async (format, resizeMode, quality) => {
+    const plugin = await makePlugin(app);
+    const imageProcessor = {
+      processImage: vi.fn(async () => new ArrayBuffer(8)),
+      resizeImage: vi.fn(async () => new ArrayBuffer(8)),
+      compressOriginalImage: vi.fn(async () => new ArrayBuffer(8)),
+    };
+    (plugin as any).imageProcessor = imageProcessor;
+    (plugin as any).folderAndFilenameManagement = {
+      combinePath: (dir: string, name: string) => (dir ? `${dir}/${name}` : name),
+      shouldSkipConversion: () => false
+    };
+    (plugin as any).getPresetByName = vi.fn(() => null);
+    (plugin as any).showSizeComparisonNotification = vi.fn();
+    (app as any).workspace.getActiveViewOfType = vi.fn(() => null);
+
+    const modal = new ProcessSingleImageModal(app, plugin as any, img);
+    await modal.onOpen();
+    (modal as any).modalSettings.outputFormat = format;
+    (modal as any).modalSettings.resizeMode = resizeMode;
+    (modal as any).modalSettings.quality = 80;
+
+    await (modal as any).processImage();
+
+    // resizeImage and compressOriginalImage skip the metadata transfer.
+    expect(imageProcessor.resizeImage).not.toHaveBeenCalled();
+    expect(imageProcessor.compressOriginalImage).not.toHaveBeenCalled();
+    expect(imageProcessor.processImage).toHaveBeenCalledWith(
+      expect.any(Blob),
+      format,
+      quality,
+      expect.any(Number),
+      resizeMode,
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(String),
+      expect.any(Boolean),
+      undefined,
+      plugin.settings
+    );
+    expect((app as any).vault.modifyBinary).toHaveBeenCalled();
+  });
 });
