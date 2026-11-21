@@ -10,6 +10,7 @@ import {
   isobmffItems,
   isobmffMetaChildTypes,
   isobmffReferences,
+  zeroWidthIlocPayload,
 } from '../../../factories/containers';
 
 describe('ISOBMFF container (HEIC / AVIF)', () => {
@@ -33,6 +34,22 @@ describe('ISOBMFF container (HEIC / AVIF)', () => {
     const file = buildIsobmff({ exif: exifBlockFrom({ make: 'Phone' }) });
 
     expect(isobmff.readExif(file.slice(0, file.length - 20))).toBeNull();
+  });
+
+  it('Given an item table of extents that take no bytes, When read, Then it is rejected without walking them', () => {
+    // 65,535 items of 65,535 extents each: 4 billion extents in a 400 KB box.
+    const file = buildIsobmff({
+      exif: exifBlockFrom({ make: 'Phone' }),
+      ilocPayload: zeroWidthIlocPayload(0xffff, 0xffff),
+    });
+
+    expect(isobmff.readExif(file)).toBeNull();
+  });
+
+  it('Given an item table of extents that take no bytes, When written, Then it throws', () => {
+    const file = buildIsobmff({ ilocPayload: zeroWidthIlocPayload(0xffff, 0xffff) });
+
+    expect(() => isobmff.writeExif(file, exifBlockFrom({ make: 'Cam' }))).toThrow(/item table/);
   });
 
   it('Given an ftyp with no supported brand, When matched, Then it is rejected', () => {

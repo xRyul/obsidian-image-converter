@@ -62,6 +62,8 @@ export interface IsobmffOptions {
    * boxes after it.
    */
   unwalkableMetaChild?: boolean;
+  /** Replaces the payload of `iloc`, for an item table that the test builds itself. */
+  ilocPayload?: Uint8Array;
 }
 
 /**
@@ -143,7 +145,7 @@ export function buildIsobmff(options: IsobmffOptions = {}): Uint8Array {
       ...items,
     ])));
 
-    children.push(box('iloc', concat([
+    children.push(box('iloc', options.ilocPayload ?? concat([
       new Uint8Array([1, 0, 0, 0]),      // version 1, flags
       new Uint8Array([0x44]),            // offset_size 4, length_size 4
       new Uint8Array([0x00]),            // base_offset_size 0, index_size 0
@@ -193,6 +195,28 @@ function itemLocation(itemId: number, offset: number, length: number): Uint8Arra
     u16be(1),        // extent_count
     u32be(offset),
     u32be(length),
+  ]);
+}
+
+/**
+ * An `iloc` payload in which every field width is zero, so an extent takes no
+ * bytes. Each item declares `extentCount` extents.
+ */
+export function zeroWidthIlocPayload(itemCount: number, extentCount: number): Uint8Array {
+  const items: Uint8Array[] = [];
+  for (let i = 0; i < itemCount; i++) {
+    items.push(concat([
+      u16be(i + 1),       // item_ID
+      u16be(0),           // data_reference_index
+      u16be(extentCount), // extent_count; no base_offset, it has width 0
+    ]));
+  }
+
+  return concat([
+    new Uint8Array([0, 0, 0, 0]),        // version 0, flags
+    new Uint8Array([0x00, 0x00]),        // all field widths 0
+    u16be(itemCount),
+    ...items,
   ]);
 }
 

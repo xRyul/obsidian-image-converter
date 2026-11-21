@@ -428,6 +428,13 @@ function parseLocations(bytes: Uint8Array, iloc: Box): Location[] | null {
         const extentCount = view.getUint16(cursor, false);
         cursor += 2;
 
+        // A record with no fields takes no bytes and means "the whole file", so
+        // a real item has at most one. More would not move the cursor past the
+        // end of the box: 65,535 items of 65,535 such records loop 4 billion times.
+        if (indexSize + offsetSize + lengthSize === 0 && extentCount > 1) {
+            return null;
+        }
+
         const extents: Extent[] = [];
         let indexed = false;
 
