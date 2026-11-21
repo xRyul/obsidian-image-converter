@@ -657,6 +657,20 @@ describe('ImageProcessor - Conversion Tests', () => {
       // Canvas applied the rotation to the pixels.
       expect(shortValue(block.ifd0.get(TAG.orientation)!.value)).toBe(1);
     });
+
+    it.each([
+      ['ORIGINAL', 'None'],
+      ['NONE', 'Fit'],
+    ] as const)('Given a .jpg file typed image/jpg, When processed as %s with resize %s, Then it is encoded as JPEG and not PNG', async (format, resizeMode) => {
+      // Arrange: the modal and batch paths build the type from the extension.
+      const inputBlob = makeImageBlob(makeJpegBytes({ w: 200, h: 200 }), 'image/jpg');
+
+      // Act
+      await processor.processImage(inputBlob, format, 0.8, 1.0, resizeMode, 100, 100, 100, 'Auto', true);
+
+      // Assert
+      expect(mockCanvas.toBlob).toHaveBeenCalledWith(expect.any(Function), 'image/jpeg', expect.any(Number));
+    });
   });
 
   describe('Quality and Color Depth Parameters', () => {

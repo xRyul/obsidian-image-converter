@@ -2005,7 +2005,8 @@ image.onload = () => { try {
                     // Draw the (potentially cropped) image onto the canvas
                     ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, imageWidth, imageHeight);
 
-                    const blobType = file.type || 'image/jpeg';
+                    // A .jpg file gives "image/jpg", which canvas does not know: it writes PNG.
+                    const blobType = (file.type === 'image/jpg' ? 'image/jpeg' : file.type) || 'image/jpeg';
 
                     // Use original format instead of hardcoding JPEG
                     canvas.toBlob(
@@ -2088,7 +2089,8 @@ canvas.toBlob(
                             }
                             blob.arrayBuffer().then(resolve).catch(reject);
                         },
-                        file.type, // Use the original file's MIME type
+                        // A .jpg file gives "image/jpg", which canvas does not know: it writes PNG.
+                        file.type === 'image/jpg' ? 'image/jpeg' : file.type, // Use the original file's MIME type
                         quality
                     );
                 };
