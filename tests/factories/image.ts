@@ -59,22 +59,15 @@ export function makePngBytes(options: {
   return buffer;
 }
 
-import type { ExifDictLike } from './exif';
-
 /**
  * Create a minimal JPEG buffer with optional EXIF data
  * @param options - Configuration for the JPEG
  * @returns ArrayBuffer containing JPEG data
  */
-// EXIF values can be numbers, strings, rationals (tuple), or arrays thereof
-type ExifValue = number | string | [number, number] | number[] | string[] | undefined;
-
-type ExifInput = Record<string, ExifValue> | ExifDictLike;
-
 export function makeJpegBytes(options: {
   w?: number;
   h?: number;
-  exif?: ExifInput;
+  exif?: Uint8Array;
   width?: number;
   height?: number;
 } = {}): ArrayBuffer {
@@ -101,7 +94,8 @@ export function makeJpegBytes(options: {
   const sof0View = new DataView(sof0Data);
   sof0View.setUint8(0, 0xFF);
   sof0View.setUint8(1, 0xC0); // SOF0 marker
-  sof0View.setUint16(2, 17, false); // Length
+  // Length counts itself and the payload, but not the two marker bytes.
+  sof0View.setUint16(2, 15, false);
   sof0View.setUint8(4, 8); // Precision
   sof0View.setUint16(5, height, false); // Height
   sof0View.setUint16(7, width, false); // Width
@@ -136,26 +130,21 @@ export function makeJpegBytes(options: {
   // Calculate total size
   let totalSize = soi.length + app0.length + sof0.length + sos.length + compressedData.length + eoi.length;
   
-  // Add EXIF if provided (simplified - in real implementation would use piexif)
+  // Wrap the supplied EXIF block in a real APP1 segment.
   let exifData: Uint8Array | null = null;
-  if (options.exif && Object.keys(options.exif).length > 0) {
-    // Simplified EXIF APP1 marker
-    const exifHeader = new Uint8Array([
-      0xFF, 0xE1, // APP1 marker
-      0x00, 0x1E, // Length (30 bytes for minimal EXIF)
-      0x45, 0x78, 0x69, 0x66, 0x00, 0x00, // "Exif\0\0"
-      // Minimal TIFF header
-      0x4D, 0x4D, // Big-endian
-      0x00, 0x2A, // TIFF magic number
-      0x00, 0x00, 0x00, 0x08, // IFD offset
-      // Minimal IFD
-      0x00, 0x01, // 1 entry
-      0x01, 0x0F, // Make tag
-      0x00, 0x02, // ASCII type
-      0x00, 0x00, 0x00, 0x04, // Count
-      0x00, 0x00, 0x00, 0x00  // Value/offset
-    ]);
-    exifData = exifHeader;
+  if (options.exif && options.exif.length > 0) {
+    const block = options.exif;
+    const segmentLength = 2 + 6 + block.length; // length field + "Exif\0\0" + block
+    const segment = new Uint8Array(2 + segmentLength);
+
+    segment[0] = 0xFF;
+    segment[1] = 0xE1; // APP1
+    segment[2] = (segmentLength >> 8) & 0xFF;
+    segment[3] = segmentLength & 0xFF;
+    segment.set([0x45, 0x78, 0x69, 0x66, 0x00, 0x00], 4); // "Exif\0\0"
+    segment.set(block, 10);
+
+    exifData = segment;
     totalSize += exifData.length;
   }
   
