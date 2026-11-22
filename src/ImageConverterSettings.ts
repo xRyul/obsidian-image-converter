@@ -634,7 +634,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName("Image metadata")
-            .then((setting) => addInfoIcon(setting, "EXIF metadata such as camera, capture date and GPS location. It applies to every image the plugin converts, compresses or resizes, and to an original that it keeps because the converted file was larger. Images that a skip pattern or 'Never process these filenames' excludes are saved as they are."))
+            .then((setting) => addInfoIcon(setting, "EXIF metadata such as camera, capture date and GPS location. It applies to every image the plugin converts, compresses or resizes, and to a pasted or dropped image that it saves as the original because conversion saved too little. Files that the plugin leaves unchanged keep their metadata: images in the vault that 'Revert to original if larger' keeps, and images that a skip pattern or 'Never process these filenames' excludes."))
             .addDropdown((dropdown) => {
                 dropdown
                     .addOption("keep-all", "Keep all")
