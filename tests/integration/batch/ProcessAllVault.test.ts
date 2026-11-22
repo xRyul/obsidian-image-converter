@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BatchImageProcessor } from '../../../src/BatchImageProcessor';
 import { fakeApp, fakeVault, fakeTFile } from '../../factories/obsidian';
+import { makeImageBytesOfSize } from '../../factories/image';
 import { ProcessAllVaultModal } from '../../../src/ProcessAllVaultModal';
 import ImageConverterPlugin from '../../../src/main';
 import { App } from 'obsidian';
@@ -17,6 +18,10 @@ function makePluginStub(overrides: any = {}) {
       ProcessAllVaultResizeModaldesiredLength: 0,
       ProcessAllVaultEnlargeOrReduce: 'Always',
       allowLargerFiles: true,
+      revertToOriginalIfLarger: false,
+      minimumCompressionSavingsInKB: 30,
+      selectedConversionPreset: 'None',
+      conversionPresets: [],
       ProcessAllVaultSkipFormats: '',
       ProcessAllVaultskipImagesInTargetFormat: true,
       ...overrides.settings
@@ -78,7 +83,7 @@ describe('BatchImageProcessor — Vault-wide orchestration', () => {
     plugin = makePluginStub();
 
     imageProcessor = {
-      processImage: vi.fn(async (_blob: Blob) => new ArrayBuffer(4))
+      processImage: vi.fn(async (_blob: Blob, format: string) => makeImageBytesOfSize(format, 4))
     };
 
     folderAndFilenameManagement = {
@@ -156,11 +161,15 @@ describe('BatchImageProcessor — Vault-wide orchestration', () => {
         ProcessAllVaultResizeModaldesiredLength: 0,
         ProcessAllVaultEnlargeOrReduce: 'Always',
         allowLargerFiles: true,
+        revertToOriginalIfLarger: false,
+        minimumCompressionSavingsInKB: 30,
+        selectedConversionPreset: 'None',
+        conversionPresets: [],
         ProcessAllVaultSkipFormats: '',
         ProcessAllVaultskipImagesInTargetFormat: false // Important: don't skip images in their own format
       }
     });
-    const imgIso = { processImage: vi.fn(async (_blob: Blob) => new ArrayBuffer(4)) };
+    const imgIso = { processImage: vi.fn(async (_blob: Blob, format: string) => makeImageBytesOfSize(format, 4)) };
     const ffmIso = { handleNameConflicts: vi.fn(async (_dir: string, name: string) => name) };
     const bipIso = new BatchImageProcessor(appIso as any, pluginIso as any, imgIso as any, ffmIso as any);
 
@@ -189,7 +198,7 @@ describe('BatchImageProcessor — Vault-wide orchestration', () => {
     const appIso = fakeApp({ vault: vaultIso, metadataCache: { resolvedLinks: { [noteFile.path]: { [keep.path]: 1, [toConvert.path]: 1 } } } as any }) as any;
     appIso.fileManager = { renameFile: vi.fn(async (file: any, newPath: string) => { await appIso.vault.rename(file, newPath); }) };
     const pluginIso = makePluginStub({ settings: { ProcessAllVaultconvertTo: 'webp', ProcessAllVaultskipImagesInTargetFormat: true } });
-    const imgIso = { processImage: vi.fn(async (_blob: Blob) => new ArrayBuffer(4)) };
+    const imgIso = { processImage: vi.fn(async (_blob: Blob, format: string) => makeImageBytesOfSize(format, 4)) };
     const ffmIso = { handleNameConflicts: vi.fn(async (_dir: string, name: string) => name) };
     const bipIso = new BatchImageProcessor(appIso as any, pluginIso as any, imgIso as any, ffmIso as any);
 
@@ -233,7 +242,7 @@ describe('BatchImageProcessor — Vault-wide orchestration', () => {
       } } as any }) as any;
       appL.fileManager = { renameFile: vi.fn(async (file: any, newPath: string) => { await appL.vault.rename(file, newPath); }) };
       const pluginL = makePluginStub();
-      const imgL = { processImage: vi.fn(async (_blob: Blob) => new ArrayBuffer(4)) };
+      const imgL = { processImage: vi.fn(async (_blob: Blob, format: string) => makeImageBytesOfSize(format, 4)) };
       const ffmL = { handleNameConflicts: vi.fn(async (_dir: string, name: string) => name) };
       const bipL = new BatchImageProcessor(appL, pluginL, imgL as any, ffmL as any);
       await bipL.processAllVaultImages();

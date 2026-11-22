@@ -2817,7 +2817,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         const newSetting = new Setting(containerEl)
             .setName("Revert to original if larger")
             .setClass("image-converter-revert-to-original")
-            .setDesc("If the processed image filesize is larger than the original, use the original image instead. Sometimes compression can increase file size, especially with certain formats or settings, but if you would prefer to always get smaller file sizes, enable this option.")
+            .setDesc("If the processed image filesize is larger than the original, use the original image instead. Sometimes compression can increase file size, especially with certain formats or settings, but if you would prefer to always get smaller file sizes, enable this option. The single-image window and the batch commands use this setting of the selected preset.")
             .addToggle((toggle) =>
                 toggle
                     .setValue(preset.revertToOriginalIfLarger ?? this.plugin.settings.revertToOriginalIfLarger)

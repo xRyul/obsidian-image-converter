@@ -1,9 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unnecessary-type-assertion */
 import { describe, it, expect, vi } from 'vitest';
 import ImageConverterPlugin from '../../../src/main';
+import { Notice } from 'obsidian';
 import { fakeApp, fakeVault, fakeTFile, fakePluginManifest } from '../../factories/obsidian';
 import { exifBlockFrom } from '../../factories/exif';
-import { makeJpegBytes } from '../../factories/image';
+import { makeImageBytesOfSize, makeJpegBytes } from '../../factories/image';
 import { readExif as readJpegExif } from '../../../src/metadata/containers/jpeg';
 
 function makeFile(name: string, type: string, size = 8): File {
@@ -38,7 +39,7 @@ describe('Conflict resolution and overwrite safety (Phase 9: 27.2)', () => {
 
     // Avoid LinkFormatter internals
     (plugin as any).linkFormatter = { formatLink: vi.fn(async (path: string) => `![](/${path})`) };
-    (plugin as any).imageProcessor = { processImage: vi.fn(async () => new ArrayBuffer(8)) };
+    (plugin as any).imageProcessor = { processImage: vi.fn(async () => makeImageBytesOfSize('WEBP', 8)) };
     (plugin as any).showSizeComparisonNotification = vi.fn();
 
     // Destination is the conflicting name
@@ -124,7 +125,7 @@ describe('Conflict resolution and overwrite safety (Phase 9: 27.2)', () => {
     selectedPreset.revertToOriginalIfLarger = true;
     selectedPreset.minimumCompressionSavingsInKB = 1;
 
-    const processedBuffer = new ArrayBuffer(1500);
+    const processedBuffer = makeImageBytesOfSize('WEBP', 1500);
     (plugin as any).imageProcessor = { processImage: vi.fn(async () => processedBuffer) };
     (plugin as any).showSizeComparisonNotification = vi.fn();
     (plugin as any).linkFormatter = { formatLink: vi.fn(async (path: string) => `![](/${path})`) };
@@ -165,7 +166,7 @@ describe('Conflict resolution and overwrite safety (Phase 9: 27.2)', () => {
     selectedPreset.minimumCompressionSavingsInKB = 1;
 
     const original = new Uint8Array(makeJpegBytes({ w: 10, h: 10, exif: exifBlockFrom({ make: 'TestCamera', gpsLatitudeRef: 'N' }) }));
-    (plugin as any).imageProcessor = { processImage: vi.fn(async () => new ArrayBuffer(original.length)) };
+    (plugin as any).imageProcessor = { processImage: vi.fn(async () => makeImageBytesOfSize('WEBP', original.length)) };
     (plugin as any).showSizeComparisonNotification = vi.fn();
     (plugin as any).linkFormatter = { formatLink: vi.fn(async (path: string) => `![](/${path})`) };
 
@@ -192,7 +193,7 @@ describe('Conflict resolution and overwrite safety (Phase 9: 27.2)', () => {
 
 // Issue #347: the original image must not be saved under the extension of the converted one.
 describe('Revert to original if larger: the saved file keeps the extension of the original', () => {
-  async function setupRevert(options: { existing?: string[]; reuse?: boolean; processedSize?: number } = {}) {
+  async function setupRevert(options: { existing?: string[]; reuse?: boolean; processedSize?: number; revert?: boolean; returnOriginal?: boolean } = {}) {
     const existing = (options.existing ?? []).map((path) => fakeTFile({ path }));
     const { app, plugin } = setupPluginWithNote(existing);
 
@@ -203,7 +204,7 @@ describe('Revert to original if larger: the saved file keeps the extension of th
     settings.modalBehavior = 'never';
     settings.selectedConversionPreset = 'WEBP (75, no resizing)';
     const conversionPreset = settings.conversionPresets.find((preset: any) => preset.name === 'WEBP (75, no resizing)');
-    conversionPreset.revertToOriginalIfLarger = true;
+    conversionPreset.revertToOriginalIfLarger = options.revert ?? true;
     conversionPreset.minimumCompressionSavingsInKB = 0;
 
     settings.selectedFilenamePreset = 'Keep original name'; // increment
@@ -215,7 +216,13 @@ describe('Revert to original if larger: the saved file keeps the extension of th
     }
 
     // By default the converted image is larger than the 2,000-byte original.
-    (plugin as any).imageProcessor = { processImage: vi.fn(async () => new ArrayBuffer(options.processedSize ?? 5000)) };
+    // With `returnOriginal`, the converter gives the original bytes, as the image
+    // processor does when a conversion fails.
+    (plugin as any).imageProcessor = {
+      processImage: vi.fn(async (file: File) => (options.returnOriginal
+        ? file.arrayBuffer()
+        : makeImageBytesOfSize('WEBP', options.processedSize ?? 5000)))
+    };
     (plugin as any).showSizeComparisonNotification = vi.fn();
     const formatLink = vi.fn(async (path: string) => `![](/${path})`);
     (plugin as any).linkFormatter = { formatLink };
@@ -290,5 +297,35 @@ describe('Revert to original if larger: the saved file keeps the extension of th
     await addImage('paste', plugin, editor, makeFile('x.webp', 'image/webp', 2000));
 
     expect(createdPaths(app)).toEqual(['images/x.webp']);
+  });
+
+  it.each(['drop', 'paste'] as const)('Given "Revert" off, When the converted image is larger on %s, Then the converted image is saved as .webp', async (flow) => {
+    const { app, plugin, editor } = await setupRevert({ revert: false });
+
+    await addImage(flow, plugin, editor, makeFile('x.png', 'image/png', 2000));
+
+    expect(createdPaths(app)).toEqual(['images/x.webp']);
+    const [, bufferArg] = (app.vault.createBinary as any).mock.calls[0] as [string, ArrayBuffer];
+    expect(bufferArg.byteLength).toBe(5000);
+  });
+
+  it.each(['drop', 'paste'] as const)('Given a converter that returns the original bytes, When an image is added on %s with "Revert" off, Then it is saved as .png and a notice says that it was not converted', async (flow) => {
+    // The image processor returns the original bytes when it cannot convert.
+    const { app, plugin, editor, formatLink } = await setupRevert({ revert: false, returnOriginal: true });
+    const file = makeFile('x.png', 'image/png', 2000);
+    ((Notice as any).instances as unknown[]).length = 0;
+
+    await addImage(flow, plugin, editor, file);
+
+    // The file must not be a .webp file that holds the bytes of the original.
+    expect(createdPaths(app)).toEqual(['images/x.png']);
+    const [, bufferArg] = (app.vault.createBinary as any).mock.calls[0] as [string, ArrayBuffer];
+    expect(bufferArg.byteLength).toBe(file.size);
+    expect(formatLink).toHaveBeenCalledWith('images/x.png', expect.anything(), expect.anything(), expect.anything(), expect.anything());
+
+    const notices = ((Notice as any).instances as { message: string }[]).map((notice) => notice.message);
+    expect(notices).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^"x\.png" could not be converted to WEBP\./),
+    ]));
   });
 });

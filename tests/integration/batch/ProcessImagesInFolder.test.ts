@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BatchImageProcessor } from '../../../src/BatchImageProcessor';
 import { fakeApp, fakeVault, fakeTFile, fakeTFolder } from '../../factories/obsidian';
+import { makeImageBytesOfSize } from '../../factories/image';
 
 function makePluginStub(overrides: any = {}) {
   return {
@@ -14,6 +15,10 @@ function makePluginStub(overrides: any = {}) {
       ProcessCurrentNoteresizeModaldesiredLength: 0,
       ProcessCurrentNoteEnlargeOrReduce: 'Always',
       allowLargerFiles: true,
+      revertToOriginalIfLarger: false,
+      minimumCompressionSavingsInKB: 30,
+      selectedConversionPreset: 'None',
+      conversionPresets: [],
       ProcessCurrentNoteSkipFormats: '',
       ProcessCurrentNoteskipImagesInTargetFormat: true,
       ...overrides.settings
@@ -67,7 +72,7 @@ describe('BatchImageProcessor — Folder processing (recursive, skipFormats)', (
     plugin = makePluginStub();
 
     imageProcessor = {
-      processImage: vi.fn(async (_blob: Blob) => new ArrayBuffer(4))
+      processImage: vi.fn(async (_blob: Blob, format: string) => makeImageBytesOfSize(format, 4))
     };
 
     folderAndFilenameManagement = {
@@ -103,7 +108,7 @@ describe('BatchImageProcessor — Folder processing (recursive, skipFormats)', (
     const app1 = fakeApp({ vault: vault1, metadataCache: { resolvedLinks: {} } as any }) as any;
     app1.fileManager = { renameFile: vi.fn(async (file: any, newPath: string) => { await app1.vault.rename(file, newPath); }) };
     const plugin1 = makePluginStub();
-    const imageProcessor1 = { processImage: vi.fn(async (_blob: Blob) => new ArrayBuffer(4)) };
+    const imageProcessor1 = { processImage: vi.fn(async (_blob: Blob, format: string) => makeImageBytesOfSize(format, 4)) };
     const ffm1 = { handleNameConflicts: vi.fn(async (_dir: string, name: string) => name) };
     const bip1 = new BatchImageProcessor(app1, plugin1, imageProcessor1 as any, ffm1 as any);
 
@@ -120,7 +125,7 @@ describe('BatchImageProcessor — Folder processing (recursive, skipFormats)', (
     const app2 = fakeApp({ vault: vault2, metadataCache: { resolvedLinks: {} } as any }) as any;
     app2.fileManager = { renameFile: vi.fn(async (file: any, newPath: string) => { await app2.vault.rename(file, newPath); }) };
     const plugin2 = makePluginStub();
-    const imageProcessor2 = { processImage: vi.fn(async (_blob: Blob) => new ArrayBuffer(4)) };
+    const imageProcessor2 = { processImage: vi.fn(async (_blob: Blob, format: string) => makeImageBytesOfSize(format, 4)) };
     const ffm2 = { handleNameConflicts: vi.fn(async (_dir: string, name: string) => name) };
     const bip2 = new BatchImageProcessor(app2, plugin2, imageProcessor2 as any, ffm2 as any);
 
@@ -149,7 +154,7 @@ describe('BatchImageProcessor — Folder processing (recursive, skipFormats)', (
     };
 
     const plugin = makePluginStub();
-    const imageProcessor = { processImage: vi.fn(async (_blob: Blob) => new ArrayBuffer(4)) };
+    const imageProcessor = { processImage: vi.fn(async (_blob: Blob, format: string) => makeImageBytesOfSize(format, 4)) };
     const ffm = { handleNameConflicts: vi.fn(async (_dir: string, name: string) => name) };
     const bip = new BatchImageProcessor(app, plugin as any, imageProcessor as any, ffm as any);
 

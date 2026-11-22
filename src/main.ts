@@ -26,6 +26,7 @@ import { ProcessCurrentNote } from "./ProcessCurrentNote";
 import { ProcessAllVaultModal } from "./ProcessAllVaultModal"
 import { ImageCaptionManager } from "./ImageCaptionManager"
 import { transferMetadata } from "./metadata/transferMetadata";
+import { getRevertPolicy, reasonToKeepOriginal } from "./utils/keepOriginal";
 
 // Settings tab and all DEFAULTS
 import {
@@ -873,18 +874,21 @@ export default class ImageConverterPlugin extends Plugin {
                             // Step 3.5.4: Create the Image File in Vault
                             // - Create the new image file in the Obsidian vault using `createBinary`.
                             // Show space savings notification
-                            // Check if processed image is larger than original + minimum savings
-                            const minSavingsKB = (typeof (selectedConversionPreset?.minimumCompressionSavingsInKB ?? this.settings.minimumCompressionSavingsInKB) === 'number'
-                                && (selectedConversionPreset?.minimumCompressionSavingsInKB ?? this.settings.minimumCompressionSavingsInKB) >= 0)
-                                ? (selectedConversionPreset?.minimumCompressionSavingsInKB ?? this.settings.minimumCompressionSavingsInKB)
-                                : 30;
-                            const shouldRevertIfLarger = selectedConversionPreset?.revertToOriginalIfLarger
-                                ?? this.settings.revertToOriginalIfLarger;
+                            // Keep the original when the image was not converted, or when the
+                            // conversion saves less than the minimum savings.
+                            const outputFormat = selectedConversionPreset
+                                ? selectedConversionPreset.outputFormat
+                                : this.settings.outputFormat;
+                            const revertPolicy = getRevertPolicy(this.settings, selectedConversionPreset);
+                            const keepReason = reasonToKeepOriginal(originalSize, this.processedImage, outputFormat, revertPolicy);
 
-                            if (shouldRevertIfLarger && this.processedImage.byteLength + (minSavingsKB * 1024) > originalSize) {
-                                // User wants to revert AND processed image is larger
-                                this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
-                                new Notice(`Using original image for "${file.name}" because size reduction was less than ${minSavingsKB} KB.`);
+                            if (keepReason) {
+                                if (keepReason === "notConverted") {
+                                    new Notice(`"${file.name}" could not be converted to ${outputFormat}. The original image is used.`);
+                                } else {
+                                    this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
+                                    new Notice(`Using original image for "${file.name}" because size reduction was less than ${revertPolicy.minSavingsKB} KB.`);
+                                }
 
                                 // The original is saved with its own extension, not that of the converted image.
                                 const originalPath = await this.saveOriginalImage(file, destinationPath, newFilename, selectedFilenamePreset);
@@ -893,7 +897,7 @@ export default class ImageConverterPlugin extends Plugin {
                                 }
                                 linkPath = originalPath;
                             } else {
-                                // Processed image is smaller OR user doesn't want to revert
+                                // The converted image is used
                                 this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
                                 const tfile = await this.app.vault.createBinary(newFullPath, this.processedImage);
                                 linkPath = tfile.path;
@@ -1222,18 +1226,21 @@ export default class ImageConverterPlugin extends Plugin {
                             // Step 3.5.4: Create the Image File in Vault
                             // - Create the new image file in the Obsidian vault using `createBinary`.
                             // - Show space savings notification
-                            // Check if processed image is larger than original + minimum savings
-                            const minSavingsKB = (typeof (selectedConversionPreset?.minimumCompressionSavingsInKB ?? this.settings.minimumCompressionSavingsInKB) === 'number'
-                                && (selectedConversionPreset?.minimumCompressionSavingsInKB ?? this.settings.minimumCompressionSavingsInKB) >= 0)
-                                ? (selectedConversionPreset?.minimumCompressionSavingsInKB ?? this.settings.minimumCompressionSavingsInKB)
-                                : 30;
-                            const shouldRevertIfLarger = selectedConversionPreset?.revertToOriginalIfLarger
-                                ?? this.settings.revertToOriginalIfLarger;
+                            // Keep the original when the image was not converted, or when the
+                            // conversion saves less than the minimum savings.
+                            const outputFormat = selectedConversionPreset
+                                ? selectedConversionPreset.outputFormat
+                                : this.settings.outputFormat;
+                            const revertPolicy = getRevertPolicy(this.settings, selectedConversionPreset);
+                            const keepReason = reasonToKeepOriginal(originalSize, this.processedImage, outputFormat, revertPolicy);
 
-                            if (shouldRevertIfLarger && this.processedImage.byteLength + (minSavingsKB * 1024) > originalSize) {
-                                // User wants to revert AND processed image is larger
-                                this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
-                                new Notice(`Using original image for "${file.name}" because size reduction was less than ${minSavingsKB} KB.`);
+                            if (keepReason) {
+                                if (keepReason === "notConverted") {
+                                    new Notice(`"${file.name}" could not be converted to ${outputFormat}. The original image is used.`);
+                                } else {
+                                    this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
+                                    new Notice(`Using original image for "${file.name}" because size reduction was less than ${revertPolicy.minSavingsKB} KB.`);
+                                }
 
                                 // The original is saved with its own extension, not that of the converted image.
                                 const originalPath = await this.saveOriginalImage(file, destinationPath, newFilename, selectedFilenamePreset);
@@ -1242,7 +1249,7 @@ export default class ImageConverterPlugin extends Plugin {
                                 }
                                 linkPath = originalPath;
                             } else {
-                                // Processed image is smaller OR user doesn't want to revert
+                                // The converted image is used
                                 this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
                                 const tfile = await this.app.vault.createBinary(newFullPath, this.processedImage);
                                 linkPath = tfile.path;

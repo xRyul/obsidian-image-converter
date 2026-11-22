@@ -2,8 +2,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ProcessSingleImageModal } from '../../../src/ProcessSingleImageModal';
 import ImageConverterPlugin from '../../../src/main';
-import { App, TFile } from 'obsidian';
+import { App, Notice, TFile } from 'obsidian';
 import { fakeApp, fakeVault, fakeTFile } from '../../factories/obsidian';
+import { makeImageBytesOfSize } from '../../factories/image';
 import { crossPlatformPathPattern } from '../../helpers/test-setup';
 
 function makePlugin(app: App, overrides: any = {}) {
@@ -412,7 +413,7 @@ describe('ProcessSingleImageModal UI flows (Phase 7: 7.1–7.14 subset)', () => 
 
   it('7.7 Process action processes, renames, writes, updates link in active note, shows size notice, and closes', async () => {
     const plugin = await makePlugin(app);
-    (plugin as any).imageProcessor = { processImage: vi.fn(async () => new ArrayBuffer(8)) };
+    (plugin as any).imageProcessor = { processImage: vi.fn(async () => makeImageBytesOfSize('WEBP', 8)) };
     (plugin as any).folderAndFilenameManagement = {
       combinePath: (dir: string, name: string) => (dir ? `${dir}/${name}` : name),
       shouldSkipConversion: () => false
@@ -468,7 +469,7 @@ describe('ProcessSingleImageModal UI flows (Phase 7: 7.1–7.14 subset)', () => 
 
   it('7.7 Process action: processes, renames on extension change, writes, updates active note link, shows notice, and closes', async () => {
     const plugin = await makePlugin(app);
-    (plugin as any).imageProcessor = { processImage: vi.fn(async () => new ArrayBuffer(8)) };
+    (plugin as any).imageProcessor = { processImage: vi.fn(async () => makeImageBytesOfSize('WEBP', 8)) };
     (plugin as any).folderAndFilenameManagement = {
       combinePath: (dir: string, name: string) => (dir ? `${dir}/${name}` : name),
       shouldSkipConversion: () => false
@@ -513,41 +514,107 @@ describe('ProcessSingleImageModal UI flows (Phase 7: 7.1–7.14 subset)', () => 
     // Modal may remain open depending on implementation; no strict close assertion
   });
 
-  it('Given "Revert to original if larger" and a converted image that is larger, When processing, Then the file and the link in the note stay as they are', async () => {
-    const plugin = await makePlugin(app);
-    (plugin as any).settings.revertToOriginalIfLarger = true;
-    // The converted image is larger than the original (fakeTFile gives 1,024 bytes).
-    (plugin as any).imageProcessor = { processImage: vi.fn(async () => new ArrayBuffer(5000)) };
-    (plugin as any).folderAndFilenameManagement = {
-      combinePath: (dir: string, name: string) => (dir ? `${dir}/${name}` : name),
-      shouldSkipConversion: () => false
-    };
-    (plugin as any).getPresetByName = vi.fn(() => null);
-    (plugin as any).showSizeComparisonNotification = vi.fn();
+  // Issue #347: the dialog must not rename an image that it did not convert.
+  describe('Process action: the original image is kept', () => {
+    /** Runs the Process action on a.png (1,024 bytes) with WEBP as the output format. */
+    async function runProcess(options: {
+      preset?: { revertToOriginalIfLarger?: boolean; minimumCompressionSavingsInKB?: number };
+      pluginWideRevert?: boolean;
+      converted: ArrayBuffer;
+    }) {
+      const plugin = await makePlugin(app);
+      const { settings } = plugin as any;
+      // A new array and a new object: the presets of DEFAULT_SETTINGS are shared between tests.
+      settings.conversionPresets = [{
+        ...settings.conversionPresets[0],
+        name: 'Selected',
+        revertToOriginalIfLarger: false,
+        minimumCompressionSavingsInKB: 0,
+        ...options.preset,
+      }];
+      settings.selectedConversionPreset = 'Selected';
+      settings.revertToOriginalIfLarger = options.pluginWideRevert ?? false;
 
-    const setValueSpy = vi.fn();
-    (app as any).workspace.getActiveViewOfType = vi.fn(() => ({
-      file: img,
-      editor: {
-        getValue: () => 'Before ![](a.png) After',
-        setValue: setValueSpy,
-      }
-    }));
-    (app as any).fileManager = {
-      renameFile: vi.fn(async (file: any, newPath: string) => { await (app as any).vault.rename(file, newPath); })
-    };
+      (plugin as any).imageProcessor = { processImage: vi.fn(async () => options.converted) };
+      (plugin as any).folderAndFilenameManagement = {
+        combinePath: (dir: string, name: string) => (dir ? `${dir}/${name}` : name),
+        shouldSkipConversion: () => false
+      };
+      (plugin as any).getPresetByName = vi.fn(() => null);
+      (plugin as any).showSizeComparisonNotification = vi.fn();
 
-    const modal = new ProcessSingleImageModal(app, plugin as any, img);
-    await modal.onOpen();
-    (modal as any).modalSettings.outputFormat = 'WEBP';
+      const setValueSpy = vi.fn();
+      (app as any).workspace.getActiveViewOfType = vi.fn(() => ({
+        file: img,
+        editor: {
+          getValue: () => 'Before ![](a.png) After',
+          setValue: setValueSpy,
+        }
+      }));
+      (app as any).fileManager = {
+        renameFile: vi.fn(async (file: any, newPath: string) => { await (app as any).vault.rename(file, newPath); })
+      };
+      ((Notice as any).instances as unknown[]).length = 0;
 
-    await (modal as any).processImage();
+      const modal = new ProcessSingleImageModal(app, plugin as any, img);
+      await modal.onOpen();
+      (modal as any).modalSettings.outputFormat = 'WEBP';
 
-    // The original is kept: a.png is not renamed or written, so the link must still point to it.
-    expect((app as any).fileManager.renameFile).not.toHaveBeenCalled();
-    expect((app as any).vault.modifyBinary).not.toHaveBeenCalled();
-    expect(img.path).toBe('images/a.png');
-    expect(setValueSpy).not.toHaveBeenCalled();
+      await (modal as any).processImage();
+
+      const notices = ((Notice as any).instances as { message: string }[]).map((notice) => notice.message);
+      return { setValueSpy, notices };
+    }
+
+    /** The file is not renamed or written, and the link in the note still points to it. */
+    function expectImageLeftAsItIs(setValueSpy: ReturnType<typeof vi.fn>) {
+      expect((app as any).fileManager.renameFile).not.toHaveBeenCalled();
+      expect((app as any).vault.modifyBinary).not.toHaveBeenCalled();
+      expect(img.path).toBe('images/a.png');
+      expect(setValueSpy).not.toHaveBeenCalled();
+    }
+
+    it('Given "Revert to original if larger" in the selected preset and a converted image that is larger, When processing, Then the file and the link in the note stay as they are', async () => {
+      const { setValueSpy } = await runProcess({
+        preset: { revertToOriginalIfLarger: true },
+        converted: makeImageBytesOfSize('WEBP', 5000),
+      });
+
+      expectImageLeftAsItIs(setValueSpy);
+    });
+
+    it('Given a minimum saving of 30 KB in the selected preset, When the conversion saves less, Then the file and the link in the note stay as they are', async () => {
+      // The converted image is smaller, but only by 1 KB.
+      const { setValueSpy } = await runProcess({
+        preset: { revertToOriginalIfLarger: true, minimumCompressionSavingsInKB: 30 },
+        converted: makeImageBytesOfSize('WEBP', 12),
+      });
+
+      expectImageLeftAsItIs(setValueSpy);
+    });
+
+    it('Given the selected preset has "Revert to original if larger" off, When the converted image is larger, Then the converted image is written', async () => {
+      // The plugin-wide value is on. The value of the preset is the one that counts.
+      await runProcess({
+        preset: { revertToOriginalIfLarger: false },
+        pluginWideRevert: true,
+        converted: makeImageBytesOfSize('WEBP', 5000),
+      });
+
+      expect(img.path).toBe('images/a.webp');
+      expect((app as any).vault.modifyBinary).toHaveBeenCalledTimes(1);
+    });
+
+    it('Given a converter that returns the original bytes, When processing, Then the file keeps its name and a notice says that it was not converted', async () => {
+      // The image processor returns the original PNG when it cannot convert.
+      const { setValueSpy, notices } = await runProcess({ converted: makeImageBytesOfSize('PNG', 1024) });
+
+      expectImageLeftAsItIs(setValueSpy);
+      expect(notices).toEqual(expect.arrayContaining([
+        expect.stringMatching(/^"a\.png" could not be converted to WEBP\./),
+      ]));
+      expect(notices.some((message) => /processed$/.test(message))).toBe(false);
+    });
   });
 
   it('7.8 Cancel action: closes without processing and saves current modal settings on close', async () => {
@@ -708,7 +775,7 @@ describe('ProcessSingleImageModal UI flows (Phase 7: 7.1–7.14 subset)', () => 
 
   it('7.15 Process action view refresh failure: given refreshActiveNote throws, then fallback Notice shown and processing completes', async () => {
     const plugin = await makePlugin(app);
-    (plugin as any).imageProcessor = { processImage: vi.fn(async () => new ArrayBuffer(8)) };
+    (plugin as any).imageProcessor = { processImage: vi.fn(async () => makeImageBytesOfSize('WEBP', 8)) };
     (plugin as any).folderAndFilenameManagement = {
       combinePath: (dir: string, name: string) => (dir ? `${dir}/${name}` : name),
       shouldSkipConversion: () => false

@@ -309,3 +309,40 @@ export function makeImageBlob(bytes: ArrayBuffer, mimeType: string): Blob {
 export function makeImageFile(bytes: ArrayBuffer, filename: string, mimeType: string): File {
   return new File([bytes], filename, { type: mimeType });
 }
+
+/**
+ * Create bytes that start with the signature of an image format, with zeros
+ * after it up to the given size. For a stand-in for a converted image of an
+ * exact size: the bytes pass a check of the format, but they do not decode.
+ *
+ * The result is never shorter than the signature. A format with no signature
+ * of its own ('ORIGINAL', 'NONE') gives zeros only.
+ */
+export function makeImageBytesOfSize(format: string, size: number): ArrayBuffer {
+  const signature = signatureOf(format);
+  const bytes = new Uint8Array(Math.max(size, signature.length));
+  bytes.set(signature);
+  return bytes.buffer;
+}
+
+function signatureOf(format: string): number[] {
+  switch (format) {
+    case 'WEBP':
+      // "RIFF", file size, "WEBP"
+      return [0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50];
+    case 'JPEG':
+      return [0xFF, 0xD8, 0xFF, 0xE0];
+    case 'PNG':
+    case 'PNGQUANT':
+      return [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    case 'AVIF':
+      // A 20-byte "ftyp" box: major brand "avif", minor version 0, compatible brand "avif"
+      return [
+        0x00, 0x00, 0x00, 0x14, 0x66, 0x74, 0x79, 0x70,
+        0x61, 0x76, 0x69, 0x66, 0x00, 0x00, 0x00, 0x00,
+        0x61, 0x76, 0x69, 0x66
+      ];
+    default:
+      return [];
+  }
+}

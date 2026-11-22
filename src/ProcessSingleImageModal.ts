@@ -5,6 +5,7 @@ import { OutputFormat, ResizeMode, EnlargeReduce } from "./ImageConverterSetting
 import { ENCODER_CONFIGS, ImageProcessor } from "./ImageProcessor";
 import { findFfmpegExecutablePath, normalizeExecutablePath } from "./utils/ffmpegPath";
 import { addInfoIcon } from "./utils/settingInfo";
+import { getRevertPolicy, getSelectedConversionPreset, reasonToKeepOriginal } from "./utils/keepOriginal";
 
 export interface SingleImageModalSettings {
     conversionPresetName: string;
@@ -783,10 +784,23 @@ export class ProcessSingleImageModal extends Modal {
 
 
             // --- File Creation/Replacement ---
+            // The file stays as it is when the image was not converted, or when the
+            // conversion saves less than the minimum savings. The dialog has no
+            // preset of its own, so the conversion preset that is selected in the
+            // settings decides.
+            const revertPolicy = getRevertPolicy(this.plugin.settings, getSelectedConversionPreset(this.plugin.settings));
+            const keepReason = reasonToKeepOriginal(originalSize, processedImageBuffer, this.modalSettings.outputFormat, revertPolicy);
+
+            if (keepReason === "notConverted") {
+                // As for an error: the dialog stays open, so another format can be tried.
+                new Notice(`"${this.imageFile.name}" could not be converted to ${this.modalSettings.outputFormat}. The file was not changed.`);
+                return;
+            }
+
             let keptOriginal = false;
-            if (processedImageBuffer && this.plugin.settings.revertToOriginalIfLarger && processedImageBuffer.byteLength > originalSize) {
+            if (keepReason === "smallSaving") {
                 this.plugin.showSizeComparisonNotification(originalSize, processedImageBuffer.byteLength);
-                new Notice(`Using original image for "${this.imageFile.name}" as processed image is larger.`, 1000);
+                new Notice(`Using original image for "${this.imageFile.name}" because size reduction was less than ${revertPolicy.minSavingsKB} KB.`, 1000);
                 // The file keeps its name and its content, so the link in the note stays as it is.
                 keptOriginal = true;
             } else if (processedImageBuffer) {

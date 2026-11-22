@@ -24,11 +24,17 @@ What happens during conversion
   - Uses FFmpeg (libaom-av1) with your configured CRF and preset. The result is also compared to the original at save time.
 
 Important: “Revert to original if larger”
-- Instead of a per-conversion “allow larger files” switch, the plugin now uses a global setting:
+- Instead of a per-conversion “allow larger files” switch, each conversion preset has this setting:
   - Revert to original if larger: When enabled, if the processed result is larger than the original, the plugin keeps the original file instead.
+  - Minimum compression savings (KB): the processed result must be smaller by at least this much, or the original is kept.
   - The original keeps its own extension. A PNG is saved as .png, even when the preset converts to WebP, so the file name matches its content.
+  - It applies to drop and paste, to the “Process image” window and to the batch commands (note, folder, vault). The window and the batch commands have no preset of their own: they use the conversion preset that is selected in the settings.
   - Default: OFF
   - Where to find it: Settings → Image Converter → Conversion presets → “Revert to original if larger”
+
+When a conversion does not work
+- If an image cannot be converted (for example, a file that the browser cannot decode), the plugin keeps the original file with its own name and extension. It does not save the original under the extension of the new format.
+- A batch command leaves that file as it is and tells you how many images were left unchanged.
 
 Examples
 1) If we get:

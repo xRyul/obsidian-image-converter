@@ -81,6 +81,14 @@ interface Location {
 
 /** True when the bytes declare an ISOBMFF still-image brand we can read. */
 export function matches(bytes: Uint8Array): boolean {
+    return hasBrand(bytes, BRANDS);
+}
+
+/**
+ * True when the `ftyp` box declares one of the brands, as the major brand or
+ * as a compatible brand.
+ */
+export function hasBrand(bytes: Uint8Array, brands: ReadonlySet<string>): boolean {
     const ftyp = findBox(bytes, 0, bytes.length, 'ftyp');
     if (!ftyp) {
         return false;
@@ -91,7 +99,7 @@ export function matches(bytes: Uint8Array): boolean {
         if (offset === ftyp.payloadStart + 4) {
             continue; // minor_version is a number, not a brand
         }
-        if (BRANDS.has(readFourCc(bytes, offset))) {
+        if (brands.has(readFourCc(bytes, offset))) {
             return true;
         }
     }
