@@ -112,7 +112,7 @@ describe('Conflict resolution and overwrite safety (Phase 9: 27.2)', () => {
     expect((editor.replaceRange as any).mock.calls.length).toBe(1);
   });
 
-  it('22.11 minimum savings: when savings below threshold, then original bytes are written to converted path', async () => {
+  it('22.11 minimum savings: when savings below threshold, then original bytes are written with the extension of the original', async () => {
     const { app, plugin } = setupPluginWithNote();
 
     await plugin.loadSettings();
@@ -146,7 +146,7 @@ describe('Conflict resolution and overwrite safety (Phase 9: 27.2)', () => {
     await (plugin as any).handlePaste(items, editor, { line: 0, ch: 0 });
 
     const [pathArg, bufferArg] = (app.vault.createBinary as any).mock.calls[0] as [string, ArrayBuffer];
-    expect(pathArg).toBe('images/x.webp');
+    expect(pathArg).toBe('images/x.png');
     expect(bufferArg.byteLength).toBe(file.size);
     expect(bufferArg.byteLength).toBeGreaterThan(processedBuffer.byteLength);
   });
@@ -187,5 +187,108 @@ describe('Conflict resolution and overwrite safety (Phase 9: 27.2)', () => {
 
     const [, bufferArg] = (app.vault.createBinary as any).mock.calls[0] as [string, ArrayBuffer];
     expect(readJpegExif(new Uint8Array(bufferArg))).toBeNull();
+  });
+});
+
+// Issue #347: the original image must not be saved under the extension of the converted one.
+describe('Revert to original if larger: the saved file keeps the extension of the original', () => {
+  async function setupRevert(options: { existing?: string[]; reuse?: boolean; processedSize?: number } = {}) {
+    const existing = (options.existing ?? []).map((path) => fakeTFile({ path }));
+    const { app, plugin } = setupPluginWithNote(existing);
+
+    await plugin.loadSettings();
+    await plugin.onload();
+
+    const { settings } = plugin as any;
+    settings.modalBehavior = 'never';
+    settings.selectedConversionPreset = 'WEBP (75, no resizing)';
+    const conversionPreset = settings.conversionPresets.find((preset: any) => preset.name === 'WEBP (75, no resizing)');
+    conversionPreset.revertToOriginalIfLarger = true;
+    conversionPreset.minimumCompressionSavingsInKB = 0;
+
+    settings.selectedFilenamePreset = 'Keep original name'; // increment
+    if (options.reuse) {
+      if (!settings.filenamePresets.some((preset: any) => preset.name === 'Reuse Existing')) {
+        settings.filenamePresets.push({ name: 'Reuse Existing', customTemplate: '{imagename}', skipRenamePatterns: '', conflictResolution: 'reuse' });
+      }
+      settings.selectedFilenamePreset = 'Reuse Existing';
+    }
+
+    // By default the converted image is larger than the 2,000-byte original.
+    (plugin as any).imageProcessor = { processImage: vi.fn(async () => new ArrayBuffer(options.processedSize ?? 5000)) };
+    (plugin as any).showSizeComparisonNotification = vi.fn();
+    const formatLink = vi.fn(async (path: string) => `![](/${path})`);
+    (plugin as any).linkFormatter = { formatLink };
+
+    vi.spyOn((plugin as any).folderAndFilenameManagement, 'determineDestination').mockResolvedValue({
+      destinationPath: 'images',
+      newFilename: 'x.webp'
+    });
+
+    const editor = {
+      getCursor: () => ({ line: 0, ch: 0 }),
+      replaceRange: vi.fn(),
+      setCursor: vi.fn(),
+    } as any;
+
+    return { app, plugin, editor, formatLink };
+  }
+
+  async function addImage(flow: 'drop' | 'paste', plugin: ImageConverterPlugin, editor: any, file: File) {
+    if (flow === 'drop') {
+      await (plugin as any).handleDrop([{ name: file.name, type: file.type, file }], editor, new Event('drop'), { line: 0, ch: 0 });
+      return;
+    }
+    await (plugin as any).handlePaste([{ kind: 'file', type: file.type, file }], editor, { line: 0, ch: 0 });
+  }
+
+  const createdPaths = (app: any): string[] => ((app.vault.createBinary as any).mock.calls as any[][]).map((callArgs) => callArgs[0] as string);
+
+  it.each(['drop', 'paste'] as const)('Given a PNG and a WEBP preset, When the original is used on %s, Then it is saved as .png and the link points to it', async (flow) => {
+    const { app, plugin, editor, formatLink } = await setupRevert();
+    const file = makeFile('x.png', 'image/png', 2000);
+
+    await addImage(flow, plugin, editor, file);
+
+    expect(createdPaths(app)).toEqual(['images/x.png']);
+    const [, bufferArg] = (app.vault.createBinary as any).mock.calls[0] as [string, ArrayBuffer];
+    expect(bufferArg.byteLength).toBe(file.size);
+    expect(formatLink).toHaveBeenCalledWith('images/x.png', expect.anything(), expect.anything(), expect.anything(), expect.anything());
+    expect((editor.replaceRange as any).mock.calls.length).toBe(1);
+  });
+
+  it.each(['drop', 'paste'] as const)('Given a PNG and a WEBP preset, When the converted image is used on %s, Then it is saved as .webp', async (flow) => {
+    const { app, plugin, editor } = await setupRevert({ processedSize: 100 });
+
+    await addImage(flow, plugin, editor, makeFile('x.png', 'image/png', 2000));
+
+    expect(createdPaths(app)).toEqual(['images/x.webp']);
+  });
+
+  it.each(['drop', 'paste'] as const)('Given a file already has the name of the original, When the original is used on %s with "increment", Then the name gets a number', async (flow) => {
+    const { app, plugin, editor, formatLink } = await setupRevert({ existing: ['images/x.png'] });
+
+    await addImage(flow, plugin, editor, makeFile('x.png', 'image/png', 2000));
+
+    expect(createdPaths(app)).toEqual(['images/x-1.png']);
+    expect(formatLink).toHaveBeenCalledWith('images/x-1.png', expect.anything(), expect.anything(), expect.anything(), expect.anything());
+  });
+
+  it.each(['drop', 'paste'] as const)('Given a file already has the name of the original, When the original is used on %s with "reuse", Then nothing is written and the link points to that file', async (flow) => {
+    const { app, plugin, editor, formatLink } = await setupRevert({ existing: ['images/x.png'], reuse: true });
+
+    await addImage(flow, plugin, editor, makeFile('x.png', 'image/png', 2000));
+
+    expect(createdPaths(app)).toEqual([]);
+    expect(formatLink).toHaveBeenCalledWith('images/x.png', expect.anything(), expect.anything(), expect.anything(), expect.anything());
+    expect((editor.replaceRange as any).mock.calls.length).toBe(1);
+  });
+
+  it('Given an original that already has the extension of the preset, When the original is used, Then the name does not change', async () => {
+    const { app, plugin, editor } = await setupRevert();
+
+    await addImage('paste', plugin, editor, makeFile('x.webp', 'image/webp', 2000));
+
+    expect(createdPaths(app)).toEqual(['images/x.webp']);
   });
 });

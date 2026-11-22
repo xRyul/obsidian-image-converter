@@ -431,6 +431,30 @@ export class FolderAndFilenameManagement {
     }
 
     /**
+     * Gives the name to save the original image under, when it is kept in
+     * place of the converted one. The name of the converted image gets the
+     * extension of the original, so that the name matches the content.
+     *
+     * @param convertedFilename - The name that the converted image would get.
+     * @param file - The original image.
+     * @returns The name with the extension of the original, in lowercase.
+     */
+    getFilenameForOriginal(convertedFilename: string, file: File): string {
+        const originalDotIndex = file.name.lastIndexOf(".");
+        if (originalDotIndex === -1) {
+            return convertedFilename; // The original has no extension to give
+        }
+
+        const originalExtension = file.name.substring(originalDotIndex).toLowerCase();
+        const convertedDotIndex = convertedFilename.lastIndexOf(".");
+        const nameWithoutExt = convertedDotIndex > -1
+            ? convertedFilename.substring(0, convertedDotIndex)
+            : convertedFilename;
+
+        return `${nameWithoutExt}${originalExtension}`;
+    }
+
+    /**
      * Sanitizes a filename by removing or replacing invalid characters, handling reserved names,
      * and ensuring compliance with common filesystem restrictions.
      *

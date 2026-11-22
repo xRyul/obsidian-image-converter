@@ -201,4 +201,29 @@ describe('Windows attachment path safety', () => {
     expect(app.vault.createBinary).toHaveBeenCalledTimes(1);
     expect(editor.replaceRange).toHaveBeenCalledTimes(1);
   });
+
+  it('blocks the original image when its own extension makes the Windows path too long', async () => {
+    // The converted name ends in .png and fits (259). The original is a .jpeg: one character more.
+    const { destinationPath, filename } = makeTargetWithAbsoluteLength(WINDOWS_MAX_PATH);
+    const convertedName = filename.replace(/\.webp$/, '.png');
+    const { app, plugin, editor } = await setup(destinationPath, convertedName);
+    const preset = (plugin as any).settings.conversionPresets.find((candidate: any) => candidate.name === 'None');
+    const file = new File([new Uint8Array([1, 2, 3])], 'photo.jpeg', { type: 'image/jpeg' });
+
+    expect(getAbsoluteWindowsPath(destinationPath, convertedName)).toHaveLength(WINDOWS_MAX_PATH - 1);
+
+    preset.revertToOriginalIfLarger = true;
+    try {
+      await (plugin as any).handlePaste([{ kind: 'file', type: file.type, file }], editor, { line: 0, ch: 0 });
+    } finally {
+      preset.revertToOriginalIfLarger = false;
+    }
+
+    expect((plugin as any).imageProcessor.processImage).toHaveBeenCalledTimes(1);
+    expect(app.vault.createBinary).not.toHaveBeenCalled();
+    expect(editor.replaceRange).not.toHaveBeenCalled();
+    expect(getNoticeMessages()).toEqual(expect.arrayContaining([
+      expect.stringMatching(/image not added.*too long.*windows/is),
+    ]));
+  });
 });

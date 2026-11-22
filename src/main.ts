@@ -491,6 +491,46 @@ export default class ImageConverterPlugin extends Plugin {
         return false;
     }
 
+    /**
+     * Saves the original image in place of the converted one. The file gets
+     * the extension of the original, so that its name matches its content.
+     *
+     * @param convertedFilename - The name that the converted image would get.
+     * @returns The vault path to link to, or null when the path is not safe to write.
+     */
+    private async saveOriginalImage(
+        file: File,
+        destinationPath: string,
+        convertedFilename: string,
+        selectedFilenamePreset?: FilenamePreset
+    ): Promise<string | null> {
+        let filename = this.folderAndFilenameManagement.getFilenameForOriginal(convertedFilename, file);
+
+        // The conflict rule was applied to the converted name. A name with
+        // another extension is a new name, so apply the rule to it too.
+        const isNewName = filename !== convertedFilename;
+        if (isNewName && selectedFilenamePreset?.conflictResolution === "increment") {
+            filename = await this.folderAndFilenameManagement.handleNameConflicts(destinationPath, filename, "increment");
+        }
+
+        const fullPath = this.folderAndFilenameManagement.combinePath(destinationPath, filename);
+        if (isNewName && selectedFilenamePreset?.conflictResolution === "reuse") {
+            const existingFile = this.app.vault.getAbstractFileByPath(fullPath);
+            if (existingFile) {
+                return existingFile.path;
+            }
+        }
+
+        if (!this.validateAttachmentPath(fullPath)) {
+            return null;
+        }
+
+        // The original keeps only the metadata that the setting allows.
+        const fileBuffer = await transferMetadata(file, await file.arrayBuffer(), true, this.settings.metadataMode);
+        const tfile = await this.app.vault.createBinary(fullPath, fileBuffer);
+        return tfile.path;
+    }
+
     private dropPasteRegisterEvents() {
         // On mobile DROP events are not supported, but lets still check as a precaution
         if (Platform.isMobile) return;
@@ -828,7 +868,7 @@ export default class ImageConverterPlugin extends Plugin {
                             );
 
 
-                            let tfile: TFile;
+                            let linkPath: string;
 
                             // Step 3.5.4: Create the Image File in Vault
                             // - Create the new image file in the Obsidian vault using `createBinary`.
@@ -846,19 +886,23 @@ export default class ImageConverterPlugin extends Plugin {
                                 this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
                                 new Notice(`Using original image for "${file.name}" because size reduction was less than ${minSavingsKB} KB.`);
 
-                                // The original keeps only the metadata that the setting allows.
-                                const fileBuffer = await transferMetadata(file, await file.arrayBuffer(), true, this.settings.metadataMode);
-                                tfile = await this.app.vault.createBinary(newFullPath, fileBuffer);
+                                // The original is saved with its own extension, not that of the converted image.
+                                const originalPath = await this.saveOriginalImage(file, destinationPath, newFilename, selectedFilenamePreset);
+                                if (originalPath === null) {
+                                    return; // Resolve this promise
+                                }
+                                linkPath = originalPath;
                             } else {
                                 // Processed image is smaller OR user doesn't want to revert
                                 this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
-                                tfile = await this.app.vault.createBinary(newFullPath, this.processedImage);
+                                const tfile = await this.app.vault.createBinary(newFullPath, this.processedImage);
+                                linkPath = tfile.path;
                             }
 
                             // Step 3.5.5: Insert Link into Editor
                             // - Insert the Markdown link to the newly created image file into the editor at the current cursor position.
                             try {
-                                await this.insertLinkAtCursorPosition(editor, tfile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                                await this.insertLinkAtCursorPosition(editor, linkPath, cursor, selectedLinkFormatPreset, selectedResizePreset);
                             } catch (error) {
                                 const errorMessage = error instanceof Error ? error.message : String(error);
                                 console.error("Failed to insert link after processing:", errorMessage);
@@ -1174,7 +1218,7 @@ export default class ImageConverterPlugin extends Plugin {
                                 this.settings
                             );
 
-                            let tfile: TFile;
+                            let linkPath: string;
                             // Step 3.5.4: Create the Image File in Vault
                             // - Create the new image file in the Obsidian vault using `createBinary`.
                             // - Show space savings notification
@@ -1191,19 +1235,23 @@ export default class ImageConverterPlugin extends Plugin {
                                 this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
                                 new Notice(`Using original image for "${file.name}" because size reduction was less than ${minSavingsKB} KB.`);
 
-                                // The original keeps only the metadata that the setting allows.
-                                const fileBuffer = await transferMetadata(file, await file.arrayBuffer(), true, this.settings.metadataMode);
-                                tfile = await this.app.vault.createBinary(newFullPath, fileBuffer);
+                                // The original is saved with its own extension, not that of the converted image.
+                                const originalPath = await this.saveOriginalImage(file, destinationPath, newFilename, selectedFilenamePreset);
+                                if (originalPath === null) {
+                                    return; // Resolve this promise
+                                }
+                                linkPath = originalPath;
                             } else {
                                 // Processed image is smaller OR user doesn't want to revert
                                 this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
-                                tfile = await this.app.vault.createBinary(newFullPath, this.processedImage);
+                                const tfile = await this.app.vault.createBinary(newFullPath, this.processedImage);
+                                linkPath = tfile.path;
                             }
 
                             // Step 3.5.5: Insert Link into Editor
                             // - Insert the link to the new image into the editor.
                             try {
-                                await this.insertLinkAtCursorPosition(editor, tfile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                                await this.insertLinkAtCursorPosition(editor, linkPath, cursor, selectedLinkFormatPreset, selectedResizePreset);
                             } catch (error) {
                                 const errorMessage = error instanceof Error ? error.message : String(error);
                                 console.error("Failed to insert link after processing:", errorMessage);

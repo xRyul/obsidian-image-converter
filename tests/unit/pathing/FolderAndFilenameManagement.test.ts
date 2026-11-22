@@ -535,6 +535,20 @@ describe('FolderAndFilenameManagement — Platform/Security (Phase 9)', () => {
     expect(out).toBe('output/name.png');
   });
 
+  it.each([
+    // [converted name, original name, expected]
+    ['x.webp', 'x.png', 'x.png'],
+    ['note-20260101.jpeg', 'IMG_0001.PNG', 'note-20260101.png'],
+    ['a.b.webp', 'photo.jpg', 'a.b.jpg'],
+    ['x.jpeg', 'x.jpg', 'x.jpg'],
+    ['x.png', 'x.png', 'x.png'],
+    ['x.webp', 'no-extension', 'x.webp'],
+  ])('Given converted name %s and original %s, When the original is saved, Then its name is %s', (converted, original, expected) => {
+    const { ffm } = makeFFMGeneric();
+    const file = new File([new Uint8Array([1])], original, { type: 'image/png' });
+    expect(ffm.getFilenameForOriginal(converted, file)).toBe(expected);
+  });
+
   it('26.6 Very long filenames: sanitizeFilename truncates base and preserves extension', () => {
     const { ffm } = makeFFMGeneric();
     const longBase = 'A'.repeat(400);

@@ -783,10 +783,12 @@ export class ProcessSingleImageModal extends Modal {
 
 
             // --- File Creation/Replacement ---
+            let keptOriginal = false;
             if (processedImageBuffer && this.plugin.settings.revertToOriginalIfLarger && processedImageBuffer.byteLength > originalSize) {
                 this.plugin.showSizeComparisonNotification(originalSize, processedImageBuffer.byteLength);
                 new Notice(`Using original image for "${this.imageFile.name}" as processed image is larger.`, 1000);
-                // We don't create/modify a file, but the link *might* need updating (if format changed).
+                // The file keeps its name and its content, so the link in the note stays as it is.
+                keptOriginal = true;
             } else if (processedImageBuffer) {
                 this.plugin.showSizeComparisonNotification(originalSize, processedImageBuffer.byteLength);
 
@@ -813,7 +815,7 @@ export class ProcessSingleImageModal extends Modal {
 
             // --- Update Link in Active Note ---
             const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-            if (activeView) {
+            if (activeView && !keptOriginal) {
                 const { editor } = activeView;
                 const fileContent = editor.getValue();
 

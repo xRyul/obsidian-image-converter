@@ -1301,8 +1301,10 @@ ffmpeg.on('error', (err: Error) => {
         enlargeOrReduce: EnlargeReduce,
         allowLargerFiles: boolean
     ): Promise<ArrayBuffer> {
-        // Early return if no processing needed
-        if (quality === 1 && resizeMode === 'None') {
+        // Return the file as it is only when it is already WebP. Other input must
+        // be encoded, or its bytes would be saved under a .webp name.
+        if (quality === 1 && resizeMode === 'None'
+            && await this.supportedImageFormats.getMimeTypeFromFile(file) === 'image/webp') {
             return file.arrayBuffer();
         }
 
@@ -1414,26 +1416,11 @@ image.onload = () => { try {
                 })
             ]);
 
-            // Get original format compression as well
-            // We're working with the original blob at the beginning,but the crucial 
-            // part is HOW we're creating the new compressed version. The path we take
-            // to create the compressed version (toDataURL vs toBlob) can result in 
-            // different compression algorithms being used internally by the browser.
-            const originalCompressed = await this.compressOriginalImage(
-                file,
-                quality,
-                resizeMode,
-                desiredWidth,
-                desiredHeight,
-                desiredLongestEdge,
-                enlargeOrReduce
-            );
-
-            // Compare all results and choose the smallest one
+            // Compare the results and choose the smallest one. A re-encode in the
+            // original format is not a candidate: it is not WebP.
             const results = [
                 { type: 'blob', data: blobResult, size: blobResult.byteLength },
-                { type: 'dataUrl', data: dataUrlResult, size: dataUrlResult.byteLength },
-                { type: 'original', data: originalCompressed, size: originalCompressed.byteLength }
+                { type: 'dataUrl', data: dataUrlResult, size: dataUrlResult.byteLength }
             ].filter(result => result.size > 0);
 
             // Sort by size
@@ -1481,8 +1468,10 @@ image.onload = () => { try {
         enlargeOrReduce: EnlargeReduce,
         allowLargerFiles: boolean
     ): Promise<ArrayBuffer> {
-        // Early return if no processing needed
-        if (quality === 1 && resizeMode === 'None') {
+        // Return the file as it is only when it is already JPEG. Other input must
+        // be encoded, or its bytes would be saved under a .jpeg name.
+        if (quality === 1 && resizeMode === 'None'
+            && await this.supportedImageFormats.getMimeTypeFromFile(file) === 'image/jpeg') {
             return file.arrayBuffer();
         }
 
@@ -1596,26 +1585,12 @@ image.onload = () => { try {
                 })
             ]);
 
-// Compare all results and choose the smallest one
-            const results: { type: string; data: ArrayBuffer; size: number }[] = [
+            // Compare the results and choose the smallest one. A re-encode in the
+            // original format is not a candidate: it is not JPEG.
+            const filtered = [
                 { type: 'blob', data: blobResult, size: blobResult.byteLength },
                 { type: 'dataUrl', data: dataUrlResult, size: dataUrlResult.byteLength }
-            ];
-            // Include original format compression only when input is not already JPEG
-            if (file.type !== 'image/jpeg') {
-                const originalCompressed = await this.compressOriginalImage(
-                    file,
-                    quality,
-                    resizeMode,
-                    desiredWidth,
-                    desiredHeight,
-                    desiredLongestEdge,
-                    enlargeOrReduce
-                );
-                results.push({ type: 'original', data: originalCompressed, size: originalCompressed.byteLength });
-            }
-
-            const filtered = results.filter(result => result.size > 0);
+            ].filter(result => result.size > 0);
 
 // Sort by size
             filtered.sort((left, right) => left.size - right.size);
@@ -1662,8 +1637,10 @@ image.onload = () => { try {
         enlargeOrReduce: EnlargeReduce,
         allowLargerFiles: boolean
     ): Promise<ArrayBuffer> {
-        // Early return if no processing needed
-        if (colorDepth === 1 && resizeMode === 'None') {
+        // Return the file as it is only when it is already PNG. Other input must
+        // be encoded, or its bytes would be saved under a .png name.
+        if (colorDepth === 1 && resizeMode === 'None'
+            && await this.supportedImageFormats.getMimeTypeFromFile(file) === 'image/png') {
             return file.arrayBuffer();
         }
 
@@ -1783,29 +1760,11 @@ image.onload = () => { try {
                 })
             ]);
 
-            // For PNG, we might want to try additional optimization methods
+            // A re-encode in the original format is not a candidate: it is not PNG.
             const results = [
                 { type: 'blob', data: blobResult, size: blobResult.byteLength },
                 { type: 'dataUrl', data: dataUrlResult, size: dataUrlResult.byteLength }
             ];
-
-            // If input wasn't PNG, add original format as comparison
-            if (file.type !== 'image/png') {
-                const originalCompressed = await this.compressOriginalImage(
-                    file,
-                    1, // PNG doesn't use quality parameter
-                    resizeMode,
-                    desiredWidth,
-                    desiredHeight,
-                    desiredLongestEdge,
-                    enlargeOrReduce
-                );
-                results.push({
-                    type: 'original',
-                    data: originalCompressed,
-                    size: originalCompressed.byteLength
-                });
-            }
 
             // Filter out empty results and sort by size
             const validResults = results

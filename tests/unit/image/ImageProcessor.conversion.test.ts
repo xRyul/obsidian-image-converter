@@ -31,6 +31,7 @@ import {
   makeJpegBytes, 
   makeWebpBytes, 
   makeImageBlob,
+  makeImageFile,
   corruptedBytes 
 } from '../../factories/image';
 import { setMockImageSize, failNextImageLoad } from '../../helpers/test-setup';
@@ -76,7 +77,7 @@ describe('ImageProcessor - Conversion Tests', () => {
 
   describe('WEBP Conversion', () => {
     // Test 1.1
-    it('Given WEBP format requested, When multiple candidates available, Then selects smallest among toBlob, toDataURL, and compressOriginalImage', async () => {
+    it('Given WEBP format requested, When multiple candidates available, Then selects the smallest WebP between toBlob and toDataURL', async () => {
       // Arrange
       const inputBytes = makePngBytes({ w: 200, h: 200 });
       const inputBlob = makeImageBlob(inputBytes, 'image/png');
@@ -84,7 +85,7 @@ describe('ImageProcessor - Conversion Tests', () => {
       // Mock canvas to return different sizes for each method
       const smallestBlobBytes = makeWebpBytes({ w: 50, h: 50 }); // Smallest
       const mediumDataUrlBytes = makeWebpBytes({ w: 100, h: 100 });
-      const largestOriginalBytes = makeWebpBytes({ w: 150, h: 150 });
+      const smallerOriginalBytes = makePngBytes({ w: 10, h: 10 });
       
       mockCanvas.toBlob = vi.fn((callback) => {
         callback(new Blob([smallestBlobBytes], { type: 'image/webp' }));
@@ -95,8 +96,8 @@ describe('ImageProcessor - Conversion Tests', () => {
         return `data:image/webp;base64,${base64}`;
       });
       
-      // Mock compressOriginalImage to return larger result
-      vi.spyOn(processor as any, 'compressOriginalImage').mockResolvedValue(largestOriginalBytes);
+      // A re-encode in the original format is smaller, but it is PNG, not WebP
+      vi.spyOn(processor as any, 'compressOriginalImage').mockResolvedValue(smallerOriginalBytes);
       
       // Act
       const result = await processor.processImage(
@@ -254,7 +255,7 @@ describe('ImageProcessor - Conversion Tests', () => {
 
   describe('JPEG Conversion', () => {
     // Test 1.5
-    it('Given JPEG format for non-JPEG input, When converting, Then selects smallest among toBlob, toDataURL, and compressOriginalImage', async () => {
+    it('Given JPEG format for non-JPEG input, When converting, Then encodes JPEG with the given quality', async () => {
       // Arrange
       const inputBytes = makePngBytes({ w: 100, h: 100 });
       const inputBlob = makeImageBlob(inputBytes, 'image/png');
@@ -285,7 +286,7 @@ describe('ImageProcessor - Conversion Tests', () => {
     });
 
     // Test 1.6
-    it('Given JPEG format for JPEG input, When converting, Then excludes compressOriginalImage from candidates', async () => {
+    it('Given JPEG format, When converting, Then no re-encode in the original format is made', async () => {
       // Arrange
       const inputBytes = makeJpegBytes({ w: 100, h: 100 });
       const inputBlob = makeImageBlob(inputBytes, 'image/jpeg');
@@ -305,8 +306,7 @@ describe('ImageProcessor - Conversion Tests', () => {
       );
       
       // Assert
-      // For JPEG input to JPEG output, compressOriginalImage should not be called
-      // since it would be redundant
+      // A re-encode in the original format is never a JPEG candidate
       expect(compressOriginalSpy).not.toHaveBeenCalled();
     });
 
@@ -688,6 +688,100 @@ describe('ImageProcessor - Conversion Tests', () => {
 
       // Assert
       expect(mockCanvas.toBlob).toHaveBeenCalledWith(expect.any(Function), 'image/jpeg', expect.any(Number));
+    });
+  });
+
+  // Issue #347: the extension comes from the format the user picked, so the
+  // bytes must be in that format too.
+  describe('Output is in the requested format', () => {
+    const magicOf = (buffer: ArrayBuffer) => {
+      const bytes = new Uint8Array(buffer);
+      if (bytes[0] === 0x89 && bytes[1] === 0x50) return 'PNG';
+      if (bytes[0] === 0xff && bytes[1] === 0xd8) return 'JPEG';
+      if (String.fromCharCode(...bytes.slice(0, 4)) === 'RIFF') return 'WEBP';
+      return 'unknown';
+    };
+
+    const inputs = {
+      PNG: () => makeImageBlob(makePngBytes({ w: 100, h: 100 }), 'image/png'),
+      JPEG: () => makeImageBlob(makeJpegBytes({ w: 100, h: 100 }), 'image/jpeg'),
+      WEBP: () => makeImageBlob(makeWebpBytes({ w: 100, h: 100 }), 'image/webp'),
+    } as const;
+
+    it.each([
+      // [input, output, quality, colour depth]
+      ['JPEG', 'PNG', 0.8, 1.0],
+      ['WEBP', 'PNG', 0.8, 1.0],
+      ['PNG', 'JPEG', 1.0, 1.0],
+      ['WEBP', 'JPEG', 1.0, 1.0],
+      ['PNG', 'WEBP', 1.0, 1.0],
+      ['JPEG', 'WEBP', 1.0, 1.0],
+    ] as const)('Given %s input and %s output with nothing to compress or resize, When processing, Then the output is encoded and not the input returned', async (input, output, quality, colorDepth) => {
+      // Act
+      const result = await processor.processImage(inputs[input](), output, quality, colorDepth, 'None', 0, 0, 0, 'Auto', true);
+
+      // Assert
+      expect(magicOf(result)).toBe(output);
+    });
+
+    it.each([
+      ['PNG', 'WEBP', 1.0],
+      ['JPEG', 'JPEG', 1.0],
+      ['PNG', 'PNG', 1.0],
+    ] as const)('Given %s input and the same %s output with nothing to compress or resize, When processing, Then the input bytes are returned as they are', async (input, output, quality) => {
+      // PNG to WEBP is here as a control for the line above: only WEBP input skips WEBP encoding.
+      const blob = output === 'WEBP' ? inputs.WEBP() : inputs[input]();
+      const toBlob = vi.spyOn(mockCanvas, 'toBlob');
+
+      // Act
+      const result = await processor.processImage(blob, output, quality, 1.0, 'None', 0, 0, 0, 'Auto', true);
+
+      // Assert
+      expect(toBlob).not.toHaveBeenCalled();
+      expect(result.byteLength).toBe(blob.size);
+    });
+
+    it('Given a .jpg file with no APPn segment, labelled image/jpg, When JPEG output with nothing to compress or resize, Then the input bytes are returned as they are', async () => {
+      // Arrange: such a JPEG starts FF D8 FF DB. The single-image dialog labels the file "image/jpg".
+      const withApp0 = new Uint8Array(makeJpegBytes({ w: 100, h: 100 }));
+      const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xdb, 0x00, 0x02, ...withApp0.slice(20)]);
+      const file = makeImageFile(bytes.buffer, 'photo.jpg', 'image/jpg');
+      const toBlob = vi.spyOn(mockCanvas, 'toBlob');
+
+      // Act
+      const result = await processor.processImage(file, 'JPEG', 1.0, 1.0, 'None', 0, 0, 0, 'Auto', true);
+
+      // Assert
+      expect(toBlob).not.toHaveBeenCalled();
+      expect(new Uint8Array(result)).toEqual(bytes);
+    });
+
+    it.each([
+      ['PNG', 'WEBP'],
+      ['PNG', 'JPEG'],
+      ['JPEG', 'PNG'],
+    ] as const)('Given %s input whose own-format re-encode is the smallest, When converting to %s, Then the output is in the requested format', async (input, output) => {
+      // Arrange: a re-encode in the input format is 8 bytes. Both paths for
+      // the requested format give 4,000 bytes, with its magic bytes first.
+      const ownFormat = { PNG: 'image/png', JPEG: 'image/jpeg' }[input];
+      const encode = (type: string, size: number) => {
+        const bytes = new Uint8Array(size);
+        bytes.set(new Uint8Array({ 'image/webp': makeWebpBytes, 'image/jpeg': makeJpegBytes, 'image/png': makePngBytes }[type]!({ w: 1, h: 1 })).slice(0, 12));
+        return bytes;
+      };
+      mockCanvas.toBlob = vi.fn((callback, type = 'image/png') => {
+        callback(new Blob([encode(type, type === ownFormat ? 12 : 4000)], { type }));
+      }) as any;
+      mockCanvas.toDataURL = vi.fn((type = 'image/png') => {
+        const base64 = btoa(String.fromCharCode(...encode(type, 4000)));
+        return `data:${type};base64,${base64}`;
+      }) as any;
+
+      // Act
+      const result = await processor.processImage(inputs[input](), output, 0.8, 1.0, 'Fit', 50, 50, 50, 'Auto', true);
+
+      // Assert
+      expect(magicOf(result)).toBe(output);
     });
   });
 

@@ -513,6 +513,43 @@ describe('ProcessSingleImageModal UI flows (Phase 7: 7.1–7.14 subset)', () => 
     // Modal may remain open depending on implementation; no strict close assertion
   });
 
+  it('Given "Revert to original if larger" and a converted image that is larger, When processing, Then the file and the link in the note stay as they are', async () => {
+    const plugin = await makePlugin(app);
+    (plugin as any).settings.revertToOriginalIfLarger = true;
+    // The converted image is larger than the original (fakeTFile gives 1,024 bytes).
+    (plugin as any).imageProcessor = { processImage: vi.fn(async () => new ArrayBuffer(5000)) };
+    (plugin as any).folderAndFilenameManagement = {
+      combinePath: (dir: string, name: string) => (dir ? `${dir}/${name}` : name),
+      shouldSkipConversion: () => false
+    };
+    (plugin as any).getPresetByName = vi.fn(() => null);
+    (plugin as any).showSizeComparisonNotification = vi.fn();
+
+    const setValueSpy = vi.fn();
+    (app as any).workspace.getActiveViewOfType = vi.fn(() => ({
+      file: img,
+      editor: {
+        getValue: () => 'Before ![](a.png) After',
+        setValue: setValueSpy,
+      }
+    }));
+    (app as any).fileManager = {
+      renameFile: vi.fn(async (file: any, newPath: string) => { await (app as any).vault.rename(file, newPath); })
+    };
+
+    const modal = new ProcessSingleImageModal(app, plugin as any, img);
+    await modal.onOpen();
+    (modal as any).modalSettings.outputFormat = 'WEBP';
+
+    await (modal as any).processImage();
+
+    // The original is kept: a.png is not renamed or written, so the link must still point to it.
+    expect((app as any).fileManager.renameFile).not.toHaveBeenCalled();
+    expect((app as any).vault.modifyBinary).not.toHaveBeenCalled();
+    expect(img.path).toBe('images/a.png');
+    expect(setValueSpy).not.toHaveBeenCalled();
+  });
+
   it('7.8 Cancel action: closes without processing and saves current modal settings on close', async () => {
     const plugin = await makePlugin(app);
     (plugin as any).imageProcessor = { processImage: vi.fn(async () => new ArrayBuffer(8)) };
