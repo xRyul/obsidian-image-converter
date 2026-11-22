@@ -552,7 +552,7 @@ export class VariableProcessor {
     // Method to group variables by category (used by AvailableVariablesModal)
     private groupVariablesByCategory(variables: VariableInfo[]): Record<string, VariableInfo[]> {
 
-        /* eslint-disable @typescript-eslint/naming-convention */
+        /* eslint-disable @typescript-eslint/naming-convention -- Keys are category labels shown in the UI */
         const categorized: Record<string, VariableInfo[]> = {
             "Basic": [],
             "Date & Time": [],
@@ -561,7 +561,7 @@ export class VariableProcessor {
             "Calculated Image Properties": [],
             "Advanced": []
         };
-        /* eslint-enable @typescript-eslint/naming-convention */
+        /* eslint-enable @typescript-eslint/naming-convention -- End of category labels */
 
         for (const variable of variables) {
             if (variable.name.startsWith("{date") || ["{YYYY}", "{MM}", "{DD}", "{HH}", "{mm}", "{ss}", "{weekday}", "{month}", "{calendar}", "{today}", "{YYYY-MM-DD}", "{tomorrow}", "{yesterday}", "{startofweek}", "{endofweek}", "{startofmonth}", "{endofmonth}", "{nextweek}", "{lastweek}", "{nextmonth}", "{lastmonth}", "{daysinmonth}", "{weekofyear}", "{quarterofyear}", "{week}", "{w}", "{quarter}", "{Q}", "{dayofyear}", "{DDD}", "{monthname}", "{MMMM}", "{dayname}", "{dddd}", "{dateordinal}", "{Do}", "{relativetime}", "{currentdate}", "{yyyy}", "{time}", "{timestamp}"].includes(variable.name)) {
@@ -1019,7 +1019,7 @@ export class VariableProcessor {
                 }
 
                 // Add properties to metadata object
-                /* eslint-disable @typescript-eslint/naming-convention */
+                /* eslint-disable @typescript-eslint/naming-convention -- Keys are template placeholders such as {width} */
                 Object.assign(metadata, {
                     // Existing properties
                     '{ratio}': aspectRatio.toFixed(2),
@@ -1060,12 +1060,12 @@ export class VariableProcessor {
                     '{mindimension}': Math.min(width, height).toString(),
                     '{diagonalpixels}': Math.sqrt(width * width + height * height).toFixed(0),
                     '{aspectratiosimplified}': (() => {
-                        /* eslint-disable id-length */
+                        /* eslint-disable id-length -- Short math names in the GCD helper */
                         const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
                         const w = width;
                         const h = height;
                         const divisor = gcd(w, h);
-                        /* eslint-enable id-length */
+                        /* eslint-enable id-length -- End of GCD helper */
                         return `${w / divisor}:${h / divisor}`;
                     })(),
                     '{screenfitcategory}': (() => {
@@ -1077,7 +1077,7 @@ export class VariableProcessor {
                         return 'above-4k';
                     })(),
                 });
-                /* eslint-enable @typescript-eslint/naming-convention */
+                /* eslint-enable @typescript-eslint/naming-convention -- End of template placeholders */
 
                 // Clean up the Blob URL
                 URL.revokeObjectURL(img.src);
@@ -1129,7 +1129,7 @@ export class VariableProcessor {
                 const fileSizeInBytes = file.size;
 
                 // Add properties to metadata object
-                /* eslint-disable @typescript-eslint/naming-convention */
+                /* eslint-disable @typescript-eslint/naming-convention -- Keys are template placeholders such as {width} */
                 Object.assign(metadata, {
                     // Existing properties
                     '{ratio}': aspectRatio.toFixed(2),
@@ -1170,12 +1170,12 @@ export class VariableProcessor {
                     '{mindimension}': Math.min(width, height).toString(),
                     '{diagonalpixels}': Math.sqrt(width * width + height * height).toFixed(0),
                     '{aspectratiosimplified}': (() => {
-                        /* eslint-disable id-length */
+                        /* eslint-disable id-length -- Short math names in the GCD helper */
                         const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
                         const w = width;
                         const h = height;
                         const divisor = gcd(w, h);
-                        /* eslint-enable id-length */
+                        /* eslint-enable id-length -- End of GCD helper */
                         return `${w / divisor}:${h / divisor}`;
                     })(),
                     '{screenfitcategory}': (() => {
@@ -1187,7 +1187,7 @@ export class VariableProcessor {
                         return 'above-4k';
                     })(),
                 });
-                /* eslint-enable @typescript-eslint/naming-convention */
+                /* eslint-enable @typescript-eslint/naming-convention -- End of template placeholders */
 
                 // Clean up the Blob URL
                 URL.revokeObjectURL(img.src);
@@ -1240,7 +1240,7 @@ export class VariableProcessor {
     private async generateMD5(text: string): Promise<string> {
         // Implementation of MD5 algorithm
         function md5(string: string): string {
-            /* eslint-disable id-length, @typescript-eslint/naming-convention, no-param-reassign */
+            /* eslint-disable id-length, @typescript-eslint/naming-convention, no-param-reassign -- MD5 reference implementation keeps its standard names and in-place updates */
             function rotateLeft(value: number, shift: number): number {
                 return (value << shift) | (value >>> (32 - shift));
             }
@@ -1432,7 +1432,7 @@ export class VariableProcessor {
 
             const temp = wordToHex(a) + wordToHex(b) + wordToHex(c) + wordToHex(d);
             return temp.toLowerCase();
-            /* eslint-enable id-length, @typescript-eslint/naming-convention, no-param-reassign */
+            /* eslint-enable id-length, @typescript-eslint/naming-convention, no-param-reassign -- End of MD5 implementation */
         }
 
         try {

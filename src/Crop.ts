@@ -131,7 +131,6 @@ export class Crop extends Modal {
         });
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-misused-promises -- Modal.onOpen() expects void but async is needed for image loading
     async onOpen() {
 		const { contentEl } = this;
 		contentEl.empty();

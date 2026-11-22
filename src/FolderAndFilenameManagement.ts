@@ -1,6 +1,6 @@
 // FolderAndFilenameManagement.ts
 import { TFile, TFolder, App, normalizePath, Notice, FileSystemAdapter, Platform } from "obsidian";
-// eslint-disable-next-line import/no-nodejs-modules -- Required for path manipulation; Obsidian runs on Electron with Node.js support
+// Required for path manipulation; Obsidian runs on Electron with Node.js support
 import * as path from 'path';
 import {
     ImageConverterSettings,

@@ -188,7 +188,6 @@ export class PresetSelectionModal extends Modal {
         
         // Title on the left
         header.createEl("h2", { 
-          // eslint-disable-next-line obsidianmd/ui/sentence-case -- Plugin name
             text: "Image Converter",
             cls: "image-converter-compact-title"
         });

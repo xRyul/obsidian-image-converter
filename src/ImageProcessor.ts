@@ -1,7 +1,7 @@
 // ImageProcessor.ts
 import { Notice, Platform } from "obsidian";
 import { SupportedImageFormats } from "./SupportedImageFormats";
-// eslint-disable-next-line import/no-nodejs-modules -- Required for spawning external processes (FFmpeg, pngquant); Obsidian runs on Electron with Node.js support
+// Required for spawning external processes (FFmpeg, pngquant); Obsidian runs on Electron with Node.js support
 import { ChildProcess, spawn } from 'child_process';
 import { ConversionPreset, ImageConverterSettings, DEFAULT_SETTINGS } from "./ImageConverterSettings";
 import { normalizeExecutablePath } from "./utils/ffmpegPath";
@@ -9,11 +9,11 @@ import { transferMetadata } from "./metadata/transferMetadata";
 import { parseExifBlock, readOrientation } from "./metadata/ExifBlock";
 import { transformCanvas, transformForOrientation } from "./utils/canvasTransform";
 
-// eslint-disable-next-line import/no-nodejs-modules -- Required for temporary file handling in FFmpeg processing; Obsidian runs on Electron with Node.js support
+// Required for temporary file handling in FFmpeg processing; Obsidian runs on Electron with Node.js support
 import * as fs from 'fs/promises';
-// eslint-disable-next-line import/no-nodejs-modules -- Required for temporary directory access; Obsidian runs on Electron with Node.js support
+// Required for temporary directory access; Obsidian runs on Electron with Node.js support
 import * as os from 'os';
-// eslint-disable-next-line import/no-nodejs-modules -- Required for path manipulation; Obsidian runs on Electron with Node.js support
+// Required for path manipulation; Obsidian runs on Electron with Node.js support
 import * as path from 'path';
 
 // Import types
@@ -71,7 +71,7 @@ export const ENCODER_CONFIGS: Record<AvifEncoder, EncoderConfig> = {
     'av1_vaapi': { crfMin: 0, crfMax: 255, supportsPreset: false, platformHint: 'vaapi' },
     'av1_mf': { crfMin: 0, crfMax: 100, supportsPreset: false, platformHint: 'mediafoundation' }
 };
-/* eslint-enable @typescript-eslint/naming-convention */
+/* eslint-enable @typescript-eslint/naming-convention -- End of FFmpeg encoder names */
 
 export class ImageProcessor {
 
@@ -196,8 +196,7 @@ export class ImageProcessor {
 
                 if (validatedEncoder) {
                     const config = ENCODER_CONFIGS[validatedEncoder];
-                    // eslint-disable-next-line no-console -- Informational logging for encoder detection
-                    console.log(`Validated AVIF encoder: ${validatedEncoder} (${config.platformHint})`);
+                    console.debug(`Validated AVIF encoder: ${validatedEncoder} (${config.platformHint})`);
                 } else {
                     console.warn('No working AV1 encoder found. Please install FFmpeg with AV1 support.');
                 }
@@ -862,7 +861,6 @@ if (format === 'ORIGINAL') {
 
                 // Check if executable path is set
                 if (!ffmpegExecutablePath) {
-                    // eslint-disable-next-line obsidianmd/ui/sentence-case -- FFmpeg is the official brand name
                     new Notice("FFmpeg executable path is not set. Please configure it in the plugin settings.");
                     return file.arrayBuffer();  // Return original
                 }

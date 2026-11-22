@@ -42,7 +42,7 @@ import {
 import { PresetSelectionModal } from "./PresetSelectionModal";
 
 export default class ImageConverterPlugin extends Plugin {
-    settings!: ImageConverterSettings;
+    declare settings: ImageConverterSettings;
 
     // Check supported image formats
     supportedImageFormats!: SupportedImageFormats;
@@ -186,7 +186,6 @@ export default class ImageConverterPlugin extends Plugin {
         this.app.workspace.onLayoutReady(() => {
             this.initializeComponents().catch((err) => {
                 console.error('Failed to initialize components:', err);
-                //eslint-disable-next-line
                 new Notice('Image Converter: Failed to initialize. Check console for details.');
             });
 
@@ -294,7 +293,6 @@ export default class ImageConverterPlugin extends Plugin {
                     });
                 } else if (file instanceof TFolder) {
                     menu.addItem((item) => {
-                        // eslint-disable-next-line obsidianmd/ui/sentence-case
                         item.setTitle("Process all images in Folder")
                             .setIcon("cog")
                             .onClick(() => {
@@ -336,9 +334,8 @@ export default class ImageConverterPlugin extends Plugin {
         });
 
         this.addCommand({
-            // eslint-disable-next-line obsidianmd/commands/no-plugin-id-in-command-id -- not to break bindings
             id: 'open-image-converter-settings',
-            // eslint-disable-next-line obsidianmd/commands/no-plugin-name-in-command-name, obsidianmd/ui/sentence-case -- not to break bindings
+            // Keeps the plugin name: renaming the command would break users' hotkey bindings.
             name: 'Open Image Converter Settings',
             callback: () => this.commandOpenSettingsTab()
         });
@@ -347,8 +344,7 @@ export default class ImageConverterPlugin extends Plugin {
     }
 
 
-    // eslint-disable-next-line @typescript-eslint/no-misused-promises
-    async onunload() {
+    onunload() {
         // Clean up alignment related components first
         if (this.ImageAlignmentManager) {
             this.ImageAlignmentManager.onunload();
@@ -411,7 +407,7 @@ export default class ImageConverterPlugin extends Plugin {
             }
         }
 
-        // eslint-disable-next-line obsidianmd/hardcoded-config-path -- legacy stored value for migration
+        // Legacy stored value, kept for migration; this is not used as a path.
         const legacyCacheLocation = ".obsidian";
         if ((this.settings.imageAlignmentCacheLocation as string) === legacyCacheLocation) {
             this.settings.imageAlignmentCacheLocation = "config";
@@ -427,8 +423,7 @@ export default class ImageConverterPlugin extends Plugin {
 
     // Command to open settings tab
     async commandOpenSettingsTab() {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access -- Obsidian internal API
-        const setting = (this.app as any).setting as { open: () => Promise<void>; openTabById: (id: string) => void } | undefined;
+        const { setting } = this.app;
         if (setting) {
             await setting.open();
             setting.openTabById(this.manifest.id);
@@ -443,10 +438,8 @@ export default class ImageConverterPlugin extends Plugin {
             id: 'reload-plugin',
             name: 'Reload plugin',
             callback: async () => {
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 new Notice('Reloading Image Converter...');
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access -- Obsidian internal API
-                const plugins = (this.app as any).plugins as { disablePlugin: (id: string) => Promise<void>; enablePlugin: (id: string) => Promise<void> } | undefined;
+                const { plugins } = this.app;
 
                 try {
                     // 1. Disable the plugin
@@ -470,7 +463,6 @@ export default class ImageConverterPlugin extends Plugin {
                         return;
                     }
 
-                    // eslint-disable-next-line obsidianmd/ui/sentence-case
                     new Notice('Image Converter reloaded!');
                 } catch (error) {
                     console.error("Error reloading plugin:", error);

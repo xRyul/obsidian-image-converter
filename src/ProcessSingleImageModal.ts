@@ -86,8 +86,7 @@ export class ProcessSingleImageModal extends Modal {
     }
 
     // Obsidian calls Modal.onOpen as a lifecycle hook and intentionally ignores the returned Promise.
-    // We keep this method async to allow await inside, so we disable the no-misused-promises rule here.
-    // eslint-disable-next-line @typescript-eslint/no-misused-promises
+    // We keep this method async to allow await inside.
     async onOpen(): Promise<void> {
         this.contentEl.empty();
         this.contentEl.addClass("process-single-image-modal");
@@ -131,7 +130,6 @@ export class ProcessSingleImageModal extends Modal {
         );
 
         new Setting(this.conversionSettingsContainer)
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
             .setName("Output Format")
             .addDropdown(dropdown => {
                 const options: Record<OutputFormat, string> = {
@@ -309,16 +307,13 @@ export class ProcessSingleImageModal extends Modal {
             };
 
             const resetEncoderUi = () => {
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 encoderDetectionSetting.setDesc("Detect and validate working AV1 encoder by running a test encode. This ensures hardware encoders are actually available on your system.");
                 encoderDetectionSetting.settingEl.removeClass("image-converter-encoder-detected");
                 encoderDetectionButtonEl?.classList.remove("image-converter-encoder-detected");
                 crfSetting.settingEl.removeClass("image-converter-encoder-detected");
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 crfSetting.setDesc("Constant rate factor for AVIF (0-63, lower is better quality). Range varies by encoder - click 'Detect encoder' to see the specific range.");
                 if (presetSelectEl) {
                     presetSetting.settingEl.show();
-                    // eslint-disable-next-line obsidianmd/ui/sentence-case
                     presetSetting.setDesc("Encoding preset (speed vs. compression).");
                     presetSelectEl.innerHTML = "";
                     defaultPresetNames.forEach(presetName => {
@@ -344,26 +339,22 @@ export class ProcessSingleImageModal extends Modal {
             };
 
             new Setting(this.conversionSettingsContainer)
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setName("FFmpeg executable path")
                 .then((setting) => addInfoIcon(setting, "Provide full-path to the binary file. It can be inside vault or anywhere in your file system."))
                 .addButton(button => {
                     button
                         .setIcon("search")
-                        // eslint-disable-next-line obsidianmd/ui/sentence-case
                         .setTooltip("Auto-detect FFmpeg")
                         .onClick(async () => {
                             button.setDisabled(true);
                             try {
                                 const detectedPath = await findFfmpegExecutablePath(this.app);
                                 if (!detectedPath) {
-                                    // eslint-disable-next-line obsidianmd/ui/sentence-case
                                     new Notice("FFmpeg not found. Try installing via: Homebrew (macOS), Chocolatey (Windows), or apt/snap (Linux). Then set the path manually.", 8000);
                                     return;
                                 }
                                 updateFfmpegPath(detectedPath);
                                 void this.plugin.saveSettings();
-                                // eslint-disable-next-line obsidianmd/ui/sentence-case
                                 new Notice("FFmpeg path detected and saved.", 4000);
                             } catch (error) {
                                 const message = this.getErrorMessage(error);
@@ -387,7 +378,6 @@ export class ProcessSingleImageModal extends Modal {
 
             const encoderDetectionSetting = new Setting(this.conversionSettingsContainer)
                 .setName("Encoder detection")
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setDesc("Detect and validate working AV1 encoder by running a test encode. This ensures hardware encoders are actually available on your system.")
                 .addButton(button => {
                     encoderDetectionButtonEl = button.buttonEl;
@@ -396,7 +386,6 @@ export class ProcessSingleImageModal extends Modal {
                         .setCta()
                         .onClick(async () => {
                             if (!this.modalSettings.ffmpegExecutablePath) {
-                                // eslint-disable-next-line obsidianmd/ui/sentence-case
                                 new Notice("Please specify FFmpeg executable path first");
                                 return;
                             }
@@ -431,7 +420,6 @@ export class ProcessSingleImageModal extends Modal {
                                         return;
                                     }
 
-                                    // eslint-disable-next-line obsidianmd/ui/sentence-case
                                     new Notice("No working AV1 encoder found. Install FFmpeg with AV1 support.", 5000);
                                     resetEncoderUi();
                                 }
@@ -446,9 +434,7 @@ export class ProcessSingleImageModal extends Modal {
                 });
 
             const crfSetting = new Setting(this.conversionSettingsContainer)
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setName("FFmpeg CRF")
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setDesc("Constant rate factor for AVIF (0-63, lower is better quality). Range varies by encoder - click 'Detect encoder' to see the specific range.")
                 .addText((text) => {
                     text.setValue(this.modalSettings.ffmpegCrf?.toString() || "")
@@ -475,9 +461,7 @@ export class ProcessSingleImageModal extends Modal {
                 });
 
             const presetSetting = new Setting(this.conversionSettingsContainer)
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setName("FFmpeg preset")
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setDesc("Encoding preset (speed vs. compression).")
                 .addDropdown(dropdown => {
                     dropdown.addOptions(
@@ -520,7 +504,6 @@ export class ProcessSingleImageModal extends Modal {
         this.resizeSettingsContainer.empty();
 
         new Setting(this.resizeSettingsContainer)
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
             .setName("Resize Mode")
             .addDropdown(dropdown => {
                 const resizeOptions: Record<ResizeMode, string> = {
@@ -547,7 +530,6 @@ export class ProcessSingleImageModal extends Modal {
              //Consolidate all text inputs that effect the generate preview function
               if (["Fit", "Fill", "Width"].includes(this.modalSettings.resizeMode)){
                 new Setting(this.resizeSettingsContainer)
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setName("Desired Width")
                 .addText(text => {
                     text.setValue(this.modalSettings.desiredWidth.toString())
@@ -562,7 +544,6 @@ export class ProcessSingleImageModal extends Modal {
               }
             if (["Fit", "Fill", "Height"].includes(this.modalSettings.resizeMode)) {
                 new Setting(this.resizeSettingsContainer)
-                    // eslint-disable-next-line obsidianmd/ui/sentence-case
                     .setName("Desired Height")
                     .addText(text => {
                         text.setValue(this.modalSettings.desiredHeight.toString())
@@ -592,7 +573,6 @@ export class ProcessSingleImageModal extends Modal {
             }
 
             new Setting(this.resizeSettingsContainer)
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setName("Enlarge/Reduce")
                 .addDropdown(dropdown => {
                     const enlargeReduceOptions: Record<EnlargeReduce, string> = {

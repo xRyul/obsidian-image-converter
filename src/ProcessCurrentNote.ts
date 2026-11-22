@@ -1,4 +1,3 @@
-/* eslint-disable obsidianmd/ui/sentence-case */
 // ProcessCurrentNote.ts
 import {
     App,
@@ -48,8 +47,7 @@ export class ProcessCurrentNote extends Modal {
     }
 
     // Obsidian calls Modal.onOpen as a lifecycle hook and intentionally ignores the returned Promise.
-    // We keep this method async to allow await inside, so we disable the no-misused-promises rule here.
-    // eslint-disable-next-line @typescript-eslint/no-misused-promises
+    // We keep this method async to allow await inside.
     async onOpen(): Promise<void> {
 		const { contentEl } = this;
 

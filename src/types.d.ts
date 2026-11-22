@@ -8,6 +8,22 @@ declare module 'obsidian' {
          * @param path - The path to the file or folder in the vault.
          */
         showInFolder(path: string): Promise<void>;
+
+        /**
+         * The settings window. Undocumented; may be missing.
+         */
+        setting?: {
+            open(): Promise<void>;
+            openTabById(id: string): void;
+        };
+
+        /**
+         * The community plugin manager. Undocumented; may be missing.
+         */
+        plugins?: {
+            disablePlugin(id: string): Promise<void>;
+            enablePlugin(id: string): Promise<void>;
+        };
     }
     interface Vault {
         /**

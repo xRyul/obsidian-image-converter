@@ -469,7 +469,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             parent: this.app.vault.getRoot(),
             stat: { mtime: Date.now(), ctime: Date.now(), size: 1024 },
             vault: this.app.vault
-        // eslint-disable-next-line obsidianmd/no-tfile-tfolder-cast -- Mock object for preview in empty vaults
+        // Mock object for preview in empty vaults
         } as unknown as TFile);
 
         return { file: imageFile, activeFile: noteFile };
@@ -1437,7 +1437,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             "image-converter-preset-group-header" // Add a wrapper for header and description
         );
 
-        // eslint-disable-next-line obsidianmd/settings-tab/no-manual-html-headings -- setHeading() not available in test mocks
         headerContainer.createEl("h3", { text: title, cls: "settings-group-heading" });
 
         // --- Add explanation here ---
@@ -2343,7 +2342,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 crfSetting.settingEl.removeClass("image-converter-encoder-detected");
 
                 presetSetting.settingEl.show();
-                // eslint-disable-next-line obsidianmd/ui/sentence-case -- Technical description
                 presetSetting.setDesc("Encoding preset (speed vs. compression).");
 
                 const dropdown = presetSetting.controlEl.querySelector('select');
@@ -2361,14 +2359,12 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             };
 
             const executablePathSetting = new Setting(containerEl)
-                // eslint-disable-next-line obsidianmd/ui/sentence-case -- Product name
                 .setName("FFmpeg executable path")
                 .then((setting) => addInfoIcon(setting, "Provide full-path to the binary file. It can be inside vault or anywhere in your file system."))
                 .setClass("image-converter-ffmpeg-executable-path")
                 .addButton(button => {
                     button
                         .setIcon("search")
-                        // eslint-disable-next-line obsidianmd/ui/sentence-case -- FFmpeg is the official brand name
                         .setTooltip("Auto-detect FFmpeg")
                         .setClass("image-converter-icon-button")
                         .onClick(async () => {
@@ -2376,7 +2372,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                             try {
                                 const detectedPath = await findFfmpegExecutablePath(this.app);
                                 if (!detectedPath) {
-                                    // eslint-disable-next-line obsidianmd/ui/sentence-case
                                     new Notice("FFmpeg not found. Try installing via: Homebrew (macOS), Chocolatey (Windows), or apt/snap (Linux). Then set the path manually.", 8000);
                                     return;
                                 }
@@ -2399,7 +2394,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                                 void this.plugin.saveSettings();
 
                                 textComponent?.setValue(normalizedPath);
-                                // eslint-disable-next-line obsidianmd/ui/sentence-case
                                 new Notice("FFmpeg path detected and saved.", 4000);
                             } catch (error) {
                                 const message = error instanceof Error ? error.message : String(error);
@@ -2450,7 +2444,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         .setCta()
                         .onClick(async () => {
                             if (!preset.ffmpegExecutablePath) {
-                                // eslint-disable-next-line obsidianmd/ui/sentence-case -- FFmpeg is the official brand name
                                 new Notice("Please specify FFmpeg executable path first");
                                 return;
                             }
@@ -2552,9 +2545,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                                         return;
                                     }
 
-                                    // eslint-disable-next-line obsidianmd/ui/sentence-case -- Technical terms: AV1, FFmpeg
                                     new Notice("No working AV1 encoder found. Install FFmpeg with AV1 support.", 5000);
-                                    // eslint-disable-next-line obsidianmd/ui/sentence-case
                                     encoderDetectionSetting.setDesc("No working encoder found. Install FFmpeg with libaom-av1, libsvtav1, or ensure hardware drivers are installed.");
                                     resetEncoderUi(encoderDetectionSetting, crfSetting, presetSetting);
                                 }
@@ -2570,7 +2561,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             executablePathSetting.settingEl.insertAdjacentElement("afterend", encoderDetectionSetting.settingEl);
 
             const crfSetting = new Setting(containerEl)
-                // eslint-disable-next-line obsidianmd/ui/sentence-case -- Product name and acronym
                 .setName("FFmpeg CRF")
                 .setDesc(defaultCrfDesc)
                 .setClass("image-converter-ffmpeg-crf")
@@ -2606,9 +2596,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
 
             const presetSetting = new Setting(containerEl)
-                // eslint-disable-next-line obsidianmd/ui/sentence-case -- Product name
                 .setName("FFmpeg preset")
-                // eslint-disable-next-line obsidianmd/ui/sentence-case -- Technical description
                 .setDesc("Encoding preset (speed vs. compression).")
                 .setClass("image-converter-ffmpeg-preset")
                 // Change this to a dropdown:
@@ -2834,10 +2822,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         lastAddedSetting = newSetting.settingEl;
 
         const minSavingsSetting = new Setting(containerEl)
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
             .setName("Minimum compression savings (KB)")
             .setClass("image-converter-min-savings-setting")
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
             .setDesc("This option allows you to further specify, how much the file size must be reduced before compressing the image. Sometimes an image's size might shrink by only 3 KB, but the visible degradation in quality is significant. This option helps catch those cases and avoids compressing such images. Default is 30kb, which means if after compressing the image file size would reduce only by 30kb or less, then the original image bytes will be used instead. Set to 0 to always allow compression when the output is smaller.")
             .addText((text) =>
                 text
@@ -3026,12 +3012,10 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         const paths = scenario.createEl("div", { cls: "image-converter-format-paths" });
         paths.createEl("div", { cls: "image-converter-path-label" }).setText("📄 Note location:");
         paths.createEl("div", { cls: "image-converter-path-value" }).setText("/Folder/Subfolder1/note.md");
-        // eslint-disable-next-line obsidianmd/ui/sentence-case -- Example label with emoji
         paths.createEl("div", { cls: "image-converter-path-label" }).setText("🖼️ Image location:");
         paths.createEl("div", { cls: "image-converter-path-value" }).setText("/Folder/Subfolder2/image.jpg");
 
         const result = scenario.createEl("div", { cls: "image-converter-format-result" });
-        // eslint-disable-next-line obsidianmd/ui/sentence-case -- Example label with arrow
         result.createEl("div", { cls: "image-converter-result-label" }).setText("→ Path becomes:");
         const resultValue = result.createEl("div", { cls: "image-converter-result-value" });
 
@@ -3100,7 +3084,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             cls: "image-converter-preset-card image-converter-add-new-preset",
         });
         card.createEl("div", {
-            // eslint-disable-next-line obsidianmd/ui/sentence-case -- Action button text
             text: "+ Add new",
             cls: "image-converter-add-new-preset-text",
         });
@@ -3752,7 +3735,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 .setName("Scale mode")
                 .setClass("image-converter-resize-scale-mode-setting")
                 .setDesc(
-                    // eslint-disable-next-line obsidianmd/ui/sentence-case -- Technical description with list
                     "Controls how images are adjusted relative to target size:\n- Auto: adjusts image to fit specified dimensions\n- Reduce only: only shrinks images larger than target\n- Enlarge only: only enlarges images smaller than target"
                 )
                 .addDropdown((dropdown) => {
