@@ -77,7 +77,7 @@ export class ImageProcessor {
 
     supportedImageFormats: SupportedImageFormats
     private preset: ConversionPreset | undefined;
-    private settings: ImageConverterSettings;
+    private settings: ImageConverterSettings = DEFAULT_SETTINGS;
     private detectedEncoder: AvifEncoder | null = null;
     private static encoderDetectionCache: Map<string, AvifEncoder | null> = new Map(); // Static cache shared across instances
     private encoderFallbackAttempted: boolean = false;

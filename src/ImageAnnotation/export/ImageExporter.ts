@@ -98,9 +98,9 @@ export class ImageExporter {
             const bounds = this.calculateBounds(canvas, backgroundImage);
             const { minX, minY, finalWidth, finalHeight, scaleToOriginal } = bounds;
 
-            const currentVPT = (Array.isArray(canvas.viewportTransform)
+            const currentVPT: TMat2D = Array.isArray(canvas.viewportTransform)
                 ? [...canvas.viewportTransform]
-                : [1, 0, 0, 1, 0, 0]) as TMat2D;
+                : [1, 0, 0, 1, 0, 0];
 
             canvas.setViewportTransform([1, 0, 0, 1, 0, 0] as TMat2D);
             if (typeof canvas.setZoom === 'function') {

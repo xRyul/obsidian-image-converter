@@ -67,10 +67,7 @@ export class ImageAlignmentManager {
 
 		this.imageAlignment = new ImageAlignment(this.app, this.plugin, this);
 		this.debouncedValidateNoteCache = debounce(
-			this.validateNoteCache.bind(this) as (
-				notePath: string,
-				noteContent: string
-			) => Promise<void>,
+			this.validateNoteCache.bind(this),
 			300,
 			true
 		);

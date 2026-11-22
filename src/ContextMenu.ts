@@ -1078,7 +1078,7 @@ export class ContextMenu extends Component {
 				});
 
 				// Clear and set the menu item content (gracefully handle test mocks without a DOM property)
-				const maybeDom = menuItem.dom as (HTMLElement & { empty?: () => void }) | undefined;
+				const maybeDom = menuItem.dom;
 				if (maybeDom && typeof maybeDom.appendChild === "function") {
 					// If Obsidian exposes a DOM element, populate it
 					if (typeof maybeDom.empty === "function") {
@@ -1092,7 +1092,7 @@ export class ContextMenu extends Component {
 					maybeDom.appendChild(inputContainer);
 				} else {
 					// Minimal fallback for test environment without MenuItem DOM
-					(menuItem as MenuItemWithDom & { setTitle?: (title: string) => void }).setTitle?.("Image tools");
+					menuItem.setTitle?.("Image tools");
 				}
 			});
 		}

@@ -30,48 +30,48 @@ export class ProcessSingleImageModal extends Modal {
     private imageFile: TFile;
     private modalSettings: SingleImageModalSettings;
     private previewImageUrl: string | null = null;
-    private previewContainer: HTMLDivElement;
+    private previewContainer!: HTMLDivElement;
 
     // --- Dedicated containers for each section ---
-    private conversionSettingsContainer: HTMLDivElement;
-    private resizeSettingsContainer: HTMLDivElement;
-    private buttonContainer: HTMLDivElement;
+    private conversionSettingsContainer!: HTMLDivElement;
+    private resizeSettingsContainer!: HTMLDivElement;
+    private buttonContainer!: HTMLDivElement;
 
     constructor(app: App, private plugin: ImageConverterPlugin, file: TFile) {
         super(app);
         this.imageFile = file;
-        this.loadModalSettings();
+        this.modalSettings = this.loadModalSettings();
         this.titleEl.setText(`Process Image: ${file.name}`);
     }
 
-    private loadModalSettings() {
+    private loadModalSettings(): SingleImageModalSettings {
         const savedSettings = this.plugin.settings.singleImageModalSettings;
 
         if (savedSettings) {
-            this.modalSettings = { ...savedSettings };
-        } else {
-            const avifPreset = this.plugin.settings.conversionPresets.find(preset => preset.outputFormat === "AVIF");
-            const pngQuantPreset = this.plugin.settings.conversionPresets.find(preset => preset.outputFormat === "PNGQUANT");
-
-            this.modalSettings = {
-                conversionPresetName: this.plugin.settings.selectedConversionPreset,
-                outputFormat: this.plugin.settings.outputFormat,
-                quality: this.plugin.settings.quality,
-                colorDepth: this.plugin.settings.colorDepth,
-                resizeMode: this.plugin.settings.resizeMode,
-                desiredWidth: this.plugin.settings.desiredWidth,
-                desiredHeight: this.plugin.settings.desiredHeight,
-                desiredLongestEdge: this.plugin.settings.desiredLongestEdge,
-                enlargeOrReduce: this.plugin.settings.enlargeOrReduce,
-                allowLargerFiles: this.plugin.settings.allowLargerFiles,
-                pngquantExecutablePath: pngQuantPreset?.pngquantExecutablePath || "",
-                pngquantQuality: pngQuantPreset?.pngquantQuality || "",
-                ffmpegExecutablePath: avifPreset?.ffmpegExecutablePath || this.plugin.settings.ffmpegExecutablePath || "",
-                ffmpegCrf: avifPreset?.ffmpegCrf !== undefined ? avifPreset.ffmpegCrf : (this.plugin.settings.ffmpegCrf !== undefined ? this.plugin.settings.ffmpegCrf : 23),
-                ffmpegPreset: avifPreset?.ffmpegPreset || this.plugin.settings.ffmpegPreset || "medium",
-                detectedEncoder: avifPreset?.detectedEncoder || this.plugin.settings.detectedEncoder,
-            };
+            return { ...savedSettings };
         }
+
+        const avifPreset = this.plugin.settings.conversionPresets.find(preset => preset.outputFormat === "AVIF");
+        const pngQuantPreset = this.plugin.settings.conversionPresets.find(preset => preset.outputFormat === "PNGQUANT");
+
+        return {
+            conversionPresetName: this.plugin.settings.selectedConversionPreset,
+            outputFormat: this.plugin.settings.outputFormat,
+            quality: this.plugin.settings.quality,
+            colorDepth: this.plugin.settings.colorDepth,
+            resizeMode: this.plugin.settings.resizeMode,
+            desiredWidth: this.plugin.settings.desiredWidth,
+            desiredHeight: this.plugin.settings.desiredHeight,
+            desiredLongestEdge: this.plugin.settings.desiredLongestEdge,
+            enlargeOrReduce: this.plugin.settings.enlargeOrReduce,
+            allowLargerFiles: this.plugin.settings.allowLargerFiles,
+            pngquantExecutablePath: pngQuantPreset?.pngquantExecutablePath || "",
+            pngquantQuality: pngQuantPreset?.pngquantQuality || "",
+            ffmpegExecutablePath: avifPreset?.ffmpegExecutablePath || this.plugin.settings.ffmpegExecutablePath || "",
+            ffmpegCrf: avifPreset?.ffmpegCrf !== undefined ? avifPreset.ffmpegCrf : (this.plugin.settings.ffmpegCrf !== undefined ? this.plugin.settings.ffmpegCrf : 23),
+            ffmpegPreset: avifPreset?.ffmpegPreset || this.plugin.settings.ffmpegPreset || "medium",
+            detectedEncoder: avifPreset?.detectedEncoder || this.plugin.settings.detectedEncoder,
+        };
     }
 
     private saveModalSettings() {

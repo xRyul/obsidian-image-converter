@@ -523,12 +523,12 @@ export class ImageAnnotationModal extends Modal {
 
         this.toolManager.updateBrushColor();
 
-        const shouldIgnoreHistoryTarget = (target?: FabricObject): boolean => {
+        const shouldIgnoreHistoryTarget = (target?: FabricObjectWithHistoryFlag): boolean => {
             if (target instanceof FabricImage || this.historyManager.isPerformingUndoRedo()) {
                 return true;
             }
 
-            return Boolean((target as FabricObjectWithHistoryFlag | undefined)?.excludeFromHistory);
+            return Boolean(target?.excludeFromHistory);
         };
 
         this.canvas.on('path:created', (e: { path?: FabricObject }) => {

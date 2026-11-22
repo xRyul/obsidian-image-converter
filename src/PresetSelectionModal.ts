@@ -25,11 +25,11 @@ export class PresetSelectionModal extends Modal {
 
     private selectedGlobalPreset: GlobalPreset | null = null;
 
-    private folderPresetDropdown: Setting;
-    private filenamePresetDropdown: Setting;
-    private conversionPresetDropdown: Setting;
-    private linkFormatPresetDropdown: Setting;
-    private resizePresetDropdown: Setting;
+    private folderPresetDropdown!: Setting;
+    private filenamePresetDropdown!: Setting;
+    private conversionPresetDropdown!: Setting;
+    private linkFormatPresetDropdown!: Setting;
+    private resizePresetDropdown!: Setting;
 
     private customFilenameText: TextComponent | null = null;
     private customFolderText: TextComponent | null = null;

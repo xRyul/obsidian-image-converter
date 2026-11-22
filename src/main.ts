@@ -392,7 +392,7 @@ export default class ImageConverterPlugin extends Plugin {
     // Load settings method
     async loadSettings() {
         const loadedSettings = (await this.loadData()) as Partial<ImageConverterSettings> | null;
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, loadedSettings ?? {}) as ImageConverterSettings;
+        this.settings = { ...DEFAULT_SETTINGS, ...loadedSettings };
 
         const isFreshInstall = !loadedSettings || Object.keys(loadedSettings).length === 0;
         if (isFreshInstall) {

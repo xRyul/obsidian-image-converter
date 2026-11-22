@@ -27,12 +27,12 @@ export class Crop extends Modal {
 
     private imageFile: TFile;
     private originalArrayBuffer: ArrayBuffer | null = null;
-    private cropContainer: HTMLDivElement;
-    private selectionArea: HTMLDivElement;
+    private cropContainer!: HTMLDivElement;
+    private selectionArea!: HTMLDivElement;
     private isDrawing = false;
     private startX = 0;
     private startY = 0;
-    private originalImage: HTMLImageElement;
+    private originalImage!: HTMLImageElement;
     private imageScale: { x: number, y: number } = { x: 1, y: 1 };
 
 	private currentAspectRatio: number | null = null;

@@ -37,7 +37,7 @@ export class HistoryManager {
             {
                 objectType: fallbackType,
                 rawKeys: typeof raw === 'object' && raw !== null
-                    ? Object.keys(raw as Record<string, unknown>).slice(0, 10)
+                    ? Object.keys(raw).slice(0, 10)
                     : typeof raw,
             }
         );

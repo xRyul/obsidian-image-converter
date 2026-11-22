@@ -469,8 +469,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             parent: this.app.vault.getRoot(),
             stat: { mtime: Date.now(), ctime: Date.now(), size: 1024 },
             vault: this.app.vault
-        // Mock object for preview in empty vaults
-        } as unknown as TFile);
+        });
 
         return { file: imageFile, activeFile: noteFile };
     }
@@ -4253,8 +4252,8 @@ export class AvailableVariablesModal extends Modal {
         type: K,
         handler: (event: HTMLElementEventMap[K]) => void
     ): void {
-        el.addEventListener(type, handler as EventListener);
-        this.eventDisposers.push(() => el.removeEventListener(type, handler as EventListener));
+        el.addEventListener(type, handler);
+        this.eventDisposers.push(() => el.removeEventListener(type, handler));
     }
 
     private registerContentDomEvent<K extends keyof HTMLElementEventMap>(
@@ -4262,8 +4261,8 @@ export class AvailableVariablesModal extends Modal {
         type: K,
         handler: (event: HTMLElementEventMap[K]) => void
     ): void {
-        el.addEventListener(type, handler as EventListener);
-        this.contentEventDisposers.push(() => el.removeEventListener(type, handler as EventListener));
+        el.addEventListener(type, handler);
+        this.contentEventDisposers.push(() => el.removeEventListener(type, handler));
     }
 
     private setFeedbackTimeout(callback: () => void, delay: number): void {

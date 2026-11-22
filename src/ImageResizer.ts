@@ -1039,7 +1039,7 @@ export class ImageResizer extends Component {
         // Determine handle type (border or specific handle)
         this.currentHandle = resizeTarget.hasClass("image-resize-border")
             ? "border"
-            : (resizeTarget as HTMLElement).getAttr("data-handle-type") || null;
+            : resizeTarget.getAttr("data-handle-type") || null;
 
         // Get initial dimensions and calculate aspect ratio
         const rect = this.activeImage.getBoundingClientRect();
@@ -1286,7 +1286,7 @@ export class ImageResizer extends Component {
             // If it's a resize handle, find the parent image
             const imageContainer = target.closest(".image-resize-container");
             if (imageContainer) {
-                image = imageContainer.querySelector("img") as HTMLImageElement;
+                image = imageContainer.querySelector("img");
             }
         }
 

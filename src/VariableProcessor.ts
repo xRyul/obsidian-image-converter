@@ -664,7 +664,7 @@ export class VariableProcessor {
         variables["{timezone}"] = Intl.DateTimeFormat().resolvedOptions().timeZone;
         variables["{locale}"] = navigator.language;
 
-        // eslint-disable-next-line obsidianmd/platform, @typescript-eslint/no-deprecated -- Expose the raw platform string for templates; not used for runtime platform detection.
+        // eslint-disable-next-line obsidianmd/platform -- Expose the raw platform string for templates; not used for runtime platform detection.
         variables["{platform}"] = navigator.platform;
 
         // eslint-disable-next-line obsidianmd/platform -- Expose user agent string for templates; not used for runtime platform detection.
