@@ -705,28 +705,40 @@ export class ImageAlignmentManager {
 			const imageFiles = this.app.vault.getFiles().filter(file =>
 				this.supportedImageFormats.isSupported(undefined, file.name)
 			);
+			const imagePaths = new Set(imageFiles.map(file => file.path));
+			const { resolvedLinks } = this.app.metadataCache;
 
 			for (const notePath in this.cache) {
 				// Check if note still exists
 				const noteFile = this.app.vault.getAbstractFileByPath(notePath);
 				if (!noteFile) continue;
 
-				// Hash every existing image in this note's context once, then
-				// cached-entry membership checks are O(1) Set lookups.
-				// getImageHash() is bypassed deliberately: for a real vault path
-				// getRelativePath() resolves to the same string, but would scan
-				// all vault files on every call.
-				const existingHashes = new Set<string>();
+				// An entry is kept when some existing image hashes to it in this
+				// note's context. getImageHash() is bypassed deliberately: its
+				// getRelativePath() call scans all vault files every time. For a
+				// vault file's own path it only cuts the path at the first "?",
+				// so do the same here to get the same key.
+				const unmatched = new Set(Object.keys(this.cache[notePath]));
+				const match = (imagePath: string) => {
+					const [keyPath] = imagePath.split("?");
+					unmatched.delete(murmurHash3128(`${notePath}:${keyPath}`, 0));
+				};
+
+				// Try the images the note links to first. They usually match every
+				// entry, so the scan of all vault images below can stop at once.
+				for (const linkedPath of Object.keys(resolvedLinks[notePath] ?? {})) {
+					if (unmatched.size === 0) break;
+					if (imagePaths.has(linkedPath)) match(linkedPath);
+				}
 				for (const file of imageFiles) {
-					existingHashes.add(
-						murmurHash3128(`${notePath}:${file.path}`, 0)
-					);
+					if (unmatched.size === 0) break;
+					match(file.path);
 				}
 
 				newCache[notePath] = {};
 
 				for (const imageHash in this.cache[notePath]) {
-					if (existingHashes.has(imageHash)) {
+					if (!unmatched.has(imageHash)) {
 						newCache[notePath][imageHash] =
 							this.cache[notePath][imageHash];
 					}
