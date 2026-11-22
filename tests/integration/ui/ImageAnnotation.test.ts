@@ -142,6 +142,7 @@ describe('ImageAnnotation — 16.1 Initialization (integration-lite)', () => {
     app = fakeApp({ vault });
     plugin = new ImageConverterPlugin(app, fakePluginManifest({ id: 'image-converter', dir: '/plugins/image-converter' }));
     plugin.manifest = { id: 'image-converter', dir: '/plugins/image-converter' } as any;
+    plugin.settings = { metadataMode: 'keep-all' } as any;
     imageFile = file;
   });
 
@@ -170,7 +171,7 @@ describe('ImageAnnotation — 16.2–16.11 Behaviors (integration-lite)', () => 
     plugin = new ImageConverterPlugin(app, fakePluginManifest({ id: 'image-converter', dir: '/plugins/image-converter' }));
     plugin.manifest = { id: 'image-converter', dir: '/plugins/image-converter' } as any;
     // minimal presets for save/preset tests
-    plugin.settings = { annotationPresets: { drawing:[{}, {}, {}], arrow:[{}, {}, {}], text:[{}, {}, {}] } } as any;
+    plugin.settings = { metadataMode: 'keep-all', annotationPresets: { drawing:[{}, {}, {}], arrow:[{}, {}, {}], text:[{}, {}, {}] } } as any;
     imageFile = file;
   });
 

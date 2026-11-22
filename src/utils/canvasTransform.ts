@@ -1,5 +1,6 @@
 // Canvas helpers that rotate and flip a full image. The TIFF decoder uses
-// them to apply the EXIF orientation.
+// them to apply the EXIF orientation, and the crop modal uses them to save
+// a rotated or flipped image.
 
 /** A rotation and flip that `transformCanvas` can apply. */
 export interface CanvasTransform {

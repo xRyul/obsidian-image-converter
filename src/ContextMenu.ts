@@ -2061,7 +2061,7 @@ export class ContextMenu extends Component {
 							  }) || matchingFiles[0];
 
 					if (file instanceof TFile) {
-						new Crop(this.app, file).open();
+						new Crop(this.app, file, this.plugin.settings.metadataMode).open();
 					} else {
 						new Notice("Unable to locate image file");
 					}
