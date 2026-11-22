@@ -765,7 +765,7 @@ if (format === 'ORIGINAL') {
                 blob,
                 type: outputMimeType,
                 quality
-            }) as Blob;
+            });
         } catch (error) {
             console.error('Error converting HEIC:', error);
             const errorMessage = error instanceof Error ? (error.message || 'Unknown error') : String(error);
