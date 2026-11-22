@@ -241,7 +241,7 @@ export class ImageAnnotationModal extends Modal {
         });
 
         this.backgroundManager = new BackgroundManager(getCanvas, this.componentContainer);
-        this.imageExporter = new ImageExporter(this.app);
+        this.imageExporter = new ImageExporter(this.app, this.plugin.settings.metadataMode);
     }
 
     private setupToolbar(container: HTMLElement): void {
