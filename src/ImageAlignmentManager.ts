@@ -699,40 +699,46 @@ export class ImageAlignmentManager {
 			const cleanupStart = Date.now();
 			const newCache: ImageAlignmentCache = {};
 
+			// List and filter vault files once, instead of re-scanning the whole
+			// vault for every cached hash (which made cleanup O(entries x files)
+			// and blocked the main thread for seconds in large vaults).
+			const imageFiles = this.app.vault.getFiles().filter(file =>
+				this.supportedImageFormats.isSupported(undefined, file.name)
+			);
+			const imagePaths = new Set(imageFiles.map(file => file.path));
+			const { resolvedLinks } = this.app.metadataCache;
+
 			for (const notePath in this.cache) {
 				// Check if note still exists
 				const noteFile = this.app.vault.getAbstractFileByPath(notePath);
 				if (!noteFile) continue;
 
+				// An entry is kept when some existing image hashes to it in this
+				// note's context. getImageHash() is bypassed deliberately: its
+				// getRelativePath() call scans all vault files every time. For a
+				// vault file's own path it only cuts the path at the first "?",
+				// so do the same here to get the same key.
+				const unmatched = new Set(Object.keys(this.cache[notePath]));
+				const match = (imagePath: string) => {
+					const [keyPath] = imagePath.split("?");
+					unmatched.delete(murmurHash3128(`${notePath}:${keyPath}`, 0));
+				};
+
+				// Try the images the note links to first. They usually match every
+				// entry, so the scan of all vault images below can stop at once.
+				for (const linkedPath of Object.keys(resolvedLinks[notePath] ?? {})) {
+					if (unmatched.size === 0) break;
+					if (imagePaths.has(linkedPath)) match(linkedPath);
+				}
+				for (const file of imageFiles) {
+					if (unmatched.size === 0) break;
+					match(file.path);
+				}
+
 				newCache[notePath] = {};
 
 				for (const imageHash in this.cache[notePath]) {
-					let imageExists = false;
-
-					// Iterate through all files in the vault
-					const allFiles = this.app.vault.getFiles();
-					for (const file of allFiles) {
-						if (
-							this.supportedImageFormats.isSupported(
-								undefined,
-								file.name
-							)
-						) {
-							// Calculate the hash for each image in the context of the current note
-							const currentImageHash = this.getImageHash(
-								notePath,
-								file.path
-							);
-
-							// Check if the calculated hash matches the one in the cache
-							if (currentImageHash === imageHash) {
-								imageExists = true;
-								break; // No need to check other files if found
-							}
-						}
-					}
-
-					if (imageExists) {
+					if (!unmatched.has(imageHash)) {
 						newCache[notePath][imageHash] =
 							this.cache[notePath][imageHash];
 					}
