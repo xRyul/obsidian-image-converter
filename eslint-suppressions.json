@@ -1,0 +1,30 @@
+{
+  "src/ContextMenu.ts": {
+    "obsidianmd/regex-lookbehind": {
+      "count": 5
+    }
+  },
+  "src/Crop.ts": {
+    "obsidianmd/no-static-styles-assignment": {
+      "count": 6
+    }
+  },
+  "src/ImageResizer.ts": {
+    "obsidianmd/no-static-styles-assignment": {
+      "count": 7
+    },
+    "obsidianmd/regex-lookbehind": {
+      "count": 1
+    }
+  },
+  "src/ProcessSingleImageModal.ts": {
+    "obsidianmd/no-static-styles-assignment": {
+      "count": 2
+    }
+  },
+  "src/VariableProcessor.ts": {
+    "eslint-comments/no-restricted-disable": {
+      "count": 2
+    }
+  }
+}
