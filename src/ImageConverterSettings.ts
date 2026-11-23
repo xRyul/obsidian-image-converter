@@ -17,6 +17,7 @@ import { ToolPreset } from "./ImageAnnotation";
 import { SingleImageModalSettings } from './ProcessSingleImageModal';
 import { findFfmpegExecutablePath, normalizeExecutablePath } from "./utils/ffmpegPath";
 import { addInfoIcon } from "./utils/settingInfo";
+import { MetadataMode } from "./metadata/types";
 
 import Sortable from "sortablejs";
 
@@ -213,6 +214,7 @@ export interface ImageConverterSettings {
     enableContextMenu: boolean;
 
     showSpaceSavedNotification: boolean;
+    metadataMode: MetadataMode;
     revertToOriginalIfLarger: boolean;
     minimumCompressionSavingsInKB: number;
 
@@ -412,6 +414,7 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
     enableContextMenu: true,
 
     showSpaceSavedNotification: true,
+    metadataMode: "keep-all",
     revertToOriginalIfLarger: false,
     minimumCompressionSavingsInKB: 30,
 
@@ -466,15 +469,14 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             parent: this.app.vault.getRoot(),
             stat: { mtime: Date.now(), ctime: Date.now(), size: 1024 },
             vault: this.app.vault
-        // eslint-disable-next-line obsidianmd/no-tfile-tfolder-cast -- Mock object for preview in empty vaults
-        } as unknown as TFile);
+        });
 
         return { file: imageFile, activeFile: noteFile };
     }
     activeTab: "folder" | "filename" | "conversion" | "linkformat" | "resize" = "folder";
     presetUIState: PresetUIState;
     editingPresetKey: string | null = null;
-    formContainer: HTMLElement;
+    formContainer!: HTMLElement;
 
     constructor(app: App, private plugin: ImageConverterPlugin) {
         super(app, plugin);
@@ -628,6 +630,21 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 })
             );
+
+        new Setting(containerEl)
+            .setName("Image metadata")
+            .then((setting) => addInfoIcon(setting, "EXIF metadata such as camera, capture date and GPS location. It applies to every image the plugin converts, compresses or resizes, and to a pasted or dropped image that it saves as the original because conversion saved too little. Files that the plugin leaves unchanged keep their metadata: images in the vault that 'Revert to original if larger' keeps, and images that a skip pattern or 'Never process these filenames' excludes."))
+            .addDropdown((dropdown) => {
+                dropdown
+                    .addOption("keep-all", "Keep all")
+                    .addOption("strip-location", "Keep all except location")
+                    .addOption("strip-all", "Remove all")
+                    .setValue(this.plugin.settings.metadataMode)
+                    .onChange(async (value: MetadataMode) => {
+                        this.plugin.settings.metadataMode = value;
+                        await this.plugin.saveSettings();
+                    });
+            });
 
 
         new Setting(containerEl)
@@ -1058,28 +1075,33 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
             new Setting(imageDragResizeSection)
                 .setName("Disable Obsidian image selection on click")
-                .then((setting) => addInfoIcon(setting, "Keep focus in the editor when clicking an internal image in live preview instead of showing Obsidian's default outline/resize corner. Cursor placement follows the drop/paste cursor position setting."))
-                .setDesc("Keep focus in the editor when clicking an internal image in live preview instead of showing Obsidian's default outline/resize corner. Cursor placement follows the drop/paste cursor position setting.")
+                .then((setting) => addInfoIcon(setting, "Reveal the Markdown link and keep focus in the editor when clicking an internal image in live preview, while hiding Obsidian's native outline, resize corner, and image action buttons. Cursor placement follows the drop/paste cursor position setting."))
+                .setDesc("Reveal the Markdown link and keep focus in the editor when clicking an internal image in live preview, while hiding Obsidian's native outline, resize corner, and image action buttons. Cursor placement follows the drop/paste cursor position setting.")
                 .addToggle((toggle) =>
                     toggle
                         .setValue(this.plugin.settings.disableObsidianImageSelectionOnClick)
                         .onChange(async (value) => {
                             this.plugin.settings.disableObsidianImageSelectionOnClick = value;
                             await this.plugin.saveSettings();
+                            new Notice(
+                                value
+                                    ? "Obsidian image selection disabled. Reload Obsidian to see changes."
+                                    : "Obsidian image selection enabled. Reload Obsidian to see changes.",
+                                5000
+                            );
                         })
                 );
 
             // New Setting: Resize Cursor Location
             new Setting(imageDragResizeSection)
                 .setName("Cursor position during resize")
-                // eslint-disable-next-line obsidianmd/ui/sentence-case -- Intentional messaging style
                 .then((setting) => addInfoIcon(setting, "Where to place the cursor when resizing an image. Note: 'don't move cursor' - will try to keep your exisiting cursor in place but if you DRAG-RESIZE and cursor is still over the image when you finish resizing, it will get the text selected."))
                 .addDropdown((dropdown) => {
                     dropdown
                         .addOption("front", "At the front of the link")
                         .addOption("back", "At the back of the link")
-                        .addOption("below", "1 line below the image")
-                        .addOption("none", "Don't move cursor")
+                        .addOption("below", "1 Line below the image")
+                        .addOption("none", "Don't move Cursor")
                         .setValue(this.plugin.settings.resizeCursorLocation)
                         .onChange(async (value: "front" | "back" | "below" | "none") => {
                             this.plugin.settings.resizeCursorLocation = value;
@@ -1238,7 +1260,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
             new Setting(imageCaptionSection)
                 .setName("Color")
-                .setDesc("Choose a color for image captions e.g.: red, grey, white, black, hsl(50, 50%, 50%), rgb(50%, 75%, 100%) ")
+                .setDesc("Choose a color for image captions e.g.: Red, grey, white, black, hsl(50, 50%, 50%), rgb(50%, 75%, 100%) ")
                 .addText(text =>
                     text.setValue(this.plugin.settings.captionColor)
                         .onChange(async (value) => {
@@ -1265,7 +1287,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
             new Setting(imageCaptionSection)
                 .setName("Background color")
-                .setDesc("Choose a background color for image captions (e.g.: transparent, #f5f5f5, rgba(255,255,255,0.8))")
+                .setDesc("Choose a background color for image captions (e.g.: Transparent, #f5f5f5, rgba(255,255,255,0.8))")
                 .addText(text =>
                     text.setValue(this.plugin.settings.captionBackgroundColor)
                         .onChange(async (value) => {
@@ -1414,7 +1436,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             "image-converter-preset-group-header" // Add a wrapper for header and description
         );
 
-        // eslint-disable-next-line obsidianmd/settings-tab/no-manual-html-headings -- setHeading() not available in test mocks
         headerContainer.createEl("h3", { text: title, cls: "settings-group-heading" });
 
         // --- Add explanation here ---
@@ -1487,20 +1508,18 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
         // Add all default cards
         for (const preset of presets) {
-            const isEditing = uiState.editingPreset === preset;
             const isActive = preset.name === this.getSelectedPresetName(activePresetSetting); // Use helper function here
             this.renderPresetCard(
                 cardsContainer,
                 preset,
                 activePresetSetting,
-                isEditing,
                 isActive,
                 uiState
             );
         }
 
         // Append the form container after the cards if it's a valid Node
-        if (this.formContainer instanceof Node) {
+        if (this.formContainer?.instanceOf(Node)) {
             tabContentWrapper.appendChild(this.formContainer);
         }
 
@@ -1521,6 +1540,16 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 activePresetSetting,
                 uiState
             );
+            this.formContainer.addClass("visible");
+        }
+
+        // Editing uses the separate form below the grid; the card remains usable.
+        const editingPreset = uiState.editingPreset ?? presets.find(
+            preset => this.editingPresetKey === this.getPresetKey(preset)
+        );
+        if (!uiState.newPreset && editingPreset) {
+            this.renderPresetForm(this.formContainer, editingPreset, false, activePresetSetting, uiState);
+            this.formContainer.addClass("visible");
         }
     }
 
@@ -1579,7 +1608,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         containerEl: HTMLElement,
         preset: T,
         activePresetSetting: ActivePresetSetting,
-        isEditing: boolean,
         isActive: boolean,
         uiState: PresetCategoryUIState<T>
     ): void {
@@ -1591,21 +1619,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 } ${isActive ? "image-converter-active-preset" : ""}`,
         });
 
-        const presetKey = this.getPresetKey(preset);
-        const isEditingExpanded = this.editingPresetKey === presetKey;
-
-        if (isEditing || isEditingExpanded) {
-            // Render the form in the form container
-            this.renderPresetForm(
-                this.formContainer, // Render in the dedicated form container
-                preset,
-                false,
-                activePresetSetting,
-                uiState
-            );
-            return; // Skip rendering the regular card content
-        }
-
         // Preset Name and Summary
         const cardHeader = card.createDiv("image-converter-preset-card-header");
         cardHeader.createEl("span", {
@@ -1616,6 +1629,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
         if (!this.isDefaultPreset(preset, activePresetSetting)) {
             const actionsContainer = cardHeader.createDiv("image-converter-preset-card-actions");
+            actionsContainer.onClickEvent(event => event.stopPropagation());
 
             // Edit Button
             new ButtonComponent(actionsContainer)
@@ -1705,7 +1719,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
         // Activate Preset on Click
         card.onClickEvent(async () => {
-            if (!isActive) {
+            const globalPresetChanged = this.updateSelectedGlobalPreset(activePresetSetting, preset.name);
+            if (preset.name !== this.getSelectedPresetName(activePresetSetting) || globalPresetChanged) {
                 switch (activePresetSetting) {
                     case "selectedFolderPreset":
                         this.plugin.settings.selectedFolderPreset = preset.name;
@@ -1723,8 +1738,12 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         this.plugin.settings.nonDestructiveResizeSettings.selectedResizePreset = preset.name;
                         break;
                 }
+                // Preserve the grid, previews and edit form instead of rebuilding the tab.
+                containerEl.querySelectorAll(".image-converter-active-preset").forEach(
+                    activeCard => activeCard.removeClass("image-converter-active-preset")
+                );
+                card.addClass("image-converter-active-preset");
                 await this.plugin.saveSettings();
-                this.display();
             }
         });
     }
@@ -1749,6 +1768,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
         // No need to set isFormExpanded here
         this.editingPresetKey = isNew ? "new" : this.getPresetKey(preset);
+        uiState.editingPreset = isNew ? null : preset;
+        uiState.newPreset = isNew ? preset : null;
 
         // Clear and render the form
         this.formContainer.empty();
@@ -2291,15 +2312,16 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         // Insert AVIF settings after Output Format
         if (preset.outputFormat === "AVIF") {
             let textComponent: TextComponent | undefined;
+            const settingsDocument = containerEl.ownerDocument;
 
             const buildEncoderDesc = (prefix: string, encoderLabel: string, suffix: string): DocumentFragment => {
-                const fragment = document.createDocumentFragment();
-                const prefixSpan = document.createElement("span");
+                const fragment = settingsDocument.createDocumentFragment();
+                const prefixSpan = settingsDocument.createElement("span");
                 prefixSpan.textContent = prefix;
-                const encoderSpan = document.createElement("span");
+                const encoderSpan = settingsDocument.createElement("span");
                 encoderSpan.textContent = encoderLabel;
                 encoderSpan.className = "image-converter-encoder-highlight";
-                const suffixSpan = document.createElement("span");
+                const suffixSpan = settingsDocument.createElement("span");
                 suffixSpan.textContent = suffix;
                 fragment.append(prefixSpan, encoderSpan, suffixSpan);
                 return fragment;
@@ -2319,7 +2341,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 crfSetting.settingEl.removeClass("image-converter-encoder-detected");
 
                 presetSetting.settingEl.show();
-                // eslint-disable-next-line obsidianmd/ui/sentence-case -- Technical description
                 presetSetting.setDesc("Encoding preset (speed vs. compression).");
 
                 const dropdown = presetSetting.controlEl.querySelector('select');
@@ -2327,7 +2348,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                     dropdown.innerHTML = '';
                     const defaultPresets = ['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow', 'placebo'];
                     defaultPresets.forEach(presetName => {
-                        const option = document.createElement('option');
+                        const option = dropdown.ownerDocument.createElement('option');
                         option.value = presetName;
                         option.text = presetName;
                         dropdown.appendChild(option);
@@ -2337,14 +2358,12 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             };
 
             const executablePathSetting = new Setting(containerEl)
-                // eslint-disable-next-line obsidianmd/ui/sentence-case -- Product name
                 .setName("FFmpeg executable path")
                 .then((setting) => addInfoIcon(setting, "Provide full-path to the binary file. It can be inside vault or anywhere in your file system."))
                 .setClass("image-converter-ffmpeg-executable-path")
                 .addButton(button => {
                     button
                         .setIcon("search")
-                        // eslint-disable-next-line obsidianmd/ui/sentence-case -- FFmpeg is the official brand name
                         .setTooltip("Auto-detect FFmpeg")
                         .setClass("image-converter-icon-button")
                         .onClick(async () => {
@@ -2352,7 +2371,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                             try {
                                 const detectedPath = await findFfmpegExecutablePath(this.app);
                                 if (!detectedPath) {
-                                    // eslint-disable-next-line obsidianmd/ui/sentence-case
                                     new Notice("FFmpeg not found. Try installing via: Homebrew (macOS), Chocolatey (Windows), or apt/snap (Linux). Then set the path manually.", 8000);
                                     return;
                                 }
@@ -2375,7 +2393,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                                 void this.plugin.saveSettings();
 
                                 textComponent?.setValue(normalizedPath);
-                                // eslint-disable-next-line obsidianmd/ui/sentence-case
                                 new Notice("FFmpeg path detected and saved.", 4000);
                             } catch (error) {
                                 const message = error instanceof Error ? error.message : String(error);
@@ -2426,7 +2443,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         .setCta()
                         .onClick(async () => {
                             if (!preset.ffmpegExecutablePath) {
-                                // eslint-disable-next-line obsidianmd/ui/sentence-case -- FFmpeg is the official brand name
                                 new Notice("Please specify FFmpeg executable path first");
                                 return;
                             }
@@ -2473,7 +2489,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                                             
                                             // Add encoder-specific presets
                                             encoderInfo.presetNames.forEach(presetName => {
-                                                const option = document.createElement('option');
+                                                const option = dropdown.ownerDocument.createElement('option');
                                                 option.value = presetName;
                                                 option.text = presetName;
                                                 dropdown.appendChild(option);
@@ -2511,7 +2527,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                                             if (dropdown) {
                                                 dropdown.innerHTML = '';
                                                 cachedInfo.presetNames.forEach(presetName => {
-                                                    const option = document.createElement('option');
+                                                    const option = dropdown.ownerDocument.createElement('option');
                                                     option.value = presetName;
                                                     option.text = presetName;
                                                     dropdown.appendChild(option);
@@ -2528,9 +2544,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                                         return;
                                     }
 
-                                    // eslint-disable-next-line obsidianmd/ui/sentence-case -- Technical terms: AV1, FFmpeg
                                     new Notice("No working AV1 encoder found. Install FFmpeg with AV1 support.", 5000);
-                                    // eslint-disable-next-line obsidianmd/ui/sentence-case
                                     encoderDetectionSetting.setDesc("No working encoder found. Install FFmpeg with libaom-av1, libsvtav1, or ensure hardware drivers are installed.");
                                     resetEncoderUi(encoderDetectionSetting, crfSetting, presetSetting);
                                 }
@@ -2546,7 +2560,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             executablePathSetting.settingEl.insertAdjacentElement("afterend", encoderDetectionSetting.settingEl);
 
             const crfSetting = new Setting(containerEl)
-                // eslint-disable-next-line obsidianmd/ui/sentence-case -- Product name and acronym
                 .setName("FFmpeg CRF")
                 .setDesc(defaultCrfDesc)
                 .setClass("image-converter-ffmpeg-crf")
@@ -2582,9 +2595,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
 
 
             const presetSetting = new Setting(containerEl)
-                // eslint-disable-next-line obsidianmd/ui/sentence-case -- Product name
                 .setName("FFmpeg preset")
-                // eslint-disable-next-line obsidianmd/ui/sentence-case -- Technical description
                 .setDesc("Encoding preset (speed vs. compression).")
                 .setClass("image-converter-ffmpeg-preset")
                 // Change this to a dropdown:
@@ -2640,7 +2651,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                         if (dropdown) {
                             dropdown.innerHTML = '';
                             encoderInfo.presetNames.forEach(presetName => {
-                                const option = document.createElement('option');
+                                const option = dropdown.ownerDocument.createElement('option');
                                 option.value = presetName;
                                 option.text = presetName;
                                 dropdown.appendChild(option);
@@ -2793,7 +2804,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         const newSetting = new Setting(containerEl)
             .setName("Revert to original if larger")
             .setClass("image-converter-revert-to-original")
-            .setDesc("If the processed image filesize is larger than the original, use the original image instead. Sometimes compression can increase file size, especially with certain formats or settings, but if you would prefer to always get smaller file sizes, enable this option.")
+            .setDesc("If the processed image filesize is larger than the original, use the original image instead. Sometimes compression can increase file size, especially with certain formats or settings, but if you would prefer to always get smaller file sizes, enable this option. The single-image window and the batch commands use this setting of the selected preset.")
             .addToggle((toggle) =>
                 toggle
                     .setValue(preset.revertToOriginalIfLarger ?? this.plugin.settings.revertToOriginalIfLarger)
@@ -2810,10 +2821,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         lastAddedSetting = newSetting.settingEl;
 
         const minSavingsSetting = new Setting(containerEl)
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
             .setName("Minimum compression savings (KB)")
             .setClass("image-converter-min-savings-setting")
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
             .setDesc("This option allows you to further specify, how much the file size must be reduced before compressing the image. Sometimes an image's size might shrink by only 3 KB, but the visible degradation in quality is significant. This option helps catch those cases and avoids compressing such images. Default is 30kb, which means if after compressing the image file size would reduce only by 30kb or less, then the original image bytes will be used instead. Set to 0 to always allow compression when the output is smaller.")
             .addText((text) =>
                 text
@@ -2936,50 +2945,76 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             }
         };
 
-        const formats = [
-            ["Shortest",
-                `Uses just the file name without any path:
-             <ul>
-                 <li><b>Wikilink</b>: ![[image.jpg]]</li>
-                 <li><b>Markdown</b>: ![](image.jpg)</li>
-             </ul>`,
-                buildExample("shortest")],
-
-            ["Relative",
-                `Uses the path relative to the current note:
-             <ul>
-                 <li>Same folder: starts with <code>./</code> (e.g., <code>./image.jpg</code>)</li>
-                 <li>Parent folder: starts with <code>../</code> (e.g., <code>../image.jpg</code>)</li>
-                 <li>Subfolder: includes folder path (e.g., <code>./subfolder/image.jpg</code>)</li>
-             </ul>`,
-                buildExample("relative")],
-
-            ["Absolute",
-                `Uses the complete path from your vault root, always starting with <code>/</code>. 
-             This ensures the link works from any note in your vault, regardless of its location.`,
-                buildExample("absolute")]
+        const formats: Array<{ label: string; format: PathFormat; example: string }> = [
+            { label: "Shortest", format: "shortest", example: buildExample("shortest") },
+            { label: "Relative", format: "relative", example: buildExample("relative") },
+            { label: "Absolute", format: "absolute", example: buildExample("absolute") }
         ];
 
-        formats.forEach(([format, description, example]) => {
+        const appendCode = (parent: HTMLElement, text: string) => {
+            parent.createEl("code", { text });
+        };
+
+        const appendFormatDescription = (parent: HTMLElement, format: PathFormat) => {
+            if (format === "shortest") {
+                parent.append("Uses just the file name without any path:");
+                const list = parent.createEl("ul");
+                const wikilinkItem = list.createEl("li");
+                wikilinkItem.createEl("b", { text: "Wikilink" });
+                wikilinkItem.append(": ![[image.jpg]]");
+                const markdownItem = list.createEl("li");
+                markdownItem.createEl("b", { text: "Markdown" });
+                markdownItem.append(": ![](image.jpg)");
+                return;
+            }
+
+            if (format === "relative") {
+                parent.append("Uses the path relative to the current note:");
+                const list = parent.createEl("ul");
+
+                const sameFolderItem = list.createEl("li");
+                sameFolderItem.append("Same folder: starts with ");
+                appendCode(sameFolderItem, "./");
+                sameFolderItem.append(" (e.g., ");
+                appendCode(sameFolderItem, "./image.jpg");
+                sameFolderItem.append(")");
+
+                const parentFolderItem = list.createEl("li");
+                parentFolderItem.append("Parent folder: starts with ");
+                appendCode(parentFolderItem, "../");
+                parentFolderItem.append(" (e.g., ");
+                appendCode(parentFolderItem, "../image.jpg");
+                parentFolderItem.append(")");
+
+                const subfolderItem = list.createEl("li");
+                subfolderItem.append("Subfolder: includes folder path (e.g., ");
+                appendCode(subfolderItem, "./subfolder/image.jpg");
+                subfolderItem.append(")");
+                return;
+            }
+
+            parent.append("Uses the complete path from your vault root, always starting with ");
+            appendCode(parent, "/");
+            parent.append(". This ensures the link works from any note in your vault, regardless of its location.");
+        };
+
+        formats.forEach(({ label, format, example }) => {
             const row = table.createEl("tr");
-            row.createEl("td", { cls: "image-converter-format-label", text: format });
-        // eslint-disable-next-line @microsoft/sdl/no-inner-html -- Safe: developer-controlled static HTML content
-            row.createEl("td", { cls: "image-converter-format-description" }).innerHTML = description;
+            row.createEl("td", { cls: "image-converter-format-label", text: label });
+            const descriptionCell = row.createEl("td", { cls: "image-converter-format-description" });
+            appendFormatDescription(descriptionCell, format);
             row.createEl("td", { cls: "image-converter-format-example", text: example });
         });
 
         // Practical example
         const scenario = content.createEl("div", { cls: "image-converter-format-scenario" });
         const paths = scenario.createEl("div", { cls: "image-converter-format-paths" });
-        // eslint-disable-next-line obsidianmd/ui/sentence-case -- Example label with emoji
         paths.createEl("div", { cls: "image-converter-path-label" }).setText("📄 Note location:");
         paths.createEl("div", { cls: "image-converter-path-value" }).setText("/Folder/Subfolder1/note.md");
-        // eslint-disable-next-line obsidianmd/ui/sentence-case -- Example label with emoji
         paths.createEl("div", { cls: "image-converter-path-label" }).setText("🖼️ Image location:");
         paths.createEl("div", { cls: "image-converter-path-value" }).setText("/Folder/Subfolder2/image.jpg");
 
         const result = scenario.createEl("div", { cls: "image-converter-format-result" });
-        // eslint-disable-next-line obsidianmd/ui/sentence-case -- Example label with arrow
         result.createEl("div", { cls: "image-converter-result-label" }).setText("→ Path becomes:");
         const resultValue = result.createEl("div", { cls: "image-converter-result-value" });
 
@@ -3048,7 +3083,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
             cls: "image-converter-preset-card image-converter-add-new-preset",
         });
         card.createEl("div", {
-            // eslint-disable-next-line obsidianmd/ui/sentence-case -- Action button text
             text: "+ Add new",
             cls: "image-converter-add-new-preset-text",
         });
@@ -3114,7 +3148,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         containerEl.empty(); // Clear existing content
         this.cachedFirstMarkdownFile = undefined;
 
-        const fragment = document.createDocumentFragment();
+        const fragment = containerEl.ownerDocument.createDocumentFragment();
 
         const addLine = (text: string) => {
             fragment.createEl("p", { text });
@@ -3167,7 +3201,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
         containerEl.empty(); // Clear existing content
         this.cachedFirstMarkdownFile = undefined;
 
-        const fragment = document.createDocumentFragment();
+        const fragment = containerEl.ownerDocument.createDocumentFragment();
 
         const addLine = (text: string) => {
             fragment.createEl("p", { text });
@@ -3207,7 +3241,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
     }
 
     getConversionPresetSummary(preset: ConversionPreset): DocumentFragment {
-        const fragment = document.createDocumentFragment();
+        const fragment = this.containerEl.ownerDocument.createDocumentFragment();
 
         const addLine = (text: string) => {
             fragment.createEl("p", { text });
@@ -3317,10 +3351,11 @@ export class ImageConverterSettingTab extends PluginSettingTab {
     }
 
     getResizePresetSummary(preset: NonDestructiveResizePreset): DocumentFragment {
-        const fragment = document.createDocumentFragment();
+        const summaryDocument = this.containerEl.ownerDocument;
+        const fragment = summaryDocument.createDocumentFragment();
 
         const addLine = (text: string) => {
-            const paragraphEl = document.createElement("p");
+            const paragraphEl = summaryDocument.createElement("p");
             paragraphEl.textContent = text;
             fragment.appendChild(paragraphEl);
         };
@@ -3699,7 +3734,6 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 .setName("Scale mode")
                 .setClass("image-converter-resize-scale-mode-setting")
                 .setDesc(
-                    // eslint-disable-next-line obsidianmd/ui/sentence-case -- Technical description with list
                     "Controls how images are adjusted relative to target size:\n- Auto: adjusts image to fit specified dimensions\n- Reduce only: only shrinks images larger than target\n- Enlarge only: only enlarges images smaller than target"
                 )
                 .addDropdown((dropdown) => {
@@ -3746,6 +3780,25 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 );
             }
         }
+    }
+
+    /** Update only the clicked category in the selected global preset, leaving other combinations unchanged. */
+    private updateSelectedGlobalPreset(activePresetSetting: ActivePresetSetting, presetName: string): boolean {
+        const { settings } = this.plugin;
+        const globalPreset = settings.globalPresets.find(preset => preset.name === settings.selectedGlobalPreset);
+        if (!settings.selectedGlobalPreset || !globalPreset) return false;
+
+        const globalPresetKeys: Record<ActivePresetSetting, keyof Omit<GlobalPreset, "name">> = {
+            selectedFolderPreset: "folderPreset",
+            selectedFilenamePreset: "filenamePreset",
+            selectedConversionPreset: "conversionPreset",
+            selectedLinkFormatPreset: "linkFormatPreset",
+            selectedResizePreset: "resizePreset",
+        };
+        const key = globalPresetKeys[activePresetSetting];
+        if (globalPreset[key] === presetName) return false;
+        globalPreset[key] = presetName;
+        return true;
     }
 
     private getSelectedPresetName(activePresetSetting: ActivePresetSetting): string | undefined {
@@ -4023,12 +4076,13 @@ export class SaveGlobalPresetModal extends Modal {
             (presetItem) => presetItem.name === this.plugin.settings.nonDestructiveResizeSettings.selectedResizePreset
         );
 
+        const summaryDocument = summaryEl.ownerDocument;
         // Use DocumentFragment for efficient DOM updates
-        const fragment = document.createDocumentFragment();
+        const fragment = summaryDocument.createDocumentFragment();
 
         // Helper function to create a section title
         const createSectionTitle = (title: string) => {
-            const titleEl = document.createElement("div");
+            const titleEl = summaryDocument.createElement("div");
             titleEl.classList.add("summary-section-title");
             titleEl.textContent = title;
             return titleEl;
@@ -4036,7 +4090,7 @@ export class SaveGlobalPresetModal extends Modal {
 
         // Helper function to create a summary item
         const createSummaryItem = (label: string, value: string | undefined | number | boolean, boldValue = false) => {
-            const itemEl = document.createElement("div");
+            const itemEl = summaryDocument.createElement("div");
             itemEl.classList.add("summary-item");
             itemEl.createEl("span", { text: `${label}: `, cls: "summary-label" });
             itemEl.createEl("span", {
@@ -4049,7 +4103,7 @@ export class SaveGlobalPresetModal extends Modal {
         // Function to add a preset summary section
         const addPresetSummary = (presetType: string, preset: FolderPreset | FilenamePreset | ConversionPreset | LinkFormatPreset | NonDestructiveResizePreset | undefined) => {
             if (preset) {
-                const sectionEl = document.createElement("div");
+                const sectionEl = summaryDocument.createElement("div");
                 sectionEl.classList.add("summary-section");
                 sectionEl.appendChild(createSectionTitle(`${presetType} Preset: ${preset.name}`));
 
@@ -4181,13 +4235,42 @@ export class SaveGlobalPresetModal extends Modal {
 export class AvailableVariablesModal extends Modal {
     private variableProcessor: VariableProcessor;
     private modalClass = "image-converter-available-variables-modal";
-    private searchInput: HTMLInputElement;
-    private categorizedVariables: Record<string, { name: string; description: string; example: string }[]>;
-    private contentContainer: HTMLElement;
+    private searchInput!: HTMLInputElement;
+    private categorizedVariables!: Record<string, { name: string; description: string; example: string }[]>;
+    private contentContainer!: HTMLElement;
+    private eventDisposers: Array<() => void> = [];
+    private contentEventDisposers: Array<() => void> = [];
+    private feedbackTimeouts: number[] = [];
 
     constructor(app: App, variableProcessor: VariableProcessor) {
         super(app);
         this.variableProcessor = variableProcessor;
+    }
+
+    private registerModalDomEvent<K extends keyof HTMLElementEventMap>(
+        el: HTMLElement,
+        type: K,
+        handler: (event: HTMLElementEventMap[K]) => void
+    ): void {
+        el.addEventListener(type, handler);
+        this.eventDisposers.push(() => el.removeEventListener(type, handler));
+    }
+
+    private registerContentDomEvent<K extends keyof HTMLElementEventMap>(
+        el: HTMLElement,
+        type: K,
+        handler: (event: HTMLElementEventMap[K]) => void
+    ): void {
+        el.addEventListener(type, handler);
+        this.contentEventDisposers.push(() => el.removeEventListener(type, handler));
+    }
+
+    private setFeedbackTimeout(callback: () => void, delay: number): void {
+        const timeoutId = window.setTimeout(() => {
+            this.feedbackTimeouts = this.feedbackTimeouts.filter((id) => id !== timeoutId);
+            callback();
+        }, delay);
+        this.feedbackTimeouts.push(timeoutId);
     }
 
     onOpen() {
@@ -4221,7 +4304,7 @@ export class AvailableVariablesModal extends Modal {
         this.renderVariables();
 
         // Add search functionality
-        this.searchInput.addEventListener("input", () => {
+        this.registerModalDomEvent(this.searchInput, "input", () => {
             this.handleSearch();
         });
 
@@ -4230,6 +4313,7 @@ export class AvailableVariablesModal extends Modal {
     }
 
     private renderVariables(searchTerm = "") {
+        this.cleanupContentHandlers();
         this.contentContainer.empty();
 
         for (const [category, variables] of Object.entries(this.categorizedVariables)) {
@@ -4266,29 +4350,26 @@ export class AvailableVariablesModal extends Modal {
                     
                     // Highlight search term in the content
                     const nameCell = row.createEl("td", { cls: "variable-name" });
-                    // eslint-disable-next-line @microsoft/sdl/no-inner-html -- Safe: content from variableProcessor with escaped search term
-                    nameCell.innerHTML = this.highlightSearchTerm(variable.name, searchTerm);
-                    
+                    this.appendHighlightedText(nameCell, variable.name, searchTerm);
+
                     const descCell = row.createEl("td", { cls: "variable-description" });
-                    // eslint-disable-next-line @microsoft/sdl/no-inner-html -- Safe: content from variableProcessor with escaped search term
-                    descCell.innerHTML = this.highlightSearchTerm(variable.description, searchTerm);
+                    this.appendHighlightedText(descCell, variable.description, searchTerm);
                     const exampleCell = row.createEl("td", { cls: "variable-example" });
-                    // eslint-disable-next-line @microsoft/sdl/no-inner-html -- Safe: content from variableProcessor with escaped search term
-                    exampleCell.innerHTML = this.highlightSearchTerm(variable.example, searchTerm);
+                    this.appendHighlightedText(exampleCell, variable.example, searchTerm);
                     // Add click handler to copy variable name
-                    nameCell.addEventListener("click", () => {
+                    this.registerContentDomEvent(nameCell, "click", () => {
                         void (async () => {
                             try {
                                 await navigator.clipboard.writeText(variable.name);
-                                
+
                                 // Visual feedback - add CSS class for copy success
                                 nameCell.classList.add("variable-name-copied");
-                                
+
                                 // Show "Copied!" text temporarily
                                 const originalText = nameCell.textContent;
                                 nameCell.textContent = "Copied!";
-                                
-                                setTimeout(() => {
+
+                                this.setFeedbackTimeout(() => {
                                     nameCell.classList.remove("variable-name-copied");
                                     nameCell.textContent = originalText;
                                 }, 800);
@@ -4296,7 +4377,7 @@ export class AvailableVariablesModal extends Modal {
                                 console.error("Failed to copy to clipboard:", err);
                                 // Fallback visual indication for copy failure
                                 nameCell.classList.add("variable-name-copy-error");
-                                setTimeout(() => {
+                                this.setFeedbackTimeout(() => {
                                     nameCell.classList.remove("variable-name-copy-error");
                                 }, 500);
                             }
@@ -4316,11 +4397,32 @@ export class AvailableVariablesModal extends Modal {
         }
     }
 
-    private highlightSearchTerm(text: string, searchTerm: string): string {
-        if (!searchTerm) return text;
-        
-        const regex = new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-        return text.replace(regex, '<mark>$1</mark>');
+    private appendHighlightedText(target: HTMLElement, text: string, searchTerm: string): void {
+        target.empty();
+        if (!searchTerm) {
+            target.textContent = text;
+            return;
+        }
+
+        const searchLower = searchTerm.toLowerCase();
+        const textLower = text.toLowerCase();
+        let currentIndex = 0;
+        let matchIndex = textLower.indexOf(searchLower, currentIndex);
+
+        while (matchIndex !== -1) {
+            if (matchIndex > currentIndex) {
+                target.appendChild(target.ownerDocument.createTextNode(text.slice(currentIndex, matchIndex)));
+            }
+
+            const matchEndIndex = matchIndex + searchTerm.length;
+            target.createEl("mark", { text: text.slice(matchIndex, matchEndIndex) });
+            currentIndex = matchEndIndex;
+            matchIndex = textLower.indexOf(searchLower, currentIndex);
+        }
+
+        if (currentIndex < text.length) {
+            target.appendChild(target.ownerDocument.createTextNode(text.slice(currentIndex)));
+        }
     }
 
     private handleSearch() {
@@ -4328,7 +4430,21 @@ export class AvailableVariablesModal extends Modal {
         this.renderVariables(searchTerm);
     }
 
+    private cleanupContentHandlers(): void {
+        this.contentEventDisposers.forEach((dispose) => dispose());
+        this.contentEventDisposers = [];
+    }
+
+    private cleanupRegisteredHandlers(): void {
+        this.cleanupContentHandlers();
+        this.eventDisposers.forEach((dispose) => dispose());
+        this.eventDisposers = [];
+        this.feedbackTimeouts.forEach((timeoutId) => window.clearTimeout(timeoutId));
+        this.feedbackTimeouts = [];
+    }
+
     onClose() {
+        this.cleanupRegisteredHandlers();
         const { contentEl } = this;
         contentEl.empty();
         this.modalEl.removeClass(this.modalClass); // Remove class on close

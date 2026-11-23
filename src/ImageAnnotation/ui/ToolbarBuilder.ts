@@ -1,5 +1,5 @@
 import { ButtonComponent, DropdownComponent, Component } from 'obsidian';
-import { BlendMode, BLEND_MODES, BRUSH_SIZES, BRUSH_OPACITIES, ToolPreset } from '../types';
+import { BlendMode, BLEND_MODES, BRUSH_SIZES, BRUSH_OPACITIES, MOSAIC_BLOCK_SIZES, ToolPreset } from '../types';
 import { hexToRgba, hslToRgb, rgbToHex, getLuminosity } from '../utils/colorUtils';
 import { Canvas } from 'fabric';
 
@@ -7,6 +7,7 @@ export interface ToolbarCallbacks {
     onDrawingToggle: () => void;
     onTextToggle: () => void;
     onArrowToggle: () => void;
+    onMosaicToggle: () => void;
     onResetZoom: () => void;
     onClearAll: () => void;
     onSave: () => void;
@@ -22,26 +23,32 @@ export interface ToolbarCallbacks {
     onPresetSave: (index: number) => void;
     onPresetLoad: (index: number) => void;
     onTextBackgroundChange: (color: string) => void;
+    onMosaicBlockSizeChange: (index: number) => void;
     getCanvas: () => Canvas | null;
     getCurrentOpacity: () => number;
     getBrushSizeIndex: () => number;
     getOpacityIndex: () => number;
     getBlendMode: () => BlendMode;
+    getMosaicBlockSizeIndex: () => number;
     isDrawingMode: () => boolean;
     isTextMode: () => boolean;
     isArrowMode: () => boolean;
+    isMosaicMode: () => boolean;
 }
 
 export interface ToolbarElements {
     drawButton: ButtonComponent;
     textButton: ButtonComponent;
     arrowButton: ButtonComponent;
+    mosaicButton: ButtonComponent;
     textBackgroundControls: HTMLElement;
+    mosaicBlockSizeControls: HTMLElement;
 }
 
 export class ToolbarBuilder {
     private dominantColors: string[] = [];
     private complementaryColors: string[][] = [];
+    private mosaicBlockSizeButtons: { size: number; button: ButtonComponent }[] = [];
 
     constructor(
         private componentContainer: Component,
@@ -66,25 +73,26 @@ export class ToolbarBuilder {
 
         // Drawing tools
         const drawButton = new ButtonComponent(drawingToolsColumn)
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
             .setTooltip('Draw (B)')
             .setIcon('pencil')
             .onClick(() => this.callbacks.onDrawingToggle());
 
         const arrowButton = new ButtonComponent(drawingToolsColumn)
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
             .setTooltip('Arrow (A)')
             .setIcon('arrow-right')
             .onClick(() => this.callbacks.onArrowToggle());
 
         const textButton = new ButtonComponent(drawingToolsColumn)
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
             .setTooltip('Add Text (T)')
             .setIcon('type')
             .onClick(() => this.callbacks.onTextToggle());
 
+        const mosaicButton = new ButtonComponent(drawingToolsColumn)
+            .setTooltip('Mosaic (M)')
+            .setIcon('grid')
+            .onClick(() => this.callbacks.onMosaicToggle());
+
         new ButtonComponent(drawingToolsColumn)
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
             .setTooltip('Reset Zoom (1:1)')
             .setIcon('search')
             .onClick(() => this.callbacks.onResetZoom());
@@ -114,25 +122,21 @@ export class ToolbarBuilder {
         const layerButtonContainer = layerControls.createDiv('image-converter-annotation-tool-button-group');
 
         new ButtonComponent(layerButtonContainer)
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
             .setTooltip('Bring to Front')
             .setIcon('arrow-up-to-line')
             .onClick(() => this.callbacks.onBringToFront());
 
         new ButtonComponent(layerButtonContainer)
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
             .setTooltip('Bring Forward')
             .setIcon('arrow-up')
             .onClick(() => this.callbacks.onBringForward());
 
         new ButtonComponent(layerButtonContainer)
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
             .setTooltip('Send Backward')
             .setIcon('arrow-down')
             .onClick(() => this.callbacks.onSendBackward());
 
         new ButtonComponent(layerButtonContainer)
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
             .setTooltip('Send to Back')
             .setIcon('arrow-down-to-line')
             .onClick(() => this.callbacks.onSendToBack());
@@ -140,6 +144,10 @@ export class ToolbarBuilder {
         // Text background controls
         const textBackgroundControls = brushControlsColumn.createDiv('text-background-controls is-hidden');
         this.createTextBackgroundControls(textBackgroundControls);
+
+        // Mosaic block size controls
+        const mosaicBlockSizeControls = brushControlsColumn.createDiv('mosaic-block-size-controls is-hidden');
+        this.createMosaicBlockSizeButtons(mosaicBlockSizeControls);
 
         // Utility buttons
         new ButtonComponent(utilityGroup)
@@ -159,7 +167,9 @@ export class ToolbarBuilder {
             drawButton,
             textButton,
             arrowButton,
-            textBackgroundControls
+            mosaicButton,
+            textBackgroundControls,
+            mosaicBlockSizeControls
         };
     }
 
@@ -345,7 +355,6 @@ export class ToolbarBuilder {
 
     private createTextBackgroundControls(container: HTMLElement): void {
         const textBgContainer = container.createDiv('image-converter-annotation-tool-control-group');
-        // eslint-disable-next-line obsidianmd/ui/sentence-case
         textBgContainer.createDiv('control-label').setText('Text Background:');
         const controlsContainer = textBgContainer.createDiv('image-converter-annotation-tool-button-group');
 
@@ -400,6 +409,33 @@ export class ToolbarBuilder {
         this.componentContainer.registerDomEvent(alphaSlider, 'input', updateBackground);
     }
 
+    private createMosaicBlockSizeButtons(container: HTMLElement): void {
+        const blockSizeContainer = container.createDiv('image-converter-annotation-tool-control-group');
+        blockSizeContainer.createDiv('control-label').setText('Block size:');
+        const buttonContainer = blockSizeContainer.createDiv('image-converter-annotation-tool-button-group');
+
+        this.mosaicBlockSizeButtons = MOSAIC_BLOCK_SIZES.map((size, index) => {
+            const button = new ButtonComponent(buttonContainer)
+                .setButtonText(`${size}px`)
+                .setTooltip('Block size for new and selected mosaics')
+                .onClick(() => {
+                    this.callbacks.onMosaicBlockSizeChange(index);
+                    this.setActiveMosaicBlockSize(size);
+                });
+
+            return { size, button };
+        });
+
+        this.setActiveMosaicBlockSize(MOSAIC_BLOCK_SIZES[this.callbacks.getMosaicBlockSizeIndex()]);
+    }
+
+    /** Highlights the button for the given block size. */
+    setActiveMosaicBlockSize(blockSize: number): void {
+        this.mosaicBlockSizeButtons.forEach(({ size, button }) => {
+            button.buttonEl.toggleClass('is-active', size === blockSize);
+        });
+    }
+
     private createPresetButtons(container: Element): void {
         const containerEl = container as HTMLElement;
         const presetContainer = containerEl.createDiv('image-converter-annotation-tool-preset-buttons is-hidden');
@@ -424,7 +460,7 @@ export class ToolbarBuilder {
     updatePresetButtons(presets: ToolPreset[], isTextMode: boolean): void {
         const presetButtons = this.modalEl.querySelectorAll('.preset-button');
 
-        /* eslint-disable @typescript-eslint/naming-convention */
+        /* eslint-disable @typescript-eslint/naming-convention -- Keys are kebab-case CSS property names */
         presetButtons.forEach((button, index) => {
             const colorDiv = button.querySelector('.image-converter-annotation-tool-preset-color') as HTMLDivElement;
             if (colorDiv && presets[index]) {
@@ -443,6 +479,6 @@ export class ToolbarBuilder {
                 }
             }
         });
-        /* eslint-enable @typescript-eslint/naming-convention */
+        /* eslint-enable @typescript-eslint/naming-convention -- End of CSS property names */
     }
 }

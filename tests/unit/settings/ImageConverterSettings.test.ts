@@ -1,9 +1,9 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/await-thenable, obsidianmd/hardcoded-config-path */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/await-thenable, @typescript-eslint/unbound-method, obsidianmd/hardcoded-config-path */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import ImageConverterPlugin from '../../../src/main';
-import { ImageConverterSettingTab, DEFAULT_SETTINGS, type ConversionPreset, type FilenamePreset } from '../../../src/ImageConverterSettings';
+import { AvailableVariablesModal, ImageConverterSettingTab, DEFAULT_SETTINGS, type ConversionPreset, type FilenamePreset } from '../../../src/ImageConverterSettings';
 import type { LinkFormatPreset } from '../../../src/LinkFormatSettings';
-import { App, Platform } from 'obsidian';
+import { App, Notice, Platform } from 'obsidian';
 import { crossPlatformPathPattern } from '../../helpers/test-setup';
 
 // Mock SortableJS to capture onEnd callbacks for reorder (11.9)
@@ -54,6 +54,133 @@ function changeSelect(sel: HTMLSelectElement, value: string) {
   sel.dispatchEvent(new Event('change'));
 }
 
+
+function makeVariableProcessor(variables: Record<string, Array<{ name: string; description: string; example: string }>>) {
+  return {
+    getCategorizedVariables: vi.fn(() => variables)
+  };
+}
+
+function countTrackedListeners(
+  trackedListeners: Map<EventTarget, Map<string, Set<EventListenerOrEventListenerObject>>>,
+  predicate: (target: EventTarget, type: string) => boolean = () => true
+) {
+  let count = 0;
+  for (const [target, listenersByType] of trackedListeners.entries()) {
+    for (const [type, listeners] of listenersByType.entries()) {
+      if (predicate(target, type)) {
+        count += listeners.size;
+      }
+    }
+  }
+  return count;
+}
+
+// -----------------------------
+// Available variables modal runtime safety
+// -----------------------------
+
+describe('AvailableVariablesModal runtime safety', () => {
+  it('renders variable text as text instead of interpreting HTML markup', () => {
+    const app = makeAppWithStorage();
+    const modal = new AvailableVariablesModal(app, makeVariableProcessor({
+      Unsafe: [
+        {
+          name: '<img class="p95-injected-name" src="x" onerror="window.__p95Injected = true">',
+          description: 'Description with <svg class="p95-injected-description"></svg> markup',
+          example: '<a class="p95-injected-example" href="javascript:void(0)">bad link</a>',
+        }
+      ]
+    }) as any);
+
+    modal.onOpen();
+
+    expect(modal.contentEl.querySelector('.p95-injected-name,.p95-injected-description,.p95-injected-example')).toBeNull();
+    expect(modal.contentEl.textContent).toContain('<img class="p95-injected-name"');
+    expect(modal.contentEl.textContent).toContain('<svg class="p95-injected-description"></svg>');
+    expect(modal.contentEl.textContent).toContain('<a class="p95-injected-example"');
+  });
+
+  it('removes search/click listeners and copy feedback timers on close', async () => {
+    vi.useFakeTimers();
+    const trackedListeners = new Map<EventTarget, Map<string, Set<EventListenerOrEventListenerObject>>>();
+    const originalAddEventListener = EventTarget.prototype.addEventListener;
+    const originalRemoveEventListener = EventTarget.prototype.removeEventListener;
+    const originalClipboard = navigator.clipboard;
+
+    EventTarget.prototype.addEventListener = function addTrackedListener(type, listener, options) {
+      if (this instanceof HTMLElement && (this.matches('.variable-search-input') || this.matches('.variable-name'))) {
+        let listenersByType = trackedListeners.get(this);
+        if (!listenersByType) {
+          listenersByType = new Map();
+          trackedListeners.set(this, listenersByType);
+        }
+        let listeners = listenersByType.get(type);
+        if (!listeners) {
+          listeners = new Set();
+          listenersByType.set(type, listeners);
+        }
+        listeners.add(listener);
+      }
+      return originalAddEventListener.call(this, type, listener, options);
+    };
+
+    EventTarget.prototype.removeEventListener = function removeTrackedListener(type, listener, options) {
+      const listenersByType = trackedListeners.get(this);
+      const listeners = listenersByType?.get(type);
+      listeners?.delete(listener);
+      if (listeners?.size === 0) {
+        listenersByType?.delete(type);
+      }
+      return originalRemoveEventListener.call(this, type, listener, options);
+    };
+
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+
+    try {
+      const app = makeAppWithStorage();
+      const modal = new AvailableVariablesModal(app, makeVariableProcessor({
+        Basic: [
+          { name: '{alpha}', description: 'Alpha variable', example: 'alpha-output' },
+          { name: '{beta}', description: 'Beta variable', example: 'beta-output' },
+        ]
+      }) as any);
+
+      modal.onOpen();
+      const searchInput = modal.contentEl.querySelector('.variable-search-input') as HTMLInputElement;
+      searchInput.value = 'alpha';
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      searchInput.value = '';
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+      expect(countTrackedListeners(trackedListeners, (target, type) => (
+        type === 'click' && target instanceof HTMLElement && target.classList.contains('variable-name') && !target.isConnected
+      ))).toBe(0);
+
+      const firstNameCell = modal.contentEl.querySelector('.variable-name') as HTMLElement;
+      firstNameCell.click();
+      await Promise.resolve();
+
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      modal.onClose();
+
+      expect(countTrackedListeners(trackedListeners)).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      EventTarget.prototype.addEventListener = originalAddEventListener;
+      EventTarget.prototype.removeEventListener = originalRemoveEventListener;
+      if (originalClipboard === undefined) {
+        delete (navigator as Partial<Navigator>).clipboard;
+      } else {
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard });
+      }
+      vi.useRealTimers();
+    }
+  });
+});
 // -----------------------------
 // 11.1–11.2 Defaults and persistence
 // -----------------------------
@@ -163,7 +290,198 @@ describe('Settings defaults, global preset application, and field constraints (1
     plugin = new ImageConverterPlugin(app, { id: 'image-converter' } as any);
     vi.spyOn(plugin as any, 'loadData').mockResolvedValue(undefined);
     await plugin.loadSettings();
+    // Card clicks now update nested global presets; keep shared defaults isolated between tests.
+    plugin.settings = JSON.parse(JSON.stringify(plugin.settings));
     tab = new ImageConverterSettingTab(app, plugin);
+  });
+
+  it.each([
+    ['folder', 'folderPreset'],
+    ['filename', 'filenamePreset'],
+    ['conversion', 'conversionPreset'],
+    ['linkformat', 'linkFormatPreset'],
+    ['resize', 'resizePreset'],
+  ] as const)('%s card selection persists in the selected global preset after switching away and reloading', async (category, key) => {
+    const original = { ...plugin.settings.globalPresets[0] };
+    const target = { ...original, name: 'Custom combination' };
+    const other = { ...original, name: 'Other combination' };
+    plugin.settings.globalPresets = [target, other];
+    const presets = {
+      folder: plugin.settings.folderPresets,
+      filename: plugin.settings.filenamePresets,
+      conversion: plugin.settings.conversionPresets,
+      linkformat: plugin.settings.linkFormatSettings.linkFormatPresets,
+      resize: plugin.settings.nonDestructiveResizeSettings.resizePresets,
+    }[category];
+    const cardPreset = { ...presets[0], name: 'New card' };
+    (presets as any[]).push(cardPreset);
+    let stored: any;
+    vi.spyOn(plugin, 'saveData').mockImplementation(async data => { stored = JSON.parse(JSON.stringify(data)); });
+    tab.activeTab = category;
+    tab.display();
+    const selectGlobal = async (name: string) => {
+      changeSelect(tab.containerEl.querySelector<HTMLSelectElement>('.image-converter-global-preset-container select')!, name);
+      await vi.waitFor(() => expect(tab.containerEl.querySelector<HTMLSelectElement>('.image-converter-global-preset-container select')!.value).toBe(name));
+      await Promise.resolve();
+    };
+    await selectGlobal(target.name);
+    const card = Array.from(tab.containerEl.querySelectorAll('.image-converter-preset-card'))
+      .find(card => card.querySelector('.image-converter-preset-card-title')?.textContent === cardPreset.name)!;
+
+    click(card);
+    await vi.waitFor(() => expect(stored.globalPresets[0][key]).toBe(cardPreset.name));
+
+    expect(target).toEqual({ ...original, name: target.name, [key]: cardPreset.name });
+    expect(other).toEqual({ ...original, name: other.name });
+    expect(tab.containerEl.contains(card)).toBe(true);
+    await selectGlobal(other.name);
+    await selectGlobal(target.name);
+    expect(card.classList.contains('image-converter-active-preset')).toBe(true);
+    expect(tab.containerEl.querySelector('.image-converter-active-preset .image-converter-preset-card-title')?.textContent).toBe(cardPreset.name);
+    vi.mocked(plugin.loadData).mockImplementation(async () => stored);
+    await plugin.loadSettings();
+    tab.display();
+    expect(plugin.settings.globalPresets[0][key]).toBe(cardPreset.name);
+    expect(tab.containerEl.querySelector('.image-converter-active-preset .image-converter-preset-card-title')?.textContent).toBe(cardPreset.name);
+  });
+
+  it.each(['', 'missing combination'])('does not change any global preset when the selection is %s', async selected => {
+    const before = JSON.parse(JSON.stringify(plugin.settings.globalPresets));
+    plugin.settings.selectedGlobalPreset = selected;
+    plugin.settings.selectedFolderPreset = 'Default (Obsidian setting)';
+    const saveSpy = vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
+    tab.display();
+    const card = Array.from(tab.containerEl.querySelectorAll('.image-converter-preset-card'))
+      .find(card => card.querySelector('.image-converter-preset-card-title')?.textContent === 'Root folder')!;
+
+    click(card);
+    await Promise.resolve();
+
+    expect(plugin.settings.selectedFolderPreset).toBe('Root folder');
+    expect(plugin.settings.globalPresets).toEqual(before);
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('clicking the already selected card synchronizes an out-of-date global preset', async () => {
+    plugin.settings.selectedFolderPreset = 'Root folder';
+    const target = plugin.settings.globalPresets[0];
+    plugin.settings.selectedGlobalPreset = target.name;
+    const saveSpy = vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
+    tab.display();
+    const card = Array.from(tab.containerEl.querySelectorAll('.image-converter-preset-card'))
+      .find(card => card.querySelector('.image-converter-preset-card-title')?.textContent === 'Root folder')!;
+
+    click(card);
+    await Promise.resolve();
+
+    expect(target.folderPreset).toBe('Root folder');
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    click(card);
+    await Promise.resolve();
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['folder', 'filename', 'conversion', 'linkformat', 'resize'] as const)(
+    '%s cards remain visible and selectable while another preset is being edited', async (category) => {
+      const presets = {
+        folder: plugin.settings.folderPresets,
+        filename: plugin.settings.filenamePresets,
+        conversion: plugin.settings.conversionPresets,
+        linkformat: plugin.settings.linkFormatSettings.linkFormatPresets,
+        resize: plugin.settings.nonDestructiveResizeSettings.resizePresets,
+      }[category];
+      const custom = { ...presets[0], name: 'Card A' };
+      (presets as any[]).push(custom);
+      const saveSpy = vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
+      tab.activeTab = category;
+      tab.display();
+      const findCard = (name: string) => Array.from(tab.containerEl.querySelectorAll<HTMLElement>(
+        '.image-converter-preset-card:not(.image-converter-add-new-preset)'
+      )).find(card => card.querySelector('.image-converter-preset-card-title')?.textContent === name)!;
+      const a = findCard(custom.name);
+      const b = findCard(presets[0].name);
+
+      click(a.querySelector('.image-converter-preset-card-actions button'));
+      await Promise.resolve();
+      const form = tab.formContainer.querySelector('.image-converter-preset-form');
+      expect(form).toBeTruthy();
+      expect(saveSpy).not.toHaveBeenCalled(); // Editing is not selection.
+
+      click(b);
+      await Promise.resolve();
+      expect(findCard(custom.name)).toBe(a);
+      expect(tab.formContainer.querySelector('.image-converter-preset-form')).toBe(form);
+      expect(b.classList.contains('image-converter-active-preset')).toBe(true);
+      click(a);
+      await Promise.resolve();
+      expect(a.classList.contains('image-converter-active-preset')).toBe(true);
+      expect(b.classList.contains('image-converter-active-preset')).toBe(false);
+      click(b);
+      await Promise.resolve();
+      expect(b.classList.contains('image-converter-active-preset')).toBe(true);
+
+      // A later full redraw must also render the edited card, not an empty shell.
+      tab.display();
+      expect(findCard(custom.name)?.querySelector('.image-converter-preset-card-actions button')).toBeTruthy();
+      expect(tab.formContainer.classList.contains('visible')).toBe(true);
+      expect(tab.containerEl.querySelectorAll('.image-converter-preset-form')).toHaveLength(1);
+    }
+  );
+
+  it('preserves filename form input and preview DOM when selecting a neighboring card', async () => {
+    plugin.settings.filenamePresets.push({ name: 'Card A', customTemplate: '{imagename}', skipRenamePatterns: '' });
+    vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
+    tab.activeTab = 'filename';
+    tab.display();
+    const cards = Array.from(tab.containerEl.querySelectorAll<HTMLElement>('.image-converter-preset-card'));
+    const a = cards.find(card => card.querySelector('.image-converter-preset-card-title')?.textContent === 'Card A')!;
+    click(a.querySelector('.image-converter-preset-card-actions button'));
+    const input = tab.formContainer.querySelector<HTMLInputElement>('.image-converter-custom-template-setting-wrapper input')!;
+    input.value = '{notename}-draft';
+    input.dispatchEvent(new Event('change'));
+    const b = cards.find(card => card.querySelector('.image-converter-preset-card-title')?.textContent === 'Keep original name')!;
+    const preview = b.querySelector('.image-converter-summary-example');
+
+    click(b);
+    await Promise.resolve();
+
+    expect(tab.formContainer.querySelector('.image-converter-custom-template-setting-wrapper input')).toBe(input);
+    expect(input.value).toBe('{notename}-draft');
+    expect(b.querySelector('.image-converter-summary-example')).toBe(preview);
+  });
+
+  it('delete button does not activate its card or save settings before confirmation', async () => {
+    plugin.settings.filenamePresets.push({ name: 'Card A', customTemplate: '{imagename}', skipRenamePatterns: '' });
+    const selected = plugin.settings.selectedFilenamePreset;
+    const saveSpy = vi.spyOn(plugin, 'saveSettings').mockResolvedValue(undefined);
+    tab.activeTab = 'filename';
+    tab.display();
+    const a = Array.from(tab.containerEl.querySelectorAll('.image-converter-preset-card'))
+      .find(card => card.querySelector('.image-converter-preset-card-title')?.textContent === 'Card A')!;
+
+    click(a.querySelector('.image-converter-preset-card-actions button.danger'));
+    await Promise.resolve();
+
+    expect(plugin.settings.selectedFilenamePreset).toBe(selected);
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it('switching from adding to editing keeps a single edit form after a redraw', () => {
+    plugin.settings.filenamePresets.push({ name: 'Card A', customTemplate: '{imagename}', skipRenamePatterns: '' });
+    tab.activeTab = 'filename';
+    tab.display();
+    click(tab.containerEl.querySelector('.image-converter-add-new-preset'));
+    expect(tab.presetUIState.filename.newPreset).toBeTruthy();
+    const a = Array.from(tab.containerEl.querySelectorAll('.image-converter-preset-card'))
+      .find(card => card.querySelector('.image-converter-preset-card-title')?.textContent === 'Card A')!;
+    click(a.querySelector('.image-converter-preset-card-actions button'));
+
+    tab.display();
+
+    expect(tab.presetUIState.filename.newPreset).toBeNull();
+    expect(tab.containerEl.querySelectorAll('.image-converter-preset-form')).toHaveLength(1);
+    expect(tab.formContainer.querySelector<HTMLInputElement>('input')?.value).toBe('Card A');
+    expect(tab.formContainer.querySelector('.image-converter-form-buttons button.cta')?.textContent).toBe('Save');
   });
 
   it('11.11 Auto-detect FFmpeg populates preset and modal settings', async () => {
@@ -367,6 +685,70 @@ describe('Settings defaults, global preset application, and field constraints (1
     const sensSlider = scrollSection?.querySelector('input[type="range"]') as HTMLInputElement;
     expect(sensSlider?.min).toBe('0.01');
     expect(sensSlider?.max).toBe('1');
+  });
+
+  it('Image selection toggle shows the standard reload notification', async () => {
+    tab.display();
+
+    const resizeSection = tab.containerEl.querySelector('.image-drag-resize-settings-section');
+    const cursorSelect = Array.from(resizeSection?.querySelectorAll('select') ?? [])
+      .find((select) => select.querySelector('option[value="below"]'));
+    const imageSelectionToggle = cursorSelect?.parentElement?.parentElement
+      ?.previousElementSibling?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+
+    expect(imageSelectionToggle).toBeTruthy();
+    Notice.instances.length = 0;
+
+    imageSelectionToggle!.checked = true;
+    imageSelectionToggle!.dispatchEvent(new Event('change'));
+
+    await vi.waitFor(() => {
+      expect(plugin.settings.disableObsidianImageSelectionOnClick).toBe(true);
+      expect(Notice.instances.at(-1)).toMatchObject({
+        message: 'Obsidian image selection disabled. Reload Obsidian to see changes.',
+        timeout: 5000
+      });
+    });
+
+    imageSelectionToggle!.checked = false;
+    imageSelectionToggle!.dispatchEvent(new Event('change'));
+
+    await vi.waitFor(() => {
+      expect(plugin.settings.disableObsidianImageSelectionOnClick).toBe(false);
+      expect(Notice.instances.at(-1)).toMatchObject({
+        message: 'Obsidian image selection enabled. Reload Obsidian to see changes.',
+        timeout: 5000
+      });
+    });
+  });
+
+  it('Given the metadata dropdown, When an option is chosen, Then the setting is saved', async () => {
+    tab.display();
+    const save = vi.spyOn(plugin, 'saveSettings').mockResolvedValue();
+
+    const metadataSelect = Array.from(tab.containerEl.querySelectorAll('select'))
+      .find((select) => select.querySelector('option[value="strip-location"]'));
+
+    expect(metadataSelect).toBeTruthy();
+    expect(metadataSelect!.value).toBe('keep-all');
+    expect(Array.from(metadataSelect!.options).map((option) => option.value)).toEqual(['keep-all', 'strip-location', 'strip-all']);
+
+    changeSelect(metadataSelect!, 'strip-all');
+
+    await vi.waitFor(() => {
+      expect(plugin.settings.metadataMode).toBe('strip-all');
+      expect(save).toHaveBeenCalled();
+    });
+  });
+
+  it('Given settings saved before the metadata setting existed, When loadSettings, Then all metadata is kept', async () => {
+    const app2 = makeAppWithStorage();
+    const plugin2 = new ImageConverterPlugin(app2, { id: 'image-converter' } as any);
+    vi.spyOn(plugin2 as any, 'loadData').mockResolvedValue({ selectedFolderPreset: 'Root folder' });
+
+    await plugin2.loadSettings();
+
+    expect(plugin2.settings.metadataMode).toBe('keep-all');
   });
 
   it('11.9 Safe defaults on missing fields: shallow merge preserves defaults for unspecified fields', async () => {

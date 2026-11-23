@@ -1,17 +1,19 @@
 // ImageProcessor.ts
 import { Notice, Platform } from "obsidian";
 import { SupportedImageFormats } from "./SupportedImageFormats";
-// eslint-disable-next-line import/no-nodejs-modules -- Required for spawning external processes (FFmpeg, pngquant); Obsidian runs on Electron with Node.js support
+// Required for spawning external processes (FFmpeg, pngquant); Obsidian runs on Electron with Node.js support
 import { ChildProcess, spawn } from 'child_process';
 import { ConversionPreset, ImageConverterSettings, DEFAULT_SETTINGS } from "./ImageConverterSettings";
-import * as piexif from "piexifjs"; // Import piexif library
 import { normalizeExecutablePath } from "./utils/ffmpegPath";
+import { transferMetadata } from "./metadata/transferMetadata";
+import { parseExifBlock, readOrientation } from "./metadata/ExifBlock";
+import { transformCanvas, transformForOrientation } from "./utils/canvasTransform";
 
-// eslint-disable-next-line import/no-nodejs-modules -- Required for temporary file handling in FFmpeg processing; Obsidian runs on Electron with Node.js support
+// Required for temporary file handling in FFmpeg processing; Obsidian runs on Electron with Node.js support
 import * as fs from 'fs/promises';
-// eslint-disable-next-line import/no-nodejs-modules -- Required for temporary directory access; Obsidian runs on Electron with Node.js support
+// Required for temporary directory access; Obsidian runs on Electron with Node.js support
 import * as os from 'os';
-// eslint-disable-next-line import/no-nodejs-modules -- Required for path manipulation; Obsidian runs on Electron with Node.js support
+// Required for path manipulation; Obsidian runs on Electron with Node.js support
 import * as path from 'path';
 
 // Import types
@@ -69,13 +71,13 @@ export const ENCODER_CONFIGS: Record<AvifEncoder, EncoderConfig> = {
     'av1_vaapi': { crfMin: 0, crfMax: 255, supportsPreset: false, platformHint: 'vaapi' },
     'av1_mf': { crfMin: 0, crfMax: 100, supportsPreset: false, platformHint: 'mediafoundation' }
 };
-/* eslint-enable @typescript-eslint/naming-convention */
+/* eslint-enable @typescript-eslint/naming-convention -- End of FFmpeg encoder names */
 
 export class ImageProcessor {
 
     supportedImageFormats: SupportedImageFormats
     private preset: ConversionPreset | undefined;
-    private settings: ImageConverterSettings;
+    private settings: ImageConverterSettings = DEFAULT_SETTINGS;
     private detectedEncoder: AvifEncoder | null = null;
     private static encoderDetectionCache: Map<string, AvifEncoder | null> = new Map(); // Static cache shared across instances
     private encoderFallbackAttempted: boolean = false;
@@ -194,8 +196,7 @@ export class ImageProcessor {
 
                 if (validatedEncoder) {
                     const config = ENCODER_CONFIGS[validatedEncoder];
-                    // eslint-disable-next-line no-console -- Informational logging for encoder detection
-                    console.log(`Validated AVIF encoder: ${validatedEncoder} (${config.platformHint})`);
+                    console.debug(`Validated AVIF encoder: ${validatedEncoder} (${config.platformHint})`);
                 } else {
                     console.warn('No working AV1 encoder found. Please install FFmpeg with AV1 support.');
                 }
@@ -466,7 +467,9 @@ export class ImageProcessor {
      * @param desiredLongestEdge - The desired longest edge for resizing.
      * @param enlargeOrReduce - Whether to enlarge or reduce the image during resizing.
      * @param allowLargerFiles - Whether to allow output files larger than the original.
+     * @param settings - Plugin settings. `metadataMode` decides which EXIF the output keeps.
      * @returns A Promise that resolves to the processed image as an ArrayBuffer.
+     * @throws If the metadata setting asks to remove EXIF and it cannot be removed.
      */
     async processImage(
         file: Blob,
@@ -498,29 +501,39 @@ export class ImageProcessor {
             settings
         );
 
-        if (format === "JPEG") {
-            try {
-                // Extract metadata from the original file
-                const metadata: piexif.ExifDict | undefined = await this.extractMetadata(file);
+        const orientationApplied = await this.orientationApplied(file, format, resizeMode);
+        const metadataMode = settings?.metadataMode ?? DEFAULT_SETTINGS.metadataMode;
+        return transferMetadata(file, processedImage, orientationApplied, metadataMode);
+    }
 
-                // Remove rotation property (Orientation tag in 0th IFD, tag 274)
-                if (metadata && metadata["0th"] && metadata["0th"][piexif.ImageIFD.Orientation]) {
-                    delete metadata["0th"][piexif.ImageIFD.Orientation];
-                }
-
-                const stringifiedMetadata = metadata && Object.keys(metadata).length > 0 ? piexif.dump(metadata) : "";
-
-                // Re-apply the metadata to the processed image
-                return await this.applyMetadata(processedImage, stringifiedMetadata);
-            } catch (exifError) {
-                console.error("JPEG EXIF handling error:", exifError);
-                // Per contract 1.8: on EXIF failure, return JPEG without EXIF; no throw
-                return processedImage;
-            }
+    /**
+     * Tells whether the pipeline rotates the pixels to match the EXIF
+     * Orientation tag of the source. The metadata transfer uses the answer to
+     * decide between Orientation 1 and the original value.
+     *
+     * - Canvas: Chromium applies the orientation when it decodes the image.
+     * - HEIC: heic-to applies the rotation of the file when it decodes.
+     * - TIFF: `handleTiff` applies the orientation after UTIF decodes.
+     * - FFmpeg: applies the orientation itself (autorotate). This was verified
+     *   with FFmpeg 9.0 and a JPEG source. Older versions possibly do not.
+     * - pngquant with no resize: the only path that does not rotate. pngquant
+     *   gets the source bytes directly, unless a decoder ran first.
+     *
+     * @returns True when the output pixels are upright.
+     */
+    private async orientationApplied(
+        file: Blob,
+        format: 'WEBP' | 'JPEG' | 'PNG' | 'ORIGINAL' | 'NONE' | 'PNGQUANT' | 'AVIF',
+        resizeMode: ResizeMode
+    ): Promise<boolean> {
+        if (format !== 'PNGQUANT' || resizeMode !== 'None') {
+            return true;
         }
 
-        return processedImage
-    }    
+        // TIFF and HEIC sources are decoded, and rotated, before pngquant.
+        const mimeType = await this.supportedImageFormats.getMimeTypeFromFile(file);
+        return ['image/tiff', 'image/tif', 'image/heic', 'image/heif'].includes(mimeType);
+    }
 
     /**
      * Helper method to process an image file.
@@ -702,9 +715,15 @@ if (format === 'ORIGINAL') {
             imageData.data.set(rgba);
             ctx.putImageData(imageData, 0, 0);
 
+            // UTIF returns the pixels as stored. Apply the Orientation tag
+            // here, so that all decoders in the pipeline give upright pixels.
+            const block = parseExifBlock(new Uint8Array(binary));
+            const transform = block ? transformForOrientation(readOrientation(block)) : null;
+            const uprightCanvas = transform ? transformCanvas(canvas, transform) : canvas;
+
             // Convert canvas to Blob
             return new Promise<Blob>((resolve, reject) => {
-                canvas.toBlob((blob) => {
+                uprightCanvas.toBlob((blob) => {
                     if (blob) {
                         resolve(blob);
                     } else {
@@ -745,7 +764,7 @@ if (format === 'ORIGINAL') {
                 blob,
                 type: outputMimeType,
                 quality
-            }) as Blob;
+            });
         } catch (error) {
             console.error('Error converting HEIC:', error);
             const errorMessage = error instanceof Error ? (error.message || 'Unknown error') : String(error);
@@ -842,7 +861,6 @@ if (format === 'ORIGINAL') {
 
                 // Check if executable path is set
                 if (!ffmpegExecutablePath) {
-                    // eslint-disable-next-line obsidianmd/ui/sentence-case -- FFmpeg is the official brand name
                     new Notice("FFmpeg executable path is not set. Please configure it in the plugin settings.");
                     return file.arrayBuffer();  // Return original
                 }
@@ -1281,8 +1299,10 @@ ffmpeg.on('error', (err: Error) => {
         enlargeOrReduce: EnlargeReduce,
         allowLargerFiles: boolean
     ): Promise<ArrayBuffer> {
-        // Early return if no processing needed
-        if (quality === 1 && resizeMode === 'None') {
+        // Return the file as it is only when it is already WebP. Other input must
+        // be encoded, or its bytes would be saved under a .webp name.
+        if (quality === 1 && resizeMode === 'None'
+            && await this.supportedImageFormats.getMimeTypeFromFile(file) === 'image/webp') {
             return file.arrayBuffer();
         }
 
@@ -1394,26 +1414,11 @@ image.onload = () => { try {
                 })
             ]);
 
-            // Get original format compression as well
-            // We're working with the original blob at the beginning,but the crucial 
-            // part is HOW we're creating the new compressed version. The path we take
-            // to create the compressed version (toDataURL vs toBlob) can result in 
-            // different compression algorithms being used internally by the browser.
-            const originalCompressed = await this.compressOriginalImage(
-                file,
-                quality,
-                resizeMode,
-                desiredWidth,
-                desiredHeight,
-                desiredLongestEdge,
-                enlargeOrReduce
-            );
-
-            // Compare all results and choose the smallest one
+            // Compare the results and choose the smallest one. A re-encode in the
+            // original format is not a candidate: it is not WebP.
             const results = [
                 { type: 'blob', data: blobResult, size: blobResult.byteLength },
-                { type: 'dataUrl', data: dataUrlResult, size: dataUrlResult.byteLength },
-                { type: 'original', data: originalCompressed, size: originalCompressed.byteLength }
+                { type: 'dataUrl', data: dataUrlResult, size: dataUrlResult.byteLength }
             ].filter(result => result.size > 0);
 
             // Sort by size
@@ -1461,8 +1466,10 @@ image.onload = () => { try {
         enlargeOrReduce: EnlargeReduce,
         allowLargerFiles: boolean
     ): Promise<ArrayBuffer> {
-        // Early return if no processing needed
-        if (quality === 1 && resizeMode === 'None') {
+        // Return the file as it is only when it is already JPEG. Other input must
+        // be encoded, or its bytes would be saved under a .jpeg name.
+        if (quality === 1 && resizeMode === 'None'
+            && await this.supportedImageFormats.getMimeTypeFromFile(file) === 'image/jpeg') {
             return file.arrayBuffer();
         }
 
@@ -1576,26 +1583,12 @@ image.onload = () => { try {
                 })
             ]);
 
-// Compare all results and choose the smallest one
-            const results: { type: string; data: ArrayBuffer; size: number }[] = [
+            // Compare the results and choose the smallest one. A re-encode in the
+            // original format is not a candidate: it is not JPEG.
+            const filtered = [
                 { type: 'blob', data: blobResult, size: blobResult.byteLength },
                 { type: 'dataUrl', data: dataUrlResult, size: dataUrlResult.byteLength }
-            ];
-            // Include original format compression only when input is not already JPEG
-            if (file.type !== 'image/jpeg') {
-                const originalCompressed = await this.compressOriginalImage(
-                    file,
-                    quality,
-                    resizeMode,
-                    desiredWidth,
-                    desiredHeight,
-                    desiredLongestEdge,
-                    enlargeOrReduce
-                );
-                results.push({ type: 'original', data: originalCompressed, size: originalCompressed.byteLength });
-            }
-
-            const filtered = results.filter(result => result.size > 0);
+            ].filter(result => result.size > 0);
 
 // Sort by size
             filtered.sort((left, right) => left.size - right.size);
@@ -1642,8 +1635,10 @@ image.onload = () => { try {
         enlargeOrReduce: EnlargeReduce,
         allowLargerFiles: boolean
     ): Promise<ArrayBuffer> {
-        // Early return if no processing needed
-        if (colorDepth === 1 && resizeMode === 'None') {
+        // Return the file as it is only when it is already PNG. Other input must
+        // be encoded, or its bytes would be saved under a .png name.
+        if (colorDepth === 1 && resizeMode === 'None'
+            && await this.supportedImageFormats.getMimeTypeFromFile(file) === 'image/png') {
             return file.arrayBuffer();
         }
 
@@ -1763,29 +1758,11 @@ image.onload = () => { try {
                 })
             ]);
 
-            // For PNG, we might want to try additional optimization methods
+            // A re-encode in the original format is not a candidate: it is not PNG.
             const results = [
                 { type: 'blob', data: blobResult, size: blobResult.byteLength },
                 { type: 'dataUrl', data: dataUrlResult, size: dataUrlResult.byteLength }
             ];
-
-            // If input wasn't PNG, add original format as comparison
-            if (file.type !== 'image/png') {
-                const originalCompressed = await this.compressOriginalImage(
-                    file,
-                    1, // PNG doesn't use quality parameter
-                    resizeMode,
-                    desiredWidth,
-                    desiredHeight,
-                    desiredLongestEdge,
-                    enlargeOrReduce
-                );
-                results.push({
-                    type: 'original',
-                    data: originalCompressed,
-                    size: originalCompressed.byteLength
-                });
-            }
 
             // Filter out empty results and sort by size
             const validResults = results
@@ -1988,7 +1965,8 @@ image.onload = () => { try {
                     // Draw the (potentially cropped) image onto the canvas
                     ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, imageWidth, imageHeight);
 
-                    const blobType = file.type || 'image/jpeg';
+                    // A .jpg file gives "image/jpg", which canvas does not know: it writes PNG.
+                    const blobType = (file.type === 'image/jpg' ? 'image/jpeg' : file.type) || 'image/jpeg';
 
                     // Use original format instead of hardcoding JPEG
                     canvas.toBlob(
@@ -2071,7 +2049,8 @@ canvas.toBlob(
                             }
                             blob.arrayBuffer().then(resolve).catch(reject);
                         },
-                        file.type, // Use the original file's MIME type
+                        // A .jpg file gives "image/jpg", which canvas does not know: it writes PNG.
+                        file.type === 'image/jpg' ? 'image/jpeg' : file.type, // Use the original file's MIME type
                         quality
                     );
                 };
@@ -2250,58 +2229,4 @@ canvas.toBlob(
         return buffer;
     }
 
-    /**
-     * Extracts metadata from an image file.
-     * @param file - The image file as a Blob.
-     * @returns A Promise that resolves to the extracted metadata.
-     */
-    private async extractMetadata(file: Blob): Promise<piexif.ExifDict | undefined> {
-        const reader = new FileReader();
-        const fileDataUrl = await new Promise<string>((resolve, reject) => {
-            reader.onload = (e) => resolve(e.target?.result as string);
-            reader.onerror = () => reject(new Error("Failed to read file for metadata"));
-            reader.readAsDataURL(file);
-        });
-
-        try {
-            return piexif.load(fileDataUrl);
-        } catch {
-            return;
-        }
-    }
-
-    private async applyMetadata(
-        buffer: ArrayBuffer,
-        metadata: string
-    ): Promise<ArrayBuffer> {
-        try {
-            // Convert ArrayBuffer to Base64 string in chunks
-            const uint8Array = new Uint8Array(buffer);
-            let binaryString = '';
-            const chunkSize = 8192; // Process in chunks to avoid stack overflow
-            for (let i = 0; i < uint8Array.length; i += chunkSize) {
-                binaryString += String.fromCharCode.apply(
-                    null,
-                    uint8Array.subarray(i, i + chunkSize)
-                );
-            }
-            const base64Data = `data:image/jpeg;base64,${btoa(binaryString)}`;
-    
-            // Insert EXIF metadata using piexif
-            const updatedBase64 = piexif.insert(metadata, base64Data);
-    
-            // Convert the updated Base64 string back to an ArrayBuffer
-            const updatedBinaryString = atob(updatedBase64.split(',')[1]);
-            const updatedBuffer = new ArrayBuffer(updatedBinaryString.length);
-            const updatedUint8Array = new Uint8Array(updatedBuffer);
-            for (let i = 0; i < updatedBinaryString.length; i++) {
-                updatedUint8Array[i] = updatedBinaryString.charCodeAt(i);
-            }
-    
-            return updatedBuffer;
-        } catch (error) {
-            console.error("Error applying metadata:", error);
-            return buffer; // Return original if metadata application fails
-        }
-    }
 }

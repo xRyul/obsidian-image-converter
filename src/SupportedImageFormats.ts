@@ -200,7 +200,7 @@ export class SupportedImageFormats {
             if (headerHex.startsWith("47494638")) { // GIF
                 return "image/gif";
             }
-            if (headerHex.startsWith("ffd8ffe")) { // JPEG (starts with ffd8ffe and then can have 0, 1, 2, 3, or 8)
+            if (headerHex.startsWith("ffd8ff")) { // JPEG: start of image (ffd8), then the ff of the first marker (APPn, DQT, ...)
                 return "image/jpeg";
             }
             if (headerHex.startsWith('424d')) { // BMP

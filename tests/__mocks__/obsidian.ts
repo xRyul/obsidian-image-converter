@@ -2,8 +2,9 @@
  * Mock implementation of the Obsidian module
  * Provides test doubles for all Obsidian API imports
  */
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-function-type, import/no-extraneous-dependencies, no-restricted-imports */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-function-type, import/no-extraneous-dependencies, import/no-nodejs-modules, no-restricted-imports */
 
+import path from 'node:path';
 import moment from 'moment';
 
 // Match Obsidian's `export const moment` runtime behavior (callable function)
@@ -11,6 +12,7 @@ export { moment };
 
 // Core classes
 export class Notice {
+  static instances: Notice[] = [];
   message: string;
   timeout?: number;
   noticeEl: HTMLElement;
@@ -19,6 +21,7 @@ export class Notice {
     this.message = message;
     this.timeout = timeout;
     this.noticeEl = document.createElement('div');
+    Notice.instances.push(this);
   }
   
   hide() {}
@@ -486,6 +489,12 @@ export class Component {
       this.register(() => { try { child.onunload(); } catch { /* noop */ } });
     }
   }
+  removeChild(child: any) {
+    try { child?.onunload?.(); } catch { /* noop */ }
+    const children = ((this as any).__children ?? []) as any[];
+    (this as any).__children = children.filter((existingChild) => existingChild !== child);
+    return child;
+  }
   registerEvent(_event: any) {}
   registerDomEvent(el: HTMLElement | Document, event: string, handler: any, useCapture?: boolean) {
     (el as any).addEventListener?.(event, handler, useCapture as any);
@@ -504,8 +513,9 @@ export class MenuItem {
   trigger() { this.click?.(); }
 }
 
-export class Menu {
+export class Menu extends Component {
   private items: MenuItem[] = [];
+  private hideCallbacks: Array<() => void> = [];
   addItem(cb: (item: MenuItem) => void) { const i = new MenuItem(); cb(i); this.items.push(i); return this; }
   addSeparator() { return this; }
   showAtMouseEvent(_evt: MouseEvent) {
@@ -514,8 +524,11 @@ export class Menu {
     for (const item of this.items) {
       try { item.trigger(); } catch { /* ignore synchronous errors in tests */ }
     }
+    return this;
   }
-  hide() { /* no-op */ }
+  hide() { this.hideCallbacks.forEach((cb) => cb()); this.unload(); return this; }
+  close() { this.hide(); }
+  onHide(callback: () => void) { this.hideCallbacks.push(callback); }
 }
 
 export class View { getViewType(): string { return 'markdown'; } }
@@ -523,8 +536,25 @@ export class MarkdownView extends View { editor: any = { getValue: () => '', set
 export class Editor {}
 
 // Utility functions
-export function normalizePath(path: string): string {
-  return path.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '');
+export function normalizePath(pathname: string): string {
+  if (!pathname) return '';
+
+  let normalized = pathname.replace(/\\/g, '/');
+  normalized = path.posix.normalize(normalized);
+
+  if (normalized === '.') {
+    return '';
+  }
+
+  if (normalized !== '/' && normalized.endsWith('/')) {
+    normalized = normalized.slice(0, -1);
+  }
+
+  if (normalized !== '/' && normalized.startsWith('/')) {
+    normalized = normalized.slice(1);
+  }
+
+  return normalized;
 }
 
 export function getLinkpath(linktext: string): string {

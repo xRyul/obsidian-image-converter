@@ -21,7 +21,7 @@ Right click on any image and select **"Annotate Image**" from the context menu 
 
 ## To add annotation:
 
-Simply use 1 of 3 tools: Brush (B), freehand Arrow (A), Text (T)
+Simply use 1 of 4 tools: Brush (B), freehand Arrow (A), Text (T), Mosaic (M)
 
 ![image](https://github.com/user-attachments/assets/2ec87dfc-7a57-416b-8a7f-d87d14cad726)
 
@@ -29,7 +29,7 @@ Simply use 1 of 3 tools: Brush (B), freehand Arrow (A), Text (T)
 
 ## To modify annotation:
 
-- Selection Tool. Active by default. Deselect active tools (Brush, Arrow, or Text) via shortcuts (B, A, T) or buttons to reactivate the Selection Tool. Use the Selection Tool to move or adjust elements.
+- Selection Tool. Active by default. Deselect active tools (Brush, Arrow, Text, or Mosaic) via shortcuts (B, A, T, M) or buttons to reactivate the Selection Tool. Use the Selection Tool to move or adjust elements.
 - Editing text: Double-click anywhere to create a new text element. Double-click an existing text element to edit it. Text automatically sharpens when scaled to ensure clarity.
 - Changing Colors. Select an element and choose a color from the swatches or use the color picker. The color picker allows HEX, HSL, or RGB value input. 6 Dominant colors are automatically calculated, then 6 Complimentary colors at 180 degrees are provided beneath it.
 
@@ -93,6 +93,22 @@ https://github.com/user-attachments/assets/38ef5d1f-4cbd-4ce5-9b52-4c830694a0e9
 ![image](https://github.com/user-attachments/assets/828c1128-719a-45ef-a5fd-cad2c7222e71)
 
 
+
+
+### **Mosaic (Pixelation):**
+
+The Mosaic tool (M) pixelates part of the image, for example to hide a face, a name or an email address before you share a screenshot.
+
+- Press **M** or click the Mosaic button (grid icon), then drag a rectangle over the area. The new mosaic stays selected.
+- **Block size** (5, 10, 15, 20 or 30 px) sets how coarse the pixelation is, in pixels of the original image. It applies to new mosaics and to the selected ones, so you can change it after drawing.
+- Drag a mosaic to move it, or drag its handles to resize it. It is redrawn from the pixels under its new position, so it always hides what is under it. It cannot be rotated, and it stays inside the image.
+- Press Delete to remove the selected mosaic. Undo and redo (Ctrl+Z / Ctrl+Shift+Z) work with mosaics.
+- Saving writes the pixelation into the image file. The original pixels under it are not kept.
+
+> [!warning] Pixelation is not a guaranteed redaction
+> Small block sizes over text can sometimes be reversed by software, for example on high-resolution screenshots. For passwords, keys and other secrets, use a large block size or cover the area completely. Saving also keeps the original EXIF metadata unless you change the metadata setting.
+
+![Mosaic tool demo](mosaic-tool-demo.png)
 
 
 ## Notes:

@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import ImageConverterPlugin from '../../../src/main';
 import { ImageAlignmentManager } from '../../../src/ImageAlignmentManager';
 import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
-import { fakeApp, fakeTFile, fakeVault } from '../../factories/obsidian';
+import { fakeApp, fakeTFile, fakeVault, makeObsidianAppResourcePath } from '../../factories/obsidian';
 import { FileSystemAdapter } from 'obsidian';
 
 /**
@@ -94,13 +94,36 @@ describe('ImageAlignmentManager utilities (12.10–12.12)', () => {
     expect(relFromFile.endsWith('imgs/p.png')).toBe(true);
 
     // app:// path under base -> normalize similarly
-    const appUrl = `app://local/${encodeURIComponent(normalizedBase)}/imgs/app-based.png`;
+    const appUrl = makeObsidianAppResourcePath('imgs/app-based.png', { basePath: normalizedBase, mtime: 123 });
     const relFromApp = manager.getRelativePath(appUrl);
     expect(relFromApp.endsWith('imgs/app-based.png')).toBe(true);
 
     // Non-matching file:/// path (outside base) should return original
     const outsideFileUrl = `file:///${encodeURIComponent('D:/Elsewhere/other.png')}`;
     expect(manager.getRelativePath(outsideFileUrl)).toBe(outsideFileUrl);
+  });
+
+  it('12.12.b getRelativePath returns the exact vault path for app:// URLs on Windows and POSIX', () => {
+    const mockAdapter = Object.create(FileSystemAdapter.prototype);
+    (app.vault as any).adapter = mockAdapter;
+
+    // Windows: backslash base path, forward-slash URL (as Obsidian renders it)
+    mockAdapter.getBasePath = () => 'D:\\My Vault';
+    const winUrl = makeObsidianAppResourcePath('imgs/Pasted image.png', { basePath: 'D:/My Vault' });
+    expect(manager.getRelativePath(winUrl)).toBe('imgs/Pasted image.png');
+
+    // Windows: base path case differs from the URL
+    mockAdapter.getBasePath = () => 'd:\\my vault';
+    expect(manager.getRelativePath(winUrl)).toBe('imgs/Pasted image.png');
+
+    // POSIX
+    mockAdapter.getBasePath = () => '/Users/me/vault';
+    const posixUrl = makeObsidianAppResourcePath('imgs/a.png', { basePath: '/Users/me/vault' });
+    expect(manager.getRelativePath(posixUrl)).toBe('imgs/a.png');
+
+    // A sibling folder that shares the base path's prefix is not inside the vault
+    const siblingUrl = makeObsidianAppResourcePath('a.png', { basePath: '/Users/me/vault-old' });
+    expect(manager.getRelativePath(siblingUrl)).not.toBe('-old/a.png');
   });
 });
 

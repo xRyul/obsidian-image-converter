@@ -2,6 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import ImageConverterPlugin from '../../../src/main';
 import { fakeApp, fakeVault, fakeTFile, fakePluginManifest } from '../../factories/obsidian';
+import { makeImageBytesOfSize } from '../../factories/image';
 
 function setup() {
   const note = fakeTFile({ path: 'Notes/n.md', name: 'n.md', extension: 'md' });
@@ -25,7 +26,7 @@ describe('CreateBinary conflict handling during paste (Phase 9: 27.2 partial)', 
     await plugin.onload();
 
     (plugin as any).settings.modalBehavior = 'never';
-    (plugin as any).imageProcessor = { processImage: vi.fn(async () => new ArrayBuffer(8)) } as any;
+    (plugin as any).imageProcessor = { processImage: vi.fn(async () => makeImageBytesOfSize('WEBP', 8)) } as any;
     (plugin as any).showSizeComparisonNotification = vi.fn();
     (plugin as any).linkFormatter = { formatLink: vi.fn(async () => '![](/mock)') };
 

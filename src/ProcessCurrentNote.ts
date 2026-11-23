@@ -1,4 +1,3 @@
-/* eslint-disable obsidianmd/ui/sentence-case */
 // ProcessCurrentNote.ts
 import {
     App,
@@ -24,19 +23,19 @@ export class ProcessCurrentNote extends Modal {
     private imageCount = 0;
     private processedCount = 0;
     private skippedCount = 0;
-    private imageCountDisplay: HTMLSpanElement;
-    private processedCountDisplay: HTMLSpanElement;
-    private skippedCountDisplay: HTMLSpanElement;
+    private imageCountDisplay!: HTMLSpanElement;
+    private processedCountDisplay!: HTMLSpanElement;
+    private skippedCountDisplay!: HTMLSpanElement;
 
     private enlargeReduceSettings: Setting | null = null;
     private resizeInputSettings: Setting | null = null;
     submitButton: ButtonComponent | null = null;
     private resizeInputsDiv: HTMLDivElement | null = null;
     private enlargeReduceDiv: HTMLDivElement | null = null;
-    convertToSetting: Setting;
-    skipFormatsSetting: Setting;
-    resizeModeSetting: Setting;
-    skipTargetFormatSetting: Setting;
+    convertToSetting!: Setting;
+    skipFormatsSetting!: Setting;
+    resizeModeSetting!: Setting;
+    skipTargetFormatSetting!: Setting;
 
     constructor(
         app: App,
@@ -48,8 +47,7 @@ export class ProcessCurrentNote extends Modal {
     }
 
     // Obsidian calls Modal.onOpen as a lifecycle hook and intentionally ignores the returned Promise.
-    // We keep this method async to allow await inside, so we disable the no-misused-promises rule here.
-    // eslint-disable-next-line @typescript-eslint/no-misused-promises
+    // We keep this method async to allow await inside.
     async onOpen(): Promise<void> {
 		const { contentEl } = this;
 
