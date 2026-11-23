@@ -99,10 +99,10 @@ https://github.com/user-attachments/assets/38ef5d1f-4cbd-4ce5-9b52-4c830694a0e9
 
 The Mosaic tool (M) pixelates part of the image, for example to hide a face, a name or an email address before you share a screenshot.
 
-- Press **M** or click the Mosaic button (grid icon), then drag a rectangle over the area.
-- **Block size** (5, 10, 15, 20 or 30 px) sets how coarse the pixelation is. It is measured in pixels of the original image.
-- Click a mosaic to select it and press Delete to remove it. A mosaic cannot be moved, resized or restyled, because moving it would uncover what it hides. To change one, delete it and drag a new one.
-- Undo and redo (Ctrl+Z / Ctrl+Shift+Z) work with mosaics.
+- Press **M** or click the Mosaic button (grid icon), then drag a rectangle over the area. The new mosaic stays selected.
+- **Block size** (5, 10, 15, 20 or 30 px) sets how coarse the pixelation is, in pixels of the original image. It applies to new mosaics and to the selected ones, so you can change it after drawing.
+- Drag a mosaic to move it, or drag its handles to resize it. It is redrawn from the pixels under its new position, so it always hides what is under it. It cannot be rotated, and it stays inside the image.
+- Press Delete to remove the selected mosaic. Undo and redo (Ctrl+Z / Ctrl+Shift+Z) work with mosaics.
 - Saving writes the pixelation into the image file. The original pixels under it are not kept.
 
 > [!warning] Pixelation is not a guaranteed redaction

@@ -22,7 +22,7 @@ import { hexToRgba, rgbaToHex, rgbaToHexWithAlpha, analyzeImageColors, updateRgb
 import { HistoryManager, ViewportManager, LayerManager, ToolManager, BackgroundManager } from './managers';
 import { ToolbarBuilder, ToolbarCallbacks } from './ui';
 import { ImageExporter } from './export/ImageExporter';
-import { MosaicTool, isMosaicImage } from './tools/MosaicTool';
+import { MosaicImage, MosaicTool, isMosaicImage } from './tools/MosaicTool';
 
 type FabricObjectWithHistoryFlag = FabricObject & {
     excludeFromHistory?: boolean;
@@ -51,6 +51,9 @@ export class ImageAnnotationModal extends Modal {
     // UI Elements
     private textBackgroundControls: HTMLElement | null = null;
     private mosaicBlockSizeControls: HTMLElement | null = null;
+
+    // A moved multi-selection holding mosaics, re-pixelated once the drag ends
+    private pendingMosaicSelection: ActiveSelection | null = null;
 
     // State
     private isTextEditingBlocked = false;
@@ -281,7 +284,7 @@ export class ImageAnnotationModal extends Modal {
             onPresetSave: (index) => { void this.savePreset(index); },
             onPresetLoad: (index) => this.loadPreset(index),
             onTextBackgroundChange: (color) => this.setTextBackground(color),
-            onMosaicBlockSizeChange: (index) => this.mosaicTool.setBlockSizeIndex(index),
+            onMosaicBlockSizeChange: (index) => this.handleMosaicBlockSizeChange(index),
             getCanvas: () => this.canvas,
             getCurrentOpacity: () => this.toolManager.getCurrentOpacity(),
             getBrushSizeIndex: () => this.toolManager.getBrushSizeIndex(),
@@ -316,15 +319,11 @@ export class ImageAnnotationModal extends Modal {
             this.textBackgroundControls.toggleClass('is-hidden', tool !== ToolMode.TEXT);
         }
 
-        // Handle mosaic block size controls visibility
-        if (this.mosaicBlockSizeControls) {
-            this.mosaicBlockSizeControls.toggleClass('is-hidden', tool !== ToolMode.MOSAIC);
-        }
-
         // Cancel any in-progress mosaic drag when switching away
         if (tool !== ToolMode.MOSAIC) {
             this.mosaicTool.cancel();
         }
+        this.updateMosaicControls();
 
         // Show/hide preset buttons
         const presetContainer = this.modalEl.querySelector('.image-converter-annotation-tool-preset-buttons');
@@ -598,6 +597,15 @@ export class ImageAnnotationModal extends Modal {
 
         this.canvas.on('object:modified', (e) => {
             if (shouldIgnoreHistoryTarget(e.target)) return;
+            if (isMosaicImage(e.target)) {
+                this.repixelateMosaic(e.target);
+            } else if (e.target instanceof ActiveSelection && e.target.getObjects().some(isMosaicImage)) {
+                // The mosaics' positions are relative to the selection until it is released.
+                // Releasing it here would end Fabric's transform early, so wait for mouse:up.
+                if (this.pendingMosaicSelection) return;
+                this.pendingMosaicSelection = e.target;
+                return;
+            }
             this.historyManager.saveState();
         });
 
@@ -608,6 +616,9 @@ export class ImageAnnotationModal extends Modal {
 
         this.canvas.on('mouse:down', (opt) => {
             if (this.toolManager.isInMosaicMode() && !this.viewportManager.isSpacebarPressed()) {
+                // A press on a mosaic or its handles moves or resizes it; anywhere else draws a new one
+                if (isMosaicImage(opt.target)) return;
+                this.canvas.discardActiveObject();
                 const pointer = this.canvas.getScenePoint(opt.e);
                 this.mosaicTool.onMouseDown(pointer.x, pointer.y);
                 return;
@@ -629,9 +640,26 @@ export class ImageAnnotationModal extends Modal {
         });
 
         this.canvas.on('mouse:up', (opt) => {
+            const selection = this.pendingMosaicSelection;
+            if (selection) {
+                // Fabric clears its transform only after this event, so release the selection afterwards
+                window.setTimeout(() => {
+                    this.repixelateMosaicsInSelection(selection);
+                    this.pendingMosaicSelection = null;
+                    this.historyManager.saveState();
+                }, 0);
+                return;
+            }
+
             if (!this.mosaicTool.isDragging()) return;
             const pointer = this.canvas.getScenePoint(opt.e);
-            this.mosaicTool.onMouseUp(pointer.x, pointer.y);
+            const mosaic = this.mosaicTool.onMouseUp(pointer.x, pointer.y);
+            if (mosaic) {
+                // Keep the new mosaic selected so its block size can be changed straight away
+                mosaic.set({ selectable: true, evented: true });
+                this.canvas.setActiveObject(mosaic);
+                this.canvas.requestRenderAll();
+            }
         });
 
         this.canvas.on('text:editing:entered', (opt) => {
@@ -781,34 +809,80 @@ export class ImageAnnotationModal extends Modal {
 
         this.canvas.on('selection:created', (e) => {
             const event = e as unknown as { selected: FabricObject[] };
-            this.lockSelectionWithMosaic();
             this.syncColorPickerWithSelection(event);
+            this.updateMosaicControls();
         });
 
         this.canvas.on('selection:updated', (e) => {
             const event = e as unknown as { selected: FabricObject[] };
-            this.lockSelectionWithMosaic();
             this.syncColorPickerWithSelection(event);
+            this.updateMosaicControls();
+        });
+
+        this.canvas.on('selection:cleared', () => {
+            this.updateMosaicControls();
         });
     }
 
-    /**
-     * A group that holds a mosaic cannot be moved, scaled or rotated. Moving it would carry
-     * the mosaic off the pixels it hides.
-     */
-    private lockSelectionWithMosaic(): void {
+    private getSelectedMosaics(): MosaicImage[] {
         const activeObject = this.canvas?.getActiveObject();
-        if (!(activeObject instanceof ActiveSelection)) return;
-        if (!activeObject.getObjects().some(isMosaicImage)) return;
+        if (!activeObject) return [];
+        const objects = activeObject instanceof ActiveSelection ? activeObject.getObjects() : [activeObject];
+        return objects.filter(isMosaicImage);
+    }
 
-        activeObject.set({
-            lockMovementX: true,
-            lockMovementY: true,
-            lockRotation: true,
-            lockScalingX: true,
-            lockScalingY: true,
-            hasControls: false,
+    /**
+     * Shows the block size row in mosaic mode or while a mosaic is selected, and marks the
+     * selected mosaic's block size.
+     */
+    private updateMosaicControls(): void {
+        if (!this.mosaicBlockSizeControls) return;
+
+        const [selectedMosaic] = this.getSelectedMosaics();
+        const isVisible = this.toolManager.isInMosaicMode() || selectedMosaic !== undefined;
+        this.mosaicBlockSizeControls.toggleClass('is-hidden', !isVisible);
+
+        const blockSize = selectedMosaic?.blockSize ?? this.mosaicTool.getBlockSize();
+        this.toolbarBuilder.setActiveMosaicBlockSize(blockSize);
+    }
+
+    /** Sets the block size for new mosaics and for any selected ones. */
+    private handleMosaicBlockSizeChange(index: number): void {
+        this.mosaicTool.setBlockSizeIndex(index);
+
+        const selected = this.getSelectedMosaics();
+        if (selected.length === 0) return;
+
+        const blockSize = this.mosaicTool.getBlockSize();
+        selected.forEach(mosaic => {
+            mosaic.blockSize = blockSize;
+            this.mosaicTool.refresh(mosaic);
         });
+        this.canvas.requestRenderAll();
+        this.historyManager.saveState();
+    }
+
+    /** Re-pixelates a mosaic after a move or resize, so it shows the pixels now under it. */
+    private repixelateMosaic(mosaic: MosaicImage): void {
+        this.mosaicTool.keepInsideBackground(mosaic);
+        this.mosaicTool.refresh(mosaic);
+        this.canvas.requestRenderAll();
+    }
+
+    /** Releases a moved multi-selection so its mosaics can be re-pixelated in place, then reselects it. */
+    private repixelateMosaicsInSelection(selection: ActiveSelection): void {
+        const objects = selection.getObjects();
+        if (this.canvas.getActiveObject() === selection) {
+            this.canvas.discardActiveObject();
+        }
+
+        objects.filter(isMosaicImage).forEach(mosaic => this.repixelateMosaic(mosaic));
+
+        const stillOnCanvas = objects.filter(obj => this.canvas.getObjects().includes(obj));
+        if (stillOnCanvas.length > 1) {
+            this.canvas.setActiveObject(new ActiveSelection(stillOnCanvas, { canvas: this.canvas }));
+        }
+        this.canvas.requestRenderAll();
     }
 
     private syncColorPickerWithSelection(e: { selected: FabricObject[] }): void {

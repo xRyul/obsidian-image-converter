@@ -448,7 +448,7 @@ describe('ImageAnnotation — 16.2–16.11 Behaviors (integration-lite)', () => 
     const mosaicButton = (modal: any): HTMLButtonElement =>
       modal.contentEl.querySelectorAll('.image-converter-annotation-tool-drawing-tools-column button')[3];
 
-    it('M toggles mosaic mode, shows only the block size controls and hides presets', async () => {
+    it('the mosaic button toggles mosaic mode, shows the block size controls and hides presets', async () => {
       const modal = await openModal();
       const blockSizeControls = modal.contentEl.querySelector('.mosaic-block-size-controls') as HTMLElement;
       const presets = modal.contentEl.querySelector('.image-converter-annotation-tool-preset-buttons') as HTMLElement | null;
@@ -516,6 +516,37 @@ describe('ImageAnnotation — 16.2–16.11 Behaviors (integration-lite)', () => 
       expect(() => modal.handleBlendModeChange('difference')).not.toThrow();
       expect(image.stroke).toBeNull();
       expect(image.globalCompositeOperation).toBeUndefined();
+    });
+
+    it('the block size buttons change the selected mosaics and redraw them in one undo step', async () => {
+      const modal = await openModal();
+      const { canvas, historyManager, mosaicTool } = modal;
+      const blockSizeControls = modal.contentEl.querySelector('.mosaic-block-size-controls') as HTMLElement;
+      const buttons = blockSizeControls.querySelectorAll('button');
+
+      // The mock canvas serialises every object the same way, so watch saveState() instead of the stack
+      const mosaic = { blockSize: 15 };
+      const refresh = vi.spyOn(mosaicTool, 'refresh').mockReturnValue(true);
+      const saveState = vi.spyOn(historyManager, 'saveState');
+      modal.getSelectedMosaics = () => [mosaic];
+
+      (buttons[4] as HTMLButtonElement).click(); // 30px
+      expect(mosaic.blockSize).toBe(30);
+      expect(refresh).toHaveBeenCalledWith(mosaic);
+      expect(mosaicTool.getBlockSize()).toBe(30);
+      expect(saveState).toHaveBeenCalledTimes(1);
+      expect(buttons[4].classList.contains('is-active')).toBe(true);
+      expect(buttons[2].classList.contains('is-active')).toBe(false);
+
+      // Selecting a mosaic shows the row and marks its size; deselecting outside mosaic mode hides it
+      mosaic.blockSize = 5;
+      canvas.trigger('selection:created', { selected: [mosaic] });
+      expect(blockSizeControls.classList.contains('is-hidden')).toBe(false);
+      expect(buttons[0].classList.contains('is-active')).toBe(true);
+
+      modal.getSelectedMosaics = () => [];
+      canvas.trigger('selection:cleared', {});
+      expect(blockSizeControls.classList.contains('is-hidden')).toBe(true);
     });
 
     it('does not add mosaic presets to settings', async () => {

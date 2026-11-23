@@ -88,7 +88,10 @@ export class ToolManager {
                 if (this.mosaicButton) this.mosaicButton.buttonEl.addClass('is-active');
                 if (canvas) {
                     canvas.isDrawingMode = false;
-                    canvas.discardActiveObject();
+                    // Keep a selected mosaic selected so its block size can be changed
+                    if (!isMosaicImage(canvas.getActiveObject())) {
+                        canvas.discardActiveObject();
+                    }
                 }
                 break;
 
@@ -136,8 +139,8 @@ export class ToolManager {
 
         canvas.forEachObject(obj => {
             if (isMosaicImage(obj)) {
-                // Mosaics can be selected and deleted, never edited
-                const interactive = !this.isDrawingMode && !this.isTextMode && !this.isMosaicMode;
+                // In mosaic mode, dragging a mosaic moves it and dragging anywhere else draws a new one
+                const interactive = !this.isDrawingMode && !this.isTextMode;
                 obj.selectable = interactive;
                 obj.evented = interactive;
             } else if (obj instanceof FabricImage) {

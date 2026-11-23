@@ -48,6 +48,7 @@ export interface ToolbarElements {
 export class ToolbarBuilder {
     private dominantColors: string[] = [];
     private complementaryColors: string[][] = [];
+    private mosaicBlockSizeButtons: { size: number; button: ButtonComponent }[] = [];
 
     constructor(
         private componentContainer: Component,
@@ -413,19 +414,25 @@ export class ToolbarBuilder {
         blockSizeContainer.createDiv('control-label').setText('Block size:');
         const buttonContainer = blockSizeContainer.createDiv('image-converter-annotation-tool-button-group');
 
-        MOSAIC_BLOCK_SIZES.forEach((size, index) => {
+        this.mosaicBlockSizeButtons = MOSAIC_BLOCK_SIZES.map((size, index) => {
             const button = new ButtonComponent(buttonContainer)
                 .setButtonText(`${size}px`)
+                .setTooltip('Block size for new and selected mosaics')
                 .onClick(() => {
                     this.callbacks.onMosaicBlockSizeChange(index);
-                    buttonContainer.querySelectorAll('button').forEach(btn =>
-                        btn.removeClass('is-active'));
-                    button.buttonEl.addClass('is-active');
+                    this.setActiveMosaicBlockSize(size);
                 });
 
-            if (index === this.callbacks.getMosaicBlockSizeIndex()) {
-                button.buttonEl.addClass('is-active');
-            }
+            return { size, button };
+        });
+
+        this.setActiveMosaicBlockSize(MOSAIC_BLOCK_SIZES[this.callbacks.getMosaicBlockSizeIndex()]);
+    }
+
+    /** Highlights the button for the given block size. */
+    setActiveMosaicBlockSize(blockSize: number): void {
+        this.mosaicBlockSizeButtons.forEach(({ size, button }) => {
+            button.buttonEl.toggleClass('is-active', size === blockSize);
         });
     }
 
