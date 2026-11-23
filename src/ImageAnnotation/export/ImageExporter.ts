@@ -90,7 +90,10 @@ export class ImageExporter {
             const objects = canvas.getObjects();
             if (objects.length === 0) return false;
 
-            const backgroundImage = objects.find(obj => obj instanceof FabricImage) as FabricImage | undefined;
+            // The background is always the first object. Mosaic regions are FabricImages too,
+            // so searching by type could pick one of them instead.
+            const [firstObject] = objects;
+            const backgroundImage = firstObject instanceof FabricImage ? firstObject : undefined;
 
             canvas.renderAll();
             await new Promise(resolve => setTimeout(resolve, 50));

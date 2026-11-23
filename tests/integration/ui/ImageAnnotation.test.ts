@@ -45,6 +45,7 @@ vi.mock('fabric', () => {
     forEachObject(cb: (obj: any) => void) { this._objects.forEach(cb); }
     getActiveObject() { return this._objects.find((obj: any) => obj.__active); }
     setActiveObject(obj: any) { this._objects.forEach((x: any) => x.__active = false); obj.__active = true; }
+    discardActiveObject() { this._objects.forEach((x: any) => x.__active = false); }
     requestRenderAll() {}
     renderAll() {}
     setViewportTransform(_m: any) {}
@@ -98,6 +99,18 @@ vi.mock('fabric', () => {
 
   class MockPencilBrush { constructor(public canvas: any){} color='#000'; width=1; }
 
+  class MockRect extends MockFabricObject {
+    constructor(opts?: any) {
+      super('rect');
+      Object.assign(this, opts);
+    }
+    set(props: any, value?: any) {
+      if (typeof props === 'string') (this as any)[props] = value; else Object.assign(this, props);
+      return this;
+    }
+    setCoords() {}
+  }
+
   return {
     Canvas: MockCanvas,
     FabricObject: MockFabricObject,
@@ -106,6 +119,8 @@ vi.mock('fabric', () => {
     ActiveSelection: MockActiveSelection,
     PencilBrush: MockPencilBrush,
     Path: MockPath,
+    Rect: MockRect,
+    classRegistry: { setClass: () => {}, getClass: () => undefined },
     util: {
       enlivenObjects: async (objects: any[]) => objects.map((obj: any) => {
         const type = typeof obj?.type === 'string' ? obj.type : 'unknown';
@@ -420,5 +435,126 @@ describe('ImageAnnotation — 16.2–16.11 Behaviors (integration-lite)', () => 
     const evt = new MouseEvent('click', { bubbles: true }); Object.defineProperty(evt, 'shiftKey', { get: () => true });
     (presetButtons[0] as HTMLElement).dispatchEvent(evt);
     expect(plugin.settings.annotationPresets.drawing[0]).toBeTruthy();
+  });
+
+  describe('Mosaic tool', () => {
+    const openModal = async () => {
+      const modal = new ImageAnnotationModal(app, plugin, imageFile);
+      await modal.onOpen();
+      await waitForCanvas();
+      return modal as any;
+    };
+
+    const mosaicButton = (modal: any): HTMLButtonElement =>
+      modal.contentEl.querySelectorAll('.image-converter-annotation-tool-drawing-tools-column button')[3];
+
+    it('the mosaic button toggles mosaic mode, shows the block size controls and hides presets', async () => {
+      const modal = await openModal();
+      const blockSizeControls = modal.contentEl.querySelector('.mosaic-block-size-controls') as HTMLElement;
+      const presets = modal.contentEl.querySelector('.image-converter-annotation-tool-preset-buttons') as HTMLElement | null;
+
+      mosaicButton(modal).click();
+      expect(modal.toolManager.isInMosaicMode()).toBe(true);
+      expect(mosaicButton(modal).classList.contains('is-active')).toBe(true);
+      expect(blockSizeControls.classList.contains('is-hidden')).toBe(false);
+      expect(modal.canvas.defaultCursor).toBe('crosshair');
+      if (presets) expect(presets.classList.contains('is-hidden')).toBe(true);
+
+      mosaicButton(modal).click();
+      expect(modal.toolManager.isInMosaicMode()).toBe(false);
+      expect(blockSizeControls.classList.contains('is-hidden')).toBe(true);
+      expect(modal.canvas.defaultCursor).toBe('default');
+    });
+
+    it('makes other annotations inert in mosaic mode so a drag cannot move them', async () => {
+      const modal = await openModal();
+      const text = new IText('');
+      modal.canvas.add(text);
+      const fabric = await import('fabric');
+      const path = new (fabric.Path as any)();
+      modal.canvas.add(path);
+
+      mosaicButton(modal).click();
+      expect(text.selectable).toBe(false);
+      expect((text as any).evented).toBe(false);
+      expect(path.selectable).toBe(false);
+      expect(path.evented).toBe(false);
+      expect(modal.canvas.selection).toBe(false);
+
+      mosaicButton(modal).click();
+      expect(text.selectable).toBe(true);
+      expect(path.selectable).toBe(true);
+    });
+
+    it('the drag preview does not create undo steps', async () => {
+      const modal = await openModal();
+      mosaicButton(modal).click();
+      const { canvas, historyManager, mosaicTool } = modal;
+
+      // The mock background has no size, so the drag never starts a mosaic; only the preview is involved
+      mosaicTool.getBackgroundImage = () => ({ left: 0, top: 0, width: 1000, height: 1000, scaleX: 1, scaleY: 1 });
+      canvas.trigger('mouse:down', { e: new MouseEvent('mousedown') });
+      expect(mosaicTool.isDragging()).toBe(true);
+      expect(canvas.getObjects().some((obj: any) => obj.type === 'rect')).toBe(true);
+
+      mosaicTool.cancel();
+      expect(canvas.getObjects().some((obj: any) => obj.type === 'rect')).toBe(false);
+      expect(historyManager.canUndo()).toBe(false);
+    });
+
+    it('opacity, colour and blend changes skip a selected image instead of throwing', async () => {
+      const modal = await openModal();
+      const fabric = await import('fabric');
+      const image = new (fabric.FabricImage as any)(document.createElement('canvas'), {});
+      image.stroke = null;
+      modal.canvas.add(image);
+      modal.canvas.setActiveObject(image);
+
+      const opacityBtn = modal.contentEl.querySelector('.opacity-buttons-container .image-converter-annotation-tool-button-group button') as HTMLButtonElement;
+      expect(() => opacityBtn.click()).not.toThrow();
+      expect(() => modal.handleColorChange('#00ff00')).not.toThrow();
+      expect(() => modal.handleBlendModeChange('difference')).not.toThrow();
+      expect(image.stroke).toBeNull();
+      expect(image.globalCompositeOperation).toBeUndefined();
+    });
+
+    it('the block size buttons change the selected mosaics and redraw them in one undo step', async () => {
+      const modal = await openModal();
+      const { canvas, historyManager, mosaicTool } = modal;
+      const blockSizeControls = modal.contentEl.querySelector('.mosaic-block-size-controls') as HTMLElement;
+      const buttons = blockSizeControls.querySelectorAll('button');
+
+      // The mock canvas serialises every object the same way, so watch saveState() instead of the stack
+      const mosaic = { blockSize: 15 };
+      const refresh = vi.spyOn(mosaicTool, 'refresh').mockReturnValue(true);
+      const saveState = vi.spyOn(historyManager, 'saveState');
+      modal.getSelectedMosaics = () => [mosaic];
+
+      (buttons[4] as HTMLButtonElement).click(); // 30px
+      expect(mosaic.blockSize).toBe(30);
+      expect(refresh).toHaveBeenCalledWith(mosaic);
+      expect(mosaicTool.getBlockSize()).toBe(30);
+      expect(saveState).toHaveBeenCalledTimes(1);
+      expect(buttons[4].classList.contains('is-active')).toBe(true);
+      expect(buttons[2].classList.contains('is-active')).toBe(false);
+
+      // Selecting a mosaic shows the row and marks its size; deselecting outside mosaic mode hides it
+      mosaic.blockSize = 5;
+      canvas.trigger('selection:created', { selected: [mosaic] });
+      expect(blockSizeControls.classList.contains('is-hidden')).toBe(false);
+      expect(buttons[0].classList.contains('is-active')).toBe(true);
+
+      modal.getSelectedMosaics = () => [];
+      canvas.trigger('selection:cleared', {});
+      expect(blockSizeControls.classList.contains('is-hidden')).toBe(true);
+    });
+
+    it('does not add mosaic presets to settings', async () => {
+      const modal = await openModal();
+      mosaicButton(modal).click();
+      await modal.savePreset(0);
+      expect(plugin.settings.annotationPresets.mosaic).toBeUndefined();
+      expect(plugin.settings.annotationPresets.drawing[0]).toEqual({});
+    });
   });
 });

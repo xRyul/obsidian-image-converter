@@ -18,9 +18,25 @@ export class HistoryManager {
      * Note: FabricObject.toObject() returns `any` by design since subclasses
      * extend the base serialization. We defensively validate the result here
      * to avoid writing malformed state into the history stacks.
+     *
+     * An object inside a multi-selection stores its position relative to the selection,
+     * so the selection's transform is applied first and undone afterwards.
      */
     private static serializeObject(obj: FabricObject): SerializedObjectProps {
-        const raw: unknown = obj.toObject();
+        const { group } = obj;
+        const ownTransform = group ? util.saveObjectTransform(obj) : null;
+        if (group) {
+            util.addTransformToObject(obj, group.calcTransformMatrix());
+        }
+
+        let raw: unknown;
+        try {
+            raw = obj.toObject();
+        } finally {
+            if (ownTransform) {
+                obj.set(ownTransform);
+            }
+        }
 
         if (HistoryManager.isSerializedObjectProps(raw)) {
             return raw;
@@ -250,14 +266,12 @@ export class HistoryManager {
         this.isUndoRedoAction = true;
 
         try {
-            // Serialize current state BEFORE popping from redoStack to avoid desync
-            // if serialization throws an exception
-            const currentState = this.serializeCanvasState(canvas);
-
             const nextState = this.redoStack.pop();
             if (!nextState) return;
 
-            this.undoStack.push(currentState);
+            // The top of the undo stack is always the state on the canvas, so the redone
+            // state goes on top. Pushing the pre-redo state here would make the next undo a no-op.
+            this.undoStack.push(nextState);
 
             const objects = HistoryManager.parseState(nextState);
 
