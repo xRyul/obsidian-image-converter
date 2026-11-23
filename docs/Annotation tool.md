@@ -97,14 +97,16 @@ https://github.com/user-attachments/assets/38ef5d1f-4cbd-4ce5-9b52-4c830694a0e9
 
 ### **Mosaic (Pixelation):**
 
-The Mosaic tool (M) allows you to pixelate/censor regions of an image. This is useful for hiding sensitive information such as faces, text, or personal data before sharing screenshots.
+The Mosaic tool (M) pixelates part of the image, for example to hide a face, a name or an email address before you share a screenshot.
 
-- Press **M** or click the Mosaic button (grid icon) to enter mosaic mode.
-- Click and drag a rectangle over the area you want to pixelate.
-- Adjust the **Block Size** (5, 10, 15, 20, or 30px) to control the pixelation intensity. Smaller values produce finer pixelation, larger values produce stronger censoring.
-- Mosaic regions are annotation objects: you can select, move, resize, and delete them like any other annotation.
-- Undo/Redo (Ctrl+Z / Ctrl+Shift+Z) works with mosaic regions.
-- Saving flattens mosaic regions permanently into the image.
+- Press **M** or click the Mosaic button (grid icon), then drag a rectangle over the area.
+- **Block size** (5, 10, 15, 20 or 30 px) sets how coarse the pixelation is. It is measured in pixels of the original image.
+- Click a mosaic to select it and press Delete to remove it. A mosaic cannot be moved, resized or restyled, because moving it would uncover what it hides. To change one, delete it and drag a new one.
+- Undo and redo (Ctrl+Z / Ctrl+Shift+Z) work with mosaics.
+- Saving writes the pixelation into the image file. The original pixels under it are not kept.
+
+> [!warning] Pixelation is not a guaranteed redaction
+> Small block sizes over text can sometimes be reversed by software, for example on high-resolution screenshots. For passwords, keys and other secrets, use a large block size or cover the area completely. Saving also keeps the original EXIF metadata unless you change the metadata setting.
 
 ![Mosaic tool demo](mosaic-tool-demo.png)
 

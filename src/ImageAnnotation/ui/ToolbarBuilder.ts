@@ -87,7 +87,6 @@ export class ToolbarBuilder {
             .onClick(() => this.callbacks.onTextToggle());
 
         const mosaicButton = new ButtonComponent(drawingToolsColumn)
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
             .setTooltip('Mosaic (M)')
             .setIcon('grid')
             .onClick(() => this.callbacks.onMosaicToggle());
@@ -411,8 +410,7 @@ export class ToolbarBuilder {
 
     private createMosaicBlockSizeButtons(container: HTMLElement): void {
         const blockSizeContainer = container.createDiv('image-converter-annotation-tool-control-group');
-        // eslint-disable-next-line obsidianmd/ui/sentence-case
-        blockSizeContainer.createDiv('control-label').setText('Block Size:');
+        blockSizeContainer.createDiv('control-label').setText('Block size:');
         const buttonContainer = blockSizeContainer.createDiv('image-converter-annotation-tool-button-group');
 
         MOSAIC_BLOCK_SIZES.forEach((size, index) => {

@@ -1,22 +1,90 @@
-import { Canvas, FabricImage, FabricObject, Rect } from 'fabric';
+import { Canvas, FabricImage, FabricObject, ImageProps, ImageSource, Rect, classRegistry } from 'fabric';
 import { MOSAIC_BLOCK_SIZES } from '../types';
 
-export const MOSAIC_MARKER = '__isMosaicRegion';
+/** Drags smaller than this many scene pixels in either direction are treated as clicks. */
+const MIN_DRAG_SIZE = 3;
 
-export function isMosaicImage(obj: FabricObject): boolean {
-    return obj instanceof FabricImage && (obj as unknown as Record<string, unknown>)[MOSAIC_MARKER] === true;
+type HistoryIgnoredRect = Rect & {
+    excludeFromHistory?: boolean;
+};
+
+export interface MosaicRegion {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+}
+
+export interface SourceRegion {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
+/**
+ * A pixelated patch baked from the background image.
+ *
+ * The bitmap is stored at one pixel per block and scaled up without smoothing, so history
+ * snapshots stay small. A mosaic can be selected and deleted, but not moved, scaled or
+ * rotated: moving it would uncover the pixels it hides.
+ */
+export class MosaicImage extends FabricImage {
+    static type = 'MosaicImage';
+
+    constructor(element: ImageSource, options?: Partial<ImageProps>) {
+        super(element, options);
+        this.set({
+            imageSmoothing: false,
+            objectCaching: false,
+            lockMovementX: true,
+            lockMovementY: true,
+            lockRotation: true,
+            lockScalingX: true,
+            lockScalingY: true,
+            lockSkewingX: true,
+            lockSkewingY: true,
+            hasControls: false,
+            hoverCursor: 'pointer',
+        });
+    }
+}
+
+classRegistry.setClass(MosaicImage);
+
+export function isMosaicImage(obj: FabricObject | undefined): obj is MosaicImage {
+    return obj instanceof MosaicImage;
+}
+
+/**
+ * Clamps a scene-space rectangle to the background bounds and snaps it to whole source pixels,
+ * so that every block covers the same source pixels as it will in the saved image.
+ */
+export function mapRegionToSource(
+    region: MosaicRegion,
+    background: { left: number; top: number; scaleX: number; scaleY: number; width: number; height: number }
+): SourceRegion | null {
+    const { left: bgLeft, top: bgTop, scaleX, scaleY, width: bgWidth, height: bgHeight } = background;
+    if (scaleX <= 0 || scaleY <= 0 || bgWidth <= 0 || bgHeight <= 0) return null;
+
+    const x0 = Math.max(0, Math.floor((region.left - bgLeft) / scaleX));
+    const y0 = Math.max(0, Math.floor((region.top - bgTop) / scaleY));
+    const x1 = Math.min(bgWidth, Math.ceil((region.left + region.width - bgLeft) / scaleX));
+    const y1 = Math.min(bgHeight, Math.ceil((region.top + region.height - bgTop) / scaleY));
+
+    if (x1 <= x0 || y1 <= y0) return null;
+
+    return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
 }
 
 export class MosaicTool {
-    private isMouseDown = false;
-    private previewRect: Rect | null = null;
+    private previewRect: HistoryIgnoredRect | null = null;
     private startPoint: { x: number; y: number } | null = null;
-    private currentBlockSizeIndex = 1; // default 10px
+    private currentBlockSizeIndex = 2; // default 15px
 
     constructor(
         private getCanvas: () => Canvas | null,
-        private getBackgroundImage: () => FabricImage | null,
-        private onMosaicCreated: () => void
+        private getBackgroundImage: () => FabricImage | null
     ) {}
 
     getBlockSizeIndex(): number {
@@ -33,19 +101,20 @@ export class MosaicTool {
         return MOSAIC_BLOCK_SIZES[this.currentBlockSizeIndex];
     }
 
+    isDragging(): boolean {
+        return this.startPoint !== null;
+    }
+
     onMouseDown(sceneX: number, sceneY: number): void {
         const canvas = this.getCanvas();
         const bgImage = this.getBackgroundImage();
         if (!canvas || !bgImage) return;
-
-        // Check if point is within background image bounds
         if (!this.isPointInBackground(sceneX, sceneY, bgImage)) return;
 
-        this.isMouseDown = true;
+        this.cancel();
         this.startPoint = { x: sceneX, y: sceneY };
 
-        // Create preview rectangle
-        this.previewRect = new Rect({
+        const previewRect: HistoryIgnoredRect = new Rect({
             left: sceneX,
             top: sceneY,
             width: 0,
@@ -53,194 +122,137 @@ export class MosaicTool {
             fill: 'rgba(0, 120, 255, 0.15)',
             stroke: 'rgba(0, 120, 255, 0.6)',
             strokeWidth: 1,
+            strokeUniform: true,
+            strokeDashArray: [4, 4],
             selectable: false,
             evented: false,
-            strokeDashArray: [4, 4],
+            excludeFromExport: true,
         });
+        previewRect.excludeFromHistory = true;
+        this.previewRect = previewRect;
 
-        canvas.add(this.previewRect);
+        canvas.add(previewRect);
         canvas.requestRenderAll();
     }
 
     onMouseMove(sceneX: number, sceneY: number): void {
-        if (!this.isMouseDown || !this.startPoint || !this.previewRect) return;
+        if (!this.startPoint || !this.previewRect) return;
 
         const canvas = this.getCanvas();
         if (!canvas) return;
 
-        const left = Math.min(this.startPoint.x, sceneX);
-        const top = Math.min(this.startPoint.y, sceneY);
-        const width = Math.abs(sceneX - this.startPoint.x);
-        const height = Math.abs(sceneY - this.startPoint.y);
-
-        this.previewRect.set({ left, top, width, height });
+        this.previewRect.set(this.regionFrom(sceneX, sceneY));
+        this.previewRect.setCoords();
         canvas.requestRenderAll();
     }
 
-    onMouseUp(sceneX: number, sceneY: number): void {
-        if (!this.isMouseDown || !this.startPoint) return;
+    /** Returns true when a mosaic region was added to the canvas. */
+    onMouseUp(sceneX: number, sceneY: number): boolean {
+        if (!this.startPoint) return false;
 
-        const canvas = this.getCanvas();
-        if (!canvas) return;
+        const region = this.regionFrom(sceneX, sceneY);
+        this.cancel();
 
-        // Remove preview rect
-        if (this.previewRect) {
-            canvas.remove(this.previewRect);
-            this.previewRect = null;
-        }
+        if (region.width < MIN_DRAG_SIZE || region.height < MIN_DRAG_SIZE) return false;
 
-        const left = Math.min(this.startPoint.x, sceneX);
-        const top = Math.min(this.startPoint.y, sceneY);
-        const width = Math.abs(sceneX - this.startPoint.x);
-        const height = Math.abs(sceneY - this.startPoint.y);
-
-        this.isMouseDown = false;
-        this.startPoint = null;
-
-        // Ignore tiny drags (click mistakes)
-        if (width < 3 || height < 3) return;
-
-        void this.createMosaicRegion(left, top, width, height);
-    }
-
-    private isPointInBackground(x: number, y: number, bgImage: FabricImage): boolean {
-        const bgLeft = bgImage.left ?? 0;
-        const bgTop = bgImage.top ?? 0;
-        const bgWidth = (bgImage.width ?? 0) * (bgImage.scaleX ?? 1);
-        const bgHeight = (bgImage.height ?? 0) * (bgImage.scaleY ?? 1);
-
-        return x >= bgLeft && x <= bgLeft + bgWidth && y >= bgTop && y <= bgTop + bgHeight;
-    }
-
-    private async createMosaicRegion(left: number, top: number, width: number, height: number): Promise<void> {
-        const canvas = this.getCanvas();
-        const bgImage = this.getBackgroundImage();
-        if (!canvas || !bgImage) return;
-
-        // Clamp region to background image bounds
-        const bgLeft = bgImage.left ?? 0;
-        const bgTop = bgImage.top ?? 0;
-        const bgWidth = (bgImage.width ?? 0) * (bgImage.scaleX ?? 1);
-        const bgHeight = (bgImage.height ?? 0) * (bgImage.scaleY ?? 1);
-
-        const clampedLeft = Math.max(left, bgLeft);
-        const clampedTop = Math.max(top, bgTop);
-        const clampedRight = Math.min(left + width, bgLeft + bgWidth);
-        const clampedBottom = Math.min(top + height, bgTop + bgHeight);
-
-        const clampedWidth = clampedRight - clampedLeft;
-        const clampedHeight = clampedBottom - clampedTop;
-
-        if (clampedWidth <= 0 || clampedHeight <= 0) return;
-
-        // Extract region from background image
-        const bgElement = bgImage.getElement() as HTMLImageElement;
-        const scaleX = bgImage.scaleX ?? 1;
-        const scaleY = bgImage.scaleY ?? 1;
-
-        // Convert canvas coordinates to source image coordinates
-        const srcX = (clampedLeft - bgLeft) / scaleX;
-        const srcY = (clampedTop - bgTop) / scaleY;
-        const srcWidth = clampedWidth / scaleX;
-        const srcHeight = clampedHeight / scaleY;
-
-        // Create pixelated region
-        const pixelatedCanvas = this.pixelateRegion(bgElement, srcX, srcY, srcWidth, srcHeight);
-        if (!pixelatedCanvas) return;
-
-        try {
-            const dataUrl = pixelatedCanvas.toDataURL('image/png');
-            const img = new Image();
-
-            await new Promise<void>((resolve, reject) => {
-                img.onload = () => resolve();
-                img.onerror = () => reject(new Error('Failed to load mosaic image'));
-                img.src = dataUrl;
-            });
-
-            const mosaicImage = new FabricImage(img, {
-                left: clampedLeft,
-                top: clampedTop,
-                scaleX: clampedWidth / img.width,
-                scaleY: clampedHeight / img.height,
-                selectable: true,
-                evented: true,
-                hasControls: true,
-                hasBorders: true,
-                objectCaching: true,
-                crossOrigin: 'anonymous',
-                strokeWidth: 0,
-            });
-
-            // Mark as mosaic region
-            (mosaicImage as unknown as Record<string, unknown>)[MOSAIC_MARKER] = true;
-
-            canvas.add(mosaicImage);
-            canvas.requestRenderAll();
-            this.onMosaicCreated();
-        } catch (error) {
-            console.error('Error creating mosaic region:', error);
-        }
-    }
-
-    private pixelateRegion(
-        source: HTMLImageElement,
-        srcX: number,
-        srcY: number,
-        srcWidth: number,
-        srcHeight: number
-    ): HTMLCanvasElement | null {
-        const blockSize = this.getBlockSize();
-
-        // Create canvas for the extracted region
-        const extractCanvas = document.createElement('canvas');
-        extractCanvas.width = Math.ceil(srcWidth);
-        extractCanvas.height = Math.ceil(srcHeight);
-        const extractCtx = extractCanvas.getContext('2d');
-        if (!extractCtx) return null;
-
-        extractCtx.drawImage(
-            source,
-            srcX, srcY, srcWidth, srcHeight,
-            0, 0, extractCanvas.width, extractCanvas.height
-        );
-
-        // Downscale
-        const smallWidth = Math.max(1, Math.ceil(extractCanvas.width / blockSize));
-        const smallHeight = Math.max(1, Math.ceil(extractCanvas.height / blockSize));
-
-        const smallCanvas = document.createElement('canvas');
-        smallCanvas.width = smallWidth;
-        smallCanvas.height = smallHeight;
-        const smallCtx = smallCanvas.getContext('2d');
-        if (!smallCtx) return null;
-
-        smallCtx.drawImage(extractCanvas, 0, 0, smallWidth, smallHeight);
-
-        // Upscale with nearest-neighbor (pixelated effect)
-        const resultCanvas = document.createElement('canvas');
-        resultCanvas.width = extractCanvas.width;
-        resultCanvas.height = extractCanvas.height;
-        const resultCtx = resultCanvas.getContext('2d');
-        if (!resultCtx) return null;
-
-        resultCtx.imageSmoothingEnabled = false;
-        resultCtx.drawImage(smallCanvas, 0, 0, resultCanvas.width, resultCanvas.height);
-
-        return resultCanvas;
+        return this.createMosaicRegion(region);
     }
 
     cancel(): void {
         const canvas = this.getCanvas();
         if (canvas && this.previewRect) {
             canvas.remove(this.previewRect);
-            this.previewRect = null;
+            canvas.requestRenderAll();
         }
-        this.isMouseDown = false;
+        this.previewRect = null;
         this.startPoint = null;
     }
 
     cleanup(): void {
         this.cancel();
+    }
+
+    private regionFrom(sceneX: number, sceneY: number): MosaicRegion {
+        const start = this.startPoint ?? { x: sceneX, y: sceneY };
+        return {
+            left: Math.min(start.x, sceneX),
+            top: Math.min(start.y, sceneY),
+            width: Math.abs(sceneX - start.x),
+            height: Math.abs(sceneY - start.y),
+        };
+    }
+
+    private isPointInBackground(x: number, y: number, bgImage: FabricImage): boolean {
+        const { left, top, width, height } = this.getBackgroundGeometry(bgImage);
+        return x >= left && x <= left + width && y >= top && y <= top + height;
+    }
+
+    private getBackgroundGeometry(bgImage: FabricImage) {
+        const scaleX = bgImage.scaleX ?? 1;
+        const scaleY = bgImage.scaleY ?? 1;
+        return {
+            left: bgImage.left ?? 0,
+            top: bgImage.top ?? 0,
+            scaleX,
+            scaleY,
+            width: (bgImage.width ?? 0) * scaleX,
+            height: (bgImage.height ?? 0) * scaleY,
+        };
+    }
+
+    private createMosaicRegion(region: MosaicRegion): boolean {
+        const canvas = this.getCanvas();
+        const bgImage = this.getBackgroundImage();
+        if (!canvas || !bgImage) return false;
+
+        const { left, top, scaleX, scaleY } = this.getBackgroundGeometry(bgImage);
+        const source = mapRegionToSource(region, {
+            left,
+            top,
+            scaleX,
+            scaleY,
+            width: bgImage.width ?? 0,
+            height: bgImage.height ?? 0,
+        });
+        if (!source) return false;
+
+        const blocks = this.pixelateRegion(bgImage.getElement(), source);
+        if (!blocks) return false;
+
+        const mosaic = new MosaicImage(blocks, {
+            left: left + source.x * scaleX,
+            top: top + source.y * scaleY,
+            scaleX: (source.width / blocks.width) * scaleX,
+            scaleY: (source.height / blocks.height) * scaleY,
+            strokeWidth: 0,
+        });
+
+        canvas.add(mosaic);
+        canvas.requestRenderAll();
+        return true;
+    }
+
+    /**
+     * Averages the source region into one pixel per block. Edge blocks are slightly larger
+     * when the region size is not a multiple of the block size.
+     */
+    private pixelateRegion(source: ImageSource, region: SourceRegion): HTMLCanvasElement | null {
+        const blockSize = this.getBlockSize();
+        const columns = Math.max(1, Math.round(region.width / blockSize));
+        const rows = Math.max(1, Math.round(region.height / blockSize));
+
+        const doc = source.ownerDocument ?? activeDocument;
+        const blocks = doc.createElement('canvas');
+        blocks.width = columns;
+        blocks.height = rows;
+
+        const ctx = blocks.getContext('2d');
+        if (!ctx) return null;
+
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(source, region.x, region.y, region.width, region.height, 0, 0, columns, rows);
+
+        return blocks;
     }
 }

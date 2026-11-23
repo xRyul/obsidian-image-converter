@@ -90,10 +90,10 @@ export class ImageExporter {
             const objects = canvas.getObjects();
             if (objects.length === 0) return false;
 
-            // Use index-based lookup: background image is always the first object (index 0).
-            // objects.find(FabricImage) would incorrectly match mosaic region images.
-            const firstObj = objects[0];
-            const backgroundImage = firstObj instanceof FabricImage ? firstObj : undefined;
+            // The background is always the first object. Mosaic regions are FabricImages too,
+            // so searching by type could pick one of them instead.
+            const [firstObject] = objects;
+            const backgroundImage = firstObject instanceof FabricImage ? firstObject : undefined;
 
             canvas.renderAll();
             await new Promise(resolve => setTimeout(resolve, 50));

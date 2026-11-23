@@ -88,19 +88,21 @@ export class ToolManager {
                 if (this.mosaicButton) this.mosaicButton.buttonEl.addClass('is-active');
                 if (canvas) {
                     canvas.isDrawingMode = false;
-                    canvas.defaultCursor = 'crosshair';
+                    canvas.discardActiveObject();
                 }
                 break;
 
             case ToolMode.NONE:
                 if (canvas) {
                     canvas.isDrawingMode = false;
-                    canvas.defaultCursor = 'default';
                 }
                 break;
         }
 
         this.currentTool = newTool;
+        if (canvas) {
+            canvas.defaultCursor = this.getIdleCursor();
+        }
         this.updateObjectInteractivity();
 
         if (this.callbacks.onToolChanged) {
@@ -133,17 +135,16 @@ export class ToolManager {
         if (!canvas) return;
 
         canvas.forEachObject(obj => {
-            if (obj instanceof FabricImage && !isMosaicImage(obj)) {
-                // Background image: always non-interactive
-                obj.selectable = false;
-                obj.evented = false;
-            } else if (isMosaicImage(obj)) {
-                // Mosaic images: interactive like annotations (but not during drawing/mosaic modes)
-                const interactive = !this.isDrawingMode && !this.isMosaicMode;
+            if (isMosaicImage(obj)) {
+                // Mosaics can be selected and deleted, never edited
+                const interactive = !this.isDrawingMode && !this.isTextMode && !this.isMosaicMode;
                 obj.selectable = interactive;
                 obj.evented = interactive;
+            } else if (obj instanceof FabricImage) {
+                obj.selectable = false;
+                obj.evented = false;
             } else if (obj instanceof IText) {
-                if (this.isDrawingMode) {
+                if (this.isDrawingMode || this.isMosaicMode) {
                     obj.selectable = false;
                     obj.evented = false;
                     obj.editable = false;
@@ -153,7 +154,7 @@ export class ToolManager {
                     obj.editable = true;
                 }
             } else {
-                if (this.isTextMode) {
+                if (this.isTextMode || this.isMosaicMode) {
                     obj.selectable = false;
                     obj.evented = false;
                 } else {
@@ -217,6 +218,11 @@ export class ToolManager {
 
     isInMosaicMode(): boolean {
         return this.isMosaicMode;
+    }
+
+    /** Cursor to show when the pointer is not over an object and no pan is in progress. */
+    getIdleCursor(): string {
+        return this.isMosaicMode ? 'crosshair' : 'default';
     }
 
     getBrushSizeIndex(): number {

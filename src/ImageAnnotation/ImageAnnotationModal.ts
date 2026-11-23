@@ -237,7 +237,8 @@ export class ImageAnnotationModal extends Modal {
                 if (this.toolManager) {
                     this.toolManager.updateDrawingModeUI(mode);
                 }
-            }
+            },
+            () => this.toolManager?.getIdleCursor() ?? 'default'
         );
 
         this.toolManager = new ToolManager(getCanvas, {
@@ -255,8 +256,7 @@ export class ImageAnnotationModal extends Modal {
                 if (!canvas) return null;
                 const [bg] = canvas.getObjects();
                 return bg instanceof FabricImage ? bg : null;
-            },
-            () => this.historyManager.saveState()
+            }
         );
     }
 
@@ -353,10 +353,12 @@ export class ImageAnnotationModal extends Modal {
                 if (activeObject instanceof ActiveSelection) {
                     const selection = activeObject;
                     selection.getObjects().forEach(obj => {
-                        this.updateObjectOpacity(obj, opacity);
+                        if (!(obj instanceof FabricImage)) {
+                            this.updateObjectOpacity(obj, opacity);
+                        }
                     });
                     selection.dirty = true;
-                } else {
+                } else if (!(activeObject instanceof FabricImage)) {
                     this.updateObjectOpacity(activeObject, opacity);
                 }
                 this.canvas.requestRenderAll();
@@ -373,12 +375,12 @@ export class ImageAnnotationModal extends Modal {
                 if (activeObject instanceof ActiveSelection) {
                     const selection = activeObject;
                     selection.getObjects().forEach(obj => {
-                        if (!(obj instanceof FabricImage) || isMosaicImage(obj)) {
+                        if (!(obj instanceof FabricImage)) {
                             obj.globalCompositeOperation = mode;
                         }
                     });
                     selection.dirty = true;
-                } else if (!(activeObject instanceof FabricImage) || isMosaicImage(activeObject)) {
+                } else if (!(activeObject instanceof FabricImage)) {
                     activeObject.globalCompositeOperation = mode;
                 }
                 this.canvas.requestRenderAll();
@@ -417,7 +419,7 @@ export class ImageAnnotationModal extends Modal {
             activeObject.forEachObject((obj) => {
                 if (obj instanceof IText) {
                     obj.set('fill', color);
-                } else {
+                } else if (!(obj instanceof FabricImage)) {
                     obj.set('stroke', hexToRgba(color, opacity));
                 }
             });
@@ -425,7 +427,7 @@ export class ImageAnnotationModal extends Modal {
         } else {
             if (activeObject instanceof IText) {
                 activeObject.set('fill', color);
-            } else {
+            } else if (!(activeObject instanceof FabricImage)) {
                 activeObject.set('stroke', hexToRgba(color, opacity));
             }
         }
@@ -562,11 +564,12 @@ export class ImageAnnotationModal extends Modal {
         this.toolManager.updateBrushColor();
 
         const shouldIgnoreHistoryTarget = (target?: FabricObjectWithHistoryFlag): boolean => {
-            if (target instanceof FabricImage || this.historyManager.isPerformingUndoRedo()) {
+            if (this.historyManager.isPerformingUndoRedo() || target?.excludeFromHistory) {
                 return true;
             }
 
-            return Boolean(target?.excludeFromHistory);
+            // Skip the background image; mosaic regions are images too but belong in history
+            return target instanceof FabricImage && !isMosaicImage(target);
         };
 
         this.canvas.on('path:created', (e: { path?: FabricObject }) => {
@@ -604,7 +607,6 @@ export class ImageAnnotationModal extends Modal {
         });
 
         this.canvas.on('mouse:down', (opt) => {
-            // Mosaic mode handling
             if (this.toolManager.isInMosaicMode() && !this.viewportManager.isSpacebarPressed()) {
                 const pointer = this.canvas.getScenePoint(opt.e);
                 this.mosaicTool.onMouseDown(pointer.x, pointer.y);
@@ -621,17 +623,15 @@ export class ImageAnnotationModal extends Modal {
         });
 
         this.canvas.on('mouse:move', (opt) => {
-            if (this.toolManager.isInMosaicMode() && !this.viewportManager.isSpacebarPressed()) {
-                const pointer = this.canvas.getScenePoint(opt.e);
-                this.mosaicTool.onMouseMove(pointer.x, pointer.y);
-            }
+            if (!this.mosaicTool.isDragging()) return;
+            const pointer = this.canvas.getScenePoint(opt.e);
+            this.mosaicTool.onMouseMove(pointer.x, pointer.y);
         });
 
         this.canvas.on('mouse:up', (opt) => {
-            if (this.toolManager.isInMosaicMode() && !this.viewportManager.isSpacebarPressed()) {
-                const pointer = this.canvas.getScenePoint(opt.e);
-                this.mosaicTool.onMouseUp(pointer.x, pointer.y);
-            }
+            if (!this.mosaicTool.isDragging()) return;
+            const pointer = this.canvas.getScenePoint(opt.e);
+            this.mosaicTool.onMouseUp(pointer.x, pointer.y);
         });
 
         this.canvas.on('text:editing:entered', (opt) => {
@@ -781,12 +781,33 @@ export class ImageAnnotationModal extends Modal {
 
         this.canvas.on('selection:created', (e) => {
             const event = e as unknown as { selected: FabricObject[] };
+            this.lockSelectionWithMosaic();
             this.syncColorPickerWithSelection(event);
         });
 
         this.canvas.on('selection:updated', (e) => {
             const event = e as unknown as { selected: FabricObject[] };
+            this.lockSelectionWithMosaic();
             this.syncColorPickerWithSelection(event);
+        });
+    }
+
+    /**
+     * A group that holds a mosaic cannot be moved, scaled or rotated. Moving it would carry
+     * the mosaic off the pixels it hides.
+     */
+    private lockSelectionWithMosaic(): void {
+        const activeObject = this.canvas?.getActiveObject();
+        if (!(activeObject instanceof ActiveSelection)) return;
+        if (!activeObject.getObjects().some(isMosaicImage)) return;
+
+        activeObject.set({
+            lockMovementX: true,
+            lockMovementY: true,
+            lockRotation: true,
+            lockScalingX: true,
+            lockScalingY: true,
+            hasControls: false,
         });
     }
 
@@ -907,8 +928,6 @@ export class ImageAnnotationModal extends Modal {
             this.plugin.settings.annotationPresets.arrow[index] = preset;
         } else if (this.toolManager.isInTextMode()) {
             this.plugin.settings.annotationPresets.text[index] = preset;
-        } else if (this.toolManager.isInMosaicMode()) {
-            this.plugin.settings.annotationPresets.mosaic[index] = preset;
         }
 
         await this.plugin.saveSettings();
@@ -925,8 +944,6 @@ export class ImageAnnotationModal extends Modal {
             preset = this.plugin.settings.annotationPresets.arrow[index];
         } else if (this.toolManager.isInTextMode()) {
             preset = this.plugin.settings.annotationPresets.text[index];
-        } else if (this.toolManager.isInMosaicMode()) {
-            preset = this.plugin.settings.annotationPresets.mosaic[index];
         } else {
             return;
         }
@@ -977,11 +994,11 @@ export class ImageAnnotationModal extends Modal {
             if (activeObject) {
                 if (activeObject instanceof ActiveSelection) {
                     activeObject.getObjects().forEach(obj => {
-                        if (!(obj instanceof IText)) {
+                        if (!(obj instanceof IText) && !(obj instanceof FabricImage)) {
                             obj.set('stroke', hexToRgba(preset.color, preset.opacity ?? 1));
                         }
                     });
-                } else if (!(activeObject instanceof IText)) {
+                } else if (!(activeObject instanceof IText) && !(activeObject instanceof FabricImage)) {
                     activeObject.set('stroke', hexToRgba(preset.color, preset.opacity ?? 1));
                 }
                 this.canvas?.requestRenderAll();
@@ -1009,9 +1026,7 @@ export class ImageAnnotationModal extends Modal {
                 ? this.plugin.settings.annotationPresets.arrow
                 : this.toolManager.isInTextMode()
                     ? this.plugin.settings.annotationPresets.text
-                    : this.toolManager.isInMosaicMode()
-                        ? this.plugin.settings.annotationPresets.mosaic
-                        : null;
+                    : null;
 
         if (currentPresets) {
             this.toolbarBuilder.updatePresetButtons(currentPresets, this.toolManager.isInTextMode());
