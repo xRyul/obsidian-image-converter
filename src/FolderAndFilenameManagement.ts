@@ -1,6 +1,6 @@
 // FolderAndFilenameManagement.ts
-import { TFile, TFolder, App, normalizePath, Notice, FileSystemAdapter } from "obsidian";
-// eslint-disable-next-line import/no-nodejs-modules -- Required for path manipulation; Obsidian runs on Electron with Node.js support
+import { TFile, TFolder, App, normalizePath, Notice, FileSystemAdapter, Platform } from "obsidian";
+// Required for path manipulation; Obsidian runs on Electron with Node.js support
 import * as path from 'path';
 import {
     ImageConverterSettings,
@@ -11,6 +11,8 @@ import {
 import { VariableProcessor, VariableContext } from "./VariableProcessor";
 import { SupportedImageFormats } from "./SupportedImageFormats";
 import { getVaultConfigString } from "./utils/vaultConfig";
+
+const WINDOWS_MAX_PATH = 260;
 
 export class FolderAndFilenameManagement {
     constructor(
@@ -184,6 +186,47 @@ export class FolderAndFilenameManagement {
             return normalizePath(`/${filename}`);
         }
         return normalizePath(`${basePath}/${filename}`);
+    }
+
+    /**
+     * Returns the conventional absolute path when a target reaches Windows MAX_PATH.
+     * The extended-length namespace prefix is excluded because it is not part of the
+     * underlying drive or UNC path evaluated against the legacy safety limit.
+     */
+    getWindowsPathLengthViolation(vaultRelativePath: string): {
+        absolutePath: string;
+        length: number;
+        limit: number;
+    } | null {
+        if (!Platform.isWin || !(this.app.vault.adapter instanceof FileSystemAdapter)) {
+            return null;
+        }
+
+        let basePath = this.app.vault.adapter.getBasePath().replace(/\//g, "\\");
+        const extendedUncPrefix = "\\\\?\\UNC\\";
+        const extendedPathPrefix = "\\\\?\\";
+
+        if (basePath.startsWith(extendedUncPrefix)) {
+            basePath = `\\\\${basePath.substring(extendedUncPrefix.length)}`;
+        } else if (basePath.startsWith(extendedPathPrefix)) {
+            basePath = basePath.substring(extendedPathPrefix.length);
+        }
+
+        basePath = basePath.replace(/\\+$/, "");
+        const relativePath = normalizePath(vaultRelativePath)
+            .replace(/^\/+/, "")
+            .replace(/\//g, "\\");
+        const absolutePath = relativePath ? `${basePath}\\${relativePath}` : basePath;
+
+        if (absolutePath.length < WINDOWS_MAX_PATH) {
+            return null;
+        }
+
+        return {
+            absolutePath,
+            length: absolutePath.length,
+            limit: WINDOWS_MAX_PATH,
+        };
     }
 
     /**
@@ -388,6 +431,30 @@ export class FolderAndFilenameManagement {
     }
 
     /**
+     * Gives the name to save the original image under, when it is kept in
+     * place of the converted one. The name of the converted image gets the
+     * extension of the original, so that the name matches the content.
+     *
+     * @param convertedFilename - The name that the converted image would get.
+     * @param file - The original image.
+     * @returns The name with the extension of the original, in lowercase.
+     */
+    getFilenameForOriginal(convertedFilename: string, file: File): string {
+        const originalDotIndex = file.name.lastIndexOf(".");
+        if (originalDotIndex === -1) {
+            return convertedFilename; // The original has no extension to give
+        }
+
+        const originalExtension = file.name.substring(originalDotIndex).toLowerCase();
+        const convertedDotIndex = convertedFilename.lastIndexOf(".");
+        const nameWithoutExt = convertedDotIndex > -1
+            ? convertedFilename.substring(0, convertedDotIndex)
+            : convertedFilename;
+
+        return `${nameWithoutExt}${originalExtension}`;
+    }
+
+    /**
      * Sanitizes a filename by removing or replacing invalid characters, handling reserved names,
      * and ensuring compliance with common filesystem restrictions.
      *
@@ -513,41 +580,113 @@ export class FolderAndFilenameManagement {
             .map((part) => part.trim())
             .filter((part) => part.length > 0);
 
+        return patterns.some((pattern) => this.matchesPattern(filename, pattern));
+    }
+
+    matchesPathPatterns(path: string, patternsString: string): boolean {
+        if (!patternsString.trim()) {
+            return false;
+        }
+
+        const normalizedPath = normalizePath(path)
+            .replace(/^\.[/\\]+/, "")
+            .replace(/^\//, "");
+        const patterns = patternsString
+            .split(",")
+            .map((part) => part.trim())
+            .filter((part) => part.length > 0);
+
         return patterns.some((pattern) => {
-            try {
-                // Check if pattern is a regex (enclosed in /)
-                if (pattern.startsWith("/") && pattern.endsWith("/")) {
-                    // Extract regex pattern without the slashes
-                    const regexPattern = pattern.slice(1, -1);
-                    const regex = new RegExp(regexPattern, "i");
-                    return regex.test(filename);
-                }
-                // Check if pattern is a regex (enclosed in r/)
-                if (pattern.startsWith("r/") && pattern.endsWith("/")) {
-                    // Extract regex pattern without r/ and /
-                    const regexPattern = pattern.slice(2, -1);
-                    const regex = new RegExp(regexPattern, "i");
-                    return regex.test(filename);
-                }
-                // Check if pattern is a regex (enclosed in regex:)
-                if (pattern.startsWith("regex:")) {
-                    // Extract regex pattern without regex:
-                    const regexPattern = pattern.slice(6);
-                    const regex = new RegExp(regexPattern, "i");
-                    return regex.test(filename);
-                }
-                // Default to glob pattern
-                const globPattern = pattern
-                    .replace(/\./g, "\\.")
-                    .replace(/\*/g, ".*")
-                    .replace(/\?/g, ".");
-                const regex = new RegExp(`^${globPattern}$`, "i");
-                return regex.test(filename);
-            } catch (e) {
-                console.error(`Invalid pattern: ${pattern}`, e);
-                return false;
+            const normalizedPattern = this.normalizePathPattern(pattern);
+
+            if (this.matchesFolderPrefixPattern(normalizedPath, normalizedPattern)) {
+                return true;
             }
+
+            if (this.matchesPattern(normalizedPath, normalizedPattern)) {
+                return true;
+            }
+
+            if (this.isPlainFolderPattern(normalizedPattern)) {
+                return normalizedPath === normalizedPattern
+                    || normalizedPath.startsWith(`${normalizedPattern}/`);
+            }
+
+            return false;
         });
+    }
+
+    private normalizePathPattern(pattern: string): string {
+        if (this.isRegexPattern(pattern)) {
+            return pattern;
+        }
+
+        return normalizePath(pattern)
+            .replace(/^\.[/\\]+/, "")
+            .replace(/^\//, "");
+    }
+
+    private matchesFolderPrefixPattern(pathValue: string, pattern: string): boolean {
+        const normalizedPattern = pattern.replace(/\/\*\*\/?$/, "");
+        if (pattern.endsWith("/**") && normalizedPattern.length > 0 && this.isPlainFolderPattern(normalizedPattern)) {
+            return pathValue === normalizedPattern || pathValue.startsWith(`${normalizedPattern}/`);
+        }
+        return false;
+    }
+
+    private matchesPattern(filename: string, pattern: string): boolean {
+        try {
+            // Check if pattern is a regex (enclosed in /)
+            if (pattern.startsWith("/") && pattern.endsWith("/")) {
+                // Extract regex pattern without the slashes
+                const regexPattern = pattern.slice(1, -1);
+                const regex = new RegExp(regexPattern, "i");
+                return regex.test(filename);
+            }
+            // Check if pattern is a regex (enclosed in r/)
+            if (pattern.startsWith("r/") && pattern.endsWith("/")) {
+                // Extract regex pattern without r/ and /
+                const regexPattern = pattern.slice(2, -1);
+                const regex = new RegExp(regexPattern, "i");
+                return regex.test(filename);
+            }
+            // Check if pattern is a regex (enclosed in regex:)
+            if (pattern.startsWith("regex:")) {
+                // Extract regex pattern without regex:
+                const regexPattern = pattern.slice(6);
+                const regex = new RegExp(regexPattern, "i");
+                return regex.test(filename);
+            }
+            // Default to glob pattern
+            // Handle ** (match any characters including /) before * (match any characters except /)
+            const globPattern = pattern
+                .replace(/\./g, "\\.")
+                .replace(/\*\*/g, "<!DOUBLESTAR!>")  // Temporarily replace ** with placeholder
+                .replace(/\*/g, "[^/]*")             // Single * matches any characters except /
+                .replace(/<!DOUBLESTAR!>/g, ".*")    // ** matches any characters including /
+                .replace(/\?/g, ".");
+            const regex = new RegExp(`^${globPattern}$`, "i");
+            return regex.test(filename);
+        } catch (e) {
+            console.error(`Invalid pattern: ${pattern}`, e);
+            return false;
+        }
+    }
+
+    private isRegexPattern(pattern: string): boolean {
+        return (pattern.startsWith("/") && pattern.endsWith("/"))
+            || (pattern.startsWith("r/") && pattern.endsWith("/"))
+            || pattern.startsWith("regex:");
+    }
+
+    private isPlainFolderPattern(pattern: string): boolean {
+        if (!pattern) {
+            return false;
+        }
+
+        return !pattern.includes("*")
+            && !pattern.includes("?")
+            && !this.isRegexPattern(pattern);
     }
 
     async processSubfolderVariables(

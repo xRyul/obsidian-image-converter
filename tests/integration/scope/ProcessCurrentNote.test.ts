@@ -5,11 +5,19 @@ import ImageConverterPlugin from '../../../src/main';
 import { App, TFile } from 'obsidian';
 import { fakeApp, fakeVault, fakeTFile } from '../../factories/obsidian';
 import { BatchImageProcessor } from '../../../src/BatchImageProcessor';
+import { FolderAndFilenameManagement } from '../../../src/FolderAndFilenameManagement';
 
-function makePlugin(app: App) {
+async function makePlugin(app: App) {
   const plugin = new ImageConverterPlugin(app, { id: 'image-converter' } as any);
   vi.spyOn(plugin as any, 'loadData').mockResolvedValue(undefined);
-  return plugin.loadSettings().then(() => plugin);
+  await plugin.loadSettings();
+  (plugin as any).folderAndFilenameManagement = new FolderAndFilenameManagement(
+    app as any,
+    plugin.settings,
+    { isSupported: vi.fn(() => true) } as any,
+    {} as any,
+  );
+  return plugin;
 }
 
 describe('ProcessCurrentNote discovery and counts (Phase 7: 9.1–9.8 subset)', () => {
@@ -17,7 +25,7 @@ describe('ProcessCurrentNote discovery and counts (Phase 7: 9.1–9.8 subset)', 
     // Files
     const note = fakeTFile({ path: 'notes/n.md' });
     const canvas = fakeTFile({ path: 'boards/board.canvas', extension: 'canvas', name: 'board.canvas' });
-    const aPng = fakeTFile({ path: 'images/a.png' });
+    const aPng = fakeTFile({ path: 'attachments/a.png' });
     const bJpg = fakeTFile({ path: 'images/b.jpg' });
     const cGif = fakeTFile({ path: 'images/c.gif' });
 
@@ -25,7 +33,10 @@ describe('ProcessCurrentNote discovery and counts (Phase 7: 9.1–9.8 subset)', 
     const app = fakeApp({ vault, metadataCache: { resolvedLinks: { [note.path]: { [aPng.path]: 1, [bJpg.path]: 1, [cGif.path]: 1 } } as any } }) as any;
 
     // Seed markdown content not required because ProcessCurrentNote uses resolvedLinks for markdown, and reads canvas JSON
-    await (vault as any).modify(canvas, JSON.stringify({ nodes: [ { id: '1', type: 'file', file: 'images/a.png' } ] }));
+    await (vault as any).modify(canvas, JSON.stringify({ nodes: [
+      { id: '1', type: 'file', file: 'attachments/a.png' },
+      { id: '2', type: 'file', file: 'images/b.jpg' }
+    ] }));
 
     const plugin = await makePlugin(app as any);
     // Provide supportedImageFormats for filtering
@@ -36,6 +47,7 @@ describe('ProcessCurrentNote discovery and counts (Phase 7: 9.1–9.8 subset)', 
     plugin.settings.ProcessCurrentNoteconvertTo = 'jpg';
     plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat = true;
     plugin.settings.ProcessCurrentNoteSkipFormats = 'gif';
+    plugin.settings.ProcessCurrentNoteIgnoreFolders = 'attachments/**';
 
     const processor = { processImagesInNote: vi.fn() } as unknown as BatchImageProcessor;
 
@@ -51,9 +63,9 @@ describe('ProcessCurrentNote discovery and counts (Phase 7: 9.1–9.8 subset)', 
 
     // Total includes png, jpg, gif -> 3
     expect(Number(totalTextMd)).toBe(3);
-    // Skip jpg (target) and gif (skipFormats) -> processed only png
-    expect(Number(processedTextMd)).toBe(1);
-    expect(Number(skippedTextMd)).toBe(2);
+    // Skip ignored attachments + jpg (target) + gif (skipFormats) -> processed none
+    expect(Number(processedTextMd)).toBe(0);
+    expect(Number(skippedTextMd)).toBe(3);
 
     // Open modal for canvas file
     const modalCv = new ProcessCurrentNote(app as any, plugin as any, canvas as TFile, processor);
@@ -64,9 +76,55 @@ describe('ProcessCurrentNote discovery and counts (Phase 7: 9.1–9.8 subset)', 
     const totalTextCv = totalsCv[1].textContent || '0';
     const processedTextCv = totalsCv[3].textContent || '0';
 
-    // Canvas had one linked png -> total 1, processed 1 under current skip rules
-    expect(Number(totalTextCv)).toBe(1);
-    expect(Number(processedTextCv)).toBe(1);
+    // Canvas had one linked jpg after ignoring attachments -> total 2, processed 0 (skip target and ignored)
+    expect(Number(totalTextCv)).toBe(2);
+    expect(Number(processedTextCv)).toBe(0);
+  });
+
+  it('keeps true root files processable when skip folders targets /_attachments/**', async () => {
+    const note = fakeTFile({ path: '2025-12-16.md' });
+    const rootWebp = fakeTFile({ path: '2025-12-16-1769210898077.webp' });
+    const attachmentWebp = fakeTFile({ path: '_attachments/Pasted image 20251006192757.webp' });
+    const nestedAttachmentWebp = fakeTFile({ path: '_attachments/subfolder1/Pasted image 20251006190944.webp' });
+
+    const vault = fakeVault({ files: [note, rootWebp, attachmentWebp, nestedAttachmentWebp] }) as any;
+    const app = fakeApp({
+      vault,
+      metadataCache: {
+        resolvedLinks: {
+          [note.path]: {
+            [rootWebp.path]: 1,
+            [attachmentWebp.path]: 1,
+            [nestedAttachmentWebp.path]: 1
+          }
+        }
+      } as any
+    }) as any;
+
+    const plugin = await makePlugin(app as any);
+    (plugin as any).supportedImageFormats = {
+      isSupported: vi.fn((_mime?: string, name?: string) => /\.(png|jpg|jpeg|webp|gif)$/i.test(name || ''))
+    };
+
+    plugin.settings.ProcessCurrentNoteconvertTo = 'webp';
+    plugin.settings.ProcessCurrentNotequality = 0.75;
+    plugin.settings.ProcessCurrentNoteResizeModalresizeMode = 'None';
+    plugin.settings.ProcessCurrentNoteskipImagesInTargetFormat = false;
+    plugin.settings.ProcessCurrentNoteSkipFormats = 'tif,tiff,heic';
+    plugin.settings.ProcessCurrentNoteIgnoreFolders = '/_attachments/**';
+
+    const processor = { processImagesInNote: vi.fn() } as unknown as BatchImageProcessor;
+    const modal = new ProcessCurrentNote(app as any, plugin as any, note as TFile, processor);
+    await modal.onOpen();
+
+    const totals = ((modal as any).contentEl as HTMLElement).querySelectorAll('.image-counts-display span');
+    const totalText = totals[1].textContent || '0';
+    const processedText = totals[3].textContent || '0';
+    const skippedText = totals[5].textContent || '0';
+
+    expect(Number(totalText)).toBe(3);
+    expect(Number(processedText)).toBe(1);
+    expect(Number(skippedText)).toBe(2);
   });
 
   it('9.2 Wikilink discovery includes corresponding TFiles', async () => {

@@ -26,13 +26,24 @@ export interface ImageAlignmentCache {
 	};
 }
 
+type MarkdownViewLike = {
+	file?: TFile | null;
+	containerEl?: HTMLElement;
+	getState?: () => { file?: string } | null;
+};
+
+type WorkspaceLeafLike = {
+	view?: MarkdownViewLike | null;
+	getViewState?: () => { state?: { file?: string } } | null;
+};
+
 export class ImageAlignmentManager {
 	private imageAlignment: ImageAlignment; // Instance of the new class
 
 	// BE cautions of using DOT files. Obsidian Sync will not sync dot files.
 	// private readonly CACHE_FILE = '.obsidian/image-converter-image-alignments.json';
 	private pluginDir: string;
-	private cacheFilePath: string;
+	private cacheFilePath = "";
 
 	cache: ImageAlignmentCache = {};
 	private imageObserver: MutationObserver | null = null;
@@ -56,10 +67,7 @@ export class ImageAlignmentManager {
 
 		this.imageAlignment = new ImageAlignment(this.app, this.plugin, this);
 		this.debouncedValidateNoteCache = debounce(
-			this.validateNoteCache.bind(this) as (
-				notePath: string,
-				noteContent: string
-			) => Promise<void>,
+			this.validateNoteCache.bind(this),
 			300,
 			true
 		);
@@ -236,17 +244,18 @@ export class ImageAlignmentManager {
 					) {
 						// Renaming an image
 						const allNotes = Object.keys(this.cache);
+						const oldRelativePath = this.getRelativePath(oldPath);
 						for (const notePath of allNotes) {
-							const oldImageHash = this.getImageHash(
+							const oldImageHash = this.findStoredImageHash(
 								notePath,
-								oldPath
+								oldRelativePath
 							);
 							const newImageHash = this.getImageHash(
 								notePath,
 								file.path
 							);
 
-							if (this.cache[notePath][oldImageHash]) {
+							if (oldImageHash) {
 								this.cache[notePath][newImageHash] =
 									this.cache[notePath][oldImageHash];
 								delete this.cache[notePath][oldImageHash];
@@ -408,6 +417,11 @@ export class ImageAlignmentManager {
 		// 4. Serialized disk writes ensure no file corruption; final disk state = final memory state
 		const relativeImageSrc = this.getRelativePath(imageSrc);
 		const imageHash = this.getImageHash(notePath, relativeImageSrc);
+		// Replace an entry saved under the older Windows key
+		const storedHash = this.findStoredImageHash(notePath, relativeImageSrc);
+		if (storedHash && storedHash !== imageHash) {
+			delete this.cache[notePath][storedHash];
+		}
 		this.setAlignmentInCacheInternal(notePath, imageHash, {
 			position,
 			width: width || "",
@@ -442,21 +456,33 @@ export class ImageAlignmentManager {
 		return hash;
 	}
 
-	public getImageAlignment(notePath: string, imageSrc: string) {
-		// console.log("getImageAlignment DETAILS:");
-		// console.log("- Note Path:", notePath);
-		// console.log("- Image Source:", imageSrc);
+	/**
+	 * Finds the key a note's entry for an image is stored under. Older Windows
+	 * builds saved keys for "/" + the vault path, because getRelativePath()
+	 * kept the separator after the vault folder, so that key is tried second.
+	 */
+	private findStoredImageHash(
+		notePath: string,
+		relativePath: string
+	): string | undefined {
+		const noteCache = this.cache[notePath];
+		if (!noteCache) return undefined;
 
-		const imageHash = this.getImageHash(notePath, imageSrc);
-		// console.log("Calculated Image Hash:", imageHash);
+		const imageHash = murmurHash3128(`${notePath}:${relativePath}`, 0);
+		if (noteCache[imageHash]) return imageHash;
+		if (relativePath.startsWith("/")) return undefined;
 
-		// console.log("Full Cache:", this.cache);
-		// console.log("Note-specific Cache:", this.cache[notePath]);
+		const legacyHash = murmurHash3128(`${notePath}:/${relativePath}`, 0);
+		return noteCache[legacyHash] ? legacyHash : undefined;
+	}
 
-		const alignment = this.cache[notePath]?.[imageHash];
-		// console.log("Found Alignment:", alignment);
-
-		return alignment;
+	public getImageAlignment(
+		notePath: string,
+		imageSrc: string
+	): ImagePositionData | null {
+		const relativePath = this.getRelativePath(imageSrc);
+		const storedHash = this.findStoredImageHash(notePath, relativePath);
+		return storedHash ? this.cache[notePath][storedHash] : null;
 	}
 
 	/**
@@ -533,24 +559,22 @@ export class ImageAlignmentManager {
 				// console.log("Base path:", basePath);
 
 				if (basePath) {
+					// Compare with forward slashes and no leading slash, so the
+					// separator after the base path is dropped on every platform.
 					const normalizedBasePath = basePath
-						.toLowerCase()
 						.replace(/\\/g, "/")
 						.replace(/^\/+|\/+$/g, "");
 					const normalizedOsPath = osPath
-						.toLowerCase()
 						.replace(/\\/g, "/")
 						.replace(/^\/+/, "");
-					// console.log("normalized base path:", normalizedBasePath);
-					// console.log("normalized OS pathh:", normalizedOsPath);
+					const baseLength = normalizedBasePath.length;
 
-					if (normalizedOsPath.startsWith(normalizedBasePath)) {
-						// Extract the relative path
-						let relativePath = osPath.substring(basePath.length);
-						relativePath = relativePath.replace(/^\\+/, ""); // Remove leading slash
-
-						// console.log("FINAL CLEANEDUP Relative path:", relativePath);
-						return relativePath;
+					if (
+						normalizedOsPath.slice(0, baseLength).toLowerCase() ===
+							normalizedBasePath.toLowerCase() &&
+						normalizedOsPath.charAt(baseLength) === "/"
+					) {
+						return normalizedOsPath.slice(baseLength + 1);
 					}
 				}
 			}
@@ -570,6 +594,56 @@ export class ImageAlignmentManager {
 		return src;
 	}
 
+	private getLeafNotePath(leaf: WorkspaceLeafLike): string | null {
+		const viewFilePath = leaf.view?.file?.path;
+		if (viewFilePath) return viewFilePath;
+
+		const viewStateFile = leaf.view?.getState?.()?.file;
+		if (viewStateFile) return viewStateFile;
+
+		return leaf.getViewState?.()?.state?.file ?? null;
+	}
+
+	private getImageRootsForNote(notePath: string): HTMLElement[] {
+		const roots: HTMLElement[] = [];
+		const seen = new Set<HTMLElement>();
+		const addRoot = (root: HTMLElement | null | undefined) => {
+			if (root && !seen.has(root)) {
+				seen.add(root);
+				roots.push(root);
+			}
+		};
+
+		this.app.workspace.iterateAllLeaves?.((leaf) => {
+			const leafLike = leaf as unknown as WorkspaceLeafLike;
+			if (this.getLeafNotePath(leafLike) === notePath) {
+				addRoot(leafLike.view?.containerEl);
+			}
+		});
+
+		return roots;
+	}
+
+	private getImagesForNote(notePath: string): HTMLImageElement[] {
+		const roots = this.getImageRootsForNote(notePath);
+		if (roots.length === 0) {
+			return Array.from(activeDocument.querySelectorAll("img"));
+		}
+
+		const images: HTMLImageElement[] = [];
+		const seen = new Set<HTMLImageElement>();
+		for (const root of roots) {
+			for (const img of Array.from(root.querySelectorAll("img"))) {
+				if (!seen.has(img)) {
+					seen.add(img);
+					images.push(img);
+				}
+			}
+		}
+
+		return images;
+	}
+
 	public async applyAlignmentsToNote(notePath: string) {
 		try {
 			// console.log("applyAlignmentsToNote")
@@ -580,7 +654,7 @@ export class ImageAlignmentManager {
 					this.plugin.settings.isImageAlignmentEnabled &&
 					defaultAlignment !== "none";
 
-				const images = Array.from(document.querySelectorAll("img"));
+				const images = this.getImagesForNote(notePath);
 				// console.log(`Found ${images.length} content images`);
 
 				for (const img of images) {
@@ -606,9 +680,7 @@ export class ImageAlignmentManager {
 		const src = img.getAttr("src");
 		if (!src) return;
 
-		const imageHash = this.getImageHash(notePath, src);
-		const alignments = this.cache[notePath];
-		const positionData = alignments ? alignments[imageHash] : undefined;
+		const positionData = this.getImageAlignment(notePath, src);
 
 		if (positionData) {
 			// Cache entry exists - apply it (including position='none' which removes CSS classes)
@@ -638,48 +710,58 @@ export class ImageAlignmentManager {
 			const cleanupStart = Date.now();
 			const newCache: ImageAlignmentCache = {};
 
+			// List and filter vault files once, instead of re-scanning the whole
+			// vault for every cached hash (which made cleanup O(entries x files)
+			// and blocked the main thread for seconds in large vaults).
+			const imageFiles = this.app.vault.getFiles().filter(file =>
+				this.supportedImageFormats.isSupported(undefined, file.name)
+			);
+			const imagePaths = new Set(imageFiles.map(file => file.path));
+			const { resolvedLinks } = this.app.metadataCache;
+
 			for (const notePath in this.cache) {
 				// Check if note still exists
 				const noteFile = this.app.vault.getAbstractFileByPath(notePath);
 				if (!noteFile) continue;
 
-				newCache[notePath] = {};
+				// An entry is kept when some existing image hashes to it in this
+				// note's context. getImageHash() is bypassed deliberately: its
+				// getRelativePath() call scans all vault files every time. For a
+				// vault file's own path it only cuts the path at the first "?",
+				// so do the same here to get the same key.
+				// Older Windows builds saved keys for "/" + path. Those entries are
+				// moved to the current key instead of being dropped.
+				const entries = this.cache[notePath];
+				const unmatched = new Set(Object.keys(entries));
+				const kept: ImageAlignmentCache[string] = {};
+				const match = (imagePath: string, checkLegacy: boolean) => {
+					const [keyPath] = imagePath.split("?");
+					const key = murmurHash3128(`${notePath}:${keyPath}`, 0);
+					if (unmatched.delete(key)) kept[key] = entries[key];
+					if (!checkLegacy) return;
 
-				for (const imageHash in this.cache[notePath]) {
-					let imageExists = false;
+					const legacyKey = murmurHash3128(`${notePath}:/${keyPath}`, 0);
+					if (unmatched.delete(legacyKey)) kept[key] ??= entries[legacyKey];
+				};
 
-					// Iterate through all files in the vault
-					const allFiles = this.app.vault.getFiles();
-					for (const file of allFiles) {
-						if (
-							this.supportedImageFormats.isSupported(
-								undefined,
-								file.name
-							)
-						) {
-							// Calculate the hash for each image in the context of the current note
-							const currentImageHash = this.getImageHash(
-								notePath,
-								file.path
-							);
-
-							// Check if the calculated hash matches the one in the cache
-							if (currentImageHash === imageHash) {
-								imageExists = true;
-								break; // No need to check other files if found
-							}
-						}
-					}
-
-					if (imageExists) {
-						newCache[notePath][imageHash] =
-							this.cache[notePath][imageHash];
-					}
+				// Try the images the note links to first. They usually match every
+				// entry, so the scan of all vault images below can stop at once.
+				const linkedPaths = resolvedLinks[notePath];
+				for (const linkedPath of Object.keys(linkedPaths ?? {})) {
+					if (unmatched.size === 0) break;
+					if (imagePaths.has(linkedPath)) match(linkedPath, true);
+				}
+				// Older Windows keys are only tried for linked images, so this scan
+				// hashes each image once. If the note's links are not indexed yet,
+				// try them here as well so those entries are not dropped.
+				for (const file of imageFiles) {
+					if (unmatched.size === 0) break;
+					match(file.path, !linkedPaths);
 				}
 
-				// Remove note entry if it has no images
-				if (Object.keys(newCache[notePath]).length === 0) {
-					delete newCache[notePath];
+				// Keep only entries whose image still exists
+				if (Object.keys(kept).length > 0) {
+					newCache[notePath] = kept;
 				}
 			}
 
@@ -726,10 +808,14 @@ export class ImageAlignmentManager {
 			const cachedImages = Object.keys(this.cache[notePath]);
 			// console.log("Cached image hashes:", cachedImages);
 
-			// Convert image links to hashes
-			const imageHashes = imageLinks.map((link) =>
-				this.getImageHash(notePath, link)
-			);
+			// Convert image links to hashes, including the older Windows key
+			const imageHashes = imageLinks.flatMap((link) => {
+				const relativePath = this.getRelativePath(link);
+				return [
+					this.getImageHash(notePath, relativePath),
+					murmurHash3128(`${notePath}:/${relativePath}`, 0),
+				];
+			});
 			// console.log("Calculated image hashes:", imageHashes);
 
 			// Find cached images that are no longer in the note
@@ -838,10 +924,11 @@ export class ImageAlignmentManager {
 		// Disconnect the MutationObserver
 		this.cleanupObserver();
 
-		// Unregister all events
-		this.eventRefs.forEach((eventRef) =>
-			this.app.workspace.offref(eventRef)
-		);
+		// Unregister all events from the emitter they were registered on.
+		// These refs come from app.vault.on(...); using workspace.offref(ref) is a no-op for vault refs.
+		this.eventRefs.forEach((eventRef) => {
+			this.app.vault.offref(eventRef);
+		});
 		this.eventRefs = [];
 
 		// Clear interval

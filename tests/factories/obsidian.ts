@@ -4,8 +4,47 @@
  */
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unnecessary-type-assertion, obsidianmd/no-tfile-tfolder-cast, obsidianmd/hardcoded-config-path */
 
+import { pathToFileURL } from 'node:url';
 import { vi } from 'vitest';
 import { Notice, TFile, TFolder, Vault, App, MetadataCache, Workspace, MarkdownView, PluginManifest } from 'obsidian';
+
+function makeObsidianFileHref(absolutePath: string): string {
+  if (/^[A-Za-z]:\//.test(absolutePath)) {
+    return new URL(`file:///${absolutePath}`).href;
+  }
+
+  if (/^\/\/[^/]/.test(absolutePath)) {
+    return new URL(`file:${absolutePath}`).href;
+  }
+
+  return pathToFileURL(absolutePath).href;
+}
+
+export function makeObsidianAppResourcePath(
+  filePath: string,
+  options: {
+    basePath?: string;
+    hash?: string;
+    mtime?: number;
+  } = {}
+): string {
+  const basePath = (options.basePath ?? '/vault')
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '');
+  const normalizedFilePath = filePath
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '');
+  const absolutePath = `${basePath}/${normalizedFilePath}`;
+  let resourcePath = makeObsidianFileHref(absolutePath);
+
+  if (resourcePath.startsWith('file:///')) {
+    resourcePath = resourcePath.substring(8);
+  } else if (resourcePath.startsWith('file://')) {
+    resourcePath = `%5C%5C${resourcePath.substring(7)}`;
+  }
+
+  return `app://${options.hash ?? '031dbfae41988efb7c10b75582fd510e00ae'}/${resourcePath}?${options.mtime ?? 1700000000000}`;
+}
 
 /**
  * Create a mock Notice object
@@ -468,7 +507,10 @@ export function fakeAppWithResourcePath(options: {
   const files = options.files ?? [];
   const vault = {
     ...fakeVault({ files }),
-    getResourcePath: vi.fn(options.resourcePath ?? ((file: TFile) => `app://local/${file.path}`))
+    getResourcePath: vi.fn(
+      options.resourcePath ??
+        ((file: TFile) => makeObsidianAppResourcePath(file.path))
+    )
   } as Vault;
   const workspace = (options.workspace ?? fakeWorkspace()) as Workspace;
   const app = fakeApp({ vault, workspace }) as App;

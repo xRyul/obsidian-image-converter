@@ -24,6 +24,14 @@ import { ToolbarBuilder, ToolbarCallbacks } from './ui';
 import { ImageExporter } from './export/ImageExporter';
 import { MosaicTool, isMosaicImage } from './tools/MosaicTool';
 
+type FabricObjectWithHistoryFlag = FabricObject & {
+    excludeFromHistory?: boolean;
+};
+
+type CanvasWithArrowEvents = Canvas & {
+    on(eventName: 'arrow:created', handler: () => void): void;
+};
+
 export class ImageAnnotationModal extends Modal {
     private componentContainer = new Component();
     private canvas!: Canvas;
@@ -102,7 +110,7 @@ export class ImageAnnotationModal extends Modal {
 
     onOpen(): void {
         const { contentEl } = this;
-        contentEl.setCssProps({ 'padding': '0', 'overflow': 'hidden' });
+        contentEl.addClass('image-converter-annotation-tool-modal-content');
 
         const modalContainer = contentEl.createDiv('image-converter-annotation-tool-modal-container');
 
@@ -238,7 +246,7 @@ export class ImageAnnotationModal extends Modal {
         });
 
         this.backgroundManager = new BackgroundManager(getCanvas, this.componentContainer);
-        this.imageExporter = new ImageExporter(this.app);
+        this.imageExporter = new ImageExporter(this.app, this.plugin.settings.metadataMode);
 
         this.mosaicTool = new MosaicTool(
             getCanvas,
@@ -553,6 +561,14 @@ export class ImageAnnotationModal extends Modal {
 
         this.toolManager.updateBrushColor();
 
+        const shouldIgnoreHistoryTarget = (target?: FabricObjectWithHistoryFlag): boolean => {
+            if (target instanceof FabricImage || this.historyManager.isPerformingUndoRedo()) {
+                return true;
+            }
+
+            return Boolean(target?.excludeFromHistory);
+        };
+
         this.canvas.on('path:created', (e: { path?: FabricObject }) => {
             if (!this.historyManager.isPerformingUndoRedo()) {
                 if (e.path) {
@@ -563,27 +579,27 @@ export class ImageAnnotationModal extends Modal {
             }
         });
 
+        (this.canvas as CanvasWithArrowEvents).on('arrow:created', () => {
+            if (!this.historyManager.isPerformingUndoRedo()) {
+                this.historyManager.saveState();
+            }
+        });
+
         this.canvas.on('object:added', (e) => {
             this.toolManager.updateObjectInteractivity();
-            if (this.historyManager.isPerformingUndoRedo()) return;
-            // Skip background image but allow mosaic images
-            if (e.target instanceof FabricImage && !isMosaicImage(e.target)) return;
+            if (shouldIgnoreHistoryTarget(e.target)) return;
             if (e.target && !(e.target instanceof Path)) {
                 this.historyManager.saveState();
             }
         });
 
         this.canvas.on('object:modified', (e) => {
-            if (this.historyManager.isPerformingUndoRedo()) return;
-            // Skip background image but allow mosaic images
-            if (e.target instanceof FabricImage && !isMosaicImage(e.target)) return;
+            if (shouldIgnoreHistoryTarget(e.target)) return;
             this.historyManager.saveState();
         });
 
         this.canvas.on('object:removed', (e) => {
-            if (this.historyManager.isPerformingUndoRedo()) return;
-            // Skip background image but allow mosaic images
-            if (e.target instanceof FabricImage && !isMosaicImage(e.target)) return;
+            if (shouldIgnoreHistoryTarget(e.target)) return;
             this.historyManager.saveState();
         });
 
@@ -662,16 +678,18 @@ export class ImageAnnotationModal extends Modal {
         });
 
         // Keyboard handlers
-        this.componentContainer.registerDomEvent(document, 'keydown', this.boundKeyDownHandler);
-        this.componentContainer.registerDomEvent(document, 'keyup', this.boundKeyUpHandler);
+        const modalDocument = this.modalEl.doc ?? this.modalEl.ownerDocument;
+        this.componentContainer.registerDomEvent(modalDocument, 'keydown', this.boundKeyDownHandler);
+        this.componentContainer.registerDomEvent(modalDocument, 'keyup', this.boundKeyUpHandler);
 
         // Periodic state check
-        setInterval(() => {
+        const textEditingInterval = window.setInterval(() => {
             const activeObject = this.canvas?.getActiveObject();
             if (activeObject instanceof IText && !activeObject.isEditing && this.isTextEditingBlocked) {
                 this.isTextEditingBlocked = false;
             }
         }, 5000);
+        this.componentContainer.register(() => window.clearInterval(textEditingInterval));
     }
 
     private preventDefaultHandlers(): void {
@@ -836,7 +854,7 @@ export class ImageAnnotationModal extends Modal {
             this.canvas?.setActiveObject(text);
             this.canvas?.requestRenderAll();
 
-            setTimeout(() => {
+            window.setTimeout(() => {
                 text.enterEditing();
                 text.selectAll();
                 this.canvas?.requestRenderAll();

@@ -4,6 +4,8 @@ import ImageConverterPlugin from "./main";
 import { OutputFormat, ResizeMode, EnlargeReduce } from "./ImageConverterSettings";
 import { ENCODER_CONFIGS, ImageProcessor } from "./ImageProcessor";
 import { findFfmpegExecutablePath, normalizeExecutablePath } from "./utils/ffmpegPath";
+import { addInfoIcon } from "./utils/settingInfo";
+import { getRevertPolicy, getSelectedConversionPreset, reasonToKeepOriginal } from "./utils/keepOriginal";
 
 export interface SingleImageModalSettings {
     conversionPresetName: string;
@@ -28,48 +30,48 @@ export class ProcessSingleImageModal extends Modal {
     private imageFile: TFile;
     private modalSettings: SingleImageModalSettings;
     private previewImageUrl: string | null = null;
-    private previewContainer: HTMLDivElement;
+    private previewContainer!: HTMLDivElement;
 
     // --- Dedicated containers for each section ---
-    private conversionSettingsContainer: HTMLDivElement;
-    private resizeSettingsContainer: HTMLDivElement;
-    private buttonContainer: HTMLDivElement;
+    private conversionSettingsContainer!: HTMLDivElement;
+    private resizeSettingsContainer!: HTMLDivElement;
+    private buttonContainer!: HTMLDivElement;
 
     constructor(app: App, private plugin: ImageConverterPlugin, file: TFile) {
         super(app);
         this.imageFile = file;
-        this.loadModalSettings();
+        this.modalSettings = this.loadModalSettings();
         this.titleEl.setText(`Process Image: ${file.name}`);
     }
 
-    private loadModalSettings() {
+    private loadModalSettings(): SingleImageModalSettings {
         const savedSettings = this.plugin.settings.singleImageModalSettings;
 
         if (savedSettings) {
-            this.modalSettings = { ...savedSettings };
-        } else {
-            const avifPreset = this.plugin.settings.conversionPresets.find(preset => preset.outputFormat === "AVIF");
-            const pngQuantPreset = this.plugin.settings.conversionPresets.find(preset => preset.outputFormat === "PNGQUANT");
-
-            this.modalSettings = {
-                conversionPresetName: this.plugin.settings.selectedConversionPreset,
-                outputFormat: this.plugin.settings.outputFormat,
-                quality: this.plugin.settings.quality,
-                colorDepth: this.plugin.settings.colorDepth,
-                resizeMode: this.plugin.settings.resizeMode,
-                desiredWidth: this.plugin.settings.desiredWidth,
-                desiredHeight: this.plugin.settings.desiredHeight,
-                desiredLongestEdge: this.plugin.settings.desiredLongestEdge,
-                enlargeOrReduce: this.plugin.settings.enlargeOrReduce,
-                allowLargerFiles: this.plugin.settings.allowLargerFiles,
-                pngquantExecutablePath: pngQuantPreset?.pngquantExecutablePath || "",
-                pngquantQuality: pngQuantPreset?.pngquantQuality || "",
-                ffmpegExecutablePath: avifPreset?.ffmpegExecutablePath || this.plugin.settings.ffmpegExecutablePath || "",
-                ffmpegCrf: avifPreset?.ffmpegCrf !== undefined ? avifPreset.ffmpegCrf : (this.plugin.settings.ffmpegCrf !== undefined ? this.plugin.settings.ffmpegCrf : 23),
-                ffmpegPreset: avifPreset?.ffmpegPreset || this.plugin.settings.ffmpegPreset || "medium",
-                detectedEncoder: avifPreset?.detectedEncoder || this.plugin.settings.detectedEncoder,
-            };
+            return { ...savedSettings };
         }
+
+        const avifPreset = this.plugin.settings.conversionPresets.find(preset => preset.outputFormat === "AVIF");
+        const pngQuantPreset = this.plugin.settings.conversionPresets.find(preset => preset.outputFormat === "PNGQUANT");
+
+        return {
+            conversionPresetName: this.plugin.settings.selectedConversionPreset,
+            outputFormat: this.plugin.settings.outputFormat,
+            quality: this.plugin.settings.quality,
+            colorDepth: this.plugin.settings.colorDepth,
+            resizeMode: this.plugin.settings.resizeMode,
+            desiredWidth: this.plugin.settings.desiredWidth,
+            desiredHeight: this.plugin.settings.desiredHeight,
+            desiredLongestEdge: this.plugin.settings.desiredLongestEdge,
+            enlargeOrReduce: this.plugin.settings.enlargeOrReduce,
+            allowLargerFiles: this.plugin.settings.allowLargerFiles,
+            pngquantExecutablePath: pngQuantPreset?.pngquantExecutablePath || "",
+            pngquantQuality: pngQuantPreset?.pngquantQuality || "",
+            ffmpegExecutablePath: avifPreset?.ffmpegExecutablePath || this.plugin.settings.ffmpegExecutablePath || "",
+            ffmpegCrf: avifPreset?.ffmpegCrf !== undefined ? avifPreset.ffmpegCrf : (this.plugin.settings.ffmpegCrf !== undefined ? this.plugin.settings.ffmpegCrf : 23),
+            ffmpegPreset: avifPreset?.ffmpegPreset || this.plugin.settings.ffmpegPreset || "medium",
+            detectedEncoder: avifPreset?.detectedEncoder || this.plugin.settings.detectedEncoder,
+        };
     }
 
     private saveModalSettings() {
@@ -84,8 +86,7 @@ export class ProcessSingleImageModal extends Modal {
     }
 
     // Obsidian calls Modal.onOpen as a lifecycle hook and intentionally ignores the returned Promise.
-    // We keep this method async to allow await inside, so we disable the no-misused-promises rule here.
-    // eslint-disable-next-line @typescript-eslint/no-misused-promises
+    // We keep this method async to allow await inside.
     async onOpen(): Promise<void> {
         this.contentEl.empty();
         this.contentEl.addClass("process-single-image-modal");
@@ -129,7 +130,6 @@ export class ProcessSingleImageModal extends Modal {
         );
 
         new Setting(this.conversionSettingsContainer)
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
             .setName("Output Format")
             .addDropdown(dropdown => {
                 const options: Record<OutputFormat, string> = {
@@ -188,8 +188,8 @@ export class ProcessSingleImageModal extends Modal {
 
         if (this.modalSettings.outputFormat === "PNGQUANT") {
             new Setting(this.conversionSettingsContainer)
-                .setName("Executable path for pngquant 🛈")
-                .setTooltip("Provide full-path to the binary file. It can be inside vault or anywhere in your file system.")
+                .setName("Executable path for pngquant")
+                .then((setting) => addInfoIcon(setting, "Provide full-path to the binary file. It can be inside vault or anywhere in your file system."))
                 .addText(text => {
                     text.setValue(this.modalSettings.pngquantExecutablePath)
                         .onChange(async value => {
@@ -203,11 +203,8 @@ export class ProcessSingleImageModal extends Modal {
                 });
 
             new Setting(this.conversionSettingsContainer)
-                .setName("Quality min-max range 🛈")
-                .setTooltip(
-                    // eslint-disable-next-line obsidianmd/ui/sentence-case
-                    "Instructs pngquant to use the least amount of colors required to meet or exceed the max quality. min and max are numbers in range 0 (worst) to 100 (perfect)."
-                )
+                .setName("Quality min-max range")
+                .then((setting) => addInfoIcon(setting, "Instructs pngquant to use the least amount of colors required to meet or exceed the max quality. min and max are numbers in range 0 (worst) to 100 (perfect)."))
                 .addText(text => {
                     text.setValue(this.modalSettings.pngquantQuality)
                         .onChange(async value => {
@@ -310,16 +307,13 @@ export class ProcessSingleImageModal extends Modal {
             };
 
             const resetEncoderUi = () => {
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 encoderDetectionSetting.setDesc("Detect and validate working AV1 encoder by running a test encode. This ensures hardware encoders are actually available on your system.");
                 encoderDetectionSetting.settingEl.removeClass("image-converter-encoder-detected");
                 encoderDetectionButtonEl?.classList.remove("image-converter-encoder-detected");
                 crfSetting.settingEl.removeClass("image-converter-encoder-detected");
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 crfSetting.setDesc("Constant rate factor for AVIF (0-63, lower is better quality). Range varies by encoder - click 'Detect encoder' to see the specific range.");
                 if (presetSelectEl) {
                     presetSetting.settingEl.show();
-                    // eslint-disable-next-line obsidianmd/ui/sentence-case
                     presetSetting.setDesc("Encoding preset (speed vs. compression).");
                     presetSelectEl.innerHTML = "";
                     defaultPresetNames.forEach(presetName => {
@@ -345,26 +339,22 @@ export class ProcessSingleImageModal extends Modal {
             };
 
             new Setting(this.conversionSettingsContainer)
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
-                .setName("FFmpeg executable path 🛈")
-                .setTooltip("Provide full-path to the binary file. It can be inside vault or anywhere in your file system.")
+                .setName("FFmpeg executable path")
+                .then((setting) => addInfoIcon(setting, "Provide full-path to the binary file. It can be inside vault or anywhere in your file system."))
                 .addButton(button => {
                     button
                         .setIcon("search")
-                        // eslint-disable-next-line obsidianmd/ui/sentence-case
                         .setTooltip("Auto-detect FFmpeg")
                         .onClick(async () => {
                             button.setDisabled(true);
                             try {
                                 const detectedPath = await findFfmpegExecutablePath(this.app);
                                 if (!detectedPath) {
-                                    // eslint-disable-next-line obsidianmd/ui/sentence-case
                                     new Notice("FFmpeg not found. Try installing via: Homebrew (macOS), Chocolatey (Windows), or apt/snap (Linux). Then set the path manually.", 8000);
                                     return;
                                 }
                                 updateFfmpegPath(detectedPath);
                                 void this.plugin.saveSettings();
-                                // eslint-disable-next-line obsidianmd/ui/sentence-case
                                 new Notice("FFmpeg path detected and saved.", 4000);
                             } catch (error) {
                                 const message = this.getErrorMessage(error);
@@ -388,7 +378,6 @@ export class ProcessSingleImageModal extends Modal {
 
             const encoderDetectionSetting = new Setting(this.conversionSettingsContainer)
                 .setName("Encoder detection")
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setDesc("Detect and validate working AV1 encoder by running a test encode. This ensures hardware encoders are actually available on your system.")
                 .addButton(button => {
                     encoderDetectionButtonEl = button.buttonEl;
@@ -397,7 +386,6 @@ export class ProcessSingleImageModal extends Modal {
                         .setCta()
                         .onClick(async () => {
                             if (!this.modalSettings.ffmpegExecutablePath) {
-                                // eslint-disable-next-line obsidianmd/ui/sentence-case
                                 new Notice("Please specify FFmpeg executable path first");
                                 return;
                             }
@@ -432,7 +420,6 @@ export class ProcessSingleImageModal extends Modal {
                                         return;
                                     }
 
-                                    // eslint-disable-next-line obsidianmd/ui/sentence-case
                                     new Notice("No working AV1 encoder found. Install FFmpeg with AV1 support.", 5000);
                                     resetEncoderUi();
                                 }
@@ -447,9 +434,7 @@ export class ProcessSingleImageModal extends Modal {
                 });
 
             const crfSetting = new Setting(this.conversionSettingsContainer)
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setName("FFmpeg CRF")
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setDesc("Constant rate factor for AVIF (0-63, lower is better quality). Range varies by encoder - click 'Detect encoder' to see the specific range.")
                 .addText((text) => {
                     text.setValue(this.modalSettings.ffmpegCrf?.toString() || "")
@@ -476,9 +461,7 @@ export class ProcessSingleImageModal extends Modal {
                 });
 
             const presetSetting = new Setting(this.conversionSettingsContainer)
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setName("FFmpeg preset")
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setDesc("Encoding preset (speed vs. compression).")
                 .addDropdown(dropdown => {
                     dropdown.addOptions(
@@ -521,7 +504,6 @@ export class ProcessSingleImageModal extends Modal {
         this.resizeSettingsContainer.empty();
 
         new Setting(this.resizeSettingsContainer)
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
             .setName("Resize Mode")
             .addDropdown(dropdown => {
                 const resizeOptions: Record<ResizeMode, string> = {
@@ -548,7 +530,6 @@ export class ProcessSingleImageModal extends Modal {
              //Consolidate all text inputs that effect the generate preview function
               if (["Fit", "Fill", "Width"].includes(this.modalSettings.resizeMode)){
                 new Setting(this.resizeSettingsContainer)
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setName("Desired Width")
                 .addText(text => {
                     text.setValue(this.modalSettings.desiredWidth.toString())
@@ -563,7 +544,6 @@ export class ProcessSingleImageModal extends Modal {
               }
             if (["Fit", "Fill", "Height"].includes(this.modalSettings.resizeMode)) {
                 new Setting(this.resizeSettingsContainer)
-                    // eslint-disable-next-line obsidianmd/ui/sentence-case
                     .setName("Desired Height")
                     .addText(text => {
                         text.setValue(this.modalSettings.desiredHeight.toString())
@@ -593,7 +573,6 @@ export class ProcessSingleImageModal extends Modal {
             }
 
             new Setting(this.resizeSettingsContainer)
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 .setName("Enlarge/Reduce")
                 .addDropdown(dropdown => {
                     const enlargeReduceOptions: Record<EnlargeReduce, string> = {
@@ -726,86 +705,84 @@ export class ProcessSingleImageModal extends Modal {
             }
 
             const originalSize = this.imageFile.stat.size;
-            let processedImageBuffer: ArrayBuffer | undefined;
 
-            // --- Handle NONE and ORIGINAL formats, and resizing ---
-            if (this.modalSettings.outputFormat === "NONE" && this.modalSettings.resizeMode !== "None") {
-                // No conversion, BUT resizing is needed.
-                processedImageBuffer = await this.plugin.imageProcessor.resizeImage(
-                    imageFile,
-                    this.modalSettings.resizeMode,
-                    this.modalSettings.desiredWidth,
-                    this.modalSettings.desiredHeight,
-                    this.modalSettings.desiredLongestEdge,
-                    this.modalSettings.enlargeOrReduce
-                );
-            } else if (this.modalSettings.outputFormat === "ORIGINAL") {
-                // Compress using the original format.
-                processedImageBuffer = await this.plugin.imageProcessor.compressOriginalImage(
-                    imageFile,
-                    this.modalSettings.quality / 100,
-                    this.modalSettings.resizeMode,
-                    this.modalSettings.desiredWidth,
-                    this.modalSettings.desiredHeight,
-                    this.modalSettings.desiredLongestEdge,
-                    this.modalSettings.enlargeOrReduce
-                );
-
-            } else {
-                // All other conversion cases (WEBP, JPEG, PNG, etc.)
-                // Pass pngquant settings if applicable
-                processedImageBuffer = await this.plugin.imageProcessor.processImage(
-                    imageFile,
-                    this.modalSettings.outputFormat,
-                    this.modalSettings.outputFormat === "AVIF" ? 100 : this.modalSettings.quality / 100, // Pass 100 for quality, it is ignored,
-                    this.modalSettings.colorDepth,
-                    this.modalSettings.resizeMode,
-                    this.modalSettings.desiredWidth,
-                    this.modalSettings.desiredHeight,
-                    this.modalSettings.desiredLongestEdge,
-                    this.modalSettings.enlargeOrReduce,
-                    this.modalSettings.allowLargerFiles,
-                    this.modalSettings.outputFormat === "PNGQUANT" ? { // Pass a dummy preset with pngquant settings
-                        name: "temp",
-                        outputFormat: "PNGQUANT",
-                        quality: 100,
-                        colorDepth: 1,
-                        resizeMode: "None",
-                        desiredWidth: 0,
-                        desiredHeight: 0,
-                        desiredLongestEdge: 0,
-                        enlargeOrReduce: "Auto",
-                        allowLargerFiles: false,
-                        skipConversionPatterns: "",
-                        pngquantExecutablePath: this.modalSettings.pngquantExecutablePath,
-                        pngquantQuality: this.modalSettings.pngquantQuality,
-                    } : this.modalSettings.outputFormat === "AVIF" ? {
-                        name: "temp", // Dummy name
-                        outputFormat: "AVIF",
-                        quality: 100,
-                        colorDepth: 1,
-                        resizeMode: "None",
-                        desiredWidth: 0,
-                        desiredHeight: 0,
-                        desiredLongestEdge: 0,
-                        enlargeOrReduce: "Auto",
-                        allowLargerFiles: false,
-                        skipConversionPatterns: "",
-                        ffmpegExecutablePath: this.modalSettings.ffmpegExecutablePath,
-                        ffmpegCrf: this.modalSettings.ffmpegCrf,
-                        ffmpegPreset: this.modalSettings.ffmpegPreset,
-                        detectedEncoder: this.modalSettings.detectedEncoder,
-                    } : undefined,
-                    this.plugin.settings
-                );
+            // AVIF ignores quality. "None" resizes without compressing.
+            let quality = this.modalSettings.quality / 100;
+            if (this.modalSettings.outputFormat === "AVIF") {
+                quality = 100;
+            } else if (this.modalSettings.outputFormat === "NONE") {
+                quality = 1;
             }
+
+            // Every format, NONE and ORIGINAL included, goes through processImage so
+            // that the EXIF metadata of the source is kept.
+            // Pass pngquant settings if applicable
+            const processedImageBuffer = await this.plugin.imageProcessor.processImage(
+                imageFile,
+                this.modalSettings.outputFormat,
+                quality,
+                this.modalSettings.colorDepth,
+                this.modalSettings.resizeMode,
+                this.modalSettings.desiredWidth,
+                this.modalSettings.desiredHeight,
+                this.modalSettings.desiredLongestEdge,
+                this.modalSettings.enlargeOrReduce,
+                this.modalSettings.allowLargerFiles,
+                this.modalSettings.outputFormat === "PNGQUANT" ? { // Pass a dummy preset with pngquant settings
+                    name: "temp",
+                    outputFormat: "PNGQUANT",
+                    quality: 100,
+                    colorDepth: 1,
+                    resizeMode: "None",
+                    desiredWidth: 0,
+                    desiredHeight: 0,
+                    desiredLongestEdge: 0,
+                    enlargeOrReduce: "Auto",
+                    allowLargerFiles: false,
+                    skipConversionPatterns: "",
+                    pngquantExecutablePath: this.modalSettings.pngquantExecutablePath,
+                    pngquantQuality: this.modalSettings.pngquantQuality,
+                } : this.modalSettings.outputFormat === "AVIF" ? {
+                    name: "temp", // Dummy name
+                    outputFormat: "AVIF",
+                    quality: 100,
+                    colorDepth: 1,
+                    resizeMode: "None",
+                    desiredWidth: 0,
+                    desiredHeight: 0,
+                    desiredLongestEdge: 0,
+                    enlargeOrReduce: "Auto",
+                    allowLargerFiles: false,
+                    skipConversionPatterns: "",
+                    ffmpegExecutablePath: this.modalSettings.ffmpegExecutablePath,
+                    ffmpegCrf: this.modalSettings.ffmpegCrf,
+                    ffmpegPreset: this.modalSettings.ffmpegPreset,
+                    detectedEncoder: this.modalSettings.detectedEncoder,
+                } : undefined,
+                this.plugin.settings
+            );
 
 
             // --- File Creation/Replacement ---
-            if (processedImageBuffer && this.plugin.settings.revertToOriginalIfLarger && processedImageBuffer.byteLength > originalSize) {
+            // The file stays as it is when the image was not converted, or when the
+            // conversion saves less than the minimum savings. The dialog has no
+            // preset of its own, so the conversion preset that is selected in the
+            // settings decides.
+            const revertPolicy = getRevertPolicy(this.plugin.settings, getSelectedConversionPreset(this.plugin.settings));
+            const keepReason = reasonToKeepOriginal(originalSize, processedImageBuffer, this.modalSettings.outputFormat, revertPolicy);
+
+            if (keepReason === "notConverted") {
+                // As for an error: the dialog stays open, so another format can be tried.
+                new Notice(`"${this.imageFile.name}" could not be converted to ${this.modalSettings.outputFormat}. The file was not changed.`);
+                return;
+            }
+
+            let keptOriginal = false;
+            if (keepReason === "smallSaving") {
                 this.plugin.showSizeComparisonNotification(originalSize, processedImageBuffer.byteLength);
-                new Notice(`Using original image for "${this.imageFile.name}" as processed image is larger.`, 1000);
-                // We don't create/modify a file, but the link *might* need updating (if format changed).
+                new Notice(`Using original image for "${this.imageFile.name}" because size reduction was less than ${revertPolicy.minSavingsKB} KB.`, 1000);
+                // The file keeps its name and its content, so the link in the note stays as it is.
+                keptOriginal = true;
             } else if (processedImageBuffer) {
                 this.plugin.showSizeComparisonNotification(originalSize, processedImageBuffer.byteLength);
 
@@ -832,7 +809,7 @@ export class ProcessSingleImageModal extends Modal {
 
             // --- Update Link in Active Note ---
             const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-            if (activeView) {
+            if (activeView && !keptOriginal) {
                 const { editor } = activeView;
                 const fileContent = editor.getValue();
 

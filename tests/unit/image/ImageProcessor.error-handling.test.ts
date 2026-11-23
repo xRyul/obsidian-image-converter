@@ -12,7 +12,6 @@ vi.mock('fs/promises');
 vi.mock('os');
 vi.mock('path');
 vi.mock('sortablejs');
-vi.mock('piexifjs');
 vi.mock('../../../src/main');
 
 import { ImageProcessor } from '../../../src/ImageProcessor';
@@ -441,8 +440,9 @@ describe('ImageProcessor - Error Handling Tests', () => {
       const inputBlob1 = makeImageBlob(inputBytes1, 'image/png');
       const inputBlob2 = makeImageBlob(inputBytes2, 'image/jpeg');
       
-      // Mock canvas to fail for both
+      // Mock canvas to fail for both: toBlob gives no blob, toDataURL no data
       mockCanvas.toBlob = vi.fn((callback) => callback(null));
+      mockCanvas.toDataURL = vi.fn(() => 'data:,');
       
       // Act - Process both concurrently
       const [result1, result2] = await Promise.all([

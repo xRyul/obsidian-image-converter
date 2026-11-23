@@ -25,6 +25,27 @@ function setupImg(wrapClass = 'markdown-preview-view') {
   return img;
 }
 
+function setupLivePreviewImage() {
+  document.body.innerHTML = '';
+  const wrap = document.createElement('div');
+  wrap.className = 'markdown-source-view';
+  const embed = document.createElement('div');
+  embed.className = 'internal-embed image-embed';
+  embed.tabIndex = -1;
+  const imageWrapper = document.createElement('div');
+  imageWrapper.className = 'image-wrapper';
+  const img = document.createElement('img');
+  img.src = 'imgs/pic.jpg';
+  const corner = document.createElement('div');
+  corner.className = 'image-resize-corner';
+  imageWrapper.appendChild(img);
+  imageWrapper.appendChild(corner);
+  embed.appendChild(imageWrapper);
+  wrap.appendChild(embed);
+  document.body.appendChild(wrap);
+  return { wrap, embed, imageWrapper, img, corner };
+}
+
 describe('ContextMenu integration (14.1–14.6)', () => {
   let app: any;
   let plugin: any;
@@ -43,15 +64,41 @@ beforeEach(async () => {
 
     plugin = new ImageConverterPlugin(app as any, manifest as any);
     plugin.manifest = manifest as any;
-    plugin.settings = { enableContextMenu: true, isImageAlignmentEnabled: true } as any;
+    plugin.settings = {
+      enableContextMenu: true,
+      isImageAlignmentEnabled: true,
+      disableObsidianImageSelectionOnClick: false
+    } as any;
     plugin.supportedImageFormats = { isExcalidrawImage: () => false } as any; // default: not Excalidraw
   });
 
   describe('14.1 Document listener registration', () => {
-    it('registers a document contextmenu listener on construction', () => {
+    it('registers document listeners on construction', () => {
       const spy = vi.spyOn(document, 'addEventListener');
       const ctx = new contextMenuCls(app as any, plugin, {} as any, {} as any);
+      expect(spy).toHaveBeenCalledWith('pointerdown', expect.any(Function), true);
+      expect(spy).toHaveBeenCalledWith('mousedown', expect.any(Function), true);
       expect(spy).toHaveBeenCalledWith('contextmenu', expect.any(Function), true);
+      (ctx as any).onunload?.();
+    });
+
+    it('registers context menu listeners for popout documents when a workspace window opens', () => {
+      let onWindowOpen: ((workspaceWindow: unknown, win: { document: Document }) => void) | undefined;
+      (app.workspace.on as any) = vi.fn((eventName: string, callback: any) => {
+        if (eventName === 'window-open') onWindowOpen = callback;
+        return { eventName, callback };
+      });
+
+      const ctx = new contextMenuCls(app as any, plugin, {} as any, {} as any);
+      const popoutDocument = document.implementation.createHTMLDocument('popout');
+      const addSpy = vi.spyOn(popoutDocument, 'addEventListener');
+
+      onWindowOpen?.({} as any, { document: popoutDocument });
+
+      expect(addSpy).toHaveBeenCalledWith('pointerdown', expect.any(Function), true);
+      expect(addSpy).toHaveBeenCalledWith('mousedown', expect.any(Function), true);
+      expect(addSpy).toHaveBeenCalledWith('contextmenu', expect.any(Function), true);
+      expect(addSpy).toHaveBeenCalledWith('click', expect.any(Function), undefined);
       (ctx as any).onunload?.();
     });
   });
@@ -72,6 +119,46 @@ const ctx = new contextMenuCls(app as any, plugin, { getImagePath: () => null } 
       (app.workspace.getActiveViewOfType as any) = vi.fn(() => ({ getViewType: () => 'other' }));
       outsideImg.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       expect(showSpy).not.toHaveBeenCalled();
+      (ctx as any).onunload?.();
+    });
+
+    it('hides the previous image context menu before opening a replacement', () => {
+      const showSpy = vi
+        .spyOn((Menu as any).prototype, 'showAtMouseEvent')
+        .mockImplementation(function (this: any) { return this; });
+      const hideSpy = vi.spyOn((Menu as any).prototype, 'hide');
+      const img = setupImg('markdown-preview-view');
+      (app.workspace.getActiveViewOfType as any) = vi.fn(() => ({ getViewType: () => 'markdown' }));
+      (app.workspace.getActiveFile as any) = vi.fn(() => fakeTFile({ path: 'n1.md', name: 'n1.md', extension: 'md' }));
+      const ctx = new contextMenuCls(app as any, plugin, { getImagePath: () => null } as any, {} as any);
+
+      try {
+        img.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+        img.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+
+        expect(showSpy).toHaveBeenCalledTimes(2);
+        expect(hideSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        (ctx as any).onunload?.();
+        showSpy.mockRestore();
+        hideSpy.mockRestore();
+      }
+    });
+
+    it('suppresses native image focus on right mouse down and clears image embed focus before opening the custom context menu when click override is enabled', () => {
+      const showSpy = vi.spyOn((Menu as any).prototype, 'showAtMouseEvent');
+      plugin.settings.disableObsidianImageSelectionOnClick = true;
+      (app.workspace.getActiveViewOfType as any) = vi.fn(() => ({ getViewType: () => 'markdown' }));
+      const { corner, embed } = setupLivePreviewImage();
+      const blurSpy = vi.spyOn(embed, 'blur');
+
+      const ctx = new contextMenuCls(app as any, plugin, {} as any, {} as any);
+      const prevented = corner.dispatchEvent(new MouseEvent('mousedown', { button: 2, bubbles: true, cancelable: true }));
+      corner.dispatchEvent(new MouseEvent('contextmenu', { button: 2, bubbles: true, cancelable: true }));
+
+      expect(prevented).toBe(false);
+      expect(showSpy).toHaveBeenCalled();
+      expect(blurSpy).toHaveBeenCalled();
       (ctx as any).onunload?.();
     });
 
@@ -174,6 +261,57 @@ expect(modalSpy).toHaveBeenCalled();
       plugin.settings.isImageAlignmentEnabled = false;
       img.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       expect(alignmentSpy).not.toHaveBeenCalled();
+      (ctx as any).onunload?.();
+    });
+  });
+
+  describe('Caption input gating', () => {
+    it('removes the caption input from the image tools panel when captions are disabled', () => {
+      plugin.settings.enableImageCaptions = false;
+
+      const ctx = new contextMenuCls(app as any, plugin, { getImagePath: () => 'imgs/pic.jpg' } as any, {} as any);
+      const menuItems: Array<{ dom: HTMLElement; setTitle: any }> = [];
+      const menu = {
+        addItem(cb: (item: any) => void) {
+          const item = { dom: document.createElement('div'), setTitle: vi.fn() };
+          cb(item);
+          menuItems.push(item);
+          return this;
+        },
+        registerDomEvent(el: HTMLElement, event: string, handler: EventListener) {
+          el.addEventListener(event, handler);
+        }
+      } as any;
+
+      ctx.addRenameAndMoveInputs(menu, document.createElement('img'), fakeTFile({ path: 'n1.md', name: 'n1.md', extension: 'md' }) as any);
+
+      expect(menuItems).toHaveLength(1);
+      expect(menuItems[0].dom.querySelector('#image-converter-caption-input')).toBeNull();
+      expect(menuItems[0].dom.querySelector('#image-converter-width-input')).not.toBeNull();
+      (ctx as any).onunload?.();
+    });
+
+    it('shows the caption input in the image tools panel when captions are enabled', () => {
+      plugin.settings.enableImageCaptions = true;
+
+      const ctx = new contextMenuCls(app as any, plugin, { getImagePath: () => 'imgs/pic.jpg' } as any, {} as any);
+      const menuItems: Array<{ dom: HTMLElement; setTitle: any }> = [];
+      const menu = {
+        addItem(cb: (item: any) => void) {
+          const item = { dom: document.createElement('div'), setTitle: vi.fn() };
+          cb(item);
+          menuItems.push(item);
+          return this;
+        },
+        registerDomEvent(el: HTMLElement, event: string, handler: EventListener) {
+          el.addEventListener(event, handler);
+        }
+      } as any;
+
+      ctx.addRenameAndMoveInputs(menu, document.createElement('img'), fakeTFile({ path: 'n1.md', name: 'n1.md', extension: 'md' }) as any);
+
+      expect(menuItems).toHaveLength(1);
+      expect(menuItems[0].dom.querySelector('#image-converter-caption-input')).not.toBeNull();
       (ctx as any).onunload?.();
     });
   });

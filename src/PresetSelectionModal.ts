@@ -25,11 +25,11 @@ export class PresetSelectionModal extends Modal {
 
     private selectedGlobalPreset: GlobalPreset | null = null;
 
-    private folderPresetDropdown: Setting;
-    private filenamePresetDropdown: Setting;
-    private conversionPresetDropdown: Setting;
-    private linkFormatPresetDropdown: Setting;
-    private resizePresetDropdown: Setting;
+    private folderPresetDropdown!: Setting;
+    private filenamePresetDropdown!: Setting;
+    private conversionPresetDropdown!: Setting;
+    private linkFormatPresetDropdown!: Setting;
+    private resizePresetDropdown!: Setting;
 
     private customFilenameText: TextComponent | null = null;
     private customFolderText: TextComponent | null = null;
@@ -64,6 +64,10 @@ export class PresetSelectionModal extends Modal {
     ) {
         super(app);
         this.variableProcessor = variableProcessor;
+
+        this.selectedGlobalPreset = this.settings.globalPresets.find(
+            (preset) => preset.name === this.settings.selectedGlobalPreset
+        ) || null;
 
         // Initialize selected presets with current settings or defaults
         this.selectedConversionPreset = this.plugin.getPresetByName(
@@ -184,7 +188,6 @@ export class PresetSelectionModal extends Modal {
         
         // Title on the left
         header.createEl("h2", { 
-          // eslint-disable-next-line obsidianmd/ui/sentence-case -- Plugin name
             text: "Image Converter",
             cls: "image-converter-compact-title"
         });
@@ -279,7 +282,8 @@ export class PresetSelectionModal extends Modal {
             .addDropdown((dropdown) => {
                 presets.forEach((preset) => {
                     dropdown.addOption(preset.name, preset.name);
-                });                dropdown.setValue(selectedPreset.name);
+                });
+                dropdown.setValue(selectedPreset.name);
                 dropdown.onChange(onPresetChange);
                 
                 // Apply compact styling to the dropdown using CSS classes

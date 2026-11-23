@@ -13,6 +13,93 @@
 } */
 
 /* --- Image Converter Settings --- */
+
+/* Failsafe: when native image selection is disabled, keep Obsidian's default
+ * Live Preview image focus affordances hidden even if focus slips through for a frame.
+ */
+body.image-converter-disable-native-image-selection:not(.is-mobile)
+	.markdown-source-view
+	.image-embed:focus-within,
+body.image-converter-disable-native-image-selection:not(.is-mobile)
+	.markdown-source-view
+	.internal-embed.image-embed:focus-within {
+	outline: none !important;
+	box-shadow: none !important;
+}
+
+body.image-converter-disable-native-image-selection:not(.is-mobile)
+	.markdown-source-view
+	.image-embed:focus-within
+	.edit-block-button,
+body.image-converter-disable-native-image-selection:not(.is-mobile)
+	.markdown-source-view
+	.internal-embed.image-embed:focus-within
+	.edit-block-button {
+	opacity: 0 !important;
+	pointer-events: none !important;
+}
+
+/* Obsidian 1.13 moved image controls into an always-present toolbar that is
+ * revealed on hover. Hide the whole native toolbar so it cannot overlap the
+ * plugin's resize handles or receive pointer input.
+ */
+body.image-converter-disable-native-image-selection:not(.is-mobile)
+	.markdown-source-view
+	.image-embed
+	.embed-actions,
+body.image-converter-disable-native-image-selection:not(.is-mobile)
+	.markdown-source-view
+	.internal-embed.image-embed
+	.embed-actions {
+	display: none !important;
+	pointer-events: none !important;
+}
+
+/* The native image-reveal tooltip is absolutely positioned and escapes Obsidian's
+ * fixed-height table row. The Markdown link is the useful part of edit mode here.
+ */
+body.image-converter-disable-native-image-selection:not(.is-mobile)
+	.markdown-source-view
+	.cm-table-widget
+	.cm-image-reveal-tooltip {
+	display: none !important;
+	pointer-events: none !important;
+}
+
+body.image-converter-disable-native-image-selection:not(.is-mobile)
+	.markdown-source-view
+	.image-embed
+	.image-wrapper::after,
+body.image-converter-disable-native-image-selection:not(.is-mobile)
+	.markdown-source-view
+	.internal-embed.image-embed
+	.image-wrapper::after {
+	content: none !important;
+	box-shadow: none !important;
+}
+
+body.image-converter-disable-native-image-selection:not(.is-mobile)
+	.markdown-source-view
+	.image-embed
+	.image-resize-corner,
+body.image-converter-disable-native-image-selection:not(.is-mobile)
+	.markdown-source-view
+	.internal-embed.image-embed
+	.image-resize-corner {
+	opacity: 0 !important;
+	pointer-events: none !important;
+}
+
+body.image-converter-disable-native-image-selection:not(.is-mobile)
+	.markdown-source-view
+	.image-embed:focus-within
+	.image-resize-corner::after,
+body.image-converter-disable-native-image-selection:not(.is-mobile)
+	.markdown-source-view
+	.internal-embed.image-embed:focus-within
+	.image-resize-corner::after {
+	opacity: 0 !important;
+}
 /* Remove X icon and get use all available space*/
 .image-converter-settings-tab {
 	padding: 20px;
@@ -773,6 +860,24 @@ html[data-theme="dark"] {
 	padding: 0 6px;
 }
 
+.image-converter-setting-info-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	margin-left: 0.35em;
+	color: var(--text-muted);
+	vertical-align: text-bottom;
+	line-height: 1;
+	flex: none;
+	cursor: help;
+}
+
+.image-converter-setting-info-icon svg {
+	width: 0.9em;
+	height: 0.9em;
+	stroke-width: 2;
+}
+
 /* --- Encoder detection success styling (green state) --- */
 button.image-converter-encoder-detected,
 .image-converter-encoder-detected.button,
@@ -1425,6 +1530,11 @@ button.image-converter-encoder-detected:hover,
 	box-shadow: var(--shadow-l);
 	display: flex;
 	flex-direction: column;
+	overflow: hidden;
+}
+
+.image-converter-annotation-tool-image-annotation-modal .image-converter-annotation-tool-modal-content {
+	padding: 0;
 	overflow: hidden;
 }
 
@@ -2929,6 +3039,24 @@ button.image-converter-encoder-detected:hover,
 	padding: 1em;
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 4px;
+}
+
+.image-convert-modal .image-converter-ignore-folders-help {
+	margin: -0.35rem 0 0.75rem;
+}
+
+.image-convert-modal .image-converter-ignore-folders-help-summary {
+	cursor: pointer;
+	color: var(--text-muted);
+	font-size: 0.9em;
+}
+
+.image-convert-modal .image-converter-ignore-folders-help-content {
+	margin-top: 8px;
+	padding-left: 12px;
+	border-left: 2px solid var(--background-modifier-border);
+	color: var(--text-muted);
+	font-size: 0.9em;
 }
 
 /* ============================================ */

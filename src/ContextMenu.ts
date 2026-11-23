@@ -12,7 +12,7 @@ import {
 	MarkdownView,
 	Editor,
 } from "obsidian";
-// eslint-disable-next-line import/no-nodejs-modules -- Required for path manipulation; Obsidian runs on Electron with Node.js support
+// Required for path manipulation; Obsidian runs on Electron with Node.js support
 import * as path from "path";
 import ImageConverterPlugin from "./main";
 import { FolderAndFilenameManagement } from "./FolderAndFilenameManagement";
@@ -29,8 +29,6 @@ interface ImageMatch {
 	fullMatch: string;
 }
 
-/** Internal Obsidian Menu type with hide method (not in public API) */
-type MenuWithHide = Menu & { hide?: () => void };
 
 /** Internal MarkdownView type with file property (not in public API) */
 type MarkdownViewWithFile = MarkdownView & { file?: TFile | null };
@@ -44,6 +42,7 @@ type FileExplorerView = { revealInFolder?: (file: TFile) => void };
 export class ContextMenu extends Component {
 	private contextMenuRegistered = false;
 	private currentMenu: Menu | null = null;
+	private registeredContextMenuDocuments = new WeakSet<Document>();
 
 	private readonly stopPropagationHandler = (e: Event) => e.stopPropagation();
 
@@ -64,10 +63,44 @@ export class ContextMenu extends Component {
 	}
 
 	/**
-	 * Hides a menu using the internal hide method.
+	 * Hides a menu. Obsidian exposes Menu.hide() publicly; optional chaining keeps tests with partial fakes safe.
 	 */
 	private hideMenu(menu: Menu): void {
-		(menu as MenuWithHide).hide?.();
+		menu.hide?.();
+	}
+
+	private closeCurrentMenu(): void {
+		const menu = this.currentMenu;
+		if (!menu) {
+			return;
+		}
+
+		this.currentMenu = null;
+		this.hideMenu(menu);
+	}
+
+	/**
+	 * Clears Obsidian's native image focus state so the default block edit affordances
+	 * do not reappear when our custom context menu is opened.
+	 */
+	private clearNativeImageFocus(img: HTMLImageElement): void {
+		if (!this.plugin.settings.disableObsidianImageSelectionOnClick) {
+			return;
+		}
+
+		if (!img.closest(".markdown-source-view")) {
+			return;
+		}
+
+		const { activeElement } = img.ownerDocument;
+		if (activeElement instanceof HTMLElement && activeElement.closest(".image-embed")) {
+			activeElement.blur();
+		}
+
+		const imageEmbed = img.closest(".image-embed");
+		if (imageEmbed instanceof HTMLElement) {
+			imageEmbed.blur();
+		}
 	}
 
 	/**
@@ -96,15 +129,17 @@ export class ContextMenu extends Component {
 	}
 
 	private readonly documentClickHandler = (event: MouseEvent) => {
+		const { target } = event;
+		if (!(target instanceof Element)) {
+			this.closeCurrentMenu();
+			return;
+		}
+
 		if (
-			!(event.target as HTMLElement).closest(
-				".image-converter-contextmenu-info-container"
-			) &&
-			!(event.target as HTMLElement).closest(".menu-item")
+			!target.closest(".image-converter-contextmenu-info-container") &&
+			!target.closest(".menu-item")
 		) {
-			if (this.currentMenu) {
-				this.hideMenu(this.currentMenu);
-			}
+			this.closeCurrentMenu();
 		}
 	};
 
@@ -126,16 +161,62 @@ export class ContextMenu extends Component {
 	 * Registers the context menu listener on the document.
 	 * This listener will trigger the context menu when an image is right-clicked.
 	 */
+	private registerContextMenuListenerForDocument(ownerDocument: Document): void {
+		if (this.registeredContextMenuDocuments.has(ownerDocument)) {
+			return;
+		}
+
+		this.registerDomEvent(
+			ownerDocument,
+			"pointerdown",
+			this.handleContextMenuPointerDownCapture,
+			true
+		);
+		this.registerDomEvent(
+			ownerDocument,
+			"mousedown",
+			this.handleContextMenuMouseDownCapture,
+			true
+		);
+		this.registerDomEvent(
+			ownerDocument,
+			"contextmenu",
+			this.handleContextMenuEvent,
+			true
+		);
+		this.registerDomEvent(
+			ownerDocument,
+			"click",
+			this.documentClickHandler
+		);
+		this.registeredContextMenuDocuments.add(ownerDocument);
+	}
+
+	private registerContextMenuListenersForWorkspaceDocuments(): void {
+		this.registerContextMenuListenerForDocument(activeDocument);
+		const workspaceDocument = this.app.workspace.containerEl?.ownerDocument;
+		if (workspaceDocument) {
+			this.registerContextMenuListenerForDocument(workspaceDocument);
+		}
+
+		this.app.workspace.iterateAllLeaves?.((leaf) => {
+			const leafDocument = leaf.view?.containerEl?.ownerDocument;
+			if (leafDocument) {
+				this.registerContextMenuListenerForDocument(leafDocument);
+			}
+		});
+	}
+
 	registerContextMenuListener() {
 		if (this.contextMenuRegistered) {
 			return;
 		}
 
-		this.registerDomEvent(
-			document,
-			"contextmenu",
-			this.handleContextMenuEvent,
-			true
+		this.registerContextMenuListenersForWorkspaceDocuments();
+		this.registerEvent(
+			this.app.workspace.on("window-open", (_workspaceWindow, win) => {
+				this.registerContextMenuListenerForDocument(win.document);
+			})
 		);
 		this.contextMenuRegistered = true;
 	}
@@ -145,6 +226,78 @@ export class ContextMenu extends Component {
 	 * This function is called when the context menu is triggered on an image.
 	 * @param event - The MouseEvent object.
 	 */
+	private resolveImageFromTarget(target: HTMLElement): HTMLImageElement | null {
+		if (target.instanceOf(HTMLImageElement)) {
+			return target;
+		}
+
+		const wrapper = target.closest(".image-wrapper, .image-embed");
+		if (!wrapper) {
+			return null;
+		}
+
+		const img = wrapper.querySelector(".image-resize-container img, img");
+		return img?.instanceOf(HTMLImageElement) ? img : null;
+	}
+
+	private getImageTargetForNativeFocusSuppression(
+		event: MouseEvent | PointerEvent
+	): HTMLImageElement | null {
+		if (!this.plugin.settings.disableObsidianImageSelectionOnClick) {
+			return null;
+		}
+
+		if (event.button !== 2) {
+			return null;
+		}
+
+		const { target } = event;
+		if (!(target instanceof HTMLElement)) {
+			return null;
+		}
+
+		const img = this.resolveImageFromTarget(target);
+		if (!(img instanceof HTMLImageElement)) {
+			return null;
+		}
+
+		if (!img.closest(".markdown-source-view")) {
+			return null;
+		}
+
+		if (this.plugin.supportedImageFormats.isExcalidrawImage(img)) {
+			return null;
+		}
+
+		return img;
+	}
+
+	private suppressNativeImageFocusOnRightMouseDown(
+		event: MouseEvent | PointerEvent
+	): void {
+		const img = this.getImageTargetForNativeFocusSuppression(event);
+		if (!img) {
+			return;
+		}
+
+		event.preventDefault();
+		event.stopPropagation();
+		event.stopImmediatePropagation();
+		this.clearNativeImageFocus(img);
+	}
+
+	handleContextMenuPointerDownCapture = (event: PointerEvent) => {
+		if (event.pointerType && event.pointerType !== "mouse") {
+			return;
+		}
+
+		this.suppressNativeImageFocusOnRightMouseDown(event);
+	};
+
+	handleContextMenuMouseDownCapture = (event: MouseEvent) => {
+		this.suppressNativeImageFocusOnRightMouseDown(event);
+	};
+
 	handleContextMenuEvent = (event: MouseEvent) => {
 		const target = event.target as HTMLElement;
 		const activeView = this.app.workspace.getActiveViewOfType(View);
@@ -154,8 +307,7 @@ export class ContextMenu extends Component {
 			return;
 		}
 
-		const img =
-			target instanceof HTMLImageElement ? target : target.closest("img");
+		const img = this.resolveImageFromTarget(target);
 		if (!img) {
 			return;
 		}
@@ -181,14 +333,24 @@ export class ContextMenu extends Component {
 
 		event.preventDefault(); // prevents the default context menu from appearing (if any)
 		event.stopPropagation(); // prevents the event from bubbling up to parent elements (like the callout)
+		this.clearNativeImageFocus(img);
 
-	   const menu = new Menu();
-	   let activeFile = this.app.workspace.getActiveFile();
-	   if (!activeFile) {
-		  // Fallback: try to get file from MarkdownView (file property exists but isn't in public types)
-		  const mv = this.app.workspace.getActiveViewOfType(MarkdownView);
-		  activeFile = this.getFileFromView(mv);
-	   }
+		this.closeCurrentMenu();
+
+		const menu = new Menu();
+		this.currentMenu = menu;
+		menu.onHide(() => {
+			if (this.currentMenu === menu) {
+				this.currentMenu = null;
+			}
+		});
+
+		let activeFile = this.app.workspace.getActiveFile();
+		if (!activeFile) {
+			// Fallback: try to get file from MarkdownView (file property exists but isn't in public types)
+			const mv = this.app.workspace.getActiveViewOfType(MarkdownView);
+			activeFile = this.getFileFromView(mv);
+		}
 
 		if (activeFile) {
 			this.createContextMenuItems(menu, img, activeFile, event);
@@ -267,6 +429,80 @@ export class ContextMenu extends Component {
 	/*                        CAPTION INPUT                            */
 	/*-----------------------------------------------------------------*/
 
+	private isDimensionsPart(part: string): boolean {
+		return /^\s*\d+(?:x\d+)?\s*$/.test(part);
+	}
+
+	private getCaptionFromFullMatch(fullMatch: string, inTable: boolean): string {
+		// Handle wiki-style links
+		if (fullMatch.startsWith("![[") && fullMatch.endsWith("]]")) {
+			const inner = fullMatch.slice(3, -2);
+
+			// Check if this wikilink uses escaped delimiters (Obsidian may auto-escape in tables)
+			// If it contains \| but no unescaped |, parse with escaped delimiters
+			const hasEscapedPipes = inner.includes("\\|");
+			const hasUnescapedPipes = /(?<!\\)\|/.test(inner);
+
+			let parts: string[];
+			if (hasEscapedPipes && !hasUnescapedPipes) {
+				// Obsidian-escaped format: ![[path\|caption\|dimensions]]
+				parts = inner.split(/\\\|/);
+			} else {
+				// Standard format: ![[path|caption|dimensions]]
+				// Split on unescaped pipes, keeping escaped pipes intact
+				parts = inner.split(/(?<!\\)\|/);
+			}
+
+			if (parts.length >= 2) {
+				const secondPart = parts[1] ?? "";
+				const thirdPart = parts[2] ?? "";
+
+				// If third part exists and is a dimension, second part is caption
+				if (thirdPart && this.isDimensionsPart(thirdPart)) {
+					return this.unescapePipes(secondPart.trim());
+				}
+				// If third part exists but is not a dimension, second part is caption if not dimension-like
+				if (thirdPart && !this.isDimensionsPart(secondPart)) {
+					return this.unescapePipes(secondPart.trim());
+				}
+				// If only second part exists and is not a dimension, it's the caption
+				if (!thirdPart && !this.isDimensionsPart(secondPart)) {
+					return this.unescapePipes(secondPart.trim());
+				}
+			}
+			return "";
+		}
+
+		// Handle markdown-style links in tables: ![caption\|dimensions](path)
+		// For markdown links in tables, the pipe between caption and dimensions IS escaped.
+		if (inTable) {
+			const mdTableMatch = fullMatch.match(/!\[([^\]]*)\]\(([^)]+)\)/);
+			if (mdTableMatch) {
+				const alt = mdTableMatch[1] ?? "";
+				const parts = alt.split(/\\\|/);
+				if (parts.length > 1) {
+					const last = parts[parts.length - 1] ?? "";
+					const captionParts = this.isDimensionsPart(last) ? parts.slice(0, -1) : parts;
+					return captionParts.join("|").trim();
+				}
+				// Single part means no escaped pipe - just return it
+				return this.unescapePipes(parts[0].trim());
+			}
+		}
+
+		// Handle markdown-style links (non-table)
+		const markdownMatch = fullMatch.match(
+			/!\[([^|\]]*?)(?:\\?\|(\d+x\d+))?\]\(([^)]+)\)/
+		);
+		if (markdownMatch) {
+			const caption = markdownMatch[1] || "";
+			// If the delimiter pipe was escaped (\\|), markdownMatch[1] may end with a stray '\\'.
+			return this.unescapePipes(caption.replace(/\\$/, "").trim());
+		}
+
+		return "";
+	}
+
 	private async loadCurrentCaption(
 		img: HTMLImageElement,
 		activeFile: TFile
@@ -289,78 +525,8 @@ export class ContextMenu extends Component {
 
 			if (matches && matches.length > 0) {
 				const [firstMatch] = matches;
-
 				const inTable = this.isTableRow(firstMatch.line);
-
-				// Handle wiki-style links
-				if (firstMatch.fullMatch.startsWith("![[") && firstMatch.fullMatch.endsWith("]]")) {
-					const inner = firstMatch.fullMatch.slice(3, -2);
-
-					// Check if this wikilink uses escaped delimiters (Obsidian may auto-escape in tables)
-					// If it contains \| but no unescaped |, parse with escaped delimiters
-					const hasEscapedPipes = inner.includes("\\|");
-					const hasUnescapedPipes = /(?<!\\)\|/.test(inner);
-
-					const isDimensions = (part: string) =>
-						/^\s*\d+(?:x\d+)?\s*$/.test(part);
-
-					let parts: string[];
-					if (hasEscapedPipes && !hasUnescapedPipes) {
-						// Obsidian-escaped format: ![[path\|caption\|dimensions]]
-						parts = inner.split(/\\\|/);
-					} else {
-						// Standard format: ![[path|caption|dimensions]]
-						// Split on unescaped pipes, keeping escaped pipes intact
-						parts = inner.split(/(?<!\\)\|/);
-					}
-
-					if (parts.length >= 2) {
-						const secondPart = parts[1] ?? "";
-						const thirdPart = parts[2] ?? "";
-
-						// If third part exists and is a dimension, second part is caption
-						if (thirdPart && isDimensions(thirdPart)) {
-							return this.unescapePipes(secondPart.trim());
-						}
-						// If third part exists but is not a dimension, second part is caption if not dimension-like
-						if (thirdPart && !isDimensions(secondPart)) {
-							return this.unescapePipes(secondPart.trim());
-						}
-						// If only second part exists and is not a dimension, it's the caption
-						if (!thirdPart && !isDimensions(secondPart)) {
-							return this.unescapePipes(secondPart.trim());
-						}
-					}
-					return "";
-				}
-
-				// Handle markdown-style links in tables: ![caption\|dimensions](path)
-				// For markdown links in tables, the pipe between caption and dimensions IS escaped.
-				if (inTable) {
-					const mdTableMatch = firstMatch.fullMatch.match(/!\[([^\]]*)\]\(([^)]+)\)/);
-					if (mdTableMatch) {
-						const alt = mdTableMatch[1] ?? "";
-						const parts = alt.split(/\\\|/);
-						if (parts.length > 1) {
-							const isDimensions = (part: string) => /^\s*\d+(?:x\d+)?\s*$/.test(part);
-							const last = parts[parts.length - 1] ?? "";
-							const captionParts = isDimensions(last) ? parts.slice(0, -1) : parts;
-							return captionParts.join("|").trim();
-						}
-						// Single part means no escaped pipe - just return it
-						return this.unescapePipes(parts[0].trim());
-					}
-				}
-
-				// Handle markdown-style links (non-table)
-				const markdownMatch = firstMatch.fullMatch.match(
-					/!\[([^|\]]*?)(?:\\?\|(\d+x\d+))?\]\(([^)]+)\)/
-				);
-				if (markdownMatch) {
-					const caption = markdownMatch[1] || "";
-					// If the delimiter pipe was escaped (\\|), markdownMatch[1] may end with a stray '\\'.
-					return this.unescapePipes(caption.replace(/\\$/, "").trim());
-				}
+				return this.getCaptionFromFullMatch(firstMatch.fullMatch, inTable);
 			}
 			return "";
 		} catch (error) {
@@ -479,7 +645,7 @@ export class ContextMenu extends Component {
 	private async updateImageLinkWithDimensions(
 		editor: Editor,
 		match: { lineNumber: number; line: string },
-		newCaption: string,
+		newCaption: string | null,
 		width: string,
 		height: string
 	): Promise<string> {
@@ -495,16 +661,6 @@ export class ContextMenu extends Component {
 		// Check if line is inside a table row
 		const inTable = this.isTableRow(line);
 
-		// In tables, Obsidian's table parser runs BEFORE the wikilink parser.
-		// This means pipes inside ![[...]] are still treated as column delimiters.
-		// We must escape ALL pipes (delimiter and content) in tables to prevent column splits.
-		// The ImageCaptionManager will strip the trailing backslash from rendered captions.
-		//
-		// For markdown links (![...]()), the same applies to the alt text section.
-		const escapedCaption = inTable
-			? this.escapePipesForTable(newCaption)
-			: newCaption;
-
 		// Pipe character: escaped in tables to prevent table column split
 		const wikiPipe = inTable ? "\\|" : "|";
 
@@ -513,6 +669,13 @@ export class ContextMenu extends Component {
 			return line.replace(
 				/!\[\[([^\]]+?)(?:\\?\|([^|\]]+?))?\s*(?:\\?\|([^|\]]+?))?\]\]/g,
 				(fullMatch, path) => {
+					const effectiveCaption = newCaption === null
+						? this.getCaptionFromFullMatch(fullMatch, inTable)
+						: newCaption;
+					const escapedCaption = inTable
+						? this.escapePipesForTable(effectiveCaption)
+						: effectiveCaption;
+
 					if (escapedCaption && dimensionsPart) {
 						return `![[${path}${wikiPipe}${escapedCaption}${wikiPipe}${dimensionsPart}]]`;
 					}
@@ -533,6 +696,13 @@ export class ContextMenu extends Component {
 		return line.replace(
 			/!\[([^|\]]*?)(?:\\?\|(\d+(?:x\d+)?))?\]\(([^)]+)\)/g,
 			(fullMatch, caption, dimensions, path) => {
+				const effectiveCaption = newCaption === null
+					? this.getCaptionFromFullMatch(fullMatch, inTable)
+					: newCaption;
+				const escapedCaption = inTable
+					? this.escapePipesForTable(effectiveCaption)
+					: effectiveCaption;
+
 				if (escapedCaption && dimensionsPart) {
 					return `![${escapedCaption}${mdPipe}${dimensionsPart}](${path})`;
 				}
@@ -549,7 +719,7 @@ export class ContextMenu extends Component {
 
 	private async handleDimensionsAndCaptionUpdate(
 		menu: Menu,
-		captionInput: HTMLInputElement,
+		captionInput: HTMLInputElement | null,
 		widthInput: HTMLInputElement,
 		heightInput: HTMLInputElement,
 		img: HTMLImageElement,
@@ -558,7 +728,7 @@ export class ContextMenu extends Component {
 	) {
 		if (!isImageResolvable) return;
 
-		const newCaption = captionInput.value.trim();
+		const newCaption = captionInput ? captionInput.value.trim() : null;
 		const width = widthInput.value.trim();
 		const height = heightInput.value.trim();
 
@@ -599,7 +769,11 @@ export class ContextMenu extends Component {
 				);
 				editor.setLine(match.lineNumber, updatedLine);
 			}
-			new Notice("Image caption and dimensions updated successfully.");
+			new Notice(
+				newCaption === null
+					? "Image dimensions updated successfully."
+					: "Image caption and dimensions updated successfully."
+			);
 			this.plugin.captionManager?.refresh();
 		};
 
@@ -627,13 +801,9 @@ export class ContextMenu extends Component {
 	/*                      RENAME AND MOVE IMAGE                      */
 	/*-----------------------------------------------------------------*/
 
-	// All event listeners use this.registerDomEvent()
-	// The Component class's onunload() will clean these up automatically
-	// Even though we add these listeners each time the menu is created, they'll be cleaned up when:
-
-	// The menu is closed (DOM elements are removed)
-	// The component is unloaded
-	// The plugin is disabled
+	// Long-lived document listeners are registered on this Component once.
+	// Menu-local listeners are attached directly to transient menu elements so opening
+	// many menus does not grow Component._events until plugin unload.
 	/**
 	 * Adds input fields for renaming and moving the image to the context menu.
 	 * @param menu - The Menu object to add the input fields to.
@@ -677,28 +847,29 @@ export class ContextMenu extends Component {
 
 		menu.addItem((item) => {
 				const menuItem = item as MenuItemWithDom;
+				const ownerDocument = menuItem.dom?.ownerDocument ?? img.ownerDocument;
 
 				// Create main container
-				const inputContainer = document.createElement("div");
+				const inputContainer = ownerDocument.createElement("div");
 				inputContainer.className =
 					"image-converter-contextmenu-info-container";
 
 				// Create name input group
-				const nameGroup = document.createElement("div");
+				const nameGroup = ownerDocument.createElement("div");
 				nameGroup.className = "image-converter-contextmenu-input-group";
 
-				const nameIcon = document.createElement("div");
+				const nameIcon = ownerDocument.createElement("div");
 				nameIcon.className =
 					"image-converter-contextmenu-icon-container";
 				setIcon(nameIcon, "file-text");
 				nameGroup.appendChild(nameIcon);
 
-				const nameLabel = document.createElement("label");
+				const nameLabel = ownerDocument.createElement("label");
 				nameLabel.textContent = "Name:";
 				nameLabel.setAttribute("for", "image-converter-name-input");
 				nameGroup.appendChild(nameLabel);
 
-				const nameInput = document.createElement("input");
+				const nameInput = ownerDocument.createElement("input");
 				nameInput.type = "text";
 				nameInput.value = fileNameWithoutExt;
 				nameInput.placeholder = "Enter a new image name";
@@ -712,21 +883,21 @@ export class ContextMenu extends Component {
 				nameGroup.appendChild(nameInput);
 
 				// Create path input group
-				const pathGroup = document.createElement("div");
+				const pathGroup = ownerDocument.createElement("div");
 				pathGroup.className = "image-converter-contextmenu-input-group";
 
-				const pathIcon = document.createElement("div");
+				const pathIcon = ownerDocument.createElement("div");
 				pathIcon.className =
 					"image-converter-contextmenu-icon-container";
 				setIcon(pathIcon, "folder");
 				pathGroup.appendChild(pathIcon);
 
-				const pathLabel = document.createElement("label");
+				const pathLabel = ownerDocument.createElement("label");
 				pathLabel.textContent = "Folder:";
 				pathLabel.setAttribute("for", "image-converter-path-input");
 				pathGroup.appendChild(pathLabel);
 
-				const pathInput = document.createElement("input");
+				const pathInput = ownerDocument.createElement("input");
 				pathInput.type = "text";
 				pathInput.value = directoryPath;
 				pathInput.placeholder = "Enter a new path for the image";
@@ -739,45 +910,51 @@ export class ContextMenu extends Component {
 				}
 				pathGroup.appendChild(pathInput);
 
-				// Create caption input group
-				const captionGroup = document.createElement("div");
-				captionGroup.className =
-					"image-converter-contextmenu-input-group";
+				const shouldShowCaptionInput =
+					this.plugin.settings.enableImageCaptions === true;
+				let captionGroup: HTMLDivElement | null = null;
+				let captionInput: HTMLInputElement | null = null;
 
-				const captionIcon = document.createElement("div");
-				captionIcon.className =
-					"image-converter-contextmenu-icon-container";
-				setIcon(captionIcon, "subtitles");
-				captionGroup.appendChild(captionIcon);
+				if (shouldShowCaptionInput) {
+					captionGroup = ownerDocument.createElement("div");
+					captionGroup.className =
+						"image-converter-contextmenu-input-group";
 
-				const captionLabel = document.createElement("label");
-				captionLabel.textContent = "Caption:";
-				captionLabel.setAttribute(
-					"for",
-					"image-converter-caption-input"
-				);
-				captionGroup.appendChild(captionLabel);
+					const captionIcon = ownerDocument.createElement("div");
+					captionIcon.className =
+						"image-converter-contextmenu-icon-container";
+					setIcon(captionIcon, "subtitles");
+					captionGroup.appendChild(captionIcon);
 
-				const captionInput = document.createElement("input");
-				captionInput.type = "text";
-				captionInput.placeholder = "Loading caption...";
-				captionInput.className =
-					"image-converter-contextmenu-caption-input";
-				captionInput.id = "image-converter-caption-input";
-				captionGroup.appendChild(captionInput);
+					const captionLabel = ownerDocument.createElement("label");
+					captionLabel.textContent = "Caption:";
+					captionLabel.setAttribute(
+						"for",
+						"image-converter-caption-input"
+					);
+					captionGroup.appendChild(captionLabel);
+
+					captionInput = ownerDocument.createElement("input");
+					captionInput.type = "text";
+					captionInput.placeholder = "Loading caption...";
+					captionInput.className =
+						"image-converter-contextmenu-caption-input";
+					captionInput.id = "image-converter-caption-input";
+					captionGroup.appendChild(captionInput);
+				}
 
 				// Create dimensions input group
-				const dimensionsGroup = document.createElement("div");
+				const dimensionsGroup = ownerDocument.createElement("div");
 				dimensionsGroup.className =
 					"image-converter-contextmenu-input-group";
 
-				const dimensionsIcon = document.createElement("div");
+				const dimensionsIcon = ownerDocument.createElement("div");
 				dimensionsIcon.className =
 					"image-converter-contextmenu-icon-container";
 				setIcon(dimensionsIcon, "aspect-ratio");
 				dimensionsGroup.appendChild(dimensionsIcon);
 
-				const dimensionsLabel = document.createElement("label");
+				const dimensionsLabel = ownerDocument.createElement("label");
 				dimensionsLabel.textContent = "Size:";
 				dimensionsLabel.setAttribute(
 					"for",
@@ -786,7 +963,7 @@ export class ContextMenu extends Component {
 				dimensionsGroup.appendChild(dimensionsLabel);
 
 				// Create width input
-				const widthInput = document.createElement("input");
+				const widthInput = ownerDocument.createElement("input");
 				widthInput.type = "number";
 				widthInput.min = "1";
 				widthInput.placeholder = "W";
@@ -795,7 +972,7 @@ export class ContextMenu extends Component {
 				widthInput.id = "image-converter-width-input";
 
 				// Create height input
-				const heightInput = document.createElement("input");
+				const heightInput = ownerDocument.createElement("input");
 				heightInput.type = "number";
 				heightInput.min = "1";
 				heightInput.placeholder = "H";
@@ -804,12 +981,12 @@ export class ContextMenu extends Component {
 				heightInput.id = "image-converter-height-input";
 
 				// Create dimension inputs container
-				const dimensionInputsContainer = document.createElement("div");
+				const dimensionInputsContainer = ownerDocument.createElement("div");
 				dimensionInputsContainer.className =
 					"image-converter-contextmenu-dimension-inputs";
 				dimensionInputsContainer.appendChild(widthInput);
 				dimensionInputsContainer.appendChild(
-					document.createTextNode("×")
+					ownerDocument.createTextNode("×")
 				); // multiplication symbol
 				dimensionInputsContainer.appendChild(heightInput);
 
@@ -828,60 +1005,50 @@ export class ContextMenu extends Component {
 				// Add all groups to container
 				inputContainer.appendChild(nameGroup);
 				inputContainer.appendChild(pathGroup);
-				inputContainer.appendChild(captionGroup);
+				if (captionGroup) {
+					inputContainer.appendChild(captionGroup);
+				}
 				inputContainer.appendChild(dimensionsGroup);
 
 				// Add single confirm button
-				const confirmButton = document.createElement("div");
+				const confirmButton = ownerDocument.createElement("div");
 				confirmButton.className =
 					"image-converter-contextmenu-button image-converter-contextmenu-confirm";
 				setIcon(confirmButton, "check");
 				inputContainer.appendChild(confirmButton);
 
-				// Register event listeners for all inputs
-				[
+				// Register menu-local listeners on the transient Menu component, not on the long-lived ContextMenu.
+				const interactiveInputs = [
 					nameInput,
 					pathInput,
-					captionInput,
 					widthInput,
 					heightInput,
-				].forEach((input) => {
-					this.registerDomEvent(
-						input,
-						"mousedown",
-						this.stopPropagationHandler
-					);
-					this.registerDomEvent(
-						input,
-						"click",
-						this.stopPropagationHandler
-					);
-					this.registerDomEvent(
-						input,
-						"keydown",
-						this.stopPropagationHandler
-					);
+				];
+				if (captionInput) {
+					interactiveInputs.splice(2, 0, captionInput);
+				}
+
+				interactiveInputs.forEach((input) => {
+					menu.registerDomEvent(input, "mousedown", this.stopPropagationHandler);
+					menu.registerDomEvent(input, "click", this.stopPropagationHandler);
+					menu.registerDomEvent(input, "keydown", this.stopPropagationHandler);
 				});
 
-				this.registerDomEvent(
-					document,
-					"click",
-					this.documentClickHandler
-				);
+				if (captionInput) {
+					// Load the current caption asynchronously
+					this.loadCurrentCaption(img, activeFile)
+						.then((currentCaption) => {
+							captionInput.value = currentCaption;
+							captionInput.placeholder = "Enter a custom caption";
+						})
+						.catch((error: unknown) => {
+							console.error("Failed to load caption:", error);
+							captionInput.placeholder = "Enter a custom caption";
+						});
+				}
 
-				// Load the current caption asynchronously
-				this.loadCurrentCaption(img, activeFile)
-					.then((currentCaption) => {
-						captionInput.value = currentCaption;
-						captionInput.placeholder = "Enter a custom caption";
-					})
-					.catch((error: unknown) => {
-						console.error("Failed to load caption:", error);
-						captionInput.placeholder = "Enter a custom caption";
-					});
-
-				// Single confirm button handler
-				this.registerDomEvent(confirmButton, "click", async () => {
+				// Register the confirm handler on the transient Menu component so it is disposed when the menu hides.
+				menu.registerDomEvent(confirmButton, "click", async () => {
 					if (isImageResolvable) {
 						// First handle rename and move
 						await this.handleRenameAndMove(
@@ -911,7 +1078,7 @@ export class ContextMenu extends Component {
 				});
 
 				// Clear and set the menu item content (gracefully handle test mocks without a DOM property)
-				const maybeDom = menuItem.dom as (HTMLElement & { empty?: () => void }) | undefined;
+				const maybeDom = menuItem.dom;
 				if (maybeDom && typeof maybeDom.appendChild === "function") {
 					// If Obsidian exposes a DOM element, populate it
 					if (typeof maybeDom.empty === "function") {
@@ -925,7 +1092,7 @@ export class ContextMenu extends Component {
 					maybeDom.appendChild(inputContainer);
 				} else {
 					// Minimal fallback for test environment without MenuItem DOM
-					(menuItem as MenuItemWithDom & { setTitle?: (title: string) => void }).setTitle?.("Image tools");
+					menuItem.setTitle?.("Image tools");
 				}
 			});
 		}
@@ -1530,7 +1697,6 @@ export class ContextMenu extends Component {
 					}
 				);
 				if (!found) {
-					// eslint-disable-next-line obsidianmd/ui/sentence-case -- Base64 is a proper technical term
 					new Notice("Failed to find Base64 image link");
 				}
 				return;
@@ -1623,10 +1789,14 @@ export class ContextMenu extends Component {
 		img.crossOrigin = "anonymous";
 		const targetImg = event.target as HTMLImageElement;
 
-		// Use this.registerDomEvent() for proper cleanup
-		this.registerDomEvent(img, "load", async () => {
+		const clearImageHandlers = () => {
+			img.onload = null;
+			img.onerror = null;
+		};
+
+		img.onload = async () => {
 			try {
-				const canvas = document.createElement("canvas");
+				const canvas = targetImg.ownerDocument.createElement("canvas");
 				canvas.width = img.naturalWidth;
 				canvas.height = img.naturalHeight;
 				const ctx = canvas.getContext("2d");
@@ -1642,8 +1812,15 @@ export class ContextMenu extends Component {
 			} catch (error) {
 				console.error("Failed to copy image:", error);
 				new Notice("Failed to copy image to clipboard");
+			} finally {
+				clearImageHandlers();
 			}
-		});
+		};
+
+		img.onerror = () => {
+			clearImageHandlers();
+			new Notice("Failed to load image for clipboard");
+		};
 
 		img.src = targetImg.src;
 	}
@@ -1660,7 +1837,6 @@ export class ContextMenu extends Component {
 	addCopyBase64ImageMenuItem(menu: Menu, event: MouseEvent) {
 		menu.addItem((item: MenuItem) =>
 			item
-				// eslint-disable-next-line obsidianmd/ui/sentence-case -- Base64 is a proper technical term
 				.setTitle("Copy as Base64 encoded image")
 				.setIcon("copy")
 				.onClick(() => {
@@ -1678,9 +1854,14 @@ export class ContextMenu extends Component {
 		const img = new Image();
 		img.crossOrigin = "anonymous";
 
-		this.registerDomEvent(img, "load", async () => {
+		const clearImageHandlers = () => {
+			img.onload = null;
+			img.onerror = null;
+		};
+
+		img.onload = async () => {
 			try {
-				const canvas = document.createElement("canvas");
+				const canvas = targetImg.ownerDocument.createElement("canvas");
 				canvas.width = img.naturalWidth;
 				canvas.height = img.naturalHeight;
 				const ctx = canvas.getContext("2d");
@@ -1691,14 +1872,19 @@ export class ContextMenu extends Component {
 				ctx.drawImage(img, 0, 0);
 				const dataURL = canvas.toDataURL();
 				await navigator.clipboard.writeText(`<img src="${dataURL}"/>`);
-				// eslint-disable-next-line obsidianmd/ui/sentence-case -- Base64 is a proper technical term
 				new Notice("Image copied to clipboard as Base64");
 			} catch (error) {
 				console.error("Failed to copy image as Base64:", error);
-				// eslint-disable-next-line obsidianmd/ui/sentence-case -- Base64 is a proper technical term
 				new Notice("Failed to copy image as Base64");
+			} finally {
+				clearImageHandlers();
 			}
-		});
+		};
+
+		img.onerror = () => {
+			clearImageHandlers();
+			new Notice("Failed to load image for base64 copy");
+		};
 
 		img.src = targetImg.src;
 	}
@@ -1871,7 +2057,7 @@ export class ContextMenu extends Component {
 							  }) || matchingFiles[0];
 
 					if (file instanceof TFile) {
-						new Crop(this.app, file).open();
+						new Crop(this.app, file, this.plugin.settings.metadataMode).open();
 					} else {
 						new Notice("Unable to locate image file");
 					}
@@ -2118,7 +2304,6 @@ export class ContextMenu extends Component {
 					}
 				);
 			if (!found) {
-				// eslint-disable-next-line obsidianmd/ui/sentence-case -- Base64 is a proper technical term
 				new Notice("Failed to find Base64 image link");
 			}
 				return;
@@ -2196,14 +2381,14 @@ export class ContextMenu extends Component {
 			// Show info in confirmation MODAL if more than 1 UNIQUE image were found
 			if (uniqueMatches.length > 1) {
 				// Create a DocumentFragment for the details
-				const detailsFragment = document.createDocumentFragment();
+				const detailsFragment = activeDocument.createDocumentFragment();
 
 				// Create a container div for the message within the fragment
-				const messageContainer = document.createElement("div");
+				const messageContainer = activeDocument.createElement("div");
 				detailsFragment.appendChild(messageContainer);
 
 				// Add introductory text
-				const introText = document.createElement("p");
+				const introText = activeDocument.createElement("p");
 				introText.textContent = `Found ${uniqueMatches.length} unique matching image links inside current note. Do you want to delete all of them?`; // Updated message
 				messageContainer.appendChild(introText);
 
@@ -2212,7 +2397,7 @@ export class ContextMenu extends Component {
 					// Iterate over uniqueMatches
 					const lineNumber = match.lineNumber + 1;
 					const lineContent = match.line.trim();
-					const detailDiv = document.createElement("div");
+					const detailDiv = activeDocument.createElement("div");
 					detailDiv.addClass("image-converter-confirm-detail");
 					detailDiv.createSpan({ text: `  ${index + 1}. Line ${lineNumber}: ${lineContent}` });
 					messageContainer.appendChild(detailDiv); // Append to messageContainer
@@ -2245,10 +2430,7 @@ export class ContextMenu extends Component {
 
 	onunload() {
 		super.onunload(); // Important! Calls Component's cleanup
-		if (this.currentMenu) {
-			this.hideMenu(this.currentMenu);
-			this.currentMenu = null;
-		}
+		this.closeCurrentMenu();
 		this.contextMenuRegistered = false;
 	}
 }

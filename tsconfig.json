@@ -1,15 +1,14 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
-    
     // Source maps handled by esbuild
     
     // Module settings optimized for Obsidian plugin
     "module": "ESNext",
     "target": "ES2024",           // Electron 37 (Chromium 138) - Full ES2024 support!
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     
     // Type checking - only what ESLint can't handle
+    "strict": true,               // TypeScript 6 default; set explicitly so it doesn't depend on the compiler version
     "noImplicitAny": true,        // TypeScript-specific, ESLint can't check
     "strictNullChecks": true,     // Critical for image processing safety
     "strictFunctionTypes": false, // Relaxed for Obsidian API callbacks

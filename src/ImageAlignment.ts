@@ -9,7 +9,15 @@ export interface ImageAlignmentOptions {
 
 export class ImageAlignment extends Component {
     // Pending re-application timeout to handle stale DOM references
-    private reapplyTimeout: ReturnType<typeof setTimeout> | null = null;
+    private reapplyTimeout: number | null = null;
+    private static readonly appliedAlignmentClasses = [
+        'image-position-left',
+        'image-position-center',
+        'image-position-right',
+        'image-wrap',
+        'image-no-wrap',
+        'image-converter-aligned',
+    ];
 
     constructor(
         private app: App,
@@ -19,11 +27,43 @@ export class ImageAlignment extends Component {
         super();
     }
 
+    private getAlignmentCleanupDocuments(): Document[] {
+        const documents = new Set<Document>();
+        const addDocument = (doc: Document | null | undefined) => {
+            if (doc?.body) {
+                documents.add(doc);
+            }
+        };
+
+        addDocument(activeDocument);
+        addDocument(this.app.workspace.containerEl?.ownerDocument);
+        this.app.workspace.iterateAllLeaves?.((leaf) => {
+            addDocument(leaf.view?.containerEl?.ownerDocument);
+        });
+
+        return Array.from(documents);
+    }
+
+    private removeAppliedAlignmentClasses(): void {
+        const selector = ImageAlignment.appliedAlignmentClasses
+            .map((className) => `.${className}`)
+            .join(',');
+
+        this.getAlignmentCleanupDocuments().forEach((doc) => {
+            doc.querySelectorAll(selector).forEach((element) => {
+                element.classList.remove(...ImageAlignment.appliedAlignmentClasses);
+            });
+        });
+    }
+
     onunload(): void {
         if (this.reapplyTimeout) {
-            clearTimeout(this.reapplyTimeout);
+            window.clearTimeout(this.reapplyTimeout);
             this.reapplyTimeout = null;
         }
+
+        this.removeAppliedAlignmentClasses();
+        super.onunload();
     }
 
     /**
@@ -39,9 +79,9 @@ export class ImageAlignment extends Component {
      */
     private scheduleReapply(notePath: string): void {
         if (this.reapplyTimeout) {
-            clearTimeout(this.reapplyTimeout);
+            window.clearTimeout(this.reapplyTimeout);
         }
-        this.reapplyTimeout = setTimeout(() => {
+        this.reapplyTimeout = window.setTimeout(() => {
             this.reapplyTimeout = null;
             this.imageAlignmentManager
                 .applyAlignmentsToNote(notePath)

@@ -59,22 +59,15 @@ export function makePngBytes(options: {
   return buffer;
 }
 
-import type { ExifDictLike } from './exif';
-
 /**
  * Create a minimal JPEG buffer with optional EXIF data
  * @param options - Configuration for the JPEG
  * @returns ArrayBuffer containing JPEG data
  */
-// EXIF values can be numbers, strings, rationals (tuple), or arrays thereof
-type ExifValue = number | string | [number, number] | number[] | string[] | undefined;
-
-type ExifInput = Record<string, ExifValue> | ExifDictLike;
-
 export function makeJpegBytes(options: {
   w?: number;
   h?: number;
-  exif?: ExifInput;
+  exif?: Uint8Array;
   width?: number;
   height?: number;
 } = {}): ArrayBuffer {
@@ -101,7 +94,8 @@ export function makeJpegBytes(options: {
   const sof0View = new DataView(sof0Data);
   sof0View.setUint8(0, 0xFF);
   sof0View.setUint8(1, 0xC0); // SOF0 marker
-  sof0View.setUint16(2, 17, false); // Length
+  // Length counts itself and the payload, but not the two marker bytes.
+  sof0View.setUint16(2, 15, false);
   sof0View.setUint8(4, 8); // Precision
   sof0View.setUint16(5, height, false); // Height
   sof0View.setUint16(7, width, false); // Width
@@ -136,26 +130,21 @@ export function makeJpegBytes(options: {
   // Calculate total size
   let totalSize = soi.length + app0.length + sof0.length + sos.length + compressedData.length + eoi.length;
   
-  // Add EXIF if provided (simplified - in real implementation would use piexif)
+  // Wrap the supplied EXIF block in a real APP1 segment.
   let exifData: Uint8Array | null = null;
-  if (options.exif && Object.keys(options.exif).length > 0) {
-    // Simplified EXIF APP1 marker
-    const exifHeader = new Uint8Array([
-      0xFF, 0xE1, // APP1 marker
-      0x00, 0x1E, // Length (30 bytes for minimal EXIF)
-      0x45, 0x78, 0x69, 0x66, 0x00, 0x00, // "Exif\0\0"
-      // Minimal TIFF header
-      0x4D, 0x4D, // Big-endian
-      0x00, 0x2A, // TIFF magic number
-      0x00, 0x00, 0x00, 0x08, // IFD offset
-      // Minimal IFD
-      0x00, 0x01, // 1 entry
-      0x01, 0x0F, // Make tag
-      0x00, 0x02, // ASCII type
-      0x00, 0x00, 0x00, 0x04, // Count
-      0x00, 0x00, 0x00, 0x00  // Value/offset
-    ]);
-    exifData = exifHeader;
+  if (options.exif && options.exif.length > 0) {
+    const block = options.exif;
+    const segmentLength = 2 + 6 + block.length; // length field + "Exif\0\0" + block
+    const segment = new Uint8Array(2 + segmentLength);
+
+    segment[0] = 0xFF;
+    segment[1] = 0xE1; // APP1
+    segment[2] = (segmentLength >> 8) & 0xFF;
+    segment[3] = segmentLength & 0xFF;
+    segment.set([0x45, 0x78, 0x69, 0x66, 0x00, 0x00], 4); // "Exif\0\0"
+    segment.set(block, 10);
+
+    exifData = segment;
     totalSize += exifData.length;
   }
   
@@ -319,4 +308,41 @@ export function makeImageBlob(bytes: ArrayBuffer, mimeType: string): Blob {
  */
 export function makeImageFile(bytes: ArrayBuffer, filename: string, mimeType: string): File {
   return new File([bytes], filename, { type: mimeType });
+}
+
+/**
+ * Create bytes that start with the signature of an image format, with zeros
+ * after it up to the given size. For a stand-in for a converted image of an
+ * exact size: the bytes pass a check of the format, but they do not decode.
+ *
+ * The result is never shorter than the signature. A format with no signature
+ * of its own ('ORIGINAL', 'NONE') gives zeros only.
+ */
+export function makeImageBytesOfSize(format: string, size: number): ArrayBuffer {
+  const signature = signatureOf(format);
+  const bytes = new Uint8Array(Math.max(size, signature.length));
+  bytes.set(signature);
+  return bytes.buffer;
+}
+
+function signatureOf(format: string): number[] {
+  switch (format) {
+    case 'WEBP':
+      // "RIFF", file size, "WEBP"
+      return [0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50];
+    case 'JPEG':
+      return [0xFF, 0xD8, 0xFF, 0xE0];
+    case 'PNG':
+    case 'PNGQUANT':
+      return [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    case 'AVIF':
+      // A 20-byte "ftyp" box: major brand "avif", minor version 0, compatible brand "avif"
+      return [
+        0x00, 0x00, 0x00, 0x14, 0x66, 0x74, 0x79, 0x70,
+        0x61, 0x76, 0x69, 0x66, 0x00, 0x00, 0x00, 0x00,
+        0x61, 0x76, 0x69, 0x66
+      ];
+    default:
+      return [];
+  }
 }
