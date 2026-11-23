@@ -250,14 +250,12 @@ export class HistoryManager {
         this.isUndoRedoAction = true;
 
         try {
-            // Serialize current state BEFORE popping from redoStack to avoid desync
-            // if serialization throws an exception
-            const currentState = this.serializeCanvasState(canvas);
-
             const nextState = this.redoStack.pop();
             if (!nextState) return;
 
-            this.undoStack.push(currentState);
+            // The top of the undo stack is always the state on the canvas, so the redone
+            // state goes on top. Pushing the pre-redo state here would make the next undo a no-op.
+            this.undoStack.push(nextState);
 
             const objects = HistoryManager.parseState(nextState);
 
