@@ -1301,27 +1301,27 @@ export class ContextMenu extends Component {
 	 * @param img - The HTMLImageElement whose file needs to be opened.
 	 */
 	async openImageWithDefaultApp(img: HTMLImageElement) {
-		const imagePath =
-			this.folderAndFilenameManagement.getImagePath(img);
-		const file = imagePath
-			? this.app.vault.getAbstractFileByPath(imagePath)
-			: null;
-		if (!(file instanceof TFile)) {
-			new Notice("Cannot open with default app: image is not a file in this vault");
-			return;
-		}
-
-		// openWithDefaultApp is undocumented and does nothing without a
-		// FileSystemAdapter, so check both instead of failing silently.
-		if (
-			!(this.app.vault.adapter instanceof FileSystemAdapter) ||
-			typeof this.app.openWithDefaultApp !== "function"
-		) {
-			new Notice("Open with default app is not available in this version of Obsidian");
-			return;
-		}
-
 		try {
+			const imagePath =
+				this.folderAndFilenameManagement.getImagePath(img);
+			const file = imagePath
+				? this.app.vault.getAbstractFileByPath(imagePath)
+				: null;
+			if (!(file instanceof TFile)) {
+				new Notice("Cannot open with default app: image is not a file in this vault");
+				return;
+			}
+
+			// openWithDefaultApp is undocumented and does nothing without a
+			// FileSystemAdapter, so check both instead of failing silently.
+			if (
+				!(this.app.vault.adapter instanceof FileSystemAdapter) ||
+				typeof this.app.openWithDefaultApp !== "function"
+			) {
+				new Notice("Open with default app is not available in this version of Obsidian");
+				return;
+			}
+
 			// Same call as Obsidian's own "Open in default app" menu: it goes
 			// through the active window and skips the unknown file type prompt.
 			await this.app.openWithDefaultApp(file.path, true);
