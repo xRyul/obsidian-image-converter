@@ -23,6 +23,11 @@ export class VariableProcessor {
 
     private counters: Map<string, number> = new Map();
 
+    // Image-content MD5 by file. A paste runs the folder and filename templates separately,
+    // and the settings preview reruns on every keystroke, so without this the same image
+    // is read and hashed again each time. `version` catches TFiles edited in place.
+    private imageContentMD5Cache = new WeakMap<TFile | File, { version: string; hash: string }>();
+
     constructor(
         private app: App,
         private settings: ImageConverterSettings
@@ -447,19 +452,19 @@ export class VariableProcessor {
             example: "{counter:001} -> 005 (if it's the fifth image in the folder)",
         },
         {
+            name: "{MD5:image}",
+            description: "The MD5 hash of the image content. Recommended for clipboard pastes on macOS where filename is generic (e.g. image.png).",
+            example: "{MD5:image} -> full hash, {MD5:image:8} -> 7a3b9e2c",
+        },
+        {
             name: "{MD5:type}",
-            description: "The first 8 characters of the MD5 hash of the specified type. Supports: image (file content), filename, fullpath, parentfolder, rootfolder, extension, notename, notefolder, notepath.",
+            description: "The first 8 characters of the MD5 hash of the specified type. Supports: filename, fullpath, parentfolder, rootfolder, extension, notename, notefolder, notepath.",
             example: "{MD5:filename} -> 7a3b9e2c",
         },
         {
             name: "{MD5:type:X}",
             description: "The first X characters of the MD5 hash of the specified type. Supports the same types as {MD5:type}.",
             example: "{MD5:fullpath:10} -> 7a3b9e2c1d",
-        },
-        {
-            name: "{MD5:image}",
-            description: "The MD5 hash of the image content. Recommended for clipboard pastes on macOS where filename is generic (e.g. image.png).",
-            example: "{MD5:image} -> full hash, {MD5:image:8} -> 7a3b9e2c",
         },
         {
             name: "{MD5:custom text}",
@@ -1252,9 +1257,10 @@ export class VariableProcessor {
         return counter.toString().padStart(padding, "0");
     }
 
-    private async generateMD5(text: string): Promise<string> {
-        // Implementation of MD5 algorithm
-        function md5(string: string): string {
+    private async generateMD5(input: string | Uint8Array): Promise<string> {
+        // Implementation of MD5 algorithm. Strings are read one char code per byte;
+        // image content is passed as raw bytes.
+        function md5(message: string | Uint8Array): string {
             /* eslint-disable id-length, @typescript-eslint/naming-convention, no-param-reassign -- MD5 reference implementation keeps its standard names and in-place updates */
             function rotateLeft(value: number, shift: number): number {
                 return (value << shift) | (value >>> (32 - shift));
@@ -1315,9 +1321,9 @@ export class VariableProcessor {
                 return addUnsigned(rotateLeft(a, s), b);
             }
 
-            function convertToWordArray(string: string): number[] {
+            function convertToWordArray(message: string | Uint8Array): number[] {
                 let lWordCount: number;
-                const lMessageLength = string.length;
+                const lMessageLength = message.length;
                 const lNumberOfWordsTemp1 = lMessageLength + 8;
                 const lNumberOfWordsTemp2 = (lNumberOfWordsTemp1 - (lNumberOfWordsTemp1 % 64)) / 64;
                 const lNumberOfWords = (lNumberOfWordsTemp2 + 1) * 16;
@@ -1328,7 +1334,8 @@ export class VariableProcessor {
                 while (lByteCount < lMessageLength) {
                     lWordCount = (lByteCount - (lByteCount % 4)) / 4;
                     lBytePosition = (lByteCount % 4) * 8;
-                    lWordArray[lWordCount] = (lWordArray[lWordCount] || 0) | (string.charCodeAt(lByteCount) << lBytePosition);
+                    const lByte = typeof message === "string" ? message.charCodeAt(lByteCount) : message[lByteCount];
+                    lWordArray[lWordCount] = (lWordArray[lWordCount] || 0) | (lByte << lBytePosition);
                     lByteCount++;
                 }
 
@@ -1353,7 +1360,7 @@ export class VariableProcessor {
                 return wordToHexValue;
             }
 
-            const x = convertToWordArray(string);
+            const x = convertToWordArray(message);
             let k, AA, BB, CC, DD, a, b, c, d;
             const S11 = 7, S12 = 12, S13 = 17, S14 = 22;
             const S21 = 5, S22 = 9, S23 = 14, S24 = 20;
@@ -1450,12 +1457,7 @@ export class VariableProcessor {
             /* eslint-enable id-length, @typescript-eslint/naming-convention, no-param-reassign -- End of MD5 implementation */
         }
 
-        try {
-            return md5(text);
-        } catch (error) {
-            console.error('MD5 generation failed:', error);
-            return 'error';
-        }
+        return md5(input);
     }
 
     private escapeRegExp(string: string): string {
@@ -1494,32 +1496,19 @@ export class VariableProcessor {
     }
 
     private async generateFileContentMD5(file: TFile | File): Promise<string> {
-        try {
-            let arrayBuffer: ArrayBuffer;
-
-            if (file instanceof TFile) {
-                arrayBuffer = await this.app.vault.readBinary(file);
-            } else {
-                arrayBuffer = await file.arrayBuffer();
-            }
-
-            // The pure-JS MD5 implementation in `generateMD5` consumes a string
-            // and reads each char's code as a single byte, so we feed it a
-            // "binary string" where every char code is the corresponding byte
-            // value (0-255). Build it in chunks to avoid stack overflows from
-            // `String.fromCharCode.apply` on large images.
-            const bytes = new Uint8Array(arrayBuffer);
-            const CHUNK_SIZE = 0x8000;
-            let binaryString = "";
-            for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
-                const chunk = bytes.subarray(i, i + CHUNK_SIZE);
-                binaryString += String.fromCharCode.apply(null, Array.from(chunk));
-            }
-
-            return await this.generateMD5(binaryString);
-        } catch (error) {
-            console.error('Error generating MD5 hash of file content:', error);
-            return 'error';
+        const version = file instanceof TFile ? `${file.stat.mtime}:${file.stat.size}` : "";
+        const cached = this.imageContentMD5Cache.get(file);
+        if (cached?.version === version) {
+            return cached.hash;
         }
+
+        // No try/catch: a fallback value would become the filename, and with "reuse"
+        // conflict resolution unrelated images would then share it.
+        const arrayBuffer = file instanceof TFile
+            ? await this.app.vault.readBinary(file)
+            : await file.arrayBuffer();
+        const hash = await this.generateMD5(new Uint8Array(arrayBuffer));
+        this.imageContentMD5Cache.set(file, { version, hash });
+        return hash;
     }
 }

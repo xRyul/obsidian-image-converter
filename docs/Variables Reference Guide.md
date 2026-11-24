@@ -149,7 +149,10 @@ This document provides a detailed explanation of all available variables for the
 
 ### MD5 Hashing Options
 
-All MD5 hashes can be truncated using `:length` suffix. The type argument is case-insensitive (e.g. `{MD5:FileName}` works the same as `{MD5:filename}`).
+MD5 supports the special `image` type (hashes the image file content). All MD5 hashes can be truncated using `:length` suffix. The type argument is case-insensitive (e.g. `{MD5:FileName}` works the same as `{MD5:filename}`).
+
+- `{MD5:image}` - Hash of the image content. Use it for clipboard pastes, where the pasted file is often named `image.png` every time (e.g. on macOS), so filename-based hashes would repeat.
+- `{MD5:image:8}` - First 8 characters of image content hash
 - `{MD5:filename}` - Hash of filename
 - `{MD5:filename:8}` - First 8 characters of filename hash
 - `{MD5:fullpath}` - Hash of the image path. For images already in the vault (`TFile`), this hashes the full vault path (e.g. `Images/Sub/pic.png`). For drag/paste images (`File`), it falls back to hashing the filename because no vault path exists.
