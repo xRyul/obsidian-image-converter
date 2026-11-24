@@ -2,6 +2,7 @@ import { App, Component, Modal, Notice, TFile } from 'obsidian';
 import { transformCanvas } from './utils/canvasTransform';
 import { transferMetadata } from './metadata/transferMetadata';
 import { MetadataMode } from './metadata/types';
+import { refreshImageInView } from './utils/refreshImageInView';
 
 
 type SupportedImageFormat = 'jpeg' | 'png' | 'webp' | 'avif';
@@ -935,17 +936,9 @@ export class Crop extends Modal {
 			await this.app.vault.modifyBinary(this.imageFile, withMetadata);
 	
 			new Notice('Image saved successfully');
-	
-			const leaf = this.app.workspace.getMostRecentLeaf();
-			if (leaf) {
-				const currentState = leaf.getViewState();
-				await leaf.setViewState({
-					type: 'empty',
-					state: {}
-				});
-				await leaf.setViewState(currentState);
-			}
-	
+
+			refreshImageInView(this.app, this.imageFile);
+
 			this.close();
 	
 	} catch (error) {

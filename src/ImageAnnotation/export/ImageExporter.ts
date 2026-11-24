@@ -1,9 +1,10 @@
-import { App, Notice, TFile, MarkdownView } from 'obsidian';
+import { App, Notice, TFile } from 'obsidian';
 import { Canvas, FabricImage, ImageFormat, type TMat2D } from 'fabric';
 import { ExtendedImageFormat } from '../types';
 import mime from '../../mime.min.js';
 import { transferMetadata } from '../../metadata/transferMetadata';
 import { MetadataMode } from '../../metadata/types';
+import { refreshImageInView } from '../../utils/refreshImageInView';
 
 function dataUrlToArrayBuffer(dataUrl: string): ArrayBuffer {
     try {
@@ -62,6 +63,16 @@ function getFabricImageElement(image: unknown): unknown {
 export class ImageExporter {
     constructor(private app: App, private metadataMode: MetadataMode) {}
 
+    /**
+     * Saves the annotated image over the original file, at full quality
+     * (quality 1).
+     *
+     * The conversion preset's quality is not used here on purpose. Annotating
+     * should only add the annotations, and each lossy save would lower the
+     * quality again. To compress or convert an annotated image, use
+     * "Convert/compress..." in the image's right-click menu, or copy the
+     * image and paste it, so the paste and drop presets apply.
+     */
     async save(canvas: Canvas, file: TFile): Promise<boolean> {
         if (!canvas) return false;
 
@@ -153,7 +164,7 @@ export class ImageExporter {
 
             new Notice('Image saved successfully');
 
-            await this.refreshActiveView();
+            refreshImageInView(this.app, file);
 
             canvas.preserveObjectStacking = originalStacking;
             canvas.requestRenderAll();
@@ -395,22 +406,5 @@ export class ImageExporter {
             console.debug('Native canvas fallback failed', e);
         }
         return null;
-    }
-
-    private async refreshActiveView(): Promise<void> {
-        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-        if (!activeView) return;
-
-        const leaf = this.app.workspace.getMostRecentLeaf();
-        if (leaf) {
-            const currentState = leaf.getViewState();
-
-            await leaf.setViewState({
-                type: 'empty',
-                state: {}
-            });
-
-            await leaf.setViewState(currentState);
-        }
     }
 }

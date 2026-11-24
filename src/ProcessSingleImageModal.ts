@@ -6,6 +6,7 @@ import { ENCODER_CONFIGS, ImageProcessor } from "./ImageProcessor";
 import { findFfmpegExecutablePath, normalizeExecutablePath } from "./utils/ffmpegPath";
 import { addInfoIcon } from "./utils/settingInfo";
 import { getRevertPolicy, getSelectedConversionPreset, reasonToKeepOriginal } from "./utils/keepOriginal";
+import { refreshImageInView } from "./utils/refreshImageInView";
 
 export interface SingleImageModalSettings {
     conversionPresetName: string;
@@ -827,7 +828,7 @@ export class ProcessSingleImageModal extends Modal {
             }
 
             try {
-                await this.refreshActiveNote();
+                this.refreshActiveNote();
             } catch (error) {
                 // Non-critical: image was processed successfully, but view refresh failed
                 console.error("Error refreshing active note after image processing:", error);
@@ -845,31 +846,8 @@ export class ProcessSingleImageModal extends Modal {
         }
     }
 
-    async refreshActiveNote() {
-        const activeFile = this.app.workspace.getActiveFile();
-        if (activeFile) {
-            const activeLeaf = this.app.workspace.getLeaf();
-            if (activeLeaf) {
-                // Get the current leaf using getMostRecentLeaf (or getLeaf for specific cases)
-                const leaf = this.app.workspace.getMostRecentLeaf();
-                if (leaf) {
-                    // Store current state
-                    const currentState = leaf.getViewState();
-
-                    // Switch to a different view type temporarily
-                    await leaf.setViewState({
-                        type: 'empty',
-                        state: {}
-                    });
-
-                    // Switch back to the original view
-                    await leaf.setViewState(currentState);
-
-                }
-                // Reopen the file to refresh its content
-                await activeLeaf.openFile(activeFile, { active: true });
-            }
-        }
+    refreshActiveNote(): void {
+        refreshImageInView(this.app, this.imageFile);
     }
     onClose() {
 		// No Changes
