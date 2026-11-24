@@ -6,6 +6,7 @@ import { ENCODER_CONFIGS, ImageProcessor } from "./ImageProcessor";
 import { findFfmpegExecutablePath, normalizeExecutablePath } from "./utils/ffmpegPath";
 import { addInfoIcon } from "./utils/settingInfo";
 import { getRevertPolicy, getSelectedConversionPreset, reasonToKeepOriginal } from "./utils/keepOriginal";
+import { refreshImageInView } from "./utils/refreshImageInView";
 
 export interface SingleImageModalSettings {
     conversionPresetName: string;
@@ -827,7 +828,7 @@ export class ProcessSingleImageModal extends Modal {
             }
 
             try {
-                await this.refreshActiveNote();
+                this.refreshActiveNote();
             } catch (error) {
                 // Non-critical: image was processed successfully, but view refresh failed
                 console.error("Error refreshing active note after image processing:", error);
@@ -845,28 +846,8 @@ export class ProcessSingleImageModal extends Modal {
         }
     }
 
-    async refreshActiveNote() {
-        // Instead of a destructive view reload (empty → restore → openFile),
-        // only update the <img> tag for the processed file via cache-busting.
-        // This preserves the user's scroll position completely.
-        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-        if (!activeView) return;
-
-        const container = activeView.containerEl;
-        const imgs = container.querySelectorAll<HTMLImageElement>('img');
-        const filePath = this.imageFile.path;
-        for (const img of imgs) {
-            try {
-                const src = img.src;
-                if (!src.includes(encodeURI(filePath)) && !src.includes(filePath)) continue;
-
-                const url = new URL(src);
-                url.searchParams.set('_t', Date.now().toString());
-                img.src = url.toString();
-            } catch {
-                continue;
-            }
-        }
+    refreshActiveNote(): void {
+        refreshImageInView(this.app, this.imageFile);
     }
     onClose() {
 		// No Changes

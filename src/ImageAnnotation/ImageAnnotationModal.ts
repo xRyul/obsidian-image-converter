@@ -1188,14 +1188,7 @@ export class ImageAnnotationModal extends Modal {
     private async saveAnnotation(): Promise<void> {
         if (!this.canvas) return;
 
-        // Resolve quality from the currently selected Conversion Preset
-        // (same logic as main.ts when processing images)
-        const conversionPresets = this.plugin.settings.conversionPresets;
-        const selectedName = this.plugin.settings.selectedConversionPreset;
-        const preset = conversionPresets?.find(p => p.name === selectedName);
-        const quality = (preset ? preset.quality : this.plugin.settings.quality) / 100;
-
-        const success = await this.imageExporter.save(this.canvas, this.file, quality);
+        const success = await this.imageExporter.save(this.canvas, this.file);
         if (success) {
             this.close();
         }

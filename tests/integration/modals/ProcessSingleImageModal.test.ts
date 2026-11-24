@@ -804,7 +804,7 @@ describe('ProcessSingleImageModal UI flows (Phase 7: 7.1–7.14 subset)', () => 
     (modal as any).modalSettings.outputFormat = 'WEBP';
 
     // Make refreshActiveNote throw an error
-    vi.spyOn(modal as any, 'refreshActiveNote').mockRejectedValue(new Error('View refresh failed'));
+    vi.spyOn(modal as any, 'refreshActiveNote').mockImplementation(() => { throw new Error('View refresh failed'); });
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(modal as any, 'close');
 

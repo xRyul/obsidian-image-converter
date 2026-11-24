@@ -1,9 +1,10 @@
-import { App, Notice, TFile, MarkdownView } from 'obsidian';
+import { App, Notice, TFile } from 'obsidian';
 import { Canvas, FabricImage, ImageFormat, type TMat2D } from 'fabric';
 import { ExtendedImageFormat } from '../types';
 import mime from '../../mime.min.js';
 import { transferMetadata } from '../../metadata/transferMetadata';
 import { MetadataMode } from '../../metadata/types';
+import { refreshImageInView } from '../../utils/refreshImageInView';
 
 function dataUrlToArrayBuffer(dataUrl: string): ArrayBuffer {
     try {
@@ -62,7 +63,17 @@ function getFabricImageElement(image: unknown): unknown {
 export class ImageExporter {
     constructor(private app: App, private metadataMode: MetadataMode) {}
 
-    async save(canvas: Canvas, file: TFile, quality: number = 1): Promise<boolean> {
+    /**
+     * Saves the annotated image over the original file, at full quality
+     * (quality 1).
+     *
+     * The conversion preset's quality is not used here on purpose. Annotating
+     * should only add the annotations, and each lossy save would lower the
+     * quality again. To compress or convert an annotated image, use
+     * "Convert/compress..." in the image's right-click menu, or copy the
+     * image and paste it, so the paste and drop presets apply.
+     */
+    async save(canvas: Canvas, file: TFile): Promise<boolean> {
         if (!canvas) return false;
 
         try {
@@ -123,16 +134,16 @@ export class ImageExporter {
             let arrayBuffer: ArrayBuffer | null = null;
 
             // Method 1: Try toBlob first
-            arrayBuffer = await this.exportViaToBlob(canvas, minX, minY, finalWidth, finalHeight, scaleToOriginal, mimeType, quality);
+            arrayBuffer = await this.exportViaToBlob(canvas, minX, minY, finalWidth, finalHeight, scaleToOriginal, mimeType);
 
             // Method 2: Try toDataURL if toBlob failed
             if (!arrayBuffer) {
-                arrayBuffer = await this.exportViaDataURL(canvas, exportFormat, minX, minY, finalWidth, finalHeight, scaleToOriginal, quality);
+                arrayBuffer = await this.exportViaDataURL(canvas, exportFormat, minX, minY, finalWidth, finalHeight, scaleToOriginal);
             }
 
             // Method 3: Try canvas drawing fallback
             if (!arrayBuffer) {
-                arrayBuffer = await this.exportViaNativeCanvas(canvas, minX, minY, finalWidth, finalHeight, scaleToOriginal, mimeType, quality);
+                arrayBuffer = await this.exportViaNativeCanvas(canvas, minX, minY, finalWidth, finalHeight, scaleToOriginal, mimeType);
             }
 
             if (!arrayBuffer || arrayBuffer.byteLength === 0) {
@@ -153,7 +164,7 @@ export class ImageExporter {
 
             new Notice('Image saved successfully');
 
-            await this.refreshActiveView(file);
+            refreshImageInView(this.app, file);
 
             canvas.preserveObjectStacking = originalStacking;
             canvas.requestRenderAll();
@@ -279,10 +290,10 @@ export class ImageExporter {
         return { minX, minY, finalWidth, finalHeight, scaleToOriginal };
     }
 
-    private async canvasElementToArrayBuffer(canvasElement: HTMLCanvasElement, mimeType: string, quality: number): Promise<ArrayBuffer | null> {
+    private async canvasElementToArrayBuffer(canvasElement: HTMLCanvasElement, mimeType: string): Promise<ArrayBuffer | null> {
         if (typeof canvasElement.toBlob === 'function') {
             const blob: Blob | null = await new Promise<Blob | null>((resolve) => {
-                canvasElement.toBlob((result: Blob | null) => resolve(result), mimeType, quality);
+                canvasElement.toBlob((result: Blob | null) => resolve(result), mimeType, 1);
             });
 
             if (blob) {
@@ -292,7 +303,7 @@ export class ImageExporter {
 
         // Fallback when toBlob isn't available (e.g. in some test/DOM environments)
         // Avoids using fetch/requestUrl since this is a local data URL.
-        const dataUrl = canvasElement.toDataURL(mimeType, quality);
+        const dataUrl = canvasElement.toDataURL(mimeType, 1);
         if (!dataUrl || dataUrl === 'data:,') return null;
         return dataUrlToArrayBuffer(dataUrl);
     }
@@ -304,8 +315,7 @@ export class ImageExporter {
         finalWidth: number,
         finalHeight: number,
         scaleToOriginal: number,
-        mimeType: string,
-        quality: number
+        mimeType: string
     ): Promise<ArrayBuffer | null> {
         try {
             const canvasElement = canvas.toCanvasElement(scaleToOriginal);
@@ -327,7 +337,7 @@ export class ImageExporter {
                     tempCanvas.height
                 );
 
-                return await this.canvasElementToArrayBuffer(tempCanvas, mimeType, quality);
+                return await this.canvasElementToArrayBuffer(tempCanvas, mimeType);
             }
         } catch (e) {
             console.debug('toCanvasElement method failed, trying alternative...', e);
@@ -342,13 +352,12 @@ export class ImageExporter {
         minY: number,
         finalWidth: number,
         finalHeight: number,
-        scaleToOriginal: number,
-        quality: number
+        scaleToOriginal: number
     ): Promise<ArrayBuffer | null> {
         try {
             const dataUrl = canvas.toDataURL({
                 format: exportFormat as ImageFormat,
-                quality: quality,
+                quality: 1,
                 multiplier: scaleToOriginal,
                 left: minX,
                 top: minY,
@@ -375,8 +384,7 @@ export class ImageExporter {
         finalWidth: number,
         finalHeight: number,
         scaleToOriginal: number,
-        mimeType: string,
-        quality: number
+        mimeType: string
     ): Promise<ArrayBuffer | null> {
         try {
             const nativeCanvas = canvas.getElement();
@@ -392,39 +400,11 @@ export class ImageExporter {
                     0, 0, tempCanvas.width, tempCanvas.height
                 );
 
-                return await this.canvasElementToArrayBuffer(tempCanvas, mimeType, quality);
+                return await this.canvasElementToArrayBuffer(tempCanvas, mimeType);
             }
         } catch (e) {
             console.debug('Native canvas fallback failed', e);
         }
         return null;
-    }
-
-    private async refreshActiveView(file: TFile): Promise<void> {
-        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-        if (!activeView) return;
-
-        // Instead of a destructive view reload (which loses scroll position),
-        // find only the <img> element(s) for the modified file and force them
-        // to reload by adding a cache-busting query parameter.
-        // Obsidian app:// URLs include the file path, so we match by that.
-        const container = activeView.containerEl;
-        const imgs = container.querySelectorAll<HTMLImageElement>('img');
-        const filePath = file.path;
-        for (const img of imgs) {
-            try {
-                const src = img.src;
-                // Match images whose src contains the vault file path
-                // (both encoded and raw forms, as Obsidian uses app:// URLs)
-                if (!src.includes(encodeURI(filePath)) && !src.includes(filePath)) continue;
-
-                const url = new URL(src);
-                url.searchParams.set('_t', Date.now().toString());
-                img.src = url.toString();
-            } catch {
-                // If URL parsing fails (e.g. data: URLs), skip
-                continue;
-            }
-        }
     }
 }
