@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { FileSystemAdapter, type TFile } from 'obsidian';
 import { FolderAndFilenameManagement } from '../../../src/FolderAndFilenameManagement';
 import { VariableProcessor } from '../../../src/VariableProcessor';
@@ -202,6 +202,46 @@ describe('FolderAndFilenameManagement destination resolution', () => {
     const folder: FolderPreset = { type: 'CUSTOM', name: 'Custom (missing)' };
     const res = await ffm.determineDestination(file, active as any, conv, fname, folder);
     expect(res.destinationPath).toBe('attachments');
+  });
+
+  it('3.6 DEFAULT uses the folder of FileManager.getAvailablePathForAttachment, so attachment plugins apply', async () => {
+    const { app, ffm } = makeDepsDest({ attachmentFolderPath: 'attachments' });
+    const getAvailablePathForAttachment = vi.fn(async () => 'Notes/Topic/Active.assets/Pasted image 1.webp');
+    app.fileManager.getAvailablePathForAttachment = getAvailablePathForAttachment;
+    const file = new File([new Uint8Array([1])], 'Pasted image.png', { type: 'image/png' });
+    const conv: ConversionPreset = { ...DEFAULT_SETTINGS.conversionPresets[0], outputFormat: 'WEBP' } as any;
+    const fname: FilenamePreset = { name: 'Custom', customTemplate: '{imagename}', skipRenamePatterns: '', conflictResolution: 'reuse' };
+    const folder: FolderPreset = { type: 'DEFAULT', name: 'Default' };
+    const res = await ffm.determineDestination(file, active as any, conv, fname, folder);
+    expect(getAvailablePathForAttachment).toHaveBeenCalledWith('Pasted image.webp', 'Notes/Topic/Active.md');
+    expect(res.destinationPath).toBe('Notes/Topic/Active.assets');
+    // The file name still comes from the filename preset, not from the API's answer
+    expect(res.newFilename).toBe('Pasted image.webp');
+  });
+
+  it('3.7 DEFAULT maps an API answer in the vault root to "/"', async () => {
+    const { app, ffm } = makeDepsDest({ attachmentFolderPath: 'attachments' });
+    app.fileManager.getAvailablePathForAttachment = vi.fn(async () => 'img.png');
+    const file = new File([new Uint8Array([1])], 'img.png', { type: 'image/png' });
+    const conv: ConversionPreset = { ...DEFAULT_SETTINGS.conversionPresets[0] } as any;
+    const fname: FilenamePreset = { name: 'Custom', customTemplate: '{imagename}', skipRenamePatterns: '', conflictResolution: 'reuse' };
+    const folder: FolderPreset = { type: 'DEFAULT', name: 'Default' };
+    const res = await ffm.determineDestination(file, active as any, conv, fname, folder);
+    expect(res.destinationPath).toBe('/');
+  });
+
+  it('3.8 DEFAULT falls back to attachmentFolderPath when the API throws', async () => {
+    const { app, ffm } = makeDepsDest({ attachmentFolderPath: './assets' });
+    app.fileManager.getAvailablePathForAttachment = vi.fn(async () => { throw new Error('boom'); });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const file = new File([new Uint8Array([1])], 'img.png', { type: 'image/png' });
+    const conv: ConversionPreset = { ...DEFAULT_SETTINGS.conversionPresets[0] } as any;
+    const fname: FilenamePreset = { name: 'Custom', customTemplate: '{imagename}', skipRenamePatterns: '', conflictResolution: 'reuse' };
+    const folder: FolderPreset = { type: 'DEFAULT', name: 'Default' };
+    const res = await ffm.determineDestination(file, active as any, conv, fname, folder);
+    expect(res.destinationPath).toBe('Notes/Topic/assets');
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it('3.12 combinePath normalizes and handles root base', () => {
