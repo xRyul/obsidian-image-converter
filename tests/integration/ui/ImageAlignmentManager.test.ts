@@ -4,7 +4,8 @@ import ImageConverterPlugin from '../../../src/main';
 import { ImageAlignmentManager } from '../../../src/ImageAlignmentManager';
 import { ImageAlignment } from '../../../src/ImageAlignment';
 import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
-import { fakeApp, fakeTFile, fakeVault } from '../../factories/obsidian';
+import { FileSystemAdapter } from 'obsidian';
+import { fakeApp, fakeTFile, fakeVault, makeObsidianAppResourcePath } from '../../factories/obsidian';
 
 function setupDomWithImage(src: string) {
   document.body.innerHTML = '';
@@ -1052,6 +1053,209 @@ describe('ImageAlignmentManager (integration-lite) — 12.x behaviors', () => {
       await alignment.updateImageAlignment(img as HTMLImageElement, { align: 'left', wrap: false });
       expect(img.classList.contains('image-position-left')).toBe(true);
       expect(img.classList.contains('image-position-right')).toBe(false);
+    });
+  });
+});
+
+describe('ImageAlignmentManager — cleanCache correctness and scan count (issue #396)', () => {
+  let app: any;
+  let plugin: any;
+  let manager: ImageAlignmentManager;
+
+  beforeEach(async () => {
+    const note = fakeTFile({ path: 'Notes/n1.md', name: 'n1.md', extension: 'md' });
+    const imgA = fakeTFile({ path: 'images/a.png' });
+    const imgB = fakeTFile({ path: 'images/b.png' });
+    const vault = fakeVault({ files: [note, imgA, imgB] });
+    app = fakeApp({ vault });
+    plugin = new ImageConverterPlugin(app as any, { id: 'image-converter', dir: '/plugins/image-converter' } as any);
+    plugin.manifest = { id: 'image-converter', dir: '/plugins/image-converter' } as any;
+    plugin.settings = {
+      isImageAlignmentEnabled: true,
+      imageAlignmentDefaultAlignment: 'none',
+      imageAlignmentCacheLocation: 'plugin',
+      imageAlignmentCacheCleanupInterval: 0,
+    } as any;
+    const supported = new SupportedImageFormats(app as any);
+    manager = new ImageAlignmentManager(app as any, plugin, supported);
+    await manager.loadCache();
+  });
+
+  it('keeps valid entries, drops stale entries and missing notes, and lists vault files once', async () => {
+    const validHash = manager.getImageHash('Notes/n1.md', 'images/a.png');
+    const staleHash = manager.getImageHash('Notes/n1.md', 'images/deleted.png');
+    const orphanHash = manager.getImageHash('Notes/gone.md', 'images/a.png');
+
+    manager.cache = {
+      'Notes/n1.md': {
+        [validHash]: { position: 'left', wrap: false },
+        [staleHash]: { position: 'right', wrap: false },
+      },
+      'Notes/gone.md': {
+        [orphanHash]: { position: 'left', wrap: false },
+      },
+    };
+
+    const getFilesSpy = vi.spyOn(app.vault, 'getFiles');
+    await manager.cleanCache();
+
+    // Valid entry kept under its note; stale entry dropped; missing note removed entirely
+    expect(Object.keys(manager.cache)).toEqual(['Notes/n1.md']);
+    expect(manager.cache['Notes/n1.md'][validHash]).toEqual({ position: 'left', wrap: false });
+    expect(manager.cache['Notes/n1.md'][staleHash]).toBeUndefined();
+
+    // Regression guard: the vault must not be re-listed once per cached entry
+    expect(getFilesSpy.mock.calls.length).toBeLessThanOrEqual(1);
+  });
+
+  it('keeps an entry for an image whose filename contains a question mark', async () => {
+    const note = fakeTFile({ path: 'Notes/n2.md', name: 'n2.md', extension: 'md' });
+    const img = fakeTFile({ path: 'images/what?.png', name: 'what?.png', extension: 'png' });
+    ((app.vault as any).getFiles as any).mockReturnValue([note, img]);
+    ((app.vault as any).getAbstractFileByPath as any).mockImplementation((path: string) =>
+      [note, img].find(file => file.path === path) ?? null
+    );
+
+    // getImageHash runs the path through getRelativePath, as every save does
+    const hash = manager.getImageHash('Notes/n2.md', 'images/what?.png');
+    manager.cache = { 'Notes/n2.md': { [hash]: { position: 'center', wrap: false } } };
+
+    await manager.cleanCache();
+
+    expect(manager.cache['Notes/n2.md']?.[hash]).toEqual({ position: 'center', wrap: false });
+  });
+
+  it('stops scanning vault images once the images each note links to match its entries', async () => {
+    const noteA = fakeTFile({ path: 'Notes/a.md', name: 'a.md', extension: 'md' });
+    const noteB = fakeTFile({ path: 'Notes/b.md', name: 'b.md', extension: 'md' });
+    const images = Array.from({ length: 50 }, (_, i) => fakeTFile({ path: `images/img-${i}.png` }));
+    const files = [noteA, noteB, ...images];
+    ((app.vault as any).getFiles as any).mockReturnValue(files);
+    ((app.vault as any).getAbstractFileByPath as any).mockImplementation((path: string) =>
+      files.find(file => file.path === path) ?? null
+    );
+    app.metadataCache.resolvedLinks = {
+      'Notes/a.md': { 'images/img-49.png': 1 },
+      'Notes/b.md': { 'images/img-48.png': 1 },
+    };
+
+    const hashA = manager.getImageHash('Notes/a.md', 'images/img-49.png');
+    const hashB = manager.getImageHash('Notes/b.md', 'images/img-48.png');
+    manager.cache = {
+      'Notes/a.md': { [hashA]: { position: 'left', wrap: false } },
+      'Notes/b.md': { [hashB]: { position: 'right', wrap: false } },
+    };
+
+    // Count image path reads during cleanup only
+    let pathReads = 0;
+    for (const file of images) {
+      const { path } = file;
+      Object.defineProperty(file, 'path', { get: () => { pathReads++; return path; } });
+    }
+
+    await manager.cleanCache();
+
+    expect(manager.cache['Notes/a.md'][hashA]).toEqual({ position: 'left', wrap: false });
+    expect(manager.cache['Notes/b.md'][hashB]).toEqual({ position: 'right', wrap: false });
+    // One read per image to list them; a full scan per note would read them all again
+    expect(pathReads).toBeLessThanOrEqual(images.length);
+  });
+});
+
+describe('ImageAlignmentManager — Windows vault keys', () => {
+  const notePath = 'Notes/n1.md';
+  const imgPath = 'images/a.png';
+  // What Obsidian renders as <img src> for a vault at D:\Vault
+  const winSrc = makeObsidianAppResourcePath(imgPath, { basePath: 'D:/Vault' });
+  let app: any;
+  let manager: ImageAlignmentManager;
+  // The key older Windows builds saved: the hash of "/" + vault path
+  const legacyHash = (note: string, path: string) => manager.getImageHash(note, `/${path}`);
+
+  beforeEach(async () => {
+    const note = fakeTFile({ path: notePath, name: 'n1.md', extension: 'md' });
+    const img = fakeTFile({ path: imgPath });
+    const vault: any = fakeVault({ files: [note, img] });
+    const adapter = Object.create(FileSystemAdapter.prototype);
+    Object.assign(adapter, vault.adapter, { getBasePath: () => 'D:\\Vault' });
+    vault.adapter = adapter;
+    app = fakeApp({ vault });
+    const plugin: any = new ImageConverterPlugin(app as any, { id: 'image-converter', dir: '/plugins/image-converter' } as any);
+    plugin.manifest = { id: 'image-converter', dir: '/plugins/image-converter' } as any;
+    plugin.settings = {
+      isImageAlignmentEnabled: true,
+      imageAlignmentDefaultAlignment: 'none',
+      imageAlignmentCacheLocation: 'plugin',
+      imageAlignmentCacheCleanupInterval: 0,
+    } as any;
+    manager = new ImageAlignmentManager(app as any, plugin, new SupportedImageFormats(app as any));
+    await manager.loadCache();
+  });
+
+  it('keeps an alignment saved from the rendered image through cleanup', async () => {
+    // ImageAlignment.updateImageAlignment saves the normalized src
+    await manager.saveImageAlignmentToCache(notePath, manager.getRelativePath(winSrc), 'center', '', '', false);
+    expect(manager.getImageAlignment(notePath, winSrc)?.position).toBe('center');
+
+    await manager.cleanCache();
+
+    expect(manager.getImageAlignment(notePath, winSrc)?.position).toBe('center');
+  });
+
+  it('reads an entry saved by an older Windows build', () => {
+    manager.cache = { [notePath]: { [legacyHash(notePath, imgPath)]: { position: 'right', wrap: true } } };
+
+    expect(manager.getImageAlignment(notePath, winSrc)).toEqual({ position: 'right', wrap: true });
+  });
+
+  it('moves an older Windows entry to the current key during cleanup', async () => {
+    manager.cache = { [notePath]: { [legacyHash(notePath, imgPath)]: { position: 'right', wrap: true } } };
+
+    await manager.cleanCache();
+
+    expect(manager.cache[notePath]).toEqual({
+      [manager.getImageHash(notePath, imgPath)]: { position: 'right', wrap: true },
+    });
+  });
+
+  it('moves an older Windows entry for a linked image when the note links are indexed', async () => {
+    app.metadataCache.resolvedLinks = { [notePath]: { [imgPath]: 1 } };
+    manager.cache = { [notePath]: { [legacyHash(notePath, imgPath)]: { position: 'right', wrap: true } } };
+
+    await manager.cleanCache();
+
+    expect(manager.cache[notePath]).toEqual({
+      [manager.getImageHash(notePath, imgPath)]: { position: 'right', wrap: true },
+    });
+  });
+
+  it('replaces an older Windows entry when the alignment is saved again', async () => {
+    manager.cache = { [notePath]: { [legacyHash(notePath, imgPath)]: { position: 'right', wrap: true } } };
+
+    await manager.saveImageAlignmentToCache(notePath, manager.getRelativePath(winSrc), 'left', '', '', false);
+
+    expect(Object.keys(manager.cache[notePath])).toEqual([manager.getImageHash(notePath, imgPath)]);
+    expect(manager.getImageAlignment(notePath, winSrc)?.position).toBe('left');
+  });
+
+  it('keeps an older Windows entry when the note still links the image', async () => {
+    manager.cache = { [notePath]: { [legacyHash(notePath, imgPath)]: { position: 'right', wrap: true } } };
+
+    await manager.validateNoteCache(notePath, `![[${imgPath}]]`);
+
+    expect(manager.getImageAlignment(notePath, winSrc)).toEqual({ position: 'right', wrap: true });
+  });
+
+  it('moves an older Windows entry when its image is renamed', async () => {
+    manager.cache = { [notePath]: { [legacyHash(notePath, imgPath)]: { position: 'right', wrap: true } } };
+    const renamed = fakeTFile({ path: 'images/b.png' });
+    (manager as any).registerEvents();
+    const handler = app.vault.on.mock.calls.find((callArgs: any[]) => callArgs[0] === 'rename')[1];
+
+    await handler(renamed, imgPath);
+
+    expect(manager.cache[notePath]).toEqual({
+      [manager.getImageHash(notePath, 'images/b.png')]: { position: 'right', wrap: true },
     });
   });
 });

@@ -9,6 +9,75 @@ export interface ResizeState {
     isScrolling: boolean;
 }
 
+interface ObsidianTableCell {
+    row: number;
+    col: number;
+    el?: HTMLElement;
+}
+
+interface ObsidianTableCellEditor {
+    editor?: Editor;
+    cell?: ObsidianTableCell;
+    containerEl?: HTMLElement;
+}
+
+interface ObsidianTableWidget {
+    editor?: { tableCell?: ObsidianTableCellEditor | null };
+    getClosestCell?: (clientX: number, clientY: number) => ObsidianTableCell | null;
+    setCellFocus?: (row: number, col: number) => void;
+}
+
+interface ObsidianTableWidgetElement extends HTMLElement {
+    cmTile?: { widget?: ObsidianTableWidget };
+}
+
+interface MarkdownLinkUpdateTarget {
+    editor: Editor;
+    imageName: string;
+    notePath: string;
+}
+
+interface TableScrollResizeContext {
+    outerTarget: MarkdownLinkUpdateTarget;
+    tableWidget: ObsidianTableWidget | null;
+    tableCell: ObsidianTableCell | null;
+    cellEditorAtSchedule: Editor | null;
+}
+
+type ImageMarkdownRevealTarget =
+    | { type: "native"; editButton: HTMLElement }
+    | { type: "table"; tableWidget: ObsidianTableWidget; imageIndex: number };
+
+interface ImageClickOverrideContext {
+    image: HTMLImageElement;
+    revealTarget: ImageMarkdownRevealTarget;
+}
+
+type ImageLinkPipeDelimiter = "|" | "\\|";
+
+interface ImageLinkMatch {
+    type: "md" | "wiki";
+    fullMatch: string;
+    index: number;
+    path: string;
+    altText?: string;
+    caption?: string;
+    existingWidth?: number;
+    existingHeight?: number;
+    pipeDelimiter: ImageLinkPipeDelimiter;
+    dimensionPipeDelimiter: ImageLinkPipeDelimiter;
+    spacing: {
+        beforeFirstPipe: string;
+        beforeSecondPipe: string;
+    };
+}
+
+interface EditorLineContext {
+    previousLine: string | null;
+    nextLine: string | null;
+    isTableRow: boolean;
+}
+
 
 export class ImageResizer extends Component {
 
@@ -58,12 +127,24 @@ export class ImageResizer extends Component {
 
     // Debounce the cache update
     private debouncedSaveToCache: Debouncer<
-        [image: HTMLImageElement, newWidth: number, newHeight: number],
+        [
+            image: HTMLImageElement,
+            newWidth: number,
+            newHeight: number,
+            shouldUpdateMarkdownLink?: boolean
+        ],
         void
     >;
 
     private scrollTimeout: number | null = null;
     private readonly SCROLL_DEBOUNCE_MS = 300;
+    private suppressNextNativeImageClick = false;
+    private nativeClickSuppressionTimer: { ownerWindow: Window; timerId: number } | null = null;
+    private nativeClickSuppressionPointer: {
+        ownerDocument: Document;
+        pointerId: number;
+    } | null = null;
+    private readonly NATIVE_CLICK_SUPPRESSION_MS = 500;
 
 
     resizeSensitivity: number;
@@ -124,7 +205,73 @@ export class ImageResizer extends Component {
         this.viewScope = null;
     }
 
+
+    private clearNativeClickSuppression(): void {
+        if (this.nativeClickSuppressionPointer) {
+            const { ownerDocument } = this.nativeClickSuppressionPointer;
+            ownerDocument.removeEventListener(
+                'pointerup',
+                this.handleNativeClickSuppressionPointerEnd,
+                true
+            );
+            ownerDocument.removeEventListener(
+                'pointercancel',
+                this.handleNativeClickSuppressionPointerEnd,
+                true
+            );
+            this.nativeClickSuppressionPointer = null;
+        }
+
+        if (this.nativeClickSuppressionTimer) {
+            const { ownerWindow, timerId } = this.nativeClickSuppressionTimer;
+            ownerWindow.clearTimeout(timerId);
+            this.nativeClickSuppressionTimer = null;
+        }
+        this.suppressNextNativeImageClick = false;
+    }
+
+    private armNativeClickSuppression(ownerDocument: Document, pointerId: number): void {
+        this.clearNativeClickSuppression();
+        this.suppressNextNativeImageClick = true;
+        this.nativeClickSuppressionPointer = { ownerDocument, pointerId };
+        ownerDocument.addEventListener(
+            'pointerup',
+            this.handleNativeClickSuppressionPointerEnd,
+            true
+        );
+        ownerDocument.addEventListener(
+            'pointercancel',
+            this.handleNativeClickSuppressionPointerEnd,
+            true
+        );
+
+        const ownerWindow = ownerDocument.defaultView ?? window;
+        const timerId = ownerWindow.setTimeout(() => {
+            if (this.nativeClickSuppressionTimer?.timerId === timerId) {
+                this.clearNativeClickSuppression();
+            }
+        }, this.NATIVE_CLICK_SUPPRESSION_MS);
+        this.nativeClickSuppressionTimer = { ownerWindow, timerId };
+    }
+
+    private handleNativeClickSuppressionPointerEnd = (event: PointerEvent): void => {
+        if (this.nativeClickSuppressionPointer?.pointerId !== event.pointerId) return;
+        this.clearNativeClickSuppression();
+    };
+
+    private suppressNativeImageEvent(event: Event): void {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+    }
+
     detachView(forceCleanup = true) {
+        this.clearNativeClickSuppression();
+        if (this.scrollTimeout !== null) {
+            window.clearTimeout(this.scrollTimeout);
+            this.scrollTimeout = null;
+        }
+        this.resizeState.isScrolling = false;
         this.cleanupHandles(forceCleanup);
         this.unloadViewScope();
 
@@ -244,8 +391,9 @@ export class ImageResizer extends Component {
         // 1. Hover Detection
         this.viewScope.registerDomEvent(this.markdownView.containerEl, 'mouseover', this.handleImageHover);
 
-        // Prevent Obsidian's native image widget focus/outline when requested, while keeping editor focus.
-        this.viewScope.registerDomEvent(this.markdownView.containerEl, 'mousedown', this.handleImageMouseDownCapture, { capture: true });
+        // Intercept pointerdown before Obsidian table widgets replace the clicked image DOM.
+        this.viewScope.registerDomEvent(this.markdownView.containerEl, 'pointerdown', this.handleImagePointerDownCapture, { capture: true });
+        this.viewScope.registerDomEvent(this.markdownView.containerEl, 'mousedown', this.handleSuppressedImageMouseDownCapture, { capture: true });
         this.viewScope.registerDomEvent(this.markdownView.containerEl, 'click', this.handleImageClickCapture, { capture: true });
 
         // 2. Drag Handling: Mouse down, move, up events for handles
@@ -278,7 +426,123 @@ export class ImageResizer extends Component {
         return image?.instanceOf(HTMLImageElement) ? image : null;
     }
 
-    private getInternalImageTargetForClickOverride(event: MouseEvent): HTMLImageElement | null {
+    // Feature-detect Obsidian 1.13 table internals; unsupported widgets stay on native handling.
+    private getObsidianTableWidget(image: HTMLImageElement): ObsidianTableWidget | null {
+        const tableWidgetElement = image.closest<ObsidianTableWidgetElement>(".cm-table-widget");
+        const tableWidget = tableWidgetElement?.cmTile?.widget;
+        if (
+            typeof tableWidget?.getClosestCell !== "function" ||
+            typeof tableWidget.setCellFocus !== "function"
+        ) {
+            return null;
+        }
+
+        return tableWidget;
+    }
+
+    private isImageInTableWidget(image: HTMLImageElement): boolean {
+        return image.closest(".cm-table-widget") !== null;
+    }
+
+    private getActiveTableCellEditorForImage(image: HTMLImageElement): Editor | null {
+        const tableWidgetElement = image.closest<ObsidianTableWidgetElement>(".cm-table-widget");
+        const activeCellEditor = tableWidgetElement?.cmTile?.widget?.editor?.tableCell;
+        const cellEditor = activeCellEditor?.editor;
+        if (!cellEditor) return null;
+
+        if (activeCellEditor.containerEl) {
+            return activeCellEditor.containerEl.contains(image) ? cellEditor : null;
+        }
+
+        const cellElement = activeCellEditor.cell?.el;
+        return cellElement?.contains(image) && image.closest(".cm-editor")
+            ? cellEditor
+            : null;
+    }
+
+    private createTableScrollResizeContext(
+        image: HTMLImageElement,
+        event: WheelEvent,
+        imageName: string,
+        notePath: string
+    ): TableScrollResizeContext | null {
+        if (!this.editor) return null;
+
+        const tableWidgetElement = image.closest<ObsidianTableWidgetElement>(".cm-table-widget");
+        const tableWidget = tableWidgetElement?.cmTile?.widget ?? null;
+        const activeTableCell = tableWidget?.editor?.tableCell;
+        const tableCell = tableWidget?.getClosestCell?.(event.clientX, event.clientY)
+            ?? activeTableCell?.cell
+            ?? null;
+
+        return {
+            outerTarget: { editor: this.editor, imageName, notePath },
+            tableWidget,
+            tableCell,
+            cellEditorAtSchedule: this.getActiveTableCellEditorForImage(image),
+        };
+    }
+
+    private resolveTableScrollResizeUpdateTarget(
+        context: TableScrollResizeContext
+    ): MarkdownLinkUpdateTarget | null {
+        const activeTableCell = context.tableWidget?.editor?.tableCell;
+        const activeCellEditor = activeTableCell?.editor;
+        if (!activeCellEditor) return context.outerTarget;
+
+        const isScheduledCellEditor = activeCellEditor === context.cellEditorAtSchedule;
+        const isTargetCell = context.tableCell !== null
+            && activeTableCell.cell !== undefined
+            && activeTableCell.cell.row === context.tableCell.row
+            && activeTableCell.cell.col === context.tableCell.col;
+
+        if (!isScheduledCellEditor && !isTargetCell) return null;
+
+        return { ...context.outerTarget, editor: activeCellEditor };
+    }
+
+    private commitTableScrollResize(
+        image: HTMLImageElement,
+        width: number,
+        height: number,
+        context: TableScrollResizeContext
+    ): void {
+        const updateTarget = this.resolveTableScrollResizeUpdateTarget(context);
+        if (!updateTarget) {
+            // The outer document is unsafe while another nested cell editor owns table edits.
+            this.scrollTimeout = window.setTimeout(
+                () => this.commitTableScrollResize(image, width, height, context),
+                this.SCROLL_DEBOUNCE_MS
+            );
+            return;
+        }
+
+        this.scrollTimeout = null;
+        void this.updateMarkdownLink(image, width, height, null, updateTarget);
+    }
+
+    private getNativeImageEditButton(image: HTMLImageElement): HTMLElement | null {
+        return image.closest(".image-embed")?.querySelector<HTMLElement>(".edit-block-button") ?? null;
+    }
+
+    private getImageMarkdownRevealTarget(image: HTMLImageElement): ImageMarkdownRevealTarget | null {
+        if (image.closest(".cm-table-widget")) {
+            const tableWidget = this.getObsidianTableWidget(image);
+            if (!tableWidget) return null;
+
+            const cellWrapper = image.closest(".table-cell-wrapper");
+            const cellImages = cellWrapper
+                ? Array.from(cellWrapper.querySelectorAll<HTMLImageElement>(".image-embed img"))
+                : [];
+            const imageIndex = cellImages.indexOf(image);
+            return imageIndex >= 0 ? { type: "table", tableWidget, imageIndex } : null;
+        }
+
+        const editButton = this.getNativeImageEditButton(image);
+        return editButton ? { type: "native", editButton } : null;
+    }
+
+    private getImageClickOverrideContext(event: MouseEvent): ImageClickOverrideContext | null {
         if (!this.editor || !this.markdownView) return null;
         if (!this.plugin.settings.disableObsidianImageSelectionOnClick) return null;
         if (event.button !== 0) return null;
@@ -298,23 +562,131 @@ export class ImageResizer extends Component {
         if (this.plugin.supportedImageFormats.isExcalidrawImage(image)) return null;
         if (this.isExternalLink(image.src)) return null;
 
-        return image;
+        const revealTarget = this.getImageMarkdownRevealTarget(image);
+        return revealTarget ? { image, revealTarget } : null;
     }
 
-    private handleImageMouseDownCapture = (event: MouseEvent) => {
-        const image = this.getInternalImageTargetForClickOverride(event);
-        if (!image) return;
+    private restoreTableCellCursorAfterNativeReveal(
+        tableWidget: ObsidianTableWidget,
+        cellEditor: Editor,
+        cursorPosition: EditorPosition,
+        ownerWindow: Window
+    ): void {
+        ownerWindow.requestAnimationFrame(() => {
+            if (tableWidget.editor?.tableCell?.editor !== cellEditor) return;
 
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
+            const lastLine = cellEditor.lastLine();
+            if (lastLine < 0) return;
 
-        this.handleImageHover(event);
+            const line = Math.min(Math.max(cursorPosition.line, 0), lastLine);
+            const ch = Math.min(
+                Math.max(cursorPosition.ch, 0),
+                cellEditor.getLine(line).length
+            );
+            cellEditor.setCursor({ line, ch });
+        });
+    }
 
-        const cursorPosition = this.getCursorPositionForImageClick(image, event);
-        if (cursorPosition && this.editor) {
-            this.editor.setCursor(cursorPosition);
+
+    private tryRevealActiveTableImageMarkdown(
+        event: MouseEvent,
+        tableWidget: ObsidianTableWidget,
+        fallbackCellElement: HTMLElement,
+        imageIndex: number
+    ): boolean {
+        const activeTableCellEditor = tableWidget.editor?.tableCell;
+        const cellEditor = activeTableCellEditor?.editor;
+        const editorContainer = activeTableCellEditor?.containerEl
+            ?? activeTableCellEditor?.cell?.el
+            ?? fallbackCellElement;
+        const editingImages = Array.from(
+            editorContainer.querySelectorAll<HTMLImageElement>(".image-embed img")
+        );
+        const editingImage = editingImages[imageIndex];
+        const editButton = editingImage ? this.getNativeImageEditButton(editingImage) : null;
+        if (!cellEditor || !editButton || !editingImage) {
+            return false;
         }
+
+        const cursorPosition = this.getCursorPositionForImageClickInEditor(
+            editingImage,
+            event,
+            cellEditor
+        );
+
+        editButton.click();
+        if (cursorPosition) {
+            const ownerWindow = editingImage.ownerDocument.defaultView ?? window;
+            this.restoreTableCellCursorAfterNativeReveal(
+                tableWidget,
+                cellEditor,
+                cursorPosition,
+                ownerWindow
+            );
+        }
+
+        return true;
+    }
+
+
+    private revealTableImageMarkdown(
+        image: HTMLImageElement,
+        event: MouseEvent,
+        tableWidget: ObsidianTableWidget,
+        imageIndex: number
+    ): boolean {
+        const tableCell = tableWidget.getClosestCell?.(event.clientX, event.clientY);
+        const tableCellElement = image.closest("td");
+        if (!tableCell || !tableCellElement || !tableWidget.setCellFocus) {
+            return false;
+        }
+
+        // Remove plugin-owned wrappers before Obsidian snapshots the cell into its nested editor.
+        this.cleanupHandles();
+        tableWidget.setCellFocus(tableCell.row, tableCell.col);
+
+        return this.tryRevealActiveTableImageMarkdown(
+            event,
+            tableWidget,
+            tableCellElement,
+            imageIndex
+        );
+    }
+
+    private handleImagePointerDownCapture = (event: PointerEvent) => {
+        const context = this.getImageClickOverrideContext(event);
+        if (!context) return;
+
+
+        const { image, revealTarget } = context;
+        let didRevealMarkdown = false;
+
+        if (revealTarget.type === "native") {
+            const cursorPosition = this.getCursorPositionForImageClick(image, event);
+
+            this.cleanupHandles();
+
+            // In Obsidian 1.13+, moving the cursor alone does not expand an image widget.
+            // Its edit action dispatches the CodeMirror effect that reveals the Markdown link.
+            revealTarget.editButton.click();
+            if (cursorPosition && this.editor) {
+                this.editor.setCursor(cursorPosition);
+            }
+            didRevealMarkdown = true;
+        } else {
+            didRevealMarkdown = this.revealTableImageMarkdown(
+                image,
+                event,
+                revealTarget.tableWidget,
+                revealTarget.imageIndex
+            );
+        }
+
+        // If Obsidian exposes no usable reveal action, preserve its native widget behavior.
+        if (!didRevealMarkdown) return;
+
+        this.armNativeClickSuppression(image.ownerDocument, event.pointerId);
+        this.suppressNativeImageEvent(event);
 
         const { activeElement } = image.ownerDocument;
         if (activeElement?.instanceOf(HTMLElement) && activeElement.closest(".image-embed")) {
@@ -322,12 +694,23 @@ export class ImageResizer extends Component {
         }
     };
 
-    private handleImageClickCapture = (event: MouseEvent) => {
-        if (!this.getInternalImageTargetForClickOverride(event)) return;
+    private handleSuppressedImageMouseDownCapture = (event: MouseEvent) => {
+        if (!this.suppressNextNativeImageClick) return;
+        this.suppressNativeImageEvent(event);
+    };
 
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
+    private handleImageClickCapture = (event: MouseEvent) => {
+        const target = event.target as Node | null;
+        if (target?.instanceOf(Element) && target.closest(".edit-block-button")) return;
+
+        if (this.suppressNextNativeImageClick) {
+            this.suppressNativeImageEvent(event);
+            this.clearNativeClickSuppression();
+            return;
+        }
+
+        if (!this.getImageClickOverrideContext(event)) return;
+        this.suppressNativeImageEvent(event);
     };
 
     private handleImageHover = (event: MouseEvent) => {
@@ -656,7 +1039,7 @@ export class ImageResizer extends Component {
         // Determine handle type (border or specific handle)
         this.currentHandle = resizeTarget.hasClass("image-resize-border")
             ? "border"
-            : (resizeTarget as HTMLElement).getAttr("data-handle-type") || null;
+            : resizeTarget.getAttr("data-handle-type") || null;
 
         // Get initial dimensions and calculate aspect ratio
         const rect = this.activeImage.getBoundingClientRect();
@@ -794,11 +1177,12 @@ export class ImageResizer extends Component {
             this.activeImage.style.width = `${roundedWidth}px`;
             this.activeImage.style.height = `${roundedHeight}px`;
 
-            // Live-update the markdown link during drag (throttled) so users can see size numbers change
-            this.throttledUpdateImageLink(this.activeImage, roundedWidth, roundedHeight, this.currentHandle);
-
-            // Update the cursor position during resize (visual feedback only during drag)
-            this.updateCursorPositionDuringResize();
+            // A table-cell editor and the outer note editor cannot safely accept concurrent
+            // transactions. Keep table resizing visual until the interaction is committed.
+            if (!this.isImageInTableWidget(this.activeImage)) {
+                this.throttledUpdateImageLink(this.activeImage, roundedWidth, roundedHeight, this.currentHandle);
+                this.updateCursorPositionDuringResize();
+            }
         };
 
 
@@ -902,7 +1286,7 @@ export class ImageResizer extends Component {
             // If it's a resize handle, find the parent image
             const imageContainer = target.closest(".image-resize-container");
             if (imageContainer) {
-                image = imageContainer.querySelector("img") as HTMLImageElement;
+                image = imageContainer.querySelector("img");
             }
         }
 
@@ -977,6 +1361,11 @@ export class ImageResizer extends Component {
         const resolvedWidth = resolvedDimensions.width;
         const resolvedHeight = resolvedDimensions.height;
 
+        const isTableImage = this.isImageInTableWidget(image);
+        const tableScrollResizeContext = isTableImage
+            ? this.createTableScrollResizeContext(image, event, imageName, notePath)
+            : null;
+
         // Check if alignment is enabled
         const isAlignmentEnabled = this.plugin.settings.isImageAlignmentEnabled;
 
@@ -999,15 +1388,15 @@ export class ImageResizer extends Component {
             };
         }
 
-        // Use throttled version if alignment is disabled OR if the image doesn't have a positional class
-        if (!isAlignmentEnabled || !hasPositionalClass) {
-            // Update markdown link immediately (but still throttled)
+        // Rewriting a table row while its nested cell editor is active causes competing
+        // CodeMirror transactions. Commit table dimensions once after scrolling settles.
+        if ((!isAlignmentEnabled || !hasPositionalClass) && !isTableImage) {
             this.throttledUpdateImageLink(image, resolvedWidth, resolvedHeight, null);
         }
 
-        // Debounced update to the markdown link and cache (only if alignment is enabled)
+        // Table Markdown is committed separately against the safe editor selected at settle time.
         if (isAlignmentEnabled) {
-            this.debouncedSaveToCache(image, resolvedWidth, resolvedHeight);
+            this.debouncedSaveToCache(image, resolvedWidth, resolvedHeight, !isTableImage);
         }
 
         // Reset scroll state after delay
@@ -1016,8 +1405,23 @@ export class ImageResizer extends Component {
         }
 
         this.scrollTimeout = window.setTimeout(() => {
+            this.scrollTimeout = null;
             this.resizeState.isScrolling = false;
             this.activeImage = null;
+
+            if (!isTableImage) return;
+
+            if (tableScrollResizeContext) {
+                this.commitTableScrollResize(
+                    image,
+                    resolvedWidth,
+                    resolvedHeight,
+                    tableScrollResizeContext
+                );
+                return;
+            }
+
+            void this.updateMarkdownLink(image, resolvedWidth, resolvedHeight, null);
         }, this.SCROLL_DEBOUNCE_MS);
     };
 
@@ -1175,9 +1579,16 @@ export class ImageResizer extends Component {
      * @param currentHandle - A string indicating which handle was used for resizing
      *                        (e.g., 'n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'),
      *                        or null if the resize was not initiated from a handle.
+     * @param updateTarget - Stable editor and link identity captured for a delayed update.
      */
-    private async updateMarkdownLink(image: HTMLImageElement, newWidth: number, newHeight: number, currentHandle: string | null) {
-        if (!this.editor || !this.markdownView) return;
+    private async updateMarkdownLink(
+        image: HTMLImageElement,
+        newWidth: number,
+        newHeight: number,
+        currentHandle: string | null,
+        updateTarget?: MarkdownLinkUpdateTarget
+    ) {
+        if (!this.markdownView || (!this.editor && !updateTarget)) return;
 
         // Check if we're in reading mode
         const state = this.markdownView.getState();
@@ -1190,21 +1601,28 @@ export class ImageResizer extends Component {
             return;
         }
 
-        const imageName = this.getImageName(image);
+        const imageName = updateTarget?.imageName ?? this.getImageName(image);
         if (!imageName) {
             console.warn("Could not get imageName for image:", image);
             return;
         }
 
-        const { editor } = this;
         const normalizedTargetName = this.isBase64Image(imageName) ? imageName : this.getFilenameFromPath(imageName);
 
-        const activeFile = this.plugin.app.workspace.getActiveFile();
-        if (!activeFile) {
-            console.warn("Could not get active file for image:", image);
-            return;
+        let notePath = updateTarget?.notePath;
+        if (!notePath) {
+            const activeFile = this.plugin.app.workspace.getActiveFile();
+            if (!activeFile) {
+                console.warn("Could not get active file for image:", image);
+                return;
+            }
+            notePath = activeFile.path;
         }
-        const notePath = activeFile.path;
+
+        const editor = updateTarget?.editor
+            ?? this.getActiveTableCellEditorForImage(image)
+            ?? this.editor;
+        if (!editor) return;
 
         // Callers (handleMouseUp, handleMouseWheel) already validate dimensions via resolveValidDimensions.
         // Use passed dimensions directly.
@@ -1233,99 +1651,95 @@ export class ImageResizer extends Component {
         const cursorLocation = this.plugin.settings.resizeCursorLocation;
 
 
-        editor.getValue()
-            .split('\n')
-            .forEach((lineContent, line) => {
-                if (this.isFrontmatter(line, editor)) return;
-
-                const matches = this.findAllMatches(lineContent).filter(match => {
-                    const matchFilename = this.isBase64Image(match.path) ? match.path : this.getFilenameFromPath(match.path);
-                    return matchFilename === normalizedTargetName;
-                });
-
-                matches.forEach(match => {
-                    let widthParam = "";
-                    let heightParam = "";
-                    let updatedContent = "";
-
-                    const cachedAlignment: ImagePositionData | null = this.plugin.settings.isImageAlignmentEnabled && this.plugin.ImageAlignmentManager ?
-                        this.plugin.ImageAlignmentManager.getImageAlignment(notePath, imageName) : null;
-
-                    const cachedWidth = cachedAlignment?.width || undefined; // Default to undefined if not found which we later filter out
-                    const cachedHeight = cachedAlignment?.height || undefined; // Default to undefined if not found which we later filter out
-                    const dimensionPart = `${Math.round(resolvedWidth)}x${Math.round(resolvedHeight)}`;
-
-                    if (match.type === "md") {
-
-                        if (this.currentHandle === "border") {
-                            widthParam = `${Math.round(resolvedWidth)}x`;
-                            heightParam = `${Math.round(resolvedHeight)}`;
-                        } else if (["n", "s"].includes(currentHandle || "")) {
-                            widthParam = cachedWidth ?? (match.existingWidth !== undefined ? `${match.existingWidth}x` : "x");
-                            heightParam = `${Math.round(resolvedHeight)}`;
-                            if (widthParam === "x") widthParam = `${this.initialWidth}x`;
-                        } else if (["e", "w"].includes(currentHandle || "")) {
-                            widthParam = `${Math.round(resolvedWidth)}x`;
-                            heightParam = cachedHeight ?? (match.existingHeight !== undefined ? `${match.existingHeight}` : "");
-                            if (heightParam === "") heightParam = `${this.initialHeight}`;
-                        } else {
-                            widthParam = `${Math.round(resolvedWidth)}x`;
-                            heightParam = `${Math.round(resolvedHeight)}`;
-                        }
-
-                        if (match.caption) {
-                            updatedContent = `![${match.altText || ""}${match.spacing.beforeFirstPipe}|${match.caption}${match.spacing.beforeSecondPipe}|${dimensionPart}](${match.path})`;
-                        } else {
-                            updatedContent = `![${match.altText || ""}${match.spacing.beforeFirstPipe}|${dimensionPart}](${match.path})`;
-                        }
-
-
-
-                    } else {
-                        if (this.currentHandle === "border") {
-                            widthParam = `${Math.round(resolvedWidth)}x`;
-                            heightParam = `${Math.round(resolvedHeight)}`;
-                        } else if (["n", "s"].includes(currentHandle || "")) {
-                            widthParam = cachedWidth ?? (match.existingWidth !== undefined ? `${match.existingWidth}x` : "x");
-                            heightParam = `${Math.round(resolvedHeight)}`;
-                            if (widthParam === "x") widthParam = `${this.initialWidth}x`;
-                        } else if (["e", "w"].includes(currentHandle || "")) {
-                            widthParam = `${Math.round(resolvedWidth)}x`;
-                            heightParam = cachedHeight ?? (match.existingHeight !== undefined ? `${match.existingHeight}` : "");
-                            if (heightParam === "") heightParam = `${this.initialHeight}`;
-                        } else {
-                            widthParam = `${Math.round(resolvedWidth)}x`;
-                            heightParam = `${Math.round(resolvedHeight)}`;
-                        }
-
-                        if (match.caption) {
-                            updatedContent = `![[${match.path}${match.spacing.beforeFirstPipe}|${match.caption}${match.spacing.beforeSecondPipe}|${dimensionPart}]]`;
-                        } else {
-                            updatedContent = `![[${match.path}${match.spacing.beforeFirstPipe}|${dimensionPart}]]`;
-                        }
-
-                    }
-
-                    if (updatedContent) {
-                        const startCh = match.index;
-                        const endCh = startCh + match.fullMatch.length;
-                        changes.push({ from: { line, ch: startCh }, to: { line, ch: endCh }, text: updatedContent });
-
-                        // Determine cursor position based on settings
-                        let endLine = line; // Initialize endLine with the current line
-                        if (cursorLocation === "front") {
-                            cursorPosition = { line, ch: startCh };
-                        } else if (cursorLocation === "back") {
-                            cursorPosition = { line, ch: startCh + updatedContent.length };
-                        } else if (cursorLocation === "below") {
-                            endLine = this.getEndLineOfLink(editor, line, startCh, endCh);
-                            // NEW: Check for callout and adjust endLine
-                            endLine = this.getEndOfCallout(editor, endLine);
-                            cursorPosition = { line: endLine + 1, ch: 0 };
-                        }
-                    }
-                });
+        this.forEachLineOutsideFrontmatter(editor, (lineContent, line, lineContext) => {
+            const matches = this.findAllMatches(lineContent, lineContext.isTableRow).filter(match => {
+                const matchFilename = this.isBase64Image(match.path) ? match.path : this.getFilenameFromPath(match.path);
+                return matchFilename === normalizedTargetName;
             });
+
+            matches.forEach(match => {
+                let widthParam = "";
+                let heightParam = "";
+                let updatedContent = "";
+
+                const cachedAlignment: ImagePositionData | null = this.plugin.settings.isImageAlignmentEnabled && this.plugin.ImageAlignmentManager ?
+                    this.plugin.ImageAlignmentManager.getImageAlignment(notePath, imageName) : null;
+
+                const cachedWidth = cachedAlignment?.width || undefined; // Default to undefined if not found which we later filter out
+                const cachedHeight = cachedAlignment?.height || undefined; // Default to undefined if not found which we later filter out
+                const dimensionPart = `${Math.round(resolvedWidth)}x${Math.round(resolvedHeight)}`;
+
+                if (match.type === "md") {
+
+                    if (this.currentHandle === "border") {
+                        widthParam = `${Math.round(resolvedWidth)}x`;
+                        heightParam = `${Math.round(resolvedHeight)}`;
+                    } else if (["n", "s"].includes(currentHandle || "")) {
+                        widthParam = cachedWidth ?? (match.existingWidth !== undefined ? `${match.existingWidth}x` : "x");
+                        heightParam = `${Math.round(resolvedHeight)}`;
+                        if (widthParam === "x") widthParam = `${this.initialWidth}x`;
+                    } else if (["e", "w"].includes(currentHandle || "")) {
+                        widthParam = `${Math.round(resolvedWidth)}x`;
+                        heightParam = cachedHeight ?? (match.existingHeight !== undefined ? `${match.existingHeight}` : "");
+                        if (heightParam === "") heightParam = `${this.initialHeight}`;
+                    } else {
+                        widthParam = `${Math.round(resolvedWidth)}x`;
+                        heightParam = `${Math.round(resolvedHeight)}`;
+                    }
+
+                    if (match.caption) {
+                        updatedContent = `![${match.altText || ""}${match.spacing.beforeFirstPipe}${match.pipeDelimiter}${match.caption}${match.spacing.beforeSecondPipe}${match.dimensionPipeDelimiter}${dimensionPart}](${match.path})`;
+                    } else {
+                        updatedContent = `![${match.altText || ""}${match.spacing.beforeFirstPipe}${match.pipeDelimiter}${dimensionPart}](${match.path})`;
+                    }
+
+
+
+                } else {
+                    if (this.currentHandle === "border") {
+                        widthParam = `${Math.round(resolvedWidth)}x`;
+                        heightParam = `${Math.round(resolvedHeight)}`;
+                    } else if (["n", "s"].includes(currentHandle || "")) {
+                        widthParam = cachedWidth ?? (match.existingWidth !== undefined ? `${match.existingWidth}x` : "x");
+                        heightParam = `${Math.round(resolvedHeight)}`;
+                        if (widthParam === "x") widthParam = `${this.initialWidth}x`;
+                    } else if (["e", "w"].includes(currentHandle || "")) {
+                        widthParam = `${Math.round(resolvedWidth)}x`;
+                        heightParam = cachedHeight ?? (match.existingHeight !== undefined ? `${match.existingHeight}` : "");
+                        if (heightParam === "") heightParam = `${this.initialHeight}`;
+                    } else {
+                        widthParam = `${Math.round(resolvedWidth)}x`;
+                        heightParam = `${Math.round(resolvedHeight)}`;
+                    }
+
+                    if (match.caption) {
+                        updatedContent = `![[${match.path}${match.spacing.beforeFirstPipe}${match.pipeDelimiter}${match.caption}${match.spacing.beforeSecondPipe}${match.dimensionPipeDelimiter}${dimensionPart}]]`;
+                    } else {
+                        updatedContent = `![[${match.path}${match.spacing.beforeFirstPipe}${match.pipeDelimiter}${dimensionPart}]]`;
+                    }
+
+                }
+
+                if (updatedContent) {
+                    const startCh = match.index;
+                    const endCh = startCh + match.fullMatch.length;
+                    changes.push({ from: { line, ch: startCh }, to: { line, ch: endCh }, text: updatedContent });
+
+                    // Determine cursor position based on settings
+                    let endLine = line; // Initialize endLine with the current line
+                    if (cursorLocation === "front") {
+                        cursorPosition = { line, ch: startCh };
+                    } else if (cursorLocation === "back") {
+                        cursorPosition = { line, ch: startCh + updatedContent.length };
+                    } else if (cursorLocation === "below") {
+                        endLine = this.getEndLineOfLink(editor, line, startCh, endCh);
+                        // NEW: Check for callout and adjust endLine
+                        endLine = this.getEndOfCallout(editor, endLine);
+                        cursorPosition = { line: endLine + 1, ch: 0 };
+                    }
+                }
+            });
+        });
 
         // Apply changes atomically
         if (changes.length > 0) {
@@ -1396,10 +1810,61 @@ export class ImageResizer extends Component {
         }
     }
 
+    /**
+     * Streams each Markdown body line exactly once, excluding YAML frontmatter.
+     */
+    private forEachLineOutsideFrontmatter(
+        editor: Editor,
+        callback: (lineContent: string, line: number, context: EditorLineContext) => void
+    ): void {
+        let inFrontmatter = false;
+        let continuingTable = false;
+        const lastLine = editor.lastLine();
+        if (lastLine < 0) return;
+
+        let previousLine: string | null = null;
+        let lineContent = editor.getLine(0);
+        let nextLine: string | null = lastLine > 0 ? editor.getLine(1) : null;
+
+        for (let line = 0; line <= lastLine; line++) {
+            if (line === 0 && lineContent === "---") {
+                inFrontmatter = true;
+                continuingTable = false;
+            } else if (inFrontmatter && lineContent === "---") {
+                inFrontmatter = false;
+                continuingTable = false;
+            } else if (!inFrontmatter) {
+                const isTableRow = this.isMarkdownTableRow(
+                    lineContent,
+                    previousLine,
+                    nextLine,
+                    continuingTable
+                );
+                callback(lineContent, line, { previousLine, nextLine, isTableRow });
+
+                if (this.isMarkdownTableSeparator(lineContent)) {
+                    continuingTable = true;
+                } else if (!continuingTable || !this.hasMarkdownTableRowSyntax(lineContent)) {
+                    continuingTable = false;
+                }
+            }
+
+            previousLine = lineContent;
+            lineContent = nextLine ?? "";
+            nextLine = line + 2 <= lastLine ? editor.getLine(line + 2) : null;
+        }
+    }
+
     private getCursorPositionForImageClick(image: HTMLImageElement, event: MouseEvent): EditorPosition | null {
         if (!this.editor) return null;
+        return this.getCursorPositionForImageClickInEditor(image, event, this.editor);
+    }
 
-        const { editor } = this;
+    private getCursorPositionForImageClickInEditor(
+        image: HTMLImageElement,
+        event: MouseEvent,
+        editor: Editor
+    ): EditorPosition | null {
         const imageName = this.getImageName(image);
         const anchorPosition = typeof editor.posAtMouse === "function"
             ? editor.posAtMouse(event) ?? editor.getCursor()
@@ -1410,41 +1875,39 @@ export class ImageResizer extends Component {
         }
 
         const normalizedTargetName = this.isBase64Image(imageName) ? imageName : this.getFilenameFromPath(imageName);
-        const candidates: Array<{ line: number; startCh: number; endCh: number }> = [];
+        const nearest = {
+            candidate: null as { line: number; startCh: number; endCh: number } | null,
+            score: Number.POSITIVE_INFINITY,
+        };
 
-        editor.getValue()
-            .split('\n')
-            .forEach((lineContent, line) => {
-                if (this.isFrontmatter(line, editor)) return;
+        this.forEachLineOutsideFrontmatter(editor, (lineContent, line) => {
+            for (const match of this.findAllMatches(lineContent)) {
+                const matchFilename = this.isBase64Image(match.path)
+                    ? match.path
+                    : this.getFilenameFromPath(match.path);
+                if (matchFilename !== normalizedTargetName) continue;
 
-                this.findAllMatches(lineContent)
-                    .filter((match) => {
-                        const matchFilename = this.isBase64Image(match.path) ? match.path : this.getFilenameFromPath(match.path);
-                        return matchFilename === normalizedTargetName;
-                    })
-                    .forEach((match) => {
-                        candidates.push({
-                            line,
-                            startCh: match.index,
-                            endCh: match.index + match.fullMatch.length,
-                        });
-                    });
-            });
+                const candidate = {
+                    line,
+                    startCh: match.index,
+                    endCh: match.index + match.fullMatch.length,
+                };
+                const score = this.getImageClickCandidateScore(candidate, anchorPosition);
+                if (score < nearest.score) {
+                    nearest.candidate = candidate;
+                    nearest.score = score;
+                }
+            }
+        });
 
-        if (candidates.length === 0) {
+        if (!nearest.candidate) {
             return anchorPosition;
         }
 
-        const bestCandidate = candidates.reduce((best, candidate) => {
-            const bestScore = this.getImageClickCandidateScore(best, anchorPosition);
-            const candidateScore = this.getImageClickCandidateScore(candidate, anchorPosition);
-            return candidateScore < bestScore ? candidate : best;
-        });
-
         const cursorLocation = this.plugin.settings.dropPasteCursorLocation ?? "back";
         return cursorLocation === "front"
-            ? { line: bestCandidate.line, ch: bestCandidate.startCh }
-            : { line: bestCandidate.line, ch: bestCandidate.endCh };
+            ? { line: nearest.candidate.line, ch: nearest.candidate.startCh }
+            : { line: nearest.candidate.line, ch: nearest.candidate.endCh };
     }
 
     private getImageClickCandidateScore(
@@ -1495,161 +1958,164 @@ export class ImageResizer extends Component {
     }
 
     /**
-     * Checks if a given line number in the editor is within the frontmatter.
-     *
-     * @param lineNumber - The line number to check.
-     * @param editor - The editor instance.
-     * @returns True if the line is within the frontmatter, false otherwise.
-     */
-    private isFrontmatter(lineNumber: number, editor: Editor): boolean {
-        let inFrontmatter = false;
-        let frontmatterStart = false;
-
-        for (let i = 0; i <= lineNumber; i++) {
-            const line = editor.getLine(i);
-
-            if (i === 0 && line === "---") {
-                inFrontmatter = true;
-                frontmatterStart = true;
-                continue;
-            }
-
-            if (inFrontmatter && line === "---") {
-                inFrontmatter = false;
-                continue;
-            }
-
-            if (i === lineNumber && inFrontmatter && frontmatterStart) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
      * Finds all Markdown and Wikilink image matches in a given content string.
      *
      * @param content - The content string to search.
      * @returns An array of match objects with details about each image link.
      */
-    private findAllMatches(content: string): Array<{
-        type: "md" | "wiki";
-        fullMatch: string;
-        index: number;
-        path: string;
-        altText?: string;
-        caption?: string;
-        existingWidth?: number;
-        existingHeight?: number;
-        spacing: {
-            beforeFirstPipe: string;
-            beforeSecondPipe: string;
+    private normalizeMarkdownTableLine(line: string | null): string {
+        return (line ?? "").replace(/^\s*(?:>\s*)+/, "").trim();
+    }
+
+    private isMarkdownTableSeparator(line: string | null): boolean {
+        const normalizedLine = this.normalizeMarkdownTableLine(line);
+        if (!normalizedLine.includes("|")) return false;
+
+        const cells = normalizedLine
+            .replace(/^\|\s*/, "")
+            .replace(/\s*\|$/, "")
+            .split("|");
+        return cells.length > 0
+            && cells.every(cell => /^\s*:?-{3,}:?\s*$/.test(cell));
+    }
+
+    private hasMarkdownTableRowSyntax(line: string): boolean {
+        return /(?<!\\)\|/.test(this.normalizeMarkdownTableLine(line));
+    }
+
+    private isMarkdownTableRow(
+        content: string,
+        previousLine: string | null = null,
+        nextLine: string | null = null,
+        continuingTable = false
+    ): boolean {
+        const currentLine = this.normalizeMarkdownTableLine(content);
+
+        return currentLine.startsWith("|")
+            || this.isMarkdownTableSeparator(previousLine)
+            || this.isMarkdownTableSeparator(nextLine)
+            || (continuingTable && this.hasMarkdownTableRowSyntax(content));
+    }
+
+    private findAllMatches(content: string, isTableRow = false): ImageLinkMatch[] {
+        const matches: ImageLinkMatch[] = [];
+        const defaultPipeDelimiter: ImageLinkPipeDelimiter =
+            isTableRow || this.isMarkdownTableRow(content) ? "\\|" : "|";
+
+        const getPipeDelimiter = (delimiter: string | undefined): ImageLinkPipeDelimiter => {
+            if (delimiter === "\\|") return "\\|";
+            if (delimiter === "|") return "|";
+            return defaultPipeDelimiter;
         };
-    }> {
-        const matches: Array<{
-            type: "md" | "wiki";
-            fullMatch: string;
-            index: number;
-            path: string;
-            altText?: string;
-            caption?: string;
-            existingWidth?: number;
-            existingHeight?: number;
-            spacing: {
-                beforeFirstPipe: string;
-                beforeSecondPipe: string;
+        const getTrailingWhitespace = (value: string | undefined): string =>
+            value?.match(/\s*$/)?.[0] ?? "";
+        const parseDimensions = (value: string | undefined): {
+            width: number;
+            height?: number;
+        } | null => {
+            const dimensionMatch = value?.trim().match(/^(\d+)(?:x(\d+))?$/);
+            if (!dimensionMatch) return null;
+
+            const [, width = "0", height] = dimensionMatch;
+            return {
+                width: parseInt(width, 10),
+                height: height ? parseInt(height, 10) : undefined
             };
-        }> = [];
+        };
+        const splitPipeSections = (value: string): {
+            sections: string[];
+            delimiters: ImageLinkPipeDelimiter[];
+        } => {
+            const sections: string[] = [];
+            const delimiters: ImageLinkPipeDelimiter[] = [];
+            const delimiterPattern = /\\?\|/g;
+            let sectionStart = 0;
+            let delimiterMatch: RegExpExecArray | null;
 
-        // Helper function to check if a string represents dimensions
-        const isDimensions = (str: string): boolean => {
-            return /^\d+x\d+$/.test(str.trim());
+            while ((delimiterMatch = delimiterPattern.exec(value)) !== null) {
+                const [rawDelimiter] = delimiterMatch;
+                sections.push(value.slice(sectionStart, delimiterMatch.index));
+                delimiters.push(getPipeDelimiter(rawDelimiter));
+                sectionStart = delimiterMatch.index + rawDelimiter.length;
+            }
+            sections.push(value.slice(sectionStart));
+
+            return { sections, delimiters };
+        };
+        const parseLinkSections = (value: string) => {
+            const { sections, delimiters } = splitPipeSections(value);
+            const [rawPrimary = ""] = sections;
+            const dimensions = sections.length > 1
+                ? parseDimensions(sections.at(-1))
+                : null;
+            const captionEnd = dimensions ? sections.length - 1 : sections.length;
+            let rawCaption: string | undefined;
+
+            if (captionEnd > 1) {
+                rawCaption = sections[1] ?? "";
+                for (let section = 2; section < captionEnd; section++) {
+                    const delimiter = delimiters[section - 1] ?? defaultPipeDelimiter;
+                    rawCaption += `${delimiter}${sections[section] ?? ""}`;
+                }
+            }
+
+            const pipeDelimiter = delimiters[0] ?? defaultPipeDelimiter;
+            const dimensionPipeDelimiter = dimensions
+                ? delimiters.at(-1) ?? pipeDelimiter
+                : pipeDelimiter;
+
+            return {
+                rawPrimary,
+                caption: rawCaption?.trim() || undefined,
+                dimensions,
+                pipeDelimiter,
+                dimensionPipeDelimiter,
+                beforeFirstPipe: getTrailingWhitespace(rawPrimary),
+                beforeSecondPipe: getTrailingWhitespace(rawCaption)
+            };
         };
 
-        // Find Wiki-style links
-        const wikiRegex = /!\[\[([^|\]]+?)(?:\s*\|([^|\]]*?))?(?:\s*\|([^|\]]*))?\]\]/g;
-        let wikiMatch;
+        const wikiRegex = /!\[\[([^\]]*)\]\]/g;
+        let wikiMatch: RegExpExecArray | null;
         while ((wikiMatch = wikiRegex.exec(content)) !== null) {
-            const path = wikiMatch[1].trim();
-            let caption: string | undefined = wikiMatch[2]?.trim();
-            let dimensionPart = wikiMatch[3]?.trim();
-
-            // If we only have one pipe part, check if it's dimensions
-            if (caption && !dimensionPart) {
-                if (isDimensions(caption)) {
-                    dimensionPart = caption;
-                    caption = undefined;
-                }
-            }
-
-            // Parse dimensions if they exist
-            let existingWidth: number | undefined;
-            let existingHeight: number | undefined;
-
-            if (dimensionPart) {
-                const dimensionMatch = dimensionPart.match(/^(\d+)x(\d+)$/);
-                if (dimensionMatch) {
-                    existingWidth = parseInt(dimensionMatch[1], 10);
-                    existingHeight = parseInt(dimensionMatch[2], 10);
-                }
-            }
-
+            const [fullMatch, inner = ""] = wikiMatch;
+            const parsed = parseLinkSections(inner);
             matches.push({
                 type: "wiki",
-                fullMatch: wikiMatch[0],
+                fullMatch,
                 index: wikiMatch.index,
-                path,
-                caption,
-                existingWidth,
-                existingHeight,
+                path: parsed.rawPrimary.trim(),
+                caption: parsed.caption,
+                existingWidth: parsed.dimensions?.width,
+                existingHeight: parsed.dimensions?.height,
+                pipeDelimiter: parsed.pipeDelimiter,
+                dimensionPipeDelimiter: parsed.dimensionPipeDelimiter,
                 spacing: {
-                    beforeFirstPipe: wikiMatch[0].match(/\[\[[^|]+?(\s*)\|/)?.[1] || '',
-                    beforeSecondPipe: wikiMatch[0].match(/\|[^|]*?(\s*)\|/)?.[1] || ''
+                    beforeFirstPipe: parsed.beforeFirstPipe,
+                    beforeSecondPipe: parsed.beforeSecondPipe
                 }
             });
         }
 
-        // Find Markdown-style links
-        const mdRegex = /!\[([^\]]*?)(?:\s*\|([^\]|]*?))?(?:\s*\|([^\]|]*))?\]\(([^)]+)\)/g;
-        let mdMatch;
+        const mdRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+        let mdMatch: RegExpExecArray | null;
         while ((mdMatch = mdRegex.exec(content)) !== null) {
-            const altText = mdMatch[1]?.trim();
-            let caption: string | undefined = mdMatch[2]?.trim();
-            let dimensionPart = mdMatch[3]?.trim();
-            const path = mdMatch[4].trim();
-
-            // If we only have one pipe part, check if it's dimensions
-            if (caption && !dimensionPart) {
-                if (isDimensions(caption)) {
-                    dimensionPart = caption;
-                    caption = undefined;
-                }
-            }
-
-            // Parse dimensions if they exist
-            let existingWidth: number | undefined;
-            let existingHeight: number | undefined;
-
-            if (dimensionPart) {
-                const dimensionMatch = dimensionPart.match(/^(\d+)x(\d+)$/);
-                if (dimensionMatch) {
-                    existingWidth = parseInt(dimensionMatch[1], 10);
-                    existingHeight = parseInt(dimensionMatch[2], 10);
-                }
-            }
-
+            const [fullMatch, inner = "", rawPath = ""] = mdMatch;
+            const parsed = parseLinkSections(inner);
             matches.push({
                 type: "md",
-                fullMatch: mdMatch[0],
+                fullMatch,
                 index: mdMatch.index,
-                path,
-                altText,
-                caption,
-                existingWidth,
-                existingHeight,
+                path: rawPath.trim(),
+                altText: parsed.rawPrimary.trim(),
+                caption: parsed.caption,
+                existingWidth: parsed.dimensions?.width,
+                existingHeight: parsed.dimensions?.height,
+                pipeDelimiter: parsed.pipeDelimiter,
+                dimensionPipeDelimiter: parsed.dimensionPipeDelimiter,
                 spacing: {
-                    beforeFirstPipe: mdMatch[0].match(/\[([^\]]*?)(\s*)\|/)?.[2] || '',
-                    beforeSecondPipe: mdMatch[0].match(/\|[^|]*?(\s*)\|/)?.[1] || ''
+                    beforeFirstPipe: parsed.beforeFirstPipe,
+                    beforeSecondPipe: parsed.beforeSecondPipe
                 }
             });
         }
@@ -1873,11 +2339,17 @@ export class ImageResizer extends Component {
  * @param image The image element being resized.
  * @param newWidth The new width of the image.
  * @param newHeight The new height of the image.
+ * @param shouldUpdateMarkdownLink Whether this debounced call owns the Markdown update.
  */
-    private saveDimensionsToCache = async (image: HTMLImageElement, newWidth: number, newHeight: number) => {
-        // Update markdown link (fire-and-forget since this is debounced)
-        this.updateMarkdownLink(image, newWidth, newHeight, null)
-            .catch(this.logAsyncError("Failed to update markdown link from cache save"));
+    private saveDimensionsToCache = async (
+        image: HTMLImageElement,
+        newWidth: number,
+        newHeight: number,
+        shouldUpdateMarkdownLink = true
+    ) => {
+        if (shouldUpdateMarkdownLink) {
+            void this.updateMarkdownLink(image, newWidth, newHeight, null);
+        }
 
         // Save to cache using the buffered dimensions
         const activeFile = this.plugin.app.workspace.getActiveFile();

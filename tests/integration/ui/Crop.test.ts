@@ -22,7 +22,7 @@ function openCropWithImage(bytesLen = 32) {
   const files = [fakeTFile({ path: 'imgs/pic.jpg', name: 'pic.jpg', extension: 'jpg' })];
   const vault = fakeVault({ files, binaryContents: new Map([[files[0].path, bytes]]) });
   const app = fakeApp({ vault });
-  const crop = new Crop(app as any, files[0]);
+  const crop = new Crop(app as any, files[0], 'keep-all');
   return { crop, app };
 }
 

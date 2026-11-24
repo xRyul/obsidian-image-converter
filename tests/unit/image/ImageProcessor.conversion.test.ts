@@ -21,24 +21,28 @@ vi.mock('fs/promises');
 vi.mock('os');
 vi.mock('path');
 vi.mock('sortablejs');
-vi.mock('piexifjs');
 vi.mock('@/main');
 
 import { ImageProcessor } from '../../../src/ImageProcessor';
+import { DEFAULT_SETTINGS } from '../../../src/ImageConverterSettings';
 import { SupportedImageFormats } from '../../../src/SupportedImageFormats';
 import { 
   makePngBytes, 
   makeJpegBytes, 
   makeWebpBytes, 
   makeImageBlob,
+  makeImageFile,
   corruptedBytes 
 } from '../../factories/image';
 import { setMockImageSize, failNextImageLoad } from '../../helpers/test-setup';
 import { 
   fakeCanvas
 } from '../../factories/canvas';
-import { exifFrom } from '../../factories/exif';
+import { asciiValue, exifBlockFrom, shortValue, TAG } from '../../factories/exif';
 import { fakeNotice } from '../../factories/obsidian';
+import { parseExifBlock } from '../../../src/metadata/ExifBlock';
+import * as metadataTransfer from '../../../src/metadata/transferMetadata';
+import { readExif as readJpegExif } from '../../../src/metadata/containers/jpeg';
 
 // Mock dependencies
 // The obsidian mock is already configured in vitest.config.ts via alias
@@ -73,7 +77,7 @@ describe('ImageProcessor - Conversion Tests', () => {
 
   describe('WEBP Conversion', () => {
     // Test 1.1
-    it('Given WEBP format requested, When multiple candidates available, Then selects smallest among toBlob, toDataURL, and compressOriginalImage', async () => {
+    it('Given WEBP format requested, When multiple candidates available, Then selects the smallest WebP between toBlob and toDataURL', async () => {
       // Arrange
       const inputBytes = makePngBytes({ w: 200, h: 200 });
       const inputBlob = makeImageBlob(inputBytes, 'image/png');
@@ -81,7 +85,7 @@ describe('ImageProcessor - Conversion Tests', () => {
       // Mock canvas to return different sizes for each method
       const smallestBlobBytes = makeWebpBytes({ w: 50, h: 50 }); // Smallest
       const mediumDataUrlBytes = makeWebpBytes({ w: 100, h: 100 });
-      const largestOriginalBytes = makeWebpBytes({ w: 150, h: 150 });
+      const smallerOriginalBytes = makePngBytes({ w: 10, h: 10 });
       
       mockCanvas.toBlob = vi.fn((callback) => {
         callback(new Blob([smallestBlobBytes], { type: 'image/webp' }));
@@ -92,8 +96,8 @@ describe('ImageProcessor - Conversion Tests', () => {
         return `data:image/webp;base64,${base64}`;
       });
       
-      // Mock compressOriginalImage to return larger result
-      vi.spyOn(processor as any, 'compressOriginalImage').mockResolvedValue(largestOriginalBytes);
+      // A re-encode in the original format is smaller, but it is PNG, not WebP
+      vi.spyOn(processor as any, 'compressOriginalImage').mockResolvedValue(smallerOriginalBytes);
       
       // Act
       const result = await processor.processImage(
@@ -251,7 +255,7 @@ describe('ImageProcessor - Conversion Tests', () => {
 
   describe('JPEG Conversion', () => {
     // Test 1.5
-    it('Given JPEG format for non-JPEG input, When converting, Then selects smallest among toBlob, toDataURL, and compressOriginalImage', async () => {
+    it('Given JPEG format for non-JPEG input, When converting, Then encodes JPEG with the given quality', async () => {
       // Arrange
       const inputBytes = makePngBytes({ w: 100, h: 100 });
       const inputBlob = makeImageBlob(inputBytes, 'image/png');
@@ -282,7 +286,7 @@ describe('ImageProcessor - Conversion Tests', () => {
     });
 
     // Test 1.6
-    it('Given JPEG format for JPEG input, When converting, Then excludes compressOriginalImage from candidates', async () => {
+    it('Given JPEG format, When converting, Then no re-encode in the original format is made', async () => {
       // Arrange
       const inputBytes = makeJpegBytes({ w: 100, h: 100 });
       const inputBlob = makeImageBlob(inputBytes, 'image/jpeg');
@@ -302,28 +306,25 @@ describe('ImageProcessor - Conversion Tests', () => {
       );
       
       // Assert
-      // For JPEG input to JPEG output, compressOriginalImage should not be called
-      // since it would be redundant
+      // A re-encode in the original format is never a JPEG candidate
       expect(compressOriginalSpy).not.toHaveBeenCalled();
     });
 
     // Test 1.7
-    it('Given JPEG with EXIF, When re-encoding, Then EXIF from original is injected with Orientation removed', async () => {
+    // The tests in tests/unit/metadata check the bytes that the readers and
+    // writers make. This test only makes sure that the pipeline uses them.
+    it('Given JPEG with EXIF, When re-encoding, Then EXIF is carried over with Orientation normalised', async () => {
       // Arrange
-      const exifData = exifFrom({ 
-        Orientation: 6, // Rotated
-        Make: 'TestCamera',
-        Model: 'TestModel'
+      const exifData = exifBlockFrom({
+        orientation: 6, // Rotated
+        make: 'TestCamera',
+        model: 'TestModel'
       });
       const inputBytes = makeJpegBytes({ w: 100, h: 100, exif: exifData });
       const inputBlob = makeImageBlob(inputBytes, 'image/jpeg');
-      
-      // Mock piexif to verify orientation removal
-      const mockExtractMetadata = vi.spyOn(processor as any, 'extractMetadata');
-      const mockApplyMetadata = vi.spyOn(processor as any, 'applyMetadata');
-      
+
       // Act
-      await processor.processImage(
+      const result = await processor.processImage(
         inputBlob,
         'JPEG',
         0.85,
@@ -335,19 +336,49 @@ describe('ImageProcessor - Conversion Tests', () => {
       );
       
       // Assert
-      expect(mockExtractMetadata).toHaveBeenCalled();
-      expect(mockApplyMetadata).toHaveBeenCalled();
+      const raw = readJpegExif(new Uint8Array(result));
+      expect(raw).not.toBeNull();
+
+      const block = parseExifBlock(raw!)!;
+      expect(asciiValue(block.ifd0.get(TAG.make)!.value)).toBe('TestCamera');
+      expect(asciiValue(block.ifd0.get(TAG.model)!.value)).toBe('TestModel');
+      // Canvas applied the rotation to the pixels.
+      expect(shortValue(block.ifd0.get(TAG.orientation)!.value)).toBe(1);
     });
 
-    // Test 1.8  
-    it('Given JPEG EXIF injection failure, When applying metadata fails, Then returns JPEG without EXIF and no throw', async () => {
+    it.each([
+      // [case, header bytes, format, resize mode, expected]
+      ['a JPEG through canvas', [0xff, 0xd8, 0xff, 0xe0], 'WEBP', 'None', true],
+      ['a TIFF source', [0x49, 0x49, 0x2a, 0x00], 'WEBP', 'None', true],
+      ['a TIFF source through pngquant with no resize', [0x49, 0x49, 0x2a, 0x00], 'PNGQUANT', 'None', true],
+      ['pngquant with no resize', [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 'PNGQUANT', 'None', false],
+      ['pngquant with resize', [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 'PNGQUANT', 'Fit', true],
+    ] as const)('Given %s, When processing, Then the transfer is told if the pixels were rotated', async (_case, header, format, resizeMode, expected) => {
       // Arrange
-      const inputBytes = makeJpegBytes({ w: 100, h: 100 });
+      const output = new ArrayBuffer(4);
+      vi.spyOn(processor as any, 'processImageHelper').mockResolvedValue(output);
+      const transferSpy = vi
+        .spyOn(metadataTransfer, 'transferMetadata')
+        .mockResolvedValue(output);
+      const inputBlob = new Blob([new Uint8Array([...header, 0, 0, 0, 0, 0, 0, 0, 0])]);
+
+      // Act
+      await processor.processImage(inputBlob, format, 0.85, 1.0, resizeMode, 100, 100, 100, 'Auto', true);
+
+      // Assert
+      expect(transferSpy).toHaveBeenCalledWith(inputBlob, output, expected, 'keep-all');
+    });
+
+    // Test 1.8
+    it('Given unreadable EXIF in the source, When converting, Then the image is returned without EXIF and no throw', async () => {
+      // Arrange
+      const inputBytes = makeJpegBytes({
+        w: 100,
+        h: 100,
+        exif: new Uint8Array([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08])
+      });
       const inputBlob = makeImageBlob(inputBytes, 'image/jpeg');
-      
-      // Mock metadata application to fail
-      vi.spyOn(processor as any, 'applyMetadata').mockRejectedValue(new Error('EXIF insert failed'));
-      
+
       // Act
       const result = await processor.processImage(
         inputBlob,
@@ -604,6 +635,153 @@ describe('ImageProcessor - Conversion Tests', () => {
         'image/png', // Original format preserved
         expect.any(Number)
       );
+    });
+  });
+
+  describe('EXIF in ORIGINAL and NONE', () => {
+    it.each([
+      ['ORIGINAL', 'None'],
+      ['ORIGINAL', 'Fit'],
+      ['NONE', 'Fit'],
+    ] as const)('Given a JPEG with EXIF, When processed as %s with resize %s, Then the EXIF is kept', async (format, resizeMode) => {
+      // Arrange
+      const exifData = exifBlockFrom({ make: 'TestCamera', model: 'TestModel', orientation: 6 });
+      const inputBlob = makeImageBlob(makeJpegBytes({ w: 200, h: 200, exif: exifData }), 'image/jpeg');
+
+      // Act
+      const result = await processor.processImage(inputBlob, format, 0.8, 1.0, resizeMode, 100, 100, 100, 'Auto', true);
+
+      // Assert
+      const block = parseExifBlock(readJpegExif(new Uint8Array(result))!)!;
+      expect(asciiValue(block.ifd0.get(TAG.make)!.value)).toBe('TestCamera');
+      expect(asciiValue(block.ifd0.get(TAG.model)!.value)).toBe('TestModel');
+      // Canvas applied the rotation to the pixels.
+      expect(shortValue(block.ifd0.get(TAG.orientation)!.value)).toBe(1);
+    });
+
+    it.each([
+      ['ORIGINAL', 'None'],
+      ['NONE', 'Fit'],
+      ['NONE', 'None'],
+    ] as const)('Given the setting to remove all metadata, When a JPEG is processed as %s with resize %s, Then the output has no camera tags', async (format, resizeMode) => {
+      // Arrange
+      const exifData = exifBlockFrom({ make: 'TestCamera', model: 'TestModel' });
+      const inputBlob = makeImageBlob(makeJpegBytes({ w: 200, h: 200, exif: exifData }), 'image/jpeg');
+      const settings = { ...DEFAULT_SETTINGS, metadataMode: 'strip-all' as const };
+
+      // Act
+      const result = await processor.processImage(inputBlob, format, 0.8, 1.0, resizeMode, 100, 100, 100, 'Auto', true, undefined, settings);
+
+      // Assert
+      expect(readJpegExif(new Uint8Array(result))).toBeNull();
+    });
+
+    it.each([
+      ['ORIGINAL', 'None'],
+      ['NONE', 'Fit'],
+    ] as const)('Given a .jpg file typed image/jpg, When processed as %s with resize %s, Then it is encoded as JPEG and not PNG', async (format, resizeMode) => {
+      // Arrange: the modal and batch paths build the type from the extension.
+      const inputBlob = makeImageBlob(makeJpegBytes({ w: 200, h: 200 }), 'image/jpg');
+
+      // Act
+      await processor.processImage(inputBlob, format, 0.8, 1.0, resizeMode, 100, 100, 100, 'Auto', true);
+
+      // Assert
+      expect(mockCanvas.toBlob).toHaveBeenCalledWith(expect.any(Function), 'image/jpeg', expect.any(Number));
+    });
+  });
+
+  // Issue #347: the extension comes from the format the user picked, so the
+  // bytes must be in that format too.
+  describe('Output is in the requested format', () => {
+    const magicOf = (buffer: ArrayBuffer) => {
+      const bytes = new Uint8Array(buffer);
+      if (bytes[0] === 0x89 && bytes[1] === 0x50) return 'PNG';
+      if (bytes[0] === 0xff && bytes[1] === 0xd8) return 'JPEG';
+      if (String.fromCharCode(...bytes.slice(0, 4)) === 'RIFF') return 'WEBP';
+      return 'unknown';
+    };
+
+    const inputs = {
+      PNG: () => makeImageBlob(makePngBytes({ w: 100, h: 100 }), 'image/png'),
+      JPEG: () => makeImageBlob(makeJpegBytes({ w: 100, h: 100 }), 'image/jpeg'),
+      WEBP: () => makeImageBlob(makeWebpBytes({ w: 100, h: 100 }), 'image/webp'),
+    } as const;
+
+    it.each([
+      // [input, output, quality, colour depth]
+      ['JPEG', 'PNG', 0.8, 1.0],
+      ['WEBP', 'PNG', 0.8, 1.0],
+      ['PNG', 'JPEG', 1.0, 1.0],
+      ['WEBP', 'JPEG', 1.0, 1.0],
+      ['PNG', 'WEBP', 1.0, 1.0],
+      ['JPEG', 'WEBP', 1.0, 1.0],
+    ] as const)('Given %s input and %s output with nothing to compress or resize, When processing, Then the output is encoded and not the input returned', async (input, output, quality, colorDepth) => {
+      // Act
+      const result = await processor.processImage(inputs[input](), output, quality, colorDepth, 'None', 0, 0, 0, 'Auto', true);
+
+      // Assert
+      expect(magicOf(result)).toBe(output);
+    });
+
+    it.each([
+      ['PNG', 'WEBP', 1.0],
+      ['JPEG', 'JPEG', 1.0],
+      ['PNG', 'PNG', 1.0],
+    ] as const)('Given %s input and the same %s output with nothing to compress or resize, When processing, Then the input bytes are returned as they are', async (input, output, quality) => {
+      // PNG to WEBP is here as a control for the line above: only WEBP input skips WEBP encoding.
+      const blob = output === 'WEBP' ? inputs.WEBP() : inputs[input]();
+      const toBlob = vi.spyOn(mockCanvas, 'toBlob');
+
+      // Act
+      const result = await processor.processImage(blob, output, quality, 1.0, 'None', 0, 0, 0, 'Auto', true);
+
+      // Assert
+      expect(toBlob).not.toHaveBeenCalled();
+      expect(result.byteLength).toBe(blob.size);
+    });
+
+    it('Given a .jpg file with no APPn segment, labelled image/jpg, When JPEG output with nothing to compress or resize, Then the input bytes are returned as they are', async () => {
+      // Arrange: such a JPEG starts FF D8 FF DB. The single-image dialog labels the file "image/jpg".
+      const withApp0 = new Uint8Array(makeJpegBytes({ w: 100, h: 100 }));
+      const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xdb, 0x00, 0x02, ...withApp0.slice(20)]);
+      const file = makeImageFile(bytes.buffer, 'photo.jpg', 'image/jpg');
+      const toBlob = vi.spyOn(mockCanvas, 'toBlob');
+
+      // Act
+      const result = await processor.processImage(file, 'JPEG', 1.0, 1.0, 'None', 0, 0, 0, 'Auto', true);
+
+      // Assert
+      expect(toBlob).not.toHaveBeenCalled();
+      expect(new Uint8Array(result)).toEqual(bytes);
+    });
+
+    it.each([
+      ['PNG', 'WEBP'],
+      ['PNG', 'JPEG'],
+      ['JPEG', 'PNG'],
+    ] as const)('Given %s input whose own-format re-encode is the smallest, When converting to %s, Then the output is in the requested format', async (input, output) => {
+      // Arrange: a re-encode in the input format is 8 bytes. Both paths for
+      // the requested format give 4,000 bytes, with its magic bytes first.
+      const ownFormat = { PNG: 'image/png', JPEG: 'image/jpeg' }[input];
+      const encode = (type: string, size: number) => {
+        const bytes = new Uint8Array(size);
+        bytes.set(new Uint8Array({ 'image/webp': makeWebpBytes, 'image/jpeg': makeJpegBytes, 'image/png': makePngBytes }[type]!({ w: 1, h: 1 })).slice(0, 12));
+        return bytes;
+      };
+      mockCanvas.toBlob = vi.fn((callback, type = 'image/png') => {
+        callback(new Blob([encode(type, type === ownFormat ? 12 : 4000)], { type }));
+      }) as any;
+      mockCanvas.toDataURL = vi.fn((type = 'image/png') => {
+        const base64 = btoa(String.fromCharCode(...encode(type, 4000)));
+        return `data:${type};base64,${base64}`;
+      }) as any;
+
+      // Act
+      const result = await processor.processImage(inputs[input](), output, 0.8, 1.0, 'Fit', 50, 50, 50, 'Auto', true);
+
+      // Assert
+      expect(magicOf(result)).toBe(output);
     });
   });
 

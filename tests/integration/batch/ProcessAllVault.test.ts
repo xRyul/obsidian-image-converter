@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BatchImageProcessor } from '../../../src/BatchImageProcessor';
 import { fakeApp, fakeVault, fakeTFile } from '../../factories/obsidian';
+import { makeImageBytesOfSize } from '../../factories/image';
 import { ProcessAllVaultModal } from '../../../src/ProcessAllVaultModal';
 import ImageConverterPlugin from '../../../src/main';
 import { App } from 'obsidian';
@@ -17,6 +18,10 @@ function makePluginStub(overrides: any = {}) {
       ProcessAllVaultResizeModaldesiredLength: 0,
       ProcessAllVaultEnlargeOrReduce: 'Always',
       allowLargerFiles: true,
+      revertToOriginalIfLarger: false,
+      minimumCompressionSavingsInKB: 30,
+      selectedConversionPreset: 'None',
+      conversionPresets: [],
       ProcessAllVaultSkipFormats: '',
       ProcessAllVaultskipImagesInTargetFormat: true,
       ...overrides.settings
@@ -78,7 +83,7 @@ describe('BatchImageProcessor — Vault-wide orchestration', () => {
     plugin = makePluginStub();
 
     imageProcessor = {
-      processImage: vi.fn(async (_blob: Blob) => new ArrayBuffer(4))
+      processImage: vi.fn(async (_blob: Blob, format: string) => makeImageBytesOfSize(format, 4))
     };
 
     folderAndFilenameManagement = {
@@ -106,6 +111,18 @@ describe('BatchImageProcessor — Vault-wide orchestration', () => {
     const oldPaths = renameArgs.map((callArgs: any[]) => (callArgs[0] as any).path);
     const newPaths = renameArgs.map((callArgs: any[]) => callArgs[1] as string);
     expect(oldPaths.some((pathStr: string) => pathStr.endsWith('images/dup.png')) || newPaths.some((pathStr: string) => pathStr.endsWith('images/dup.webp'))).toBe(true);
+  });
+
+  it('Given the metadata setting, When processing vault-wide, Then processImage receives the plugin settings', async () => {
+    plugin.settings.metadataMode = 'strip-all';
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
+
+    await bip.processAllVaultImages();
+
+    expect(imageProcessor.processImage).toHaveBeenCalled();
+    for (const call of imageProcessor.processImage.mock.calls) {
+      expect(call[11]).toBe(plugin.settings);
+    }
   });
 
   it('4.12 Given convertTo set, When renaming, Then new filenames use target extension and conflicts handled', async () => {
@@ -144,11 +161,15 @@ describe('BatchImageProcessor — Vault-wide orchestration', () => {
         ProcessAllVaultResizeModaldesiredLength: 0,
         ProcessAllVaultEnlargeOrReduce: 'Always',
         allowLargerFiles: true,
+        revertToOriginalIfLarger: false,
+        minimumCompressionSavingsInKB: 30,
+        selectedConversionPreset: 'None',
+        conversionPresets: [],
         ProcessAllVaultSkipFormats: '',
         ProcessAllVaultskipImagesInTargetFormat: false // Important: don't skip images in their own format
       }
     });
-    const imgIso = { processImage: vi.fn(async (_blob: Blob) => new ArrayBuffer(4)) };
+    const imgIso = { processImage: vi.fn(async (_blob: Blob, format: string) => makeImageBytesOfSize(format, 4)) };
     const ffmIso = { handleNameConflicts: vi.fn(async (_dir: string, name: string) => name) };
     const bipIso = new BatchImageProcessor(appIso as any, pluginIso as any, imgIso as any, ffmIso as any);
 
@@ -177,7 +198,7 @@ describe('BatchImageProcessor — Vault-wide orchestration', () => {
     const appIso = fakeApp({ vault: vaultIso, metadataCache: { resolvedLinks: { [noteFile.path]: { [keep.path]: 1, [toConvert.path]: 1 } } } as any }) as any;
     appIso.fileManager = { renameFile: vi.fn(async (file: any, newPath: string) => { await appIso.vault.rename(file, newPath); }) };
     const pluginIso = makePluginStub({ settings: { ProcessAllVaultconvertTo: 'webp', ProcessAllVaultskipImagesInTargetFormat: true } });
-    const imgIso = { processImage: vi.fn(async (_blob: Blob) => new ArrayBuffer(4)) };
+    const imgIso = { processImage: vi.fn(async (_blob: Blob, format: string) => makeImageBytesOfSize(format, 4)) };
     const ffmIso = { handleNameConflicts: vi.fn(async (_dir: string, name: string) => name) };
     const bipIso = new BatchImageProcessor(appIso as any, pluginIso as any, imgIso as any, ffmIso as any);
 
@@ -221,7 +242,7 @@ describe('BatchImageProcessor — Vault-wide orchestration', () => {
       } } as any }) as any;
       appL.fileManager = { renameFile: vi.fn(async (file: any, newPath: string) => { await appL.vault.rename(file, newPath); }) };
       const pluginL = makePluginStub();
-      const imgL = { processImage: vi.fn(async (_blob: Blob) => new ArrayBuffer(4)) };
+      const imgL = { processImage: vi.fn(async (_blob: Blob, format: string) => makeImageBytesOfSize(format, 4)) };
       const ffmL = { handleNameConflicts: vi.fn(async (_dir: string, name: string) => name) };
       const bipL = new BatchImageProcessor(appL, pluginL, imgL as any, ffmL as any);
       await bipL.processAllVaultImages();
@@ -232,6 +253,19 @@ describe('BatchImageProcessor — Vault-wide orchestration', () => {
     const firstRun = await runOnce();
     const secondRun = await runOnce();
     expect(secondRun).toEqual(firstRun);
+  });
+
+  it('Given revertToOriginalIfLarger enabled, When processed output is larger, Then vault files are left untouched', async () => {
+    plugin.settings.revertToOriginalIfLarger = true;
+    plugin.settings.minimumCompressionSavingsInKB = 0;
+    imageProcessor.processImage.mockImplementation(async (_blob: Blob, format: string) => makeImageBytesOfSize(format, 2048));
+
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
+    await bip.processAllVaultImages();
+
+    // Every processed output (2048 bytes) is larger than the originals (0 bytes), so nothing is renamed or rewritten
+    expect(app.fileManager.renameFile).not.toHaveBeenCalled();
+    expect(app.vault.modifyBinary).not.toHaveBeenCalled();
   });
 });
 
@@ -380,4 +414,5 @@ describe('ProcessAllVaultModal UI basics (Phase 7: 10.1–10.7 subset)', () => {
     // Assert processor invoked; runtime rename behavior validated in BatchImageProcessor tests
     expect((processor as any).processAllVaultImages).toHaveBeenCalled();
   });
+
 });

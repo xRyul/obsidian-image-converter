@@ -1,11 +1,11 @@
 import { App, Platform } from "obsidian";
-// eslint-disable-next-line import/no-nodejs-modules -- Electron environment supports Node.js APIs
+// Electron environment supports Node.js APIs
 import * as os from "os";
-// eslint-disable-next-line import/no-nodejs-modules -- Electron environment supports Node.js APIs
+// Electron environment supports Node.js APIs
 import * as path from "path";
-// eslint-disable-next-line import/no-nodejs-modules -- Electron environment supports Node.js APIs
+// Electron environment supports Node.js APIs
 import * as fs from "fs/promises";
-// eslint-disable-next-line import/no-nodejs-modules -- Electron environment supports Node.js APIs
+// Electron environment supports Node.js APIs
 import { constants as fsConstants } from "fs";
 
 const WINDOWS_ENV_VAR_REGEX = /%([^%]+)%/g;

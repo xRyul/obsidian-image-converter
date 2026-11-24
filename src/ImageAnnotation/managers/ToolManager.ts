@@ -3,6 +3,7 @@ import { ButtonComponent } from 'obsidian';
 import { ToolMode, BlendMode, BRUSH_SIZES, BRUSH_OPACITIES, DrawingBrushWithComposite } from '../types';
 import { ArrowBrush } from '../brushes/ArrowBrush';
 import { hexToRgba } from '../utils/colorUtils';
+import { isMosaicImage } from '../tools/MosaicTool';
 
 export interface ToolManagerCallbacks {
     onToolChanged?: (tool: ToolMode) => void;
@@ -14,10 +15,12 @@ export class ToolManager {
     private isDrawingMode = false;
     private isTextMode = false;
     private isArrowMode = false;
+    private isMosaicMode = false;
 
     private drawButton: ButtonComponent | undefined;
     private textButton: ButtonComponent | undefined;
     private arrowButton: ButtonComponent | undefined;
+    private mosaicButton: ButtonComponent | undefined;
 
     private currentBrushSizeIndex = 2;
     private currentOpacityIndex = 5;
@@ -28,20 +31,23 @@ export class ToolManager {
         private callbacks: ToolManagerCallbacks
     ) {}
 
-    setButtons(draw?: ButtonComponent, text?: ButtonComponent, arrow?: ButtonComponent): void {
+    setButtons(draw?: ButtonComponent, text?: ButtonComponent, arrow?: ButtonComponent, mosaic?: ButtonComponent): void {
         this.drawButton = draw;
         this.textButton = text;
         this.arrowButton = arrow;
+        this.mosaicButton = mosaic;
     }
 
     switchTool(newTool: ToolMode): void {
         this.isDrawingMode = false;
         this.isTextMode = false;
         this.isArrowMode = false;
+        this.isMosaicMode = false;
 
         if (this.drawButton) this.drawButton.buttonEl.removeClass('is-active');
         if (this.textButton) this.textButton.buttonEl.removeClass('is-active');
         if (this.arrowButton) this.arrowButton.buttonEl.removeClass('is-active');
+        if (this.mosaicButton) this.mosaicButton.buttonEl.removeClass('is-active');
 
         const canvas = this.getCanvas();
 
@@ -77,6 +83,18 @@ export class ToolManager {
                 }
                 break;
 
+            case ToolMode.MOSAIC:
+                this.isMosaicMode = true;
+                if (this.mosaicButton) this.mosaicButton.buttonEl.addClass('is-active');
+                if (canvas) {
+                    canvas.isDrawingMode = false;
+                    // Keep a selected mosaic selected so its block size can be changed
+                    if (!isMosaicImage(canvas.getActiveObject())) {
+                        canvas.discardActiveObject();
+                    }
+                }
+                break;
+
             case ToolMode.NONE:
                 if (canvas) {
                     canvas.isDrawingMode = false;
@@ -85,6 +103,9 @@ export class ToolManager {
         }
 
         this.currentTool = newTool;
+        if (canvas) {
+            canvas.defaultCursor = this.getIdleCursor();
+        }
         this.updateObjectInteractivity();
 
         if (this.callbacks.onToolChanged) {
@@ -107,16 +128,26 @@ export class ToolManager {
         this.switchTool(newTool);
     }
 
+    toggleMosaicMode(): void {
+        const newTool = this.currentTool === ToolMode.MOSAIC ? ToolMode.NONE : ToolMode.MOSAIC;
+        this.switchTool(newTool);
+    }
+
     updateObjectInteractivity(): void {
         const canvas = this.getCanvas();
         if (!canvas) return;
 
         canvas.forEachObject(obj => {
-            if (obj instanceof FabricImage) {
+            if (isMosaicImage(obj)) {
+                // In mosaic mode, dragging a mosaic moves it and dragging anywhere else draws a new one
+                const interactive = !this.isDrawingMode && !this.isTextMode;
+                obj.selectable = interactive;
+                obj.evented = interactive;
+            } else if (obj instanceof FabricImage) {
                 obj.selectable = false;
                 obj.evented = false;
             } else if (obj instanceof IText) {
-                if (this.isDrawingMode) {
+                if (this.isDrawingMode || this.isMosaicMode) {
                     obj.selectable = false;
                     obj.evented = false;
                     obj.editable = false;
@@ -126,7 +157,7 @@ export class ToolManager {
                     obj.editable = true;
                 }
             } else {
-                if (this.isTextMode) {
+                if (this.isTextMode || this.isMosaicMode) {
                     obj.selectable = false;
                     obj.evented = false;
                 } else {
@@ -136,7 +167,7 @@ export class ToolManager {
             }
         });
 
-        canvas.selection = !this.isDrawingMode && !this.isTextMode;
+        canvas.selection = !this.isDrawingMode && !this.isTextMode && !this.isMosaicMode;
         canvas.requestRenderAll();
     }
 
@@ -188,6 +219,15 @@ export class ToolManager {
         return this.isArrowMode;
     }
 
+    isInMosaicMode(): boolean {
+        return this.isMosaicMode;
+    }
+
+    /** Cursor to show when the pointer is not over an object and no pan is in progress. */
+    getIdleCursor(): string {
+        return this.isMosaicMode ? 'crosshair' : 'default';
+    }
+
     getBrushSizeIndex(): number {
         return this.currentBrushSizeIndex;
     }
@@ -229,6 +269,7 @@ export class ToolManager {
         this.isDrawingMode = false;
         this.isTextMode = false;
         this.isArrowMode = false;
+        this.isMosaicMode = false;
         this.currentTool = ToolMode.NONE;
 
         if (this.drawButton) {
@@ -239,6 +280,9 @@ export class ToolManager {
         }
         if (this.arrowButton) {
             this.arrowButton.buttonEl.removeClass('is-active');
+        }
+        if (this.mosaicButton) {
+            this.mosaicButton.buttonEl.removeClass('is-active');
         }
     }
 }

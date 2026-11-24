@@ -25,11 +25,11 @@ export class PresetSelectionModal extends Modal {
 
     private selectedGlobalPreset: GlobalPreset | null = null;
 
-    private folderPresetDropdown: Setting;
-    private filenamePresetDropdown: Setting;
-    private conversionPresetDropdown: Setting;
-    private linkFormatPresetDropdown: Setting;
-    private resizePresetDropdown: Setting;
+    private folderPresetDropdown!: Setting;
+    private filenamePresetDropdown!: Setting;
+    private conversionPresetDropdown!: Setting;
+    private linkFormatPresetDropdown!: Setting;
+    private resizePresetDropdown!: Setting;
 
     private customFilenameText: TextComponent | null = null;
     private customFolderText: TextComponent | null = null;
@@ -188,7 +188,6 @@ export class PresetSelectionModal extends Modal {
         
         // Title on the left
         header.createEl("h2", { 
-          // eslint-disable-next-line obsidianmd/ui/sentence-case -- Plugin name
             text: "Image Converter",
             cls: "image-converter-compact-title"
         });

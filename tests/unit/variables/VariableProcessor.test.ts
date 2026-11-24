@@ -189,6 +189,48 @@ describe('VariableProcessor hashes, random, and uuid', () => {
     expect(out).toBe(expected);
   });
 
+  it('2.52 MD5:image hashes the File bytes, not the literal word "image"', async () => {
+    // Over 64 KB, with every byte value 0-255, so multi-block input and high bytes are covered.
+    const bytes = new Uint8Array(70_000).map((_, index) => (index * 31 + 7) % 256);
+    const file = new File([bytes], 'image.png', { type: 'image/png' });
+
+    const out = await processor.processTemplate('{MD5:image}|{MD5:Image:8}', { file, activeFile: activeNote });
+
+    const expected = createHash('md5').update(bytes).digest('hex');
+    expect(out).toBe(`${expected}|${expected.substring(0, 8)}`);
+    expect(out).not.toContain(createHash('md5').update('image').digest('hex'));
+  });
+
+  it('2.53 MD5:image hashes a vault TFile once per version', async () => {
+    const bytes = new Uint8Array([0x00, 0x7f, 0x80, 0xff, 0x10]);
+    const tfile = fakeTFile({ path: 'img/pic.png', name: 'pic.png', extension: 'png', basename: 'pic', stat: { mtime: 1, ctime: 1, size: bytes.length } });
+    app.vault.readBinary = vi.fn(async () => bytes.buffer);
+    (app.vault.adapter.stat as any).mockResolvedValue({ mtime: 1, ctime: 1, size: bytes.length });
+    const md5Spy = vi.spyOn(processor as any, 'generateMD5');
+
+    // Repeated tokens and a second template (as with folder + filename) share one hash.
+    const out = await processor.processTemplate('{MD5:image}/{MD5:image:6}', { file: tfile as any, activeFile: activeNote });
+    await processor.processTemplate('{MD5:image}', { file: tfile as any, activeFile: activeNote });
+
+    const expected = createHash('md5').update(bytes).digest('hex');
+    expect(out).toBe(`${expected}/${expected.substring(0, 6)}`);
+    expect(md5Spy).toHaveBeenCalledTimes(1);
+
+    // An edit in place changes mtime, so the image is hashed again.
+    tfile.stat.mtime = 2;
+    await processor.processTemplate('{MD5:image}', { file: tfile as any, activeFile: activeNote });
+    expect(md5Spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('2.54 MD5:image lets read errors propagate instead of naming the file "error"', async () => {
+    const file = new File([new Uint8Array([1, 2, 3])], 'gone.png', { type: 'image/png' });
+    vi.spyOn(file, 'arrayBuffer').mockRejectedValue(new Error('NotReadableError'));
+
+    await expect(
+      processor.processTemplate('{MD5:image:8}', { file, activeFile: activeNote })
+    ).rejects.toThrow('NotReadableError');
+  });
+
   it('2.48 HEIC/TIFF metadata extraction is skipped (no throw; unresolved width/height remain)', async () => {
     const heicFile = new File([new Uint8Array([1])], 'x.heic', { type: 'image/heic' });
     const outFile = await processor.processTemplate('{width}|{height}', { file: heicFile, activeFile: activeNote });

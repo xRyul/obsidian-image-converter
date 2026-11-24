@@ -25,6 +25,8 @@ import { ProcessFolderModal } from "./ProcessFolderModal";
 import { ProcessCurrentNote } from "./ProcessCurrentNote";
 import { ProcessAllVaultModal } from "./ProcessAllVaultModal"
 import { ImageCaptionManager } from "./ImageCaptionManager"
+import { transferMetadata } from "./metadata/transferMetadata";
+import { getRevertPolicy, reasonToKeepOriginal } from "./utils/keepOriginal";
 
 // Settings tab and all DEFAULTS
 import {
@@ -40,7 +42,7 @@ import {
 import { PresetSelectionModal } from "./PresetSelectionModal";
 
 export default class ImageConverterPlugin extends Plugin {
-    settings!: ImageConverterSettings;
+    declare settings: ImageConverterSettings;
 
     // Check supported image formats
     supportedImageFormats!: SupportedImageFormats;
@@ -184,7 +186,6 @@ export default class ImageConverterPlugin extends Plugin {
         this.app.workspace.onLayoutReady(() => {
             this.initializeComponents().catch((err) => {
                 console.error('Failed to initialize components:', err);
-                //eslint-disable-next-line
                 new Notice('Image Converter: Failed to initialize. Check console for details.');
             });
 
@@ -292,7 +293,6 @@ export default class ImageConverterPlugin extends Plugin {
                     });
                 } else if (file instanceof TFolder) {
                     menu.addItem((item) => {
-                        // eslint-disable-next-line obsidianmd/ui/sentence-case
                         item.setTitle("Process all images in Folder")
                             .setIcon("cog")
                             .onClick(() => {
@@ -334,9 +334,8 @@ export default class ImageConverterPlugin extends Plugin {
         });
 
         this.addCommand({
-            // eslint-disable-next-line obsidianmd/commands/no-plugin-id-in-command-id -- not to break bindings
             id: 'open-image-converter-settings',
-            // eslint-disable-next-line obsidianmd/commands/no-plugin-name-in-command-name, obsidianmd/ui/sentence-case -- not to break bindings
+            // Keeps the plugin name: renaming the command would break users' hotkey bindings.
             name: 'Open Image Converter Settings',
             callback: () => this.commandOpenSettingsTab()
         });
@@ -345,8 +344,7 @@ export default class ImageConverterPlugin extends Plugin {
     }
 
 
-    // eslint-disable-next-line @typescript-eslint/no-misused-promises
-    async onunload() {
+    onunload() {
         // Clean up alignment related components first
         if (this.ImageAlignmentManager) {
             this.ImageAlignmentManager.onunload();
@@ -394,7 +392,7 @@ export default class ImageConverterPlugin extends Plugin {
     // Load settings method
     async loadSettings() {
         const loadedSettings = (await this.loadData()) as Partial<ImageConverterSettings> | null;
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, loadedSettings ?? {}) as ImageConverterSettings;
+        this.settings = { ...DEFAULT_SETTINGS, ...loadedSettings };
 
         const isFreshInstall = !loadedSettings || Object.keys(loadedSettings).length === 0;
         if (isFreshInstall) {
@@ -409,7 +407,7 @@ export default class ImageConverterPlugin extends Plugin {
             }
         }
 
-        // eslint-disable-next-line obsidianmd/hardcoded-config-path -- legacy stored value for migration
+        // Legacy stored value, kept for migration; this is not used as a path.
         const legacyCacheLocation = ".obsidian";
         if ((this.settings.imageAlignmentCacheLocation as string) === legacyCacheLocation) {
             this.settings.imageAlignmentCacheLocation = "config";
@@ -425,8 +423,7 @@ export default class ImageConverterPlugin extends Plugin {
 
     // Command to open settings tab
     async commandOpenSettingsTab() {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access -- Obsidian internal API
-        const setting = (this.app as any).setting as { open: () => Promise<void>; openTabById: (id: string) => void } | undefined;
+        const { setting } = this.app;
         if (setting) {
             await setting.open();
             setting.openTabById(this.manifest.id);
@@ -441,10 +438,8 @@ export default class ImageConverterPlugin extends Plugin {
             id: 'reload-plugin',
             name: 'Reload plugin',
             callback: async () => {
-                // eslint-disable-next-line obsidianmd/ui/sentence-case
                 new Notice('Reloading Image Converter...');
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access -- Obsidian internal API
-                const plugins = (this.app as any).plugins as { disablePlugin: (id: string) => Promise<void>; enablePlugin: (id: string) => Promise<void> } | undefined;
+                const { plugins } = this.app;
 
                 try {
                     // 1. Disable the plugin
@@ -468,7 +463,6 @@ export default class ImageConverterPlugin extends Plugin {
                         return;
                     }
 
-                    // eslint-disable-next-line obsidianmd/ui/sentence-case
                     new Notice('Image Converter reloaded!');
                 } catch (error) {
                     console.error("Error reloading plugin:", error);
@@ -476,6 +470,58 @@ export default class ImageConverterPlugin extends Plugin {
                 }
             },
         });
+    }
+
+    private validateAttachmentPath(vaultPath: string): boolean {
+        const violation = this.folderAndFilenameManagement.getWindowsPathLengthViolation(vaultPath);
+        if (!violation) {
+            return true;
+        }
+        new Notice(
+            `Image not added: the destination path is too long for Windows (${violation.length} characters). Paths must be shorter than ${violation.limit} characters. Shorten the destination folder or filename.\n${violation.absolutePath}`,
+            15000
+        );
+        return false;
+    }
+
+    /**
+     * Saves the original image in place of the converted one. The file gets
+     * the extension of the original, so that its name matches its content.
+     *
+     * @param convertedFilename - The name that the converted image would get.
+     * @returns The vault path to link to, or null when the path is not safe to write.
+     */
+    private async saveOriginalImage(
+        file: File,
+        destinationPath: string,
+        convertedFilename: string,
+        selectedFilenamePreset?: FilenamePreset
+    ): Promise<string | null> {
+        let filename = this.folderAndFilenameManagement.getFilenameForOriginal(convertedFilename, file);
+
+        // The conflict rule was applied to the converted name. A name with
+        // another extension is a new name, so apply the rule to it too.
+        const isNewName = filename !== convertedFilename;
+        if (isNewName && selectedFilenamePreset?.conflictResolution === "increment") {
+            filename = await this.folderAndFilenameManagement.handleNameConflicts(destinationPath, filename, "increment");
+        }
+
+        const fullPath = this.folderAndFilenameManagement.combinePath(destinationPath, filename);
+        if (isNewName && selectedFilenamePreset?.conflictResolution === "reuse") {
+            const existingFile = this.app.vault.getAbstractFileByPath(fullPath);
+            if (existingFile) {
+                return existingFile.path;
+            }
+        }
+
+        if (!this.validateAttachmentPath(fullPath)) {
+            return null;
+        }
+
+        // The original keeps only the metadata that the setting allows.
+        const fileBuffer = await transferMetadata(file, await file.arrayBuffer(), true, this.settings.metadataMode);
+        const tfile = await this.app.vault.createBinary(fullPath, fileBuffer);
+        return tfile.path;
     }
 
     private dropPasteRegisterEvents() {
@@ -549,8 +595,17 @@ export default class ImageConverterPlugin extends Plugin {
                 );
 
                 if (hasSupportedItems) {
-                    evt.preventDefault();
-                    await this.handlePaste(itemData, editor, cursor);
+                    // Spreadsheet copies (Excel, Numbers, Google Sheets) put a rendered
+                    // image AND the table itself on the clipboard. Let those fall through
+                    // to the default paste so they become text/Markdown instead of an image.
+                    const html = evt.clipboardData.getData?.("text/html") ?? "";
+                    const plainText = evt.clipboardData.getData?.("text/plain") ?? "";
+                    const hasTableContent = html.includes("<table") || plainText.includes("\t");
+
+                    if (!hasTableContent) {
+                        evt.preventDefault();
+                        await this.handlePaste(itemData, editor, cursor);
+                    }
                 }
             })
         );
@@ -688,24 +743,7 @@ export default class ImageConverterPlugin extends Plugin {
                     return; // Resolve this promise (no further processing for this file)
                 }
 
-                // Rest of the steps (3.3 to 3.7) remain the same,
-                // using selectedConversionPreset and selectedFilenamePreset
-                // ...
-                // Step 3.3: Create Destination Folder
-                // - Create the destination folder if it doesn't exist.
-                try {
-                    await this.folderAndFilenameManagement.ensureFolderExists(destinationPath);
-                } catch (error) {
-                    // Ignore "Folder already exists" error, but handle other errors.
-                    const errorMessage = error instanceof Error ? error.message : String(error);
-                    if (!errorMessage.startsWith('Folder already exists')) {
-                        console.error("Error creating folder:", errorMessage);
-                        new Notice(`Failed to create folder "${destinationPath}". Check console for details.`);
-                        return; // Resolve this promise
-                    }
-                }
-
-                // Step 3.4: Handle Filename Conflicts
+                // Step 3.3: Handle Filename Conflicts
                 // - Check if a file with the same name already exists at the destination.
                 // - Apply conflict resolution rules based on the selected filename preset (e.g., increment, reuse, or skip).
                 const fullPath = `${destinationPath}/${newFilename}`;
@@ -736,6 +774,23 @@ export default class ImageConverterPlugin extends Plugin {
                 }
 
                 const newFullPath = this.folderAndFilenameManagement.combinePath(destinationPath, newFilename);
+
+                // Step 3.4: Reject unsafe paths before creating folders or writing the image.
+                if (!this.validateAttachmentPath(newFullPath)) {
+                    return;
+                }
+
+                try {
+                    await this.folderAndFilenameManagement.ensureFolderExists(destinationPath);
+                } catch (error) {
+                    // Ignore "Folder already exists" error, but handle other errors.
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    if (!errorMessage.startsWith('Folder already exists')) {
+                        console.error("Error creating folder:", errorMessage);
+                        new Notice(`Failed to create folder "${destinationPath}". Check console for details.`);
+                        return; // Resolve this promise
+                    }
+                }
 
                 // Step 3.5: Process, Reuse, or Skip
                 if (!skipFurtherProcessing) {
@@ -815,36 +870,44 @@ export default class ImageConverterPlugin extends Plugin {
                             );
 
 
-                            let tfile: TFile;
+                            let linkPath: string;
 
                             // Step 3.5.4: Create the Image File in Vault
                             // - Create the new image file in the Obsidian vault using `createBinary`.
                             // Show space savings notification
-                            // Check if processed image is larger than original + minimum savings
-                            const minSavingsKB = (typeof (selectedConversionPreset?.minimumCompressionSavingsInKB ?? this.settings.minimumCompressionSavingsInKB) === 'number'
-                                && (selectedConversionPreset?.minimumCompressionSavingsInKB ?? this.settings.minimumCompressionSavingsInKB) >= 0)
-                                ? (selectedConversionPreset?.minimumCompressionSavingsInKB ?? this.settings.minimumCompressionSavingsInKB)
-                                : 30;
-                            const shouldRevertIfLarger = selectedConversionPreset?.revertToOriginalIfLarger
-                                ?? this.settings.revertToOriginalIfLarger;
+                            // Keep the original when the image was not converted, or when the
+                            // conversion saves less than the minimum savings.
+                            const outputFormat = selectedConversionPreset
+                                ? selectedConversionPreset.outputFormat
+                                : this.settings.outputFormat;
+                            const revertPolicy = getRevertPolicy(this.settings, selectedConversionPreset);
+                            const keepReason = reasonToKeepOriginal(originalSize, this.processedImage, outputFormat, revertPolicy);
 
-                            if (shouldRevertIfLarger && this.processedImage.byteLength + (minSavingsKB * 1024) > originalSize) {
-                                // User wants to revert AND processed image is larger
-                                this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
-                                new Notice(`Using original image for "${file.name}" because size reduction was less than ${minSavingsKB} KB.`);
+                            if (keepReason) {
+                                if (keepReason === "notConverted") {
+                                    new Notice(`"${file.name}" could not be converted to ${outputFormat}. The original image is used.`);
+                                } else {
+                                    this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
+                                    new Notice(`Using original image for "${file.name}" because size reduction was less than ${revertPolicy.minSavingsKB} KB.`);
+                                }
 
-                                const fileBuffer = await file.arrayBuffer();
-                                tfile = await this.app.vault.createBinary(newFullPath, fileBuffer);
+                                // The original is saved with its own extension, not that of the converted image.
+                                const originalPath = await this.saveOriginalImage(file, destinationPath, newFilename, selectedFilenamePreset);
+                                if (originalPath === null) {
+                                    return; // Resolve this promise
+                                }
+                                linkPath = originalPath;
                             } else {
-                                // Processed image is smaller OR user doesn't want to revert
+                                // The converted image is used
                                 this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
-                                tfile = await this.app.vault.createBinary(newFullPath, this.processedImage);
+                                const tfile = await this.app.vault.createBinary(newFullPath, this.processedImage);
+                                linkPath = tfile.path;
                             }
 
                             // Step 3.5.5: Insert Link into Editor
                             // - Insert the Markdown link to the newly created image file into the editor at the current cursor position.
                             try {
-                                await this.insertLinkAtCursorPosition(editor, tfile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                                await this.insertLinkAtCursorPosition(editor, linkPath, cursor, selectedLinkFormatPreset, selectedResizePreset);
                             } catch (error) {
                                 const errorMessage = error instanceof Error ? error.message : String(error);
                                 console.error("Failed to insert link after processing:", errorMessage);
@@ -1031,20 +1094,7 @@ export default class ImageConverterPlugin extends Plugin {
                     return; // Resolve this promise
                 }
 
-                // Step 3.3: Create Destination Folder
-                // - Create the destination folder if it doesn't exist.
-                try {
-                    await this.folderAndFilenameManagement.ensureFolderExists(destinationPath);
-                } catch (error) {
-                    const errorMessage = error instanceof Error ? error.message : String(error);
-                    if (!errorMessage.startsWith('Folder already exists')) {
-                        console.error("Error creating folder:", errorMessage);
-                        new Notice(`Failed to create folder "${destinationPath}". Check console for details.`);
-                        return; // Resolve this promise
-                    }
-                }
-
-                // Step 3.4: Handle Filename Conflicts
+                // Step 3.3: Handle Filename Conflicts
                 // - Check for filename conflicts and apply conflict resolution rules.
                 const fullPath = `${destinationPath}/${newFilename}`;
                 let existingFile = this.app.vault.getAbstractFileByPath(fullPath);
@@ -1083,6 +1133,22 @@ export default class ImageConverterPlugin extends Plugin {
                 }
 
                 const newFullPath = this.folderAndFilenameManagement.combinePath(destinationPath, newFilename);
+
+                // Step 3.4: Reject unsafe paths before creating folders or writing the image.
+                if (!this.validateAttachmentPath(newFullPath)) {
+                    return;
+                }
+
+                try {
+                    await this.folderAndFilenameManagement.ensureFolderExists(destinationPath);
+                } catch (error) {
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    if (!errorMessage.startsWith('Folder already exists')) {
+                        console.error("Error creating folder:", errorMessage);
+                        new Notice(`Failed to create folder "${destinationPath}". Check console for details.`);
+                        return; // Resolve this promise
+                    }
+                }
 
                 // Step 3.5: Process, Reuse, or Skip
                 if (!skipFurtherProcessing) {
@@ -1157,35 +1223,43 @@ export default class ImageConverterPlugin extends Plugin {
                                 this.settings
                             );
 
-                            let tfile: TFile;
+                            let linkPath: string;
                             // Step 3.5.4: Create the Image File in Vault
                             // - Create the new image file in the Obsidian vault using `createBinary`.
                             // - Show space savings notification
-                            // Check if processed image is larger than original + minimum savings
-                            const minSavingsKB = (typeof (selectedConversionPreset?.minimumCompressionSavingsInKB ?? this.settings.minimumCompressionSavingsInKB) === 'number'
-                                && (selectedConversionPreset?.minimumCompressionSavingsInKB ?? this.settings.minimumCompressionSavingsInKB) >= 0)
-                                ? (selectedConversionPreset?.minimumCompressionSavingsInKB ?? this.settings.minimumCompressionSavingsInKB)
-                                : 30;
-                            const shouldRevertIfLarger = selectedConversionPreset?.revertToOriginalIfLarger
-                                ?? this.settings.revertToOriginalIfLarger;
+                            // Keep the original when the image was not converted, or when the
+                            // conversion saves less than the minimum savings.
+                            const outputFormat = selectedConversionPreset
+                                ? selectedConversionPreset.outputFormat
+                                : this.settings.outputFormat;
+                            const revertPolicy = getRevertPolicy(this.settings, selectedConversionPreset);
+                            const keepReason = reasonToKeepOriginal(originalSize, this.processedImage, outputFormat, revertPolicy);
 
-                            if (shouldRevertIfLarger && this.processedImage.byteLength + (minSavingsKB * 1024) > originalSize) {
-                                // User wants to revert AND processed image is larger
-                                this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
-                                new Notice(`Using original image for "${file.name}" because size reduction was less than ${minSavingsKB} KB.`);
+                            if (keepReason) {
+                                if (keepReason === "notConverted") {
+                                    new Notice(`"${file.name}" could not be converted to ${outputFormat}. The original image is used.`);
+                                } else {
+                                    this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
+                                    new Notice(`Using original image for "${file.name}" because size reduction was less than ${revertPolicy.minSavingsKB} KB.`);
+                                }
 
-                                const fileBuffer = await file.arrayBuffer();
-                                tfile = await this.app.vault.createBinary(newFullPath, fileBuffer);
+                                // The original is saved with its own extension, not that of the converted image.
+                                const originalPath = await this.saveOriginalImage(file, destinationPath, newFilename, selectedFilenamePreset);
+                                if (originalPath === null) {
+                                    return; // Resolve this promise
+                                }
+                                linkPath = originalPath;
                             } else {
-                                // Processed image is smaller OR user doesn't want to revert
+                                // The converted image is used
                                 this.showSizeComparisonNotification(originalSize, this.processedImage.byteLength);
-                                tfile = await this.app.vault.createBinary(newFullPath, this.processedImage);
+                                const tfile = await this.app.vault.createBinary(newFullPath, this.processedImage);
+                                linkPath = tfile.path;
                             }
 
                             // Step 3.5.5: Insert Link into Editor
                             // - Insert the link to the new image into the editor.
                             try {
-                                await this.insertLinkAtCursorPosition(editor, tfile.path, cursor, selectedLinkFormatPreset, selectedResizePreset);
+                                await this.insertLinkAtCursorPosition(editor, linkPath, cursor, selectedLinkFormatPreset, selectedResizePreset);
                             } catch (error) {
                                 const errorMessage = error instanceof Error ? error.message : String(error);
                                 console.error("Failed to insert link after processing:", errorMessage);

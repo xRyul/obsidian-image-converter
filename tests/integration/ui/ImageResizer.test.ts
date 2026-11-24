@@ -388,7 +388,7 @@ describe('ImageResizer additional behaviors (13.4–13.6, 13.7–13.14, 13.19, 1
     expect((editor.setCursor as any).mock.calls.length).toBe(0);
   });
 
-  it('13.29 Click override: given enabled setting, when clicking an internal image or native resize corner, then Obsidian selection is suppressed and drop/paste cursor placement is used', () => {
+  it('13.29 Click override: given enabled setting, when clicking an internal image or native resize corner, then the Markdown link is revealed at the configured cursor position', () => {
     const lines = ['before', '![[imgs/pic.jpg|100x100]]', 'middle', '![[imgs/pic.jpg|120x120]]'];
     const editor = {
       getValue: () => lines.join('\n'),
@@ -411,18 +411,833 @@ describe('ImageResizer additional behaviors (13.4–13.6, 13.7–13.14, 13.19, 1
     (resizer as any).editor = editor;
 
     const { corner, img } = setupViewWithImageWrapper();
+    const editButton = document.createElement('button');
+    editButton.className = 'edit-block-button';
+    const nativeRevealClick = vi.fn(() => {
+      editor.setCursor({ line: 3, ch: 99 });
+    });
+    editButton.addEventListener('click', nativeRevealClick);
+    img.closest('.image-embed')!.appendChild(editButton);
 
-    const prevented = corner.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    const prevented = corner.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
     expect(prevented).toBe(false);
-    expect(editor.setCursor).toHaveBeenCalledWith({ line: 3, ch: 0 });
-    expect((img as any).matchParent('.image-resize-container')).toBeTruthy();
+    expect(nativeRevealClick).toHaveBeenCalledTimes(1);
+    expect(editor.setCursor).toHaveBeenLastCalledWith({ line: 3, ch: 0 });
+
+    corner.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    corner.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
 
     plugin.settings.dropPasteCursorLocation = 'back';
     (editor.posAtMouse as any).mockReturnValue({ line: 1, ch: 6 });
     (editor.setCursor as any).mockClear?.();
 
-    img.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-    expect(editor.setCursor).toHaveBeenCalledWith({ line: 1, ch: lines[1].length });
+    img.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+    expect(nativeRevealClick).toHaveBeenCalledTimes(2);
+    expect(editor.setCursor).toHaveBeenLastCalledWith({ line: 1, ch: lines[1].length });
+  });
+
+  it.each([
+    { cursorLocation: 'front' as const },
+    { cursorLocation: 'back' as const }
+  ])('13.29c Table click override: reveals the clicked cell image at its $cursorLocation', ({ cursorLocation }) => {
+    const firstLink = '![[imgs/first.jpg]]';
+    const clickedLink = '![[imgs/pic.jpg|100x100]]';
+    const cellLine = `${firstLink} ${clickedLink}`;
+    const clickedStart = cellLine.indexOf(clickedLink);
+    const expectedCh = cursorLocation === 'front' ? clickedStart : clickedStart + clickedLink.length;
+    const lines = ['before', '', '| Image | Text |', '| --- | --- |', `| ${cellLine} | Example |`];
+    const outerEditor = {
+      getValue: () => lines.join('\n'),
+      getCursor: () => ({ line: 0, ch: 0 }),
+      getLine: (line: number) => lines[line] ?? '',
+      lastLine: () => lines.length - 1,
+      posAtMouse: vi.fn(() => ({ line: 4, ch: clickedStart + 7 })),
+      transaction: vi.fn(),
+      setCursor: vi.fn()
+    };
+    const cellEditor = {
+      getValue: () => cellLine,
+      getCursor: () => ({ line: 0, ch: 5 }),
+      getLine: (line: number) => line === 0 ? cellLine : '',
+      lastLine: () => 0,
+      posAtMouse: vi.fn(() => ({ line: 0, ch: clickedStart + 5 })),
+      transaction: vi.fn(),
+      setCursor: vi.fn()
+    };
+    const { resizer, markdownView } = makeResizer({
+      viewMode: 'source',
+      overrides: {
+        disableObsidianImageSelectionOnClick: true,
+        dropPasteCursorLocation: cursorLocation
+      }
+    });
+    (markdownView as any).editor = outerEditor;
+    (resizer as any).editor = outerEditor;
+
+    document.body.replaceChildren();
+    const tableWidgetEl = document.createElement('div');
+    tableWidgetEl.className = 'cm-embed-block cm-table-widget markdown-rendered';
+    const table = document.createElement('table');
+    const row = document.createElement('tr');
+    const cellEl = document.createElement('td');
+    const renderedCell = document.createElement('div');
+    renderedCell.className = 'table-cell-wrapper';
+    const firstRenderedEmbed = document.createElement('span');
+    firstRenderedEmbed.className = 'internal-embed media-embed image-embed is-loaded';
+    const firstRenderedImage = document.createElement('img');
+    firstRenderedImage.src = 'app://vault/imgs/first.jpg';
+    firstRenderedEmbed.appendChild(firstRenderedImage);
+
+    const renderedEmbed = document.createElement('span');
+    renderedEmbed.className = 'internal-embed media-embed image-embed is-loaded';
+    const renderedImage = document.createElement('img');
+    renderedImage.src = 'app://vault/imgs/pic.jpg';
+    const activeCellNativeEditClick = vi.fn();
+    const renderedEditButton = document.createElement('button');
+    renderedEditButton.className = 'edit-block-button';
+    renderedEditButton.addEventListener('click', activeCellNativeEditClick);
+    renderedEmbed.appendChild(renderedImage);
+    renderedEmbed.appendChild(renderedEditButton);
+    renderedCell.appendChild(firstRenderedEmbed);
+    renderedCell.appendChild(renderedEmbed);
+    cellEl.appendChild(renderedCell);
+    row.appendChild(cellEl);
+    table.appendChild(row);
+    tableWidgetEl.appendChild(table);
+    document.body.appendChild(tableWidgetEl);
+
+    const nativePostPointerMouseDown = vi.fn();
+    const nativePostPointerClick = vi.fn();
+    tableWidgetEl.addEventListener('mousedown', nativePostPointerMouseDown);
+    tableWidgetEl.addEventListener('click', (event) => {
+      if ((event.target as Element).closest('.edit-block-button')) return;
+      nativePostPointerClick();
+    });
+
+    const tableCell = { row: 1, col: 0, el: cellEl };
+    const firstNativeRevealClick = vi.fn(() => {
+      cellEditor.setCursor({ line: 0, ch: 888 });
+    });
+    const nativeRevealClick = vi.fn(() => {
+      cellEditor.setCursor({ line: 0, ch: 999 });
+    });
+    const tableEditorState: {
+      tableCell?: {
+        editor: typeof cellEditor;
+        containerEl: HTMLElement;
+        cell: typeof tableCell;
+      };
+    } = {};
+    const mountCellEditor = () => {
+      renderedCell.style.display = 'none';
+      const editingCell = document.createElement('div');
+      editingCell.className = 'table-cell-wrapper';
+      const firstEditingEmbed = document.createElement('div');
+      firstEditingEmbed.className = 'internal-embed media-embed image-embed is-loaded';
+      const firstEditingImage = document.createElement('img');
+      firstEditingImage.src = 'app://vault/imgs/first.jpg';
+      const firstEditButton = document.createElement('button');
+      firstEditButton.className = 'edit-block-button';
+      firstEditButton.addEventListener('click', firstNativeRevealClick);
+      firstEditingEmbed.appendChild(firstEditingImage);
+      firstEditingEmbed.appendChild(firstEditButton);
+
+      const editingEmbed = document.createElement('div');
+      editingEmbed.className = 'internal-embed media-embed image-embed is-loaded';
+      const editingImage = document.createElement('img');
+      editingImage.src = 'app://vault/imgs/pic.jpg';
+      const editButton = document.createElement('button');
+      editButton.className = 'edit-block-button';
+      editButton.addEventListener('click', nativeRevealClick);
+      editingEmbed.appendChild(editingImage);
+      editingEmbed.appendChild(editButton);
+      editingCell.appendChild(firstEditingEmbed);
+      editingCell.appendChild(editingEmbed);
+      const activeCellElement = document.createElement('td');
+      activeCellElement.appendChild(editingCell);
+      row.replaceChild(activeCellElement, cellEl);
+      tableEditorState.tableCell = {
+        editor: cellEditor,
+        containerEl: editingCell,
+        cell: { ...tableCell, el: activeCellElement }
+      };
+    };
+    const setCellFocus = vi.fn(() => {
+      mountCellEditor();
+    });
+    const getClosestCell = vi.fn(() => tableCell);
+    (tableWidgetEl as any).cmTile = {
+      widget: {
+        editor: tableEditorState,
+        getClosestCell,
+        setCellFocus
+      }
+    };
+
+    const frameCallbacks: FrameRequestCallback[] = [];
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frameCallbacks.push(callback);
+      return frameCallbacks.length;
+    });
+
+    const allowed = renderedImage.dispatchEvent(new PointerEvent('pointerdown', {
+      bubbles: true,
+      cancelable: true,
+      clientX: 25,
+      clientY: 30
+    }));
+
+
+    tableWidgetEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    tableWidgetEl.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+    expect(allowed).toBe(false);
+    expect(getClosestCell).toHaveBeenCalledWith(25, 30);
+    expect(setCellFocus).toHaveBeenCalledWith(1, 0);
+    expect(nativeRevealClick).toHaveBeenCalledTimes(1);
+    expect(firstNativeRevealClick).not.toHaveBeenCalled();
+    expect(activeCellNativeEditClick).not.toHaveBeenCalled();
+    expect(nativePostPointerMouseDown).not.toHaveBeenCalled();
+    expect(nativePostPointerClick).not.toHaveBeenCalled();
+    expect(cellEditor.setCursor).toHaveBeenLastCalledWith({ line: 0, ch: 999 });
+    expect(frameCallbacks).toHaveLength(1);
+
+    frameCallbacks[0]?.(0);
+
+    expect(cellEditor.setCursor).toHaveBeenLastCalledWith({ line: 0, ch: expectedCh });
+    expect(outerEditor.setCursor).not.toHaveBeenCalled();
+  });
+
+  it('13.29i Table click removes transient resize handles before mounting the cell editor', () => {
+    const { resizer } = makeResizer({
+      viewMode: 'source',
+      overrides: { disableObsidianImageSelectionOnClick: true }
+    });
+
+    document.body.replaceChildren();
+    const tableWidgetEl = document.createElement('div');
+    tableWidgetEl.className = 'cm-table-widget';
+    const table = document.createElement('table');
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    const embed = document.createElement('div');
+    embed.className = 'image-embed';
+    const resizeContainer = document.createElement('div');
+    resizeContainer.className = 'image-resize-container';
+    const image = document.createElement('img');
+    image.src = 'app://vault/imgs/pic.jpg';
+
+    resizeContainer.appendChild(image);
+    embed.appendChild(resizeContainer);
+    cell.appendChild(embed);
+    row.appendChild(cell);
+    table.appendChild(row);
+    tableWidgetEl.appendChild(table);
+    document.body.appendChild(tableWidgetEl);
+    (resizer as any).activeImage = image;
+
+    const setCellFocus = vi.fn(() => {
+      expect(image.closest('.image-resize-container')).toBeNull();
+    });
+    const tableWidget = {
+      editor: {},
+      getClosestCell: vi.fn(() => ({ row: 0, col: 0, el: cell })),
+      setCellFocus
+    };
+    vi.spyOn(resizer as any, 'tryRevealActiveTableImageMarkdown').mockReturnValue(true);
+
+    const didReveal = (resizer as any).revealTableImageMarkdown(
+      image,
+      new MouseEvent('pointerdown', { clientX: 10, clientY: 20 }),
+      tableWidget,
+      0
+    );
+
+    expect(didReveal).toBe(true);
+    expect(setCellFocus).toHaveBeenCalledWith(0, 0);
+  });
+
+  it('13.29m Table reveal does not suppress an unrelated click after the originating pointer ends', () => {
+    const { resizer } = makeResizer({
+      viewMode: 'source',
+      overrides: { disableObsidianImageSelectionOnClick: true }
+    });
+
+    document.body.replaceChildren();
+    const tableWidgetEl = document.createElement('div');
+    tableWidgetEl.className = 'cm-table-widget';
+    const cellWrapper = document.createElement('div');
+    cellWrapper.className = 'table-cell-wrapper';
+    const embed = document.createElement('span');
+    embed.className = 'image-embed';
+    const image = document.createElement('img');
+    image.src = 'app://vault/imgs/pic.jpg';
+    embed.appendChild(image);
+    cellWrapper.appendChild(embed);
+    tableWidgetEl.appendChild(cellWrapper);
+    (tableWidgetEl as any).cmTile = {
+      widget: {
+        editor: {},
+        getClosestCell: vi.fn(),
+        setCellFocus: vi.fn()
+      }
+    };
+    document.body.appendChild(tableWidgetEl);
+
+    vi.spyOn(resizer as any, 'revealTableImageMarkdown').mockImplementation(() => {
+      tableWidgetEl.replaceChildren();
+      return true;
+    });
+
+    image.dispatchEvent(new PointerEvent('pointerdown', {
+      bubbles: true,
+      cancelable: true,
+      pointerId: 17
+    }));
+    document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 17 }));
+
+    const unrelatedEditorLocation = document.createElement('button');
+    const unrelatedMouseDown = vi.fn();
+    const unrelatedClick = vi.fn();
+    unrelatedEditorLocation.addEventListener('mousedown', unrelatedMouseDown);
+    unrelatedEditorLocation.addEventListener('click', unrelatedClick);
+    document.body.appendChild(unrelatedEditorLocation);
+
+    const mouseDownAllowed = unrelatedEditorLocation.dispatchEvent(new MouseEvent('mousedown', {
+      bubbles: true,
+      cancelable: true
+    }));
+    const clickAllowed = unrelatedEditorLocation.dispatchEvent(new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true
+    }));
+
+    expect(mouseDownAllowed).toBe(true);
+    expect(clickAllowed).toBe(true);
+    expect(unrelatedMouseDown).toHaveBeenCalledTimes(1);
+    expect(unrelatedClick).toHaveBeenCalledTimes(1);
+  });
+
+
+  it('13.29d Click override leaves unsupported table image widgets to Obsidian', () => {
+    const line = '| ![[imgs/pic.jpg|100x100]] |';
+    const editor = {
+      getValue: () => line,
+      getCursor: () => ({ line: 0, ch: 0 }),
+      getLine: () => line,
+      lastLine: () => 0,
+      posAtMouse: vi.fn(() => ({ line: 0, ch: 3 })),
+      transaction: vi.fn(),
+      setCursor: vi.fn()
+    };
+    const { resizer, markdownView } = makeResizer({
+      viewMode: 'source',
+      overrides: { disableObsidianImageSelectionOnClick: true }
+    });
+    (markdownView as any).editor = editor;
+    (resizer as any).editor = editor;
+
+    document.body.replaceChildren();
+    const tableWidgetEl = document.createElement('div');
+    tableWidgetEl.className = 'cm-embed-block cm-table-widget markdown-rendered';
+    const cellEl = document.createElement('td');
+    const embed = document.createElement('div');
+    embed.className = 'internal-embed media-embed image-embed is-loaded';
+    const img = document.createElement('img');
+    img.src = 'app://vault/imgs/pic.jpg';
+    const editButton = document.createElement('button');
+    editButton.className = 'edit-block-button';
+    const nativeEditClick = vi.fn();
+    editButton.addEventListener('click', nativeEditClick);
+    embed.appendChild(img);
+    embed.appendChild(editButton);
+    cellEl.appendChild(embed);
+    tableWidgetEl.appendChild(cellEl);
+    (tableWidgetEl as any).cmTile = { widget: {} };
+    document.body.appendChild(tableWidgetEl);
+
+    const nativePointerDown = vi.fn();
+    const nativeMouseDown = vi.fn();
+    const nativeClick = vi.fn();
+    tableWidgetEl.addEventListener('pointerdown', nativePointerDown);
+    tableWidgetEl.addEventListener('mousedown', nativeMouseDown);
+    tableWidgetEl.addEventListener('click', nativeClick);
+
+    const pointerAllowed = img.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+    const mouseAllowed = img.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    const clickAllowed = img.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+    expect(pointerAllowed).toBe(true);
+    expect(mouseAllowed).toBe(true);
+    expect(clickAllowed).toBe(true);
+    expect(nativePointerDown).toHaveBeenCalledTimes(1);
+    expect(nativeMouseDown).toHaveBeenCalledTimes(1);
+    expect(nativeClick).toHaveBeenCalledTimes(1);
+    expect(nativeEditClick).not.toHaveBeenCalled();
+    expect(editor.setCursor).not.toHaveBeenCalled();
+  });
+
+
+  it('13.29a Click cursor lookup scans a large note once without copying the whole document', () => {
+    const lineCount = 1000;
+    const lines = Array.from({ length: lineCount }, (_, line) => `ordinary line ${line}`);
+    lines[0] = '---';
+    lines[1] = 'cover: "![[target.png]]"';
+    lines[2] = '---';
+    lines[500] = '![[target.png|100x100]]';
+    lines[lineCount - 1] = '![[target.png|120x120]]';
+
+    const getValue = vi.fn(() => lines.join('\n'));
+    const getLine = vi.fn((line: number) => lines[line] ?? '');
+    const editor = {
+      getValue,
+      getCursor: () => ({ line: lineCount - 1, ch: 8 }),
+      getLine,
+      lastLine: () => lineCount - 1,
+      posAtMouse: () => ({ line: lineCount - 1, ch: 8 }),
+      transaction: vi.fn(),
+      setCursor: vi.fn()
+    };
+    const { resizer, markdownView } = makeResizer({
+      viewMode: 'source',
+      overrides: { dropPasteCursorLocation: 'back' }
+    });
+    (markdownView as any).editor = editor;
+    (resizer as any).editor = editor;
+    const { img } = setupViewWithImageWrapper();
+    img.setAttribute('src', 'app://vault/target.png');
+
+    const position = (resizer as any).getCursorPositionForImageClick(
+      img,
+      new MouseEvent('mousedown')
+    );
+
+    expect(position).toEqual({
+      line: lineCount - 1,
+      ch: lines[lineCount - 1].length
+    });
+    expect(getValue).not.toHaveBeenCalled();
+    expect(getLine).toHaveBeenCalledTimes(lineCount);
+  });
+
+  it('13.29b Markdown resize lookup scans a large note once without copying the whole document', async () => {
+    const lineCount = 1000;
+    const lines = Array.from({ length: lineCount }, (_, line) => `ordinary line ${line}`);
+    lines[0] = '---';
+    lines[1] = 'cover: "![[target.png]]"';
+    lines[2] = '---';
+    lines[500] = '![[target.png|100x100]]';
+    lines[lineCount - 1] = '![[target.png|120x120]]';
+
+    const getValue = vi.fn(() => lines.join('\n'));
+    const getLine = vi.fn((line: number) => lines[line] ?? '');
+    const transaction = vi.fn();
+    const editor = {
+      getValue,
+      getCursor: () => ({ line: lineCount - 1, ch: 8 }),
+      getLine,
+      lastLine: () => lineCount - 1,
+      posAtMouse: () => ({ line: lineCount - 1, ch: 8 }),
+      transaction,
+      setCursor: vi.fn()
+    };
+    const { resizer, markdownView } = makeResizer({ viewMode: 'source' });
+    (markdownView as any).editor = editor;
+    (resizer as any).editor = editor;
+    const { img } = setupViewWithImageWrapper();
+    img.setAttribute('src', 'app://vault/target.png');
+
+    await (resizer as any).updateMarkdownLink(img, 200, 100, 'se');
+
+    const transactionArgs = (transaction as any).mock.calls[0][0] as {
+      changes: Array<{ from: { line: number } }>
+    };
+    const changedLines = transactionArgs.changes.map((change) => change.from.line);
+    expect(changedLines).toEqual([500, lineCount - 1]);
+    expect(getValue).not.toHaveBeenCalled();
+    expect(getLine).toHaveBeenCalledTimes(lineCount);
+  });
+
+  it.each([
+    { interaction: 'scroll resize', currentHandle: null },
+    { interaction: 'drag resize', currentHandle: 'se' }
+  ])('13.29e Table image $interaction updates an escaped width-only wikilink', async ({ currentHandle }) => {
+    const link = '![[_attachments/Pasted image 20251004160543.jpg\\|122]]';
+    const line = `|     | ${link} |     |`;
+    const transaction = vi.fn();
+    const editor = {
+      getValue: () => line,
+      getCursor: () => ({ line: 0, ch: 0 }),
+      getLine: () => line,
+      lastLine: () => 0,
+      transaction,
+      setCursor: vi.fn()
+    };
+    const { resizer, markdownView } = makeResizer({ viewMode: 'source' });
+    (markdownView as any).editor = editor;
+    (resizer as any).editor = editor;
+    const { img } = setupViewWithImageWrapper();
+    img.setAttribute('src', 'app://vault/_attachments/Pasted%20image%2020251004160543.jpg');
+
+    await (resizer as any).updateMarkdownLink(img, 200, 100, currentHandle);
+
+    const expectedLink = '![[_attachments/Pasted image 20251004160543.jpg\\|200x100]]';
+    expect(transaction).toHaveBeenCalledWith({
+      changes: [{
+        from: { line: 0, ch: line.indexOf(link) },
+        to: { line: 0, ch: line.indexOf(link) + link.length },
+        text: expectedLink
+      }]
+    });
+  });
+
+  it('13.29j Active table-cell resize updates the nested editor without corrupting table delimiters', async () => {
+    const outerLine = '| ![[image.webp\\|122]] | control |';
+    let cellLine = '![[image.webp|122]]';
+    const outerTransaction = vi.fn();
+    const cellTransaction = vi.fn(({ changes }: any) => {
+      const [change] = changes;
+      cellLine = `${cellLine.slice(0, change.from.ch)}${change.text}${cellLine.slice(change.to.ch)}`;
+    });
+    const outerEditor = {
+      getValue: () => outerLine,
+      getCursor: () => ({ line: 0, ch: 0 }),
+      getLine: () => outerLine,
+      lastLine: () => 0,
+      transaction: outerTransaction,
+      setCursor: vi.fn()
+    };
+    const cellEditor = {
+      getValue: () => cellLine,
+      getCursor: () => ({ line: 0, ch: 0 }),
+      getLine: () => cellLine,
+      lastLine: () => 0,
+      transaction: cellTransaction,
+      setCursor: vi.fn()
+    };
+    const { resizer, markdownView } = makeResizer({ viewMode: 'source' });
+    (markdownView as any).editor = outerEditor;
+    (resizer as any).editor = outerEditor;
+
+    document.body.replaceChildren();
+    const tableWidget = document.createElement('div');
+    tableWidget.className = 'cm-table-widget';
+    const editingCell = document.createElement('div');
+    editingCell.className = 'table-cell-wrapper';
+    const image = addInternalImage(editingCell, 'app://vault/image.webp');
+    tableWidget.appendChild(editingCell);
+    (tableWidget as any).cmTile = {
+      widget: {
+        editor: { tableCell: { editor: cellEditor, containerEl: editingCell } },
+        getClosestCell: vi.fn(),
+        setCellFocus: vi.fn()
+      }
+    };
+    document.body.appendChild(tableWidget);
+
+    await (resizer as any).updateMarkdownLink(image, 200, 100, 'se');
+
+    expect(cellTransaction).toHaveBeenCalledWith({
+      changes: [{
+        from: { line: 0, ch: 0 },
+        to: { line: 0, ch: '![[image.webp|122]]'.length },
+        text: '![[image.webp|200x100]]'
+      }]
+    });
+    expect(outerTransaction).not.toHaveBeenCalled();
+    expect(cellLine).toBe('![[image.webp|200x100]]');
+    expect(cellLine).not.toMatch(/\]\]\|$/);
+  });
+
+  it.each([
+    {
+      caseName: 'escaped wiki caption pipes',
+      line: '| ![[image.webp\\|Hello\\|World\\|122]] |',
+      link: '![[image.webp\\|Hello\\|World\\|122]]',
+      expectedLink: '![[image.webp\\|Hello\\|World\\|200x100]]'
+    },
+    {
+      caseName: 'regular wiki caption pipes',
+      line: '![[image.webp|Hello|World]]',
+      link: '![[image.webp|Hello|World]]',
+      expectedLink: '![[image.webp|Hello|World|200x100]]'
+    },
+    {
+      caseName: 'escaped Markdown width',
+      line: '| ![Preview\\|122](_attachments/image.webp) |',
+      link: '![Preview\\|122](_attachments/image.webp)',
+      expectedLink: '![Preview\\|200x100](_attachments/image.webp)'
+    },
+    {
+      caseName: 'regular Markdown width',
+      line: '![Preview|122](_attachments/image.webp)',
+      link: '![Preview|122](_attachments/image.webp)',
+      expectedLink: '![Preview|200x100](_attachments/image.webp)'
+    },
+    {
+      caseName: 'bare table wikilink',
+      line: '| ![[image.webp]] |',
+      link: '![[image.webp]]',
+      expectedLink: '![[image.webp\\|200x100]]'
+    },
+    {
+      caseName: 'bare non-table wikilink',
+      line: '![[image.webp]]',
+      link: '![[image.webp]]',
+      expectedLink: '![[image.webp|200x100]]'
+    }
+  ])('13.29f Resize preserves $caseName syntax and content', async ({ line, link, expectedLink }) => {
+    const transaction = vi.fn();
+    const editor = {
+      getValue: () => line,
+      getCursor: () => ({ line: 0, ch: 0 }),
+      getLine: () => line,
+      lastLine: () => 0,
+      transaction,
+      setCursor: vi.fn()
+    };
+    const { resizer, markdownView } = makeResizer({ viewMode: 'source' });
+    (markdownView as any).editor = editor;
+    (resizer as any).editor = editor;
+    const { img } = setupViewWithImageWrapper();
+    img.setAttribute('src', 'app://vault/_attachments/image.webp');
+
+    await (resizer as any).updateMarkdownLink(img, 200, 100, 'se');
+
+    expect(transaction).toHaveBeenCalledWith({
+      changes: [{
+        from: { line: 0, ch: line.indexOf(link) },
+        to: { line: 0, ch: line.indexOf(link) + link.length },
+        text: expectedLink
+      }]
+    });
+  });
+
+  it.each([
+    {
+      caseName: 'optional-leading-pipe table',
+      lines: ['Image | Description', '--- | ---', 'First | Example', '![[image.webp]] | Later'],
+      targetLine: 3
+    },
+    {
+      caseName: 'optional-leading single-column table',
+      lines: ['Image |', '--- |', 'First |', '![[image.webp]] |'],
+      targetLine: 3
+    },
+    {
+      caseName: 'callout table',
+      lines: ['> | Image | Description |', '> | --- | --- |', '> | ![[image.webp]] | Example |'],
+      targetLine: 2
+    }
+  ])('13.29g Resize inserts an escaped delimiter in a $caseName', async ({ lines, targetLine }) => {
+    const transaction = vi.fn();
+    const editor = {
+      getValue: () => lines.join('\n'),
+      getCursor: () => ({ line: targetLine, ch: 0 }),
+      getLine: (line: number) => lines[line] ?? '',
+      lastLine: () => lines.length - 1,
+      transaction,
+      setCursor: vi.fn()
+    };
+    const { resizer, markdownView } = makeResizer({ viewMode: 'source' });
+    (markdownView as any).editor = editor;
+    (resizer as any).editor = editor;
+    const { img } = setupViewWithImageWrapper();
+    img.setAttribute('src', 'app://vault/_attachments/image.webp');
+
+    await (resizer as any).updateMarkdownLink(img, 200, 100, 'se');
+
+    expect(transaction).toHaveBeenCalledWith({
+      changes: [{
+        from: { line: targetLine, ch: lines[targetLine].indexOf('![[image.webp]]') },
+        to: {
+          line: targetLine,
+          ch: lines[targetLine].indexOf('![[image.webp]]') + '![[image.webp]]'.length
+        },
+        text: '![[image.webp\\|200x100]]'
+      }]
+    });
+  });
+
+  it('13.29h Table wheel-resize defers one Markdown update until scrolling settles', () => {
+    let line = '| ![[image.webp\\|122]] |';
+    const transaction = vi.fn(({ changes }: any) => {
+      const [change] = changes;
+      line = `${line.slice(0, change.from.ch)}${change.text}${line.slice(change.to.ch)}`;
+    });
+    const editor = {
+      getValue: () => line,
+      getCursor: () => ({ line: 0, ch: 0 }),
+      getLine: () => line,
+      lastLine: () => 0,
+      transaction,
+      setCursor: vi.fn()
+    };
+    const { resizer, markdownView } = makeResizer({
+      viewMode: 'source',
+      overrides: { isScrollResizeEnabled: true, scrollwheelModifier: 'None' }
+    });
+    (markdownView as any).editor = editor;
+    (resizer as any).editor = editor;
+    const { container } = setupView();
+    const tableWidget = document.createElement('div');
+    tableWidget.className = 'cm-table-widget';
+    container.appendChild(tableWidget);
+    const img = addInternalImage(tableWidget, 'app://vault/_attachments/image.webp');
+    img.style.width = '122px';
+    img.style.height = '53px';
+    const timers = setupFakeTimers();
+
+    try {
+      img.dispatchEvent(new WheelEvent('wheel', { deltaY: -10, bubbles: true, cancelable: true }));
+
+      expect(transaction).not.toHaveBeenCalled();
+      timers.advance(299);
+      expect(transaction).not.toHaveBeenCalled();
+      timers.advance(1);
+
+      expect(transaction).toHaveBeenCalledTimes(1);
+      expect(line).toMatch(/!\[\[image\.webp\\\|\d+x\d+\]\]/);
+      expect(line).not.toContain('\\|122]]');
+    } finally {
+      timers.restore();
+    }
+  });
+
+  it('13.29l Table wheel-resize persists through the nested cell editor opened during debounce', async () => {
+    const outerLine = '| ![[image.webp\\|122]] |';
+    let cellLine = '![[image.webp|122]]';
+    const tableEditorState: {
+      tableCell?: {
+        editor: any;
+        containerEl: HTMLElement;
+        cell: { row: number; col: number; el: HTMLElement };
+      } | null;
+    } = { tableCell: null };
+    const outerTransaction = vi.fn(() => {
+      if (tableEditorState.tableCell) {
+        throw new RangeError('Applying change set to a document with the wrong length');
+      }
+    });
+    const cellTransaction = vi.fn(({ changes }: any) => {
+      const [change] = changes;
+      cellLine = `${cellLine.slice(0, change.from.ch)}${change.text}${cellLine.slice(change.to.ch)}`;
+    });
+    const outerEditor = {
+      getValue: () => outerLine,
+      getCursor: () => ({ line: 0, ch: 0 }),
+      getLine: () => outerLine,
+      lastLine: () => 0,
+      transaction: outerTransaction,
+      setCursor: vi.fn()
+    };
+    const cellEditor = {
+      getValue: () => cellLine,
+      getCursor: () => ({ line: 0, ch: 0 }),
+      getLine: () => cellLine,
+      lastLine: () => 0,
+      transaction: cellTransaction,
+      setCursor: vi.fn()
+    };
+    const { resizer, markdownView } = makeResizer({
+      viewMode: 'source',
+      overrides: { isScrollResizeEnabled: true, scrollwheelModifier: 'None' }
+    });
+    (markdownView as any).editor = outerEditor;
+    (resizer as any).editor = outerEditor;
+
+    const { container } = setupView();
+    const tableWidgetEl = document.createElement('div');
+    tableWidgetEl.className = 'cm-table-widget';
+    const table = document.createElement('table');
+    const row = document.createElement('tr');
+    const renderedCell = document.createElement('td');
+    const renderedCellWrapper = document.createElement('div');
+    renderedCellWrapper.className = 'table-cell-wrapper';
+    const image = addInternalImage(renderedCellWrapper, 'app://vault/image.webp');
+    renderedCell.appendChild(renderedCellWrapper);
+    row.appendChild(renderedCell);
+    table.appendChild(row);
+    tableWidgetEl.appendChild(table);
+    container.appendChild(tableWidgetEl);
+
+    const tableCell = { row: 0, col: 0, el: renderedCell };
+    (tableWidgetEl as any).cmTile = {
+      widget: {
+        editor: tableEditorState,
+        getClosestCell: vi.fn(() => tableCell),
+        setCellFocus: vi.fn()
+      }
+    };
+    const timers = setupFakeTimers();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      image.dispatchEvent(new WheelEvent('wheel', {
+        deltaY: -10,
+        bubbles: true,
+        cancelable: true,
+        clientX: 20,
+        clientY: 10
+      }));
+
+      const editingCell = document.createElement('td');
+      const editingCellWrapper = document.createElement('div');
+      editingCellWrapper.className = 'table-cell-wrapper';
+      editingCell.appendChild(editingCellWrapper);
+      tableEditorState.tableCell = {
+        editor: cellEditor,
+        containerEl: editingCellWrapper,
+        cell: { row: 0, col: 0, el: editingCell }
+      };
+      tableWidgetEl.appendChild(editingCell);
+
+      timers.advance(300);
+      await Promise.resolve();
+
+      expect(outerTransaction).not.toHaveBeenCalled();
+      expect(cellTransaction).toHaveBeenCalledTimes(1);
+      expect(cellLine).toMatch(/^!\[\[image\.webp\|\d+x\d+\]\]$/);
+      expect(cellLine).not.toContain('|122]]');
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+      timers.restore();
+    }
+  });
+
+  it('13.29k Table drag-resize updates visually during drag and writes Markdown once on mouseup', () => {
+    const line = '| ![[image.webp\\|122]] |';
+    const transaction = vi.fn();
+    const editor = {
+      getValue: () => line,
+      getCursor: () => ({ line: 0, ch: 0 }),
+      getLine: () => line,
+      lastLine: () => 0,
+      transaction,
+      setCursor: vi.fn()
+    };
+    const { resizer, markdownView } = makeResizer({ viewMode: 'source' });
+    (markdownView as any).editor = editor;
+    (resizer as any).editor = editor;
+    const { container } = setupView();
+    const tableWidget = document.createElement('div');
+    tableWidget.className = 'cm-table-widget';
+    container.appendChild(tableWidget);
+    const image = addInternalImage(tableWidget, 'app://vault/image.webp');
+
+    (resizer as any).handleImageHover({ target: image } as any);
+    const resizeContainer = (image as any).matchParent('.image-resize-container')!;
+    const handle = resizeContainer.querySelector('.image-resize-handle-se') as HTMLElement;
+    handle.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    document.dispatchEvent(new MouseEvent('mousemove', { clientX: 40, clientY: 20, bubbles: true }));
+
+    expect(parseInt(image.style.width, 10)).toBeGreaterThan(200);
+    expect(transaction).not.toHaveBeenCalled();
+
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+
+    expect(transaction).toHaveBeenCalledTimes(1);
   });
 
   it('13.30 Click override disabled: given default setting, when clicking an internal image, then no cursor override is applied', () => {
@@ -443,7 +1258,7 @@ describe('ImageResizer additional behaviors (13.4–13.6, 13.7–13.14, 13.19, 1
     const { container } = setupView();
     const img = addInternalImage(container);
 
-    const prevented = img.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    const prevented = img.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
     expect(prevented).toBe(true);
     expect(editor.setCursor).not.toHaveBeenCalled();
     expect((img as any).matchParent('.image-resize-container')).toBeNull();
@@ -566,7 +1381,7 @@ describe('ImageResizer lifecycle and wheel behaviors (13.15–13.16, 13.17–13.
 
     const scope: any = (resizer as any).viewScope;
     expect(Array.isArray(scope?.disposables)).toBe(true);
-    expect(scope.disposables.length).toBe(7);
+    expect(scope.disposables.length).toBe(8);
 
     (resizer as any).handleImageHover({ target: img, clientX: 10, clientY: 10 } as any);
     const wrapper = (img as any).matchParent('.image-resize-container')!;

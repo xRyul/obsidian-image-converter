@@ -10,6 +10,22 @@ declare module 'obsidian' {
         showInFolder(path: string): Promise<void>;
 
         /**
+         * The settings window. Undocumented; may be missing.
+         */
+        setting?: {
+            open(): Promise<void>;
+            openTabById(id: string): void;
+        };
+
+        /**
+         * The community plugin manager. Undocumented; may be missing.
+         */
+        plugins?: {
+            disablePlugin(id: string): Promise<void>;
+            enablePlugin(id: string): Promise<void>;
+        };
+
+        /**
          * Opens a file with the operating system's default app, as Obsidian's
          * own "Open in default app" menu does. Undocumented; may be missing.
          * @param path - The path to the file in the vault.

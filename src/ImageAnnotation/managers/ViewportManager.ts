@@ -29,7 +29,8 @@ export class ViewportManager {
         private modalEl: HTMLElement,
         private componentContainer: Component,
         private getDrawingMode: () => boolean,
-        private setDrawingMode: (mode: boolean) => void
+        private setDrawingMode: (mode: boolean) => void,
+        private getIdleCursor: () => string = () => 'default'
     ) {}
 
     setupZoom(): void {
@@ -97,7 +98,7 @@ export class ViewportManager {
             if (this.isPanning) {
                 this.isPanning = false;
                 this.lastPanPoint = null;
-                canvas.defaultCursor = this.isSpacebarDown ? 'grab' : 'default';
+                canvas.defaultCursor = this.isSpacebarDown ? 'grab' : this.getIdleCursor();
             }
         });
     }
@@ -133,7 +134,7 @@ export class ViewportManager {
 
             const canvas = this.getCanvas();
             if (canvas) {
-                canvas.defaultCursor = 'default';
+                canvas.defaultCursor = this.getIdleCursor();
 
                 if (this.previousDrawingMode) {
                     canvas.isDrawingMode = true;
