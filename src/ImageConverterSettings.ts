@@ -7,7 +7,8 @@ import {
     ButtonComponent,
     setIcon,
     TextComponent,
-    TFile
+    TFile,
+    debounce
 } from "obsidian";
 import ImageConverterPlugin from "./main";
 import { VariableProcessor } from "./VariableProcessor";
@@ -1880,7 +1881,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 .setValue(preset.customTemplate || "")
                 .onChange((value) => {
             preset.customTemplate = value;
-                    void updatePreview();
+                    schedulePreviewUpdate();
                 });
             text.inputEl.setAttr('spellcheck', 'false');
             return text;
@@ -1914,6 +1915,8 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                 previewEl.setText('Error generating preview');
             }
         };
+        // Templates such as {MD5:image} read the whole preview image, so wait until typing pauses.
+        const schedulePreviewUpdate = debounce(() => void updatePreview(), 300, true);
 
         // Initial preview update
         void updatePreview();
@@ -2024,7 +2027,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                     .setValue(this.plugin.settings.subfolderTemplate)
                     .onChange(async (value) => {
                         this.plugin.settings.subfolderTemplate = value;
-                        void updatePreview();
+                        schedulePreviewUpdate();
                     });
                 text.inputEl.setAttr('spellcheck', 'false');
                 if (isDefault) text.setDisabled(true);
@@ -2057,6 +2060,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                     previewEl.setText('Error generating preview');
                 }
             };
+            const schedulePreviewUpdate = debounce(() => void updatePreview(), 300, true);
 
             void updatePreview();
 
@@ -2082,7 +2086,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                     .setValue(preset.customTemplate || "")
                     .onChange((value) => {
                             preset.customTemplate = value;
-                        void updatePreview();
+                        schedulePreviewUpdate();
                     });
                 text.inputEl.setAttr('spellcheck', 'false');
                 if (isDefault) text.setDisabled(true);
@@ -2115,6 +2119,7 @@ export class ImageConverterSettingTab extends PluginSettingTab {
                     previewEl.setText('Error generating preview');
                 }
             };
+            const schedulePreviewUpdate = debounce(() => void updatePreview(), 300, true);
 
             void updatePreview();
 

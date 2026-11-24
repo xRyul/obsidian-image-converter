@@ -23,6 +23,11 @@ export class VariableProcessor {
 
     private counters: Map<string, number> = new Map();
 
+    // Image-content MD5 by file. A paste runs the folder and filename templates separately,
+    // and the settings preview reruns on every keystroke, so without this the same image
+    // is read and hashed again each time. `version` catches TFiles edited in place.
+    private imageContentMD5Cache = new WeakMap<TFile | File, { version: string; hash: string }>();
+
     constructor(
         private app: App,
         private settings: ImageConverterSettings
@@ -447,6 +452,11 @@ export class VariableProcessor {
             example: "{counter:001} -> 005 (if it's the fifth image in the folder)",
         },
         {
+            name: "{MD5:image}",
+            description: "The MD5 hash of the image content. Recommended for clipboard pastes on macOS where filename is generic (e.g. image.png).",
+            example: "{MD5:image} -> full hash, {MD5:image:8} -> 7a3b9e2c",
+        },
+        {
             name: "{MD5:type}",
             description: "The first 8 characters of the MD5 hash of the specified type. Supports: filename, fullpath, parentfolder, rootfolder, extension, notename, notefolder, notepath.",
             example: "{MD5:filename} -> 7a3b9e2c",
@@ -798,6 +808,7 @@ export class VariableProcessor {
 
         // --- Handle MD5 Hashes ---
         // Allow user to specify what they want to hashe.g. filename, fodlerpaht , any name etc.
+        // {MD5:image} -> hash of the image's binary content (recommended for clipboard pastes on macOS where filename is always "image.png")
         // {MD5:filename} -> full MD5 hash of filename
         // {MD5:filename:8} -> first 8 characters of MD5 hash
         // {MD5:path} -> hash of file path
@@ -815,48 +826,57 @@ export class VariableProcessor {
             const [fullToken, rawType, lengthStr] = md5Match;
             const hashType = rawType.toLowerCase();
             const length = lengthStr ? parseInt(lengthStr, 10) : undefined;
-            let textToHash = "";
+            let md5Hash: string;
 
-            switch (hashType) {
-                case "filename":
-                    textToHash = file.name.substring(0, file.name.lastIndexOf("."));
-                    break;
-                case "imagepath":
-                case "fullpath": {
-                    // Use the full vault path when available; for drag/paste `File` fall back to filename.
-                    textToHash = file instanceof TFile ? file.path : file.name;
-                    break;
+            if (hashType === "image") {
+                // Hash the image binary content. This is the only reliable option
+                // for clipboard pastes on macOS, where `file.name` is a fixed
+                // placeholder (e.g. "image.png") and would otherwise produce the
+                // same hash for every paste.
+                md5Hash = await this.generateFileContentMD5(file);
+            } else {
+                let textToHash = "";
+                switch (hashType) {
+                    case "filename":
+                        textToHash = file.name.substring(0, file.name.lastIndexOf("."));
+                        break;
+                    case "imagepath":
+                    case "fullpath": {
+                        // Use the full vault path when available; for drag/paste `File` fall back to filename.
+                        textToHash = file instanceof TFile ? file.path : file.name;
+                        break;
+                    }
+                    case "parentfolder":
+                        textToHash = activeFile.parent?.name || "";
+                        break;
+                    case "grandparentfolder":
+                        textToHash = (activeFile.parent?.parent?.path == "/" ? activeFile.parent?.name : activeFile.parent?.parent?.name) || "";
+                        break;
+                    case "rootfolder":
+                        textToHash = this.app.vault.getRoot().path;
+                        break;
+                    case "extension":
+                        textToHash = file.name.substring(file.name.lastIndexOf(".") + 1);
+                        break;
+                    case "notename":
+                        textToHash = activeFile.basename;
+                        break;
+                    case "notename_nospaces":
+                        textToHash = activeFile.basename.replace(/\s+/g, "_");
+                        break;
+                    case "notefolder":
+                        textToHash = activeFile.parent?.name || "";
+                        break;
+                    case "notepath":
+                        textToHash = activeFile.path;
+                        break;
+                    default:
+                        // Preserve user-provided text case/formatting for hashing.
+                        textToHash = rawType;
                 }
-                case "parentfolder":
-                    textToHash = activeFile.parent?.name || "";
-                    break;
-                case "grandparentfolder":
-                    textToHash = (activeFile.parent?.parent?.path == "/" ? activeFile.parent?.name : activeFile.parent?.parent?.name) || "";
-                    break;
-                case "rootfolder":
-                    textToHash = this.app.vault.getRoot().path;
-                    break;
-                case "extension":
-                    textToHash = file.name.substring(file.name.lastIndexOf(".") + 1);
-                    break;
-                case "notename":
-                    textToHash = activeFile.basename;
-                    break;
-                case "notename_nospaces":
-                    textToHash = activeFile.basename.replace(/\s+/g, "_");
-                    break;
-                case "notefolder":
-                    textToHash = activeFile.parent?.name || "";
-                    break;
-                case "notepath":
-                    textToHash = activeFile.path;
-                    break;
-                default:
-                    // Preserve user-provided text case/formatting for hashing.
-                    textToHash = rawType;
+                md5Hash = await this.generateMD5(textToHash);
             }
 
-            let md5Hash = await this.generateMD5(textToHash);
             if (length) {
                 md5Hash = md5Hash.substring(0, length);
             }
@@ -1237,9 +1257,10 @@ export class VariableProcessor {
         return counter.toString().padStart(padding, "0");
     }
 
-    private async generateMD5(text: string): Promise<string> {
-        // Implementation of MD5 algorithm
-        function md5(string: string): string {
+    private async generateMD5(input: string | Uint8Array): Promise<string> {
+        // Implementation of MD5 algorithm. Strings are read one char code per byte;
+        // image content is passed as raw bytes.
+        function md5(message: string | Uint8Array): string {
             /* eslint-disable id-length, @typescript-eslint/naming-convention, no-param-reassign -- MD5 reference implementation keeps its standard names and in-place updates */
             function rotateLeft(value: number, shift: number): number {
                 return (value << shift) | (value >>> (32 - shift));
@@ -1300,9 +1321,9 @@ export class VariableProcessor {
                 return addUnsigned(rotateLeft(a, s), b);
             }
 
-            function convertToWordArray(string: string): number[] {
+            function convertToWordArray(message: string | Uint8Array): number[] {
                 let lWordCount: number;
-                const lMessageLength = string.length;
+                const lMessageLength = message.length;
                 const lNumberOfWordsTemp1 = lMessageLength + 8;
                 const lNumberOfWordsTemp2 = (lNumberOfWordsTemp1 - (lNumberOfWordsTemp1 % 64)) / 64;
                 const lNumberOfWords = (lNumberOfWordsTemp2 + 1) * 16;
@@ -1313,7 +1334,8 @@ export class VariableProcessor {
                 while (lByteCount < lMessageLength) {
                     lWordCount = (lByteCount - (lByteCount % 4)) / 4;
                     lBytePosition = (lByteCount % 4) * 8;
-                    lWordArray[lWordCount] = (lWordArray[lWordCount] || 0) | (string.charCodeAt(lByteCount) << lBytePosition);
+                    const lByte = typeof message === "string" ? message.charCodeAt(lByteCount) : message[lByteCount];
+                    lWordArray[lWordCount] = (lWordArray[lWordCount] || 0) | (lByte << lBytePosition);
                     lByteCount++;
                 }
 
@@ -1338,7 +1360,7 @@ export class VariableProcessor {
                 return wordToHexValue;
             }
 
-            const x = convertToWordArray(string);
+            const x = convertToWordArray(message);
             let k, AA, BB, CC, DD, a, b, c, d;
             const S11 = 7, S12 = 12, S13 = 17, S14 = 22;
             const S21 = 5, S22 = 9, S23 = 14, S24 = 20;
@@ -1435,12 +1457,7 @@ export class VariableProcessor {
             /* eslint-enable id-length, @typescript-eslint/naming-convention, no-param-reassign -- End of MD5 implementation */
         }
 
-        try {
-            return md5(text);
-        } catch (error) {
-            console.error('MD5 generation failed:', error);
-            return 'error';
-        }
+        return md5(input);
     }
 
     private escapeRegExp(string: string): string {
@@ -1476,5 +1493,22 @@ export class VariableProcessor {
             console.error('Error generating SHA-256 hash of file content:', error);
             return 'error';
         }
+    }
+
+    private async generateFileContentMD5(file: TFile | File): Promise<string> {
+        const version = file instanceof TFile ? `${file.stat.mtime}:${file.stat.size}` : "";
+        const cached = this.imageContentMD5Cache.get(file);
+        if (cached?.version === version) {
+            return cached.hash;
+        }
+
+        // No try/catch: a fallback value would become the filename, and with "reuse"
+        // conflict resolution unrelated images would then share it.
+        const arrayBuffer = file instanceof TFile
+            ? await this.app.vault.readBinary(file)
+            : await file.arrayBuffer();
+        const hash = await this.generateMD5(new Uint8Array(arrayBuffer));
+        this.imageContentMD5Cache.set(file, { version, hash });
+        return hash;
     }
 }
