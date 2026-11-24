@@ -1290,23 +1290,39 @@ export class ContextMenu extends Component {
 			item.setTitle("Open with default app")
 				.setIcon("external-link")
 				.onClick(async () => {
-					try {
-						const imagePath =
-							this.folderAndFilenameManagement.getImagePath(img);
-						if (imagePath) {
-							const adapter = this.app.vault.adapter;
-							if (adapter instanceof FileSystemAdapter) {
-								const absolutePath =
-									adapter.getFilePath(imagePath);
-								window.open(absolutePath, "_external");
-							}
-						}
-					} catch (error) {
-						new Notice("Failed to open with default app");
-						console.error(error);
-					}
+					await this.openImageWithDefaultApp(img);
 				});
 		});
+	}
+
+	/**
+	 * Opens the image file with the operating system's default app.
+	 * Only images stored in the vault can be opened.
+	 * @param img - The HTMLImageElement whose file needs to be opened.
+	 */
+	async openImageWithDefaultApp(img: HTMLImageElement) {
+		const imagePath =
+			this.folderAndFilenameManagement.getImagePath(img);
+		const file = imagePath
+			? this.app.vault.getAbstractFileByPath(imagePath)
+			: null;
+		if (!(file instanceof TFile)) {
+			new Notice("Cannot open with default app: image is not a file in this vault");
+			return;
+		}
+
+		const { adapter } = this.app.vault;
+		if (!(adapter instanceof FileSystemAdapter)) {
+			new Notice("Open with default app is only available on desktop");
+			return;
+		}
+
+		try {
+			window.open(adapter.getFilePath(file.path), "_external");
+		} catch (error) {
+			new Notice("Failed to open with default app");
+			console.error(error);
+		}
 	}
 
 	/*-----------------------------------------------------------------*/
