@@ -2,7 +2,20 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import ImageConverterPlugin from '../../../src/main';
 import { fakeApp, fakeTFile, fakeVault, fakePluginManifest } from '../../factories/obsidian';
-import { Menu, Platform } from 'obsidian';
+import { FileSystemAdapter, Menu, Platform } from 'obsidian';
+
+// Record Notice messages so tests can assert on user-facing feedback
+const noticeMessages = vi.hoisted(() => [] as string[]);
+vi.mock('obsidian', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('obsidian')>();
+  class RecordingNotice extends (actual as any).Notice {
+    constructor(message: string, timeout?: number) {
+      super(message, timeout);
+      noticeMessages.push(message);
+    }
+  }
+  return { ...actual, Notice: RecordingNotice };
+});
 
 // Mock modules that are constructed by ContextMenu actions
 vi.mock('../../../src/ProcessSingleImageModal.ts', () => ({
@@ -316,6 +329,90 @@ expect(modalSpy).toHaveBeenCalled();
     });
   });
 
+  describe('Open with default app', () => {
+    const imageFile = () => fakeTFile({ path: 'imgs/pic.jpg', name: 'pic.jpg', extension: 'jpg' });
+
+    function setupDesktopApp(files: any[]) {
+      app.vault = fakeVault({ files });
+      app.vault.adapter = new FileSystemAdapter('/vault');
+      app.openWithDefaultApp = vi.fn(async () => {});
+    }
+
+    beforeEach(() => {
+      noticeMessages.length = 0;
+    });
+
+    it('opens a vault image through app.openWithDefaultApp, skipping the unknown file prompt', async () => {
+      setupDesktopApp([imageFile()]);
+      const ctx = new contextMenuCls(app as any, plugin, { getImagePath: () => 'imgs/pic.jpg' } as any, {} as any);
+
+      await ctx.openImageWithDefaultApp(document.createElement('img'));
+
+      expect(app.openWithDefaultApp).toHaveBeenCalledWith('imgs/pic.jpg', true);
+      expect(noticeMessages).toEqual([]);
+      (ctx as any).onunload?.();
+    });
+
+    it('shows a notice and does not open anything when the image path cannot be resolved', async () => {
+      setupDesktopApp([imageFile()]);
+      const ctx = new contextMenuCls(app as any, plugin, { getImagePath: () => null } as any, {} as any);
+
+      await ctx.openImageWithDefaultApp(document.createElement('img'));
+
+      expect(app.openWithDefaultApp).not.toHaveBeenCalled();
+      expect(noticeMessages).toEqual(['Cannot open with default app: image is not a file in this vault']);
+      (ctx as any).onunload?.();
+    });
+
+    it('shows a notice for images embedded from outside the vault instead of opening a vault-prefixed path', async () => {
+      setupDesktopApp([imageFile()]);
+      // getImagePath returns the OS path for app:// images outside the vault
+      const ctx = new contextMenuCls(app as any, plugin, { getImagePath: () => 'C:/pics/outside.png' } as any, {} as any);
+
+      await ctx.openImageWithDefaultApp(document.createElement('img'));
+
+      expect(app.openWithDefaultApp).not.toHaveBeenCalled();
+      expect(noticeMessages).toEqual(['Cannot open with default app: image is not a file in this vault']);
+      (ctx as any).onunload?.();
+    });
+
+    it('shows a notice when the vault is not on a local file system', async () => {
+      setupDesktopApp([imageFile()]);
+      app.vault.adapter = {};
+      const ctx = new contextMenuCls(app as any, plugin, { getImagePath: () => 'imgs/pic.jpg' } as any, {} as any);
+
+      await ctx.openImageWithDefaultApp(document.createElement('img'));
+
+      expect(app.openWithDefaultApp).not.toHaveBeenCalled();
+      expect(noticeMessages).toEqual(['Open with default app is not available in this version of Obsidian']);
+      (ctx as any).onunload?.();
+    });
+
+    it('shows a notice when app.openWithDefaultApp is missing', async () => {
+      setupDesktopApp([imageFile()]);
+      delete app.openWithDefaultApp;
+      const ctx = new contextMenuCls(app as any, plugin, { getImagePath: () => 'imgs/pic.jpg' } as any, {} as any);
+
+      await ctx.openImageWithDefaultApp(document.createElement('img'));
+
+      expect(noticeMessages).toEqual(['Open with default app is not available in this version of Obsidian']);
+      (ctx as any).onunload?.();
+    });
+
+    it('shows a failure notice when opening throws', async () => {
+      setupDesktopApp([imageFile()]);
+      app.openWithDefaultApp = vi.fn(async () => { throw new Error('boom'); });
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const ctx = new contextMenuCls(app as any, plugin, { getImagePath: () => 'imgs/pic.jpg' } as any, {} as any);
+
+      await ctx.openImageWithDefaultApp(document.createElement('img'));
+
+      expect(noticeMessages).toEqual(['Failed to open with default app']);
+      expect(errorSpy).toHaveBeenCalled();
+      (ctx as any).onunload?.();
+    });
+  });
+
   describe('Mobile gating (Phase 9: 25.4/25.5)', () => {
     it('does not add desktop-only items when Platform.isMobile=true', async () => {
       // Arrange
@@ -324,6 +421,7 @@ expect(modalSpy).toHaveBeenCalled();
 
       const openInNewWindowSpy = vi.spyOn(ctx as any, 'addOpenInNewWindowMenuItem');
       const cutImageSpy = vi.spyOn(ctx as any, 'addCutImageMenuItem');
+      const openWithDefaultAppSpy = vi.spyOn(ctx as any, 'addOpenWithDefaultAppMenuItem');
 
       const img = document.createElement('img');
       img.setAttribute('src', '/images/a.png');
@@ -334,6 +432,7 @@ expect(modalSpy).toHaveBeenCalled();
 
       // Assert
       expect(openInNewWindowSpy).not.toHaveBeenCalled();
+      expect(openWithDefaultAppSpy).not.toHaveBeenCalled();
       expect(cutImageSpy).not.toHaveBeenCalled();
 
       // Cleanup

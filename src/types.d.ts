@@ -24,6 +24,15 @@ declare module 'obsidian' {
             disablePlugin(id: string): Promise<void>;
             enablePlugin(id: string): Promise<void>;
         };
+
+        /**
+         * Opens a file with the operating system's default app, as Obsidian's
+         * own "Open in default app" menu does. Undocumented; may be missing.
+         * @param path - The path to the file in the vault.
+         * @param skipUnknownFilePrompt - Pass true to skip Obsidian's "Open file in
+         *   another app?" prompt for file types it does not know (e.g. SVG).
+         */
+        openWithDefaultApp?(path: string, skipUnknownFilePrompt?: boolean): Promise<void>;
     }
     interface Vault {
         /**
