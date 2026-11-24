@@ -1311,14 +1311,20 @@ export class ContextMenu extends Component {
 			return;
 		}
 
-		const { adapter } = this.app.vault;
-		if (!(adapter instanceof FileSystemAdapter)) {
-			new Notice("Open with default app is only available on desktop");
+		// openWithDefaultApp is undocumented and does nothing without a
+		// FileSystemAdapter, so check both instead of failing silently.
+		if (
+			!(this.app.vault.adapter instanceof FileSystemAdapter) ||
+			typeof this.app.openWithDefaultApp !== "function"
+		) {
+			new Notice("Open with default app is not available in this version of Obsidian");
 			return;
 		}
 
 		try {
-			window.open(adapter.getFilePath(file.path), "_external");
+			// Same call as Obsidian's own "Open in default app" menu: it goes
+			// through the active window and skips the unknown file type prompt.
+			await this.app.openWithDefaultApp(file.path, true);
 		} catch (error) {
 			new Notice("Failed to open with default app");
 			console.error(error);
