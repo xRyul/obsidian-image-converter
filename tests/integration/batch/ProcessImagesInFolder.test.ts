@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BatchImageProcessor } from '../../../src/BatchImageProcessor';
 import { fakeApp, fakeVault, fakeTFile, fakeTFolder } from '../../factories/obsidian';
+import { makeImageBytesOfSize } from '../../factories/image';
 
 function makePluginStub(overrides: any = {}) {
   return {
@@ -14,6 +15,10 @@ function makePluginStub(overrides: any = {}) {
       ProcessCurrentNoteresizeModaldesiredLength: 0,
       ProcessCurrentNoteEnlargeOrReduce: 'Always',
       allowLargerFiles: true,
+      revertToOriginalIfLarger: false,
+      minimumCompressionSavingsInKB: 30,
+      selectedConversionPreset: 'None',
+      conversionPresets: [],
       ProcessCurrentNoteSkipFormats: '',
       ProcessCurrentNoteskipImagesInTargetFormat: true,
       ...overrides.settings
@@ -67,7 +72,7 @@ describe('BatchImageProcessor — Folder processing (recursive, skipFormats)', (
     plugin = makePluginStub();
 
     imageProcessor = {
-      processImage: vi.fn(async (_blob: Blob) => new ArrayBuffer(4))
+      processImage: vi.fn(async (_blob: Blob, format: string) => makeImageBytesOfSize(format, 4))
     };
 
     folderAndFilenameManagement = {
@@ -103,7 +108,7 @@ describe('BatchImageProcessor — Folder processing (recursive, skipFormats)', (
     const app1 = fakeApp({ vault: vault1, metadataCache: { resolvedLinks: {} } as any }) as any;
     app1.fileManager = { renameFile: vi.fn(async (file: any, newPath: string) => { await app1.vault.rename(file, newPath); }) };
     const plugin1 = makePluginStub();
-    const imageProcessor1 = { processImage: vi.fn(async (_blob: Blob) => new ArrayBuffer(4)) };
+    const imageProcessor1 = { processImage: vi.fn(async (_blob: Blob, format: string) => makeImageBytesOfSize(format, 4)) };
     const ffm1 = { handleNameConflicts: vi.fn(async (_dir: string, name: string) => name) };
     const bip1 = new BatchImageProcessor(app1, plugin1, imageProcessor1 as any, ffm1 as any);
 
@@ -120,7 +125,7 @@ describe('BatchImageProcessor — Folder processing (recursive, skipFormats)', (
     const app2 = fakeApp({ vault: vault2, metadataCache: { resolvedLinks: {} } as any }) as any;
     app2.fileManager = { renameFile: vi.fn(async (file: any, newPath: string) => { await app2.vault.rename(file, newPath); }) };
     const plugin2 = makePluginStub();
-    const imageProcessor2 = { processImage: vi.fn(async (_blob: Blob) => new ArrayBuffer(4)) };
+    const imageProcessor2 = { processImage: vi.fn(async (_blob: Blob, format: string) => makeImageBytesOfSize(format, 4)) };
     const ffm2 = { handleNameConflicts: vi.fn(async (_dir: string, name: string) => name) };
     const bip2 = new BatchImageProcessor(app2, plugin2, imageProcessor2 as any, ffm2 as any);
 
@@ -149,7 +154,7 @@ describe('BatchImageProcessor — Folder processing (recursive, skipFormats)', (
     };
 
     const plugin = makePluginStub();
-    const imageProcessor = { processImage: vi.fn(async (_blob: Blob) => new ArrayBuffer(4)) };
+    const imageProcessor = { processImage: vi.fn(async (_blob: Blob, format: string) => makeImageBytesOfSize(format, 4)) };
     const ffm = { handleNameConflicts: vi.fn(async (_dir: string, name: string) => name) };
     const bip = new BatchImageProcessor(app, plugin as any, imageProcessor as any, ffm as any);
 
@@ -165,5 +170,107 @@ describe('BatchImageProcessor — Folder processing (recursive, skipFormats)', (
     const contentAfter = await app.vault.read(note);
     expect(contentAfter).toContain('SubSubfolder2-1757522743837.webp');
     expect(contentAfter).toContain('SubSubfolder2-1757527917825.webp');
+  });
+
+  it.each([
+    ['processImagesInFolder', 'images'],
+    ['processLinkedImagesInFolder', 'notes'],
+  ] as const)('Given the metadata setting, When %s runs, Then processImage receives the plugin settings', async (method, folderPath) => {
+    // Linked mode processes the images that the notes in the folder link to.
+    const notesFolder = fakeTFolder({ path: 'notes', name: 'notes' });
+    const vault = fakeVault({ files: [note, aPng], folders: [folderA, notesFolder] }) as any;
+    await vault.modify(note, '![](images/a.png)');
+    app = fakeApp({ vault, metadataCache: { resolvedLinks: { [note.path]: { [aPng.path]: 1 } } } as any }) as any;
+    app.fileManager = { renameFile: vi.fn(async (file: any, newPath: string) => { await app.vault.rename(file, newPath); }) };
+    plugin.settings.metadataMode = 'strip-location';
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
+
+    await bip[method](folderPath, false);
+
+    expect(imageProcessor.processImage).toHaveBeenCalled();
+    for (const call of imageProcessor.processImage.mock.calls) {
+      expect(call[11]).toBe(plugin.settings);
+    }
+  });
+});
+describe('BatchImageProcessor — revert to original when output is larger', () => {
+  let app: any;
+  let plugin: any;
+  let imageProcessor: any;
+  let folderAndFilenameManagement: any;
+  let aPng: any; let bJpg: any;
+  let binaryContents: Map<string, ArrayBuffer>;
+
+  beforeEach(() => {
+    const folderA = fakeTFolder({ path: 'images', name: 'images' });
+    aPng = fakeTFile({ path: 'images/a.png' });
+    bJpg = fakeTFile({ path: 'images/b.jpg' });
+    (folderA as any).children = [aPng, bJpg];
+
+    binaryContents = new Map<string, ArrayBuffer>([
+      ['images/a.png', new ArrayBuffer(100)],
+      ['images/b.jpg', new ArrayBuffer(100)]
+    ]);
+
+    const vault = fakeVault({ files: [aPng, bJpg], folders: [folderA], binaryContents }) as any;
+    app = fakeApp({ vault, metadataCache: { resolvedLinks: {} } as any }) as any;
+    app.fileManager = {
+      renameFile: vi.fn(async (file: any, newPath: string) => {
+        await app.vault.rename(file, newPath);
+      })
+    };
+
+    plugin = makePluginStub();
+    plugin.settings.revertToOriginalIfLarger = true;
+    plugin.settings.minimumCompressionSavingsInKB = 0;
+
+    imageProcessor = {
+      // PNG output balloons to 200 bytes; JPG shrinks to 20 bytes
+      processImage: vi.fn(async (blob: Blob, format: string) =>
+        makeImageBytesOfSize(format, blob.type.includes('png') ? 200 : 20))
+    };
+
+    folderAndFilenameManagement = {
+      handleNameConflicts: vi.fn(async (_dir: string, name: string) => name)
+    };
+  });
+
+  it('Given revert enabled, When processed output is larger, Then the file is left untouched', async () => {
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
+
+    await bip.processImagesInFolder('images', false);
+
+    // a.png (larger output) must not be renamed or rewritten; b.jpg processed normally
+    const renamedPaths = (app.fileManager.renameFile as any).mock.calls.map((args: any[]) => args[0].basename);
+    expect(renamedPaths).toEqual(['b']);
+
+    expect(app.vault.modifyBinary).toHaveBeenCalledTimes(1);
+    expect(binaryContents.get('images/a.png')?.byteLength).toBe(100);
+    expect(binaryContents.get('images/b.webp')?.byteLength).toBe(20);
+  });
+
+  it('Given revert enabled with a minimum savings threshold, When savings are below it, Then the file is skipped', async () => {
+    plugin.settings.minimumCompressionSavingsInKB = 30;
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
+
+    await bip.processImagesInFolder('images', false);
+
+    // Even the 20-byte JPG output saves only 80 bytes (< 30 KB), so nothing is written
+    expect(app.fileManager.renameFile).not.toHaveBeenCalled();
+    expect(app.vault.modifyBinary).not.toHaveBeenCalled();
+    expect(binaryContents.get('images/a.png')?.byteLength).toBe(100);
+    expect(binaryContents.get('images/b.jpg')?.byteLength).toBe(100);
+  });
+
+  it('Given revert disabled, When processed output is larger, Then the file is still written', async () => {
+    plugin.settings.revertToOriginalIfLarger = false;
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor as any, folderAndFilenameManagement as any);
+
+    await bip.processImagesInFolder('images', false);
+
+    const renamedPaths = (app.fileManager.renameFile as any).mock.calls.map((args: any[]) => args[0].basename);
+    expect(renamedPaths.sort()).toEqual(['a', 'b']);
+    expect(binaryContents.get('images/a.webp')?.byteLength).toBe(200);
+    expect(binaryContents.get('images/b.webp')?.byteLength).toBe(20);
   });
 });

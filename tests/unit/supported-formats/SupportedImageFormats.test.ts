@@ -157,6 +157,12 @@ describe('SupportedImageFormats — header-based MIME detection (6.5–6.9, 6.18
     await expect(formats.getMimeTypeFromFile(blob)).resolves.toBe('image/jpeg');
   });
 
+  it('Given a JPEG with no APPn segment (starts FF D8 FF DB), When detected from Blob, Then returns image/jpeg', async () => {
+    // The single-image dialog labels a .jpg file "image/jpg": the header must win.
+    const blob = makeImageBlob(new Uint8Array([0xFF, 0xD8, 0xFF, 0xDB, 0x00, 0x43, 0x00, 0x08]).buffer, 'image/jpg');
+    await expect(formats.getMimeTypeFromFile(blob)).resolves.toBe('image/jpeg');
+  });
+
   it('Given GIF header, When detected from Blob, Then returns image/gif (6.9)', async () => {
     const blob = makeImageBlob(makeGifHeaderBytes(), 'application/octet-stream');
     await expect(formats.getMimeTypeFromFile(blob)).resolves.toBe('image/gif');

@@ -36,7 +36,8 @@ export enum ToolMode {
     NONE,
     DRAW,
     TEXT,
-    ARROW
+    ARROW,
+    MOSAIC
 }
 
 export interface ToolManagerState {
@@ -44,7 +45,10 @@ export interface ToolManagerState {
     isDrawingMode: boolean;
     isTextMode: boolean;
     isArrowMode: boolean;
+    isMosaicMode: boolean;
 }
+
+export const MOSAIC_BLOCK_SIZES = [5, 10, 15, 20, 30] as const;
 
 export interface ViewportState {
     currentZoom: number;

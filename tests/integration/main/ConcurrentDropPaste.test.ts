@@ -2,6 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import ImageConverterPlugin from '../../../src/main';
 import { fakeApp, fakeVault, fakeTFile, fakePluginManifest } from '../../factories/obsidian';
+import { makeImageBytesOfSize } from '../../factories/image';
 
 function makePluginWithNote() {
   const note = fakeTFile({ path: 'Notes/n.md', name: 'n.md', extension: 'md' });
@@ -32,7 +33,7 @@ describe('Concurrent drop/paste handling (Phase 9: 26.9, 26.10 subset)', () => {
     (plugin as any).linkFormatter = { formatLink: vi.fn(async () => '![](/mock)') };
 
     // Stub processor to avoid heavy image work
-    (plugin as any).imageProcessor = { processImage: vi.fn(async () => new ArrayBuffer(16)) } as any;
+    (plugin as any).imageProcessor = { processImage: vi.fn(async () => makeImageBytesOfSize('WEBP', 16)) } as any;
     (plugin as any).showSizeComparisonNotification = vi.fn();
 
     // Unique destination/newFilename per file
@@ -69,7 +70,7 @@ describe('Concurrent drop/paste handling (Phase 9: 26.9, 26.10 subset)', () => {
     await plugin.loadSettings();
     await plugin.onload();
     (plugin as any).settings.modalBehavior = 'never';
-    (plugin as any).imageProcessor = { processImage: vi.fn(async () => new ArrayBuffer(8)) } as any;
+    (plugin as any).imageProcessor = { processImage: vi.fn(async () => makeImageBytesOfSize('WEBP', 8)) } as any;
     (plugin as any).showSizeComparisonNotification = vi.fn();
     (plugin as any).linkFormatter = { formatLink: vi.fn(async () => '![](/mock)') };
 

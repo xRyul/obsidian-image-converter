@@ -1,6 +1,6 @@
 // FolderAndFilenameManagement.ts
-import { TFile, TFolder, App, normalizePath, Notice, FileSystemAdapter } from "obsidian";
-// eslint-disable-next-line import/no-nodejs-modules -- Required for path manipulation; Obsidian runs on Electron with Node.js support
+import { TFile, TFolder, App, normalizePath, Notice, FileSystemAdapter, Platform } from "obsidian";
+// Required for path manipulation; Obsidian runs on Electron with Node.js support
 import * as path from 'path';
 import {
     ImageConverterSettings,
@@ -11,6 +11,8 @@ import {
 import { VariableProcessor, VariableContext } from "./VariableProcessor";
 import { SupportedImageFormats } from "./SupportedImageFormats";
 import { getVaultConfigString } from "./utils/vaultConfig";
+
+const WINDOWS_MAX_PATH = 260;
 
 export class FolderAndFilenameManagement {
     constructor(
@@ -184,6 +186,47 @@ export class FolderAndFilenameManagement {
             return normalizePath(`/${filename}`);
         }
         return normalizePath(`${basePath}/${filename}`);
+    }
+
+    /**
+     * Returns the conventional absolute path when a target reaches Windows MAX_PATH.
+     * The extended-length namespace prefix is excluded because it is not part of the
+     * underlying drive or UNC path evaluated against the legacy safety limit.
+     */
+    getWindowsPathLengthViolation(vaultRelativePath: string): {
+        absolutePath: string;
+        length: number;
+        limit: number;
+    } | null {
+        if (!Platform.isWin || !(this.app.vault.adapter instanceof FileSystemAdapter)) {
+            return null;
+        }
+
+        let basePath = this.app.vault.adapter.getBasePath().replace(/\//g, "\\");
+        const extendedUncPrefix = "\\\\?\\UNC\\";
+        const extendedPathPrefix = "\\\\?\\";
+
+        if (basePath.startsWith(extendedUncPrefix)) {
+            basePath = `\\\\${basePath.substring(extendedUncPrefix.length)}`;
+        } else if (basePath.startsWith(extendedPathPrefix)) {
+            basePath = basePath.substring(extendedPathPrefix.length);
+        }
+
+        basePath = basePath.replace(/\\+$/, "");
+        const relativePath = normalizePath(vaultRelativePath)
+            .replace(/^\/+/, "")
+            .replace(/\//g, "\\");
+        const absolutePath = relativePath ? `${basePath}\\${relativePath}` : basePath;
+
+        if (absolutePath.length < WINDOWS_MAX_PATH) {
+            return null;
+        }
+
+        return {
+            absolutePath,
+            length: absolutePath.length,
+            limit: WINDOWS_MAX_PATH,
+        };
     }
 
     /**
@@ -385,6 +428,30 @@ export class FolderAndFilenameManagement {
             default:
                 return `${filename}${originalExtension}`;
         }
+    }
+
+    /**
+     * Gives the name to save the original image under, when it is kept in
+     * place of the converted one. The name of the converted image gets the
+     * extension of the original, so that the name matches the content.
+     *
+     * @param convertedFilename - The name that the converted image would get.
+     * @param file - The original image.
+     * @returns The name with the extension of the original, in lowercase.
+     */
+    getFilenameForOriginal(convertedFilename: string, file: File): string {
+        const originalDotIndex = file.name.lastIndexOf(".");
+        if (originalDotIndex === -1) {
+            return convertedFilename; // The original has no extension to give
+        }
+
+        const originalExtension = file.name.substring(originalDotIndex).toLowerCase();
+        const convertedDotIndex = convertedFilename.lastIndexOf(".");
+        const nameWithoutExt = convertedDotIndex > -1
+            ? convertedFilename.substring(0, convertedDotIndex)
+            : convertedFilename;
+
+        return `${nameWithoutExt}${originalExtension}`;
     }
 
     /**

@@ -11,8 +11,9 @@ import {
 	MenuItem,
 	MarkdownView,
 	Editor,
+	FileSystemAdapter,
 } from "obsidian";
-// eslint-disable-next-line import/no-nodejs-modules -- Required for path manipulation; Obsidian runs on Electron with Node.js support
+// Required for path manipulation; Obsidian runs on Electron with Node.js support
 import * as path from "path";
 import ImageConverterPlugin from "./main";
 import { FolderAndFilenameManagement } from "./FolderAndFilenameManagement";
@@ -385,6 +386,7 @@ export class ContextMenu extends Component {
 
 		if (!Platform.isMobile) {
 			this.addOpenInNewWindowMenuItem(menu, img);
+			this.addOpenWithDefaultAppMenuItem(menu, img);
 			menu.addSeparator();
 			this.addCutImageMenuItem(menu, event);
 		}
@@ -1078,7 +1080,7 @@ export class ContextMenu extends Component {
 				});
 
 				// Clear and set the menu item content (gracefully handle test mocks without a DOM property)
-				const maybeDom = menuItem.dom as (HTMLElement & { empty?: () => void }) | undefined;
+				const maybeDom = menuItem.dom;
 				if (maybeDom && typeof maybeDom.appendChild === "function") {
 					// If Obsidian exposes a DOM element, populate it
 					if (typeof maybeDom.empty === "function") {
@@ -1092,7 +1094,7 @@ export class ContextMenu extends Component {
 					maybeDom.appendChild(inputContainer);
 				} else {
 					// Minimal fallback for test environment without MenuItem DOM
-					(menuItem as MenuItemWithDom & { setTitle?: (title: string) => void }).setTitle?.("Image tools");
+					menuItem.setTitle?.("Image tools");
 				}
 			});
 		}
@@ -1272,6 +1274,61 @@ export class ContextMenu extends Component {
 					}
 				});
 		});
+	}
+
+	/*-----------------------------------------------------------------*/
+	/*                    OPEN WITH DEFAULT APP                        */
+	/*-----------------------------------------------------------------*/
+
+	/**
+	 * Adds the "Open with default app" menu item.
+	 * @param menu - The Menu object to add the item to.
+	 * @param img - The HTMLImageElement that was right-clicked.
+	 */
+	addOpenWithDefaultAppMenuItem(menu: Menu, img: HTMLImageElement) {
+		menu.addItem((item) => {
+			item.setTitle("Open with default app")
+				.setIcon("external-link")
+				.onClick(async () => {
+					await this.openImageWithDefaultApp(img);
+				});
+		});
+	}
+
+	/**
+	 * Opens the image file with the operating system's default app.
+	 * Only images stored in the vault can be opened.
+	 * @param img - The HTMLImageElement whose file needs to be opened.
+	 */
+	async openImageWithDefaultApp(img: HTMLImageElement) {
+		try {
+			const imagePath =
+				this.folderAndFilenameManagement.getImagePath(img);
+			const file = imagePath
+				? this.app.vault.getAbstractFileByPath(imagePath)
+				: null;
+			if (!(file instanceof TFile)) {
+				new Notice("Cannot open with default app: image is not a file in this vault");
+				return;
+			}
+
+			// openWithDefaultApp is undocumented and does nothing without a
+			// FileSystemAdapter, so check both instead of failing silently.
+			if (
+				!(this.app.vault.adapter instanceof FileSystemAdapter) ||
+				typeof this.app.openWithDefaultApp !== "function"
+			) {
+				new Notice("Open with default app is not available in this version of Obsidian");
+				return;
+			}
+
+			// Same call as Obsidian's own "Open in default app" menu: it goes
+			// through the active window and skips the unknown file type prompt.
+			await this.app.openWithDefaultApp(file.path, true);
+		} catch (error) {
+			new Notice("Failed to open with default app");
+			console.error(error);
+		}
 	}
 
 	/*-----------------------------------------------------------------*/
@@ -1697,7 +1754,6 @@ export class ContextMenu extends Component {
 					}
 				);
 				if (!found) {
-					// eslint-disable-next-line obsidianmd/ui/sentence-case -- Base64 is a proper technical term
 					new Notice("Failed to find Base64 image link");
 				}
 				return;
@@ -1838,7 +1894,6 @@ export class ContextMenu extends Component {
 	addCopyBase64ImageMenuItem(menu: Menu, event: MouseEvent) {
 		menu.addItem((item: MenuItem) =>
 			item
-				// eslint-disable-next-line obsidianmd/ui/sentence-case -- Base64 is a proper technical term
 				.setTitle("Copy as Base64 encoded image")
 				.setIcon("copy")
 				.onClick(() => {
@@ -1874,11 +1929,9 @@ export class ContextMenu extends Component {
 				ctx.drawImage(img, 0, 0);
 				const dataURL = canvas.toDataURL();
 				await navigator.clipboard.writeText(`<img src="${dataURL}"/>`);
-				// eslint-disable-next-line obsidianmd/ui/sentence-case -- Base64 is a proper technical term
 				new Notice("Image copied to clipboard as Base64");
 			} catch (error) {
 				console.error("Failed to copy image as Base64:", error);
-				// eslint-disable-next-line obsidianmd/ui/sentence-case -- Base64 is a proper technical term
 				new Notice("Failed to copy image as Base64");
 			} finally {
 				clearImageHandlers();
@@ -2061,7 +2114,7 @@ export class ContextMenu extends Component {
 							  }) || matchingFiles[0];
 
 					if (file instanceof TFile) {
-						new Crop(this.app, file).open();
+						new Crop(this.app, file, this.plugin.settings.metadataMode).open();
 					} else {
 						new Notice("Unable to locate image file");
 					}
@@ -2308,7 +2361,6 @@ export class ContextMenu extends Component {
 					}
 				);
 			if (!found) {
-				// eslint-disable-next-line obsidianmd/ui/sentence-case -- Base64 is a proper technical term
 				new Notice("Failed to find Base64 image link");
 			}
 				return;

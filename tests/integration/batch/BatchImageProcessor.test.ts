@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BatchImageProcessor } from '../../../src/BatchImageProcessor';
 import { fakeApp, fakeVault, fakeTFile } from '../../factories/obsidian';
+import { makeImageBytesOfSize } from '../../factories/image';
 
 function makePluginStub(overrides: any = {}) {
   return {
@@ -15,6 +16,10 @@ function makePluginStub(overrides: any = {}) {
       ProcessCurrentNoteresizeModaldesiredLength: 0,
       ProcessCurrentNoteEnlargeOrReduce: 'Always',
       allowLargerFiles: true,
+      revertToOriginalIfLarger: false,
+      minimumCompressionSavingsInKB: 30,
+      selectedConversionPreset: 'None',
+      conversionPresets: [],
       ProcessCurrentNoteSkipFormats: '',
       ProcessCurrentNoteskipImagesInTargetFormat: true,
       // All Vault defaults
@@ -74,9 +79,9 @@ describe('BatchImageProcessor orchestration', () => {
     plugin = makePluginStub();
 
     imageProcessor = {
-      processImage: vi.fn(async (_blob: Blob) => {
-        // Return predictable bytes
-        return new ArrayBuffer(4);
+      processImage: vi.fn(async (_blob: Blob, format: string) => {
+        // Return predictable bytes in the requested format
+        return makeImageBytesOfSize(format, 4);
       })
     };
 
@@ -105,6 +110,22 @@ describe('BatchImageProcessor orchestration', () => {
     // Link updated in the note
     const content = await app.vault.read(note);
     expect(content).toContain(newPath);
+  });
+
+  it('Given the metadata setting, When images in a note are processed, Then processImage receives the plugin settings', async () => {
+    // The metadata setting is read from these settings. Without them, batch
+    // jobs would always keep all metadata.
+    app.metadataCache.resolvedLinks[note.path] = { [imgA.path]: 1 };
+    plugin.settings.metadataMode = 'strip-all';
+    const bip = new BatchImageProcessor(app, plugin, imageProcessor, folderAndFilenameManagement);
+    await app.vault.modify(note, '![alt](images/a.png)');
+
+    await bip.processImagesInNote(note);
+
+    expect(imageProcessor.processImage).toHaveBeenCalledTimes(1);
+    const settingsArg = imageProcessor.processImage.mock.calls[0][11];
+    expect(settingsArg).toBe(plugin.settings);
+    expect(settingsArg.metadataMode).toBe('strip-all');
   });
 
   it('4.1 Sequential processing across multiple files and progress updates', async () => {
@@ -209,7 +230,7 @@ describe('BatchImageProcessor — Progress, scope, and error behaviors', () => {
     plugin = makePluginStub();
 
     imageProcessor = {
-      processImage: vi.fn(async (_blob: Blob) => new ArrayBuffer(4))
+      processImage: vi.fn(async (_blob: Blob, format: string) => makeImageBytesOfSize(format, 4))
     };
 
     folderAndFilenameManagement = {
@@ -374,7 +395,7 @@ describe('BatchImageProcessor — Progress, scope, and error behaviors', () => {
         signalFirstCalled();
         return firstPromise;
       })
-      .mockImplementationOnce(async () => new ArrayBuffer(4));
+      .mockImplementationOnce(async () => makeImageBytesOfSize('WEBP', 4));
 
     const bip = new BatchImageProcessor(app, plugin, imageProcessor, folderAndFilenameManagement);
     await app.vault.modify(note1, '![a](images/a.png) and ![b](images/b.jpg)');
@@ -385,7 +406,7 @@ describe('BatchImageProcessor — Progress, scope, and error behaviors', () => {
     await firstCalled;
     expect(imageProcessor.processImage).toHaveBeenCalledTimes(1);
 
-    resolveFirst(new ArrayBuffer(4));
+    resolveFirst(makeImageBytesOfSize('WEBP', 4));
     await runPromise;
 
     expect(imageProcessor.processImage).toHaveBeenCalledTimes(2);

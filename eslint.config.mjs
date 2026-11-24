@@ -26,7 +26,8 @@ export default defineConfig([
 			// Third-party libraries
 			"src/UTIF.js",
 			"src/UTIF.d.ts",
-			"src/heic-to.d.ts",
+			"src/heic-to.min.js",
+			"src/heic-to.min.d.ts",
 
 			// Documentation and examples
 			"*.md",
@@ -81,6 +82,7 @@ export default defineConfig([
 			globals: {
 				...globals.node,
 				...globals.browser,
+				activeDocument: "readonly",
 				console: "readonly",
 				process: "readonly",
 				Buffer: "readonly",

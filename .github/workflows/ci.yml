@@ -1,0 +1,51 @@
+# ci.yml
+#
+# Type-checks, lints, tests and builds the plugin on every pull request and
+# on every push to main.
+#
+# Lint errors that existed when this workflow was added are recorded in
+# eslint-suppressions.json, so only new errors fail the check. Fixing one of
+# them makes ESLint report an unused suppression; run
+# `npx eslint "src/**/*.ts" --prune-suppressions` and commit the result.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc -noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: node esbuild.config.mjs production

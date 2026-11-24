@@ -2,7 +2,7 @@
  * Mock implementation of the Obsidian module
  * Provides test doubles for all Obsidian API imports
  */
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-function-type, import/no-extraneous-dependencies, no-restricted-imports */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-function-type, import/no-extraneous-dependencies, import/no-nodejs-modules, no-restricted-imports */
 
 import path from 'node:path';
 import moment from 'moment';
@@ -12,6 +12,7 @@ export { moment };
 
 // Core classes
 export class Notice {
+  static instances: Notice[] = [];
   message: string;
   timeout?: number;
   noticeEl: HTMLElement;
@@ -20,6 +21,7 @@ export class Notice {
     this.message = message;
     this.timeout = timeout;
     this.noticeEl = document.createElement('div');
+    Notice.instances.push(this);
   }
   
   hide() {}

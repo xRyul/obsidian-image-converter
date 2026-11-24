@@ -8,6 +8,31 @@ declare module 'obsidian' {
          * @param path - The path to the file or folder in the vault.
          */
         showInFolder(path: string): Promise<void>;
+
+        /**
+         * The settings window. Undocumented; may be missing.
+         */
+        setting?: {
+            open(): Promise<void>;
+            openTabById(id: string): void;
+        };
+
+        /**
+         * The community plugin manager. Undocumented; may be missing.
+         */
+        plugins?: {
+            disablePlugin(id: string): Promise<void>;
+            enablePlugin(id: string): Promise<void>;
+        };
+
+        /**
+         * Opens a file with the operating system's default app, as Obsidian's
+         * own "Open in default app" menu does. Undocumented; may be missing.
+         * @param path - The path to the file in the vault.
+         * @param skipUnknownFilePrompt - Pass true to skip Obsidian's "Open file in
+         *   another app?" prompt for file types it does not know (e.g. SVG).
+         */
+        openWithDefaultApp?(path: string, skipUnknownFilePrompt?: boolean): Promise<void>;
     }
     interface Vault {
         /**

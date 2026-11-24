@@ -407,3 +407,26 @@ describe('HistoryManager serializeObject fallback (16.12 supplement)', () => {
     consoleSpy.mockRestore();
   });
 });
+
+describe('HistoryManager redo keeps the undo stack in step with the canvas', () => {
+  it('after redo, one undo goes back one step', async () => {
+    const mockCanvas = createMinimalCanvasMock();
+    const historyManager = new HistoryManager(() => mockCanvas as unknown as import('fabric').Canvas);
+    historyManager.initialize();
+    const hm = historyManager as unknown as HistoryManagerInternals;
+
+    const stateA = JSON.stringify([{ type: 'rect', left: 1 }]);
+    const stateAB = JSON.stringify([{ type: 'rect', left: 1 }, { type: 'rect', left: 2 }]);
+    hm.undoStack.push(stateA, stateAB);
+
+    await historyManager.undo();
+    expect(hm.undoStack[hm.undoStack.length - 1]).toBe(stateA);
+
+    await historyManager.redo();
+    expect(hm.undoStack[hm.undoStack.length - 1]).toBe(stateAB);
+
+    await historyManager.undo();
+    expect(hm.undoStack[hm.undoStack.length - 1]).toBe(stateA);
+    expect(hm.redoStack).toEqual([stateAB]);
+  });
+});
