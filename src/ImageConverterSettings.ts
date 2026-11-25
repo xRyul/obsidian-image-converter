@@ -166,6 +166,7 @@ export interface ImageConverterSettings {
 
     neverProcessFilenames: string;
     modalBehavior: ModalBehavior;
+    autoImageProcessingPaused?: boolean;
 
     singleImageModalSettings?: SingleImageModalSettings;
 
@@ -354,6 +355,7 @@ export const DEFAULT_SETTINGS: ImageConverterSettings = {
     dropPasteCursorLocation: "back",
     neverProcessFilenames: "",
     modalBehavior: "never",
+    autoImageProcessingPaused: false,
 
     singleImageModalSettings: undefined,
 
