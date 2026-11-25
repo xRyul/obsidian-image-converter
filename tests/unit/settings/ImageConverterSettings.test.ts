@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import ImageConverterPlugin from '../../../src/main';
 import { AvailableVariablesModal, ImageConverterSettingTab, DEFAULT_SETTINGS, type ConversionPreset, type FilenamePreset } from '../../../src/ImageConverterSettings';
 import type { LinkFormatPreset } from '../../../src/LinkFormatSettings';
-import { App, Notice, Platform } from 'obsidian';
+import { App, Notice, Platform, Setting, requireApiVersion } from 'obsidian';
+import * as ObsidianModule from 'obsidian';
 import { crossPlatformPathPattern } from '../../helpers/test-setup';
 
 // Mock SortableJS to capture onEnd callbacks for reorder (11.9)
@@ -52,6 +53,16 @@ function click(el: Element | null | undefined) {
 function changeSelect(sel: HTMLSelectElement, value: string) {
   sel.value = value;
   sel.dispatchEvent(new Event('change'));
+}
+
+function openSettingsSubpage(tab: ImageConverterSettingTab, name: string) {
+  const row = Array.from(tab.containerEl.querySelectorAll('.setting-item'))
+    .find(item => item.querySelector('.setting-item-name')?.textContent === name);
+  click(row?.querySelector('button'));
+}
+
+function backToSettings(tab: ImageConverterSettingTab) {
+  click(Array.from(tab.containerEl.querySelectorAll('button')).find(button => button.textContent === 'Back'));
 }
 
 
@@ -484,6 +495,67 @@ describe('Settings defaults, global preset application, and field constraints (1
     expect(tab.formContainer.querySelector('.image-converter-form-buttons button.cta')?.textContent).toBe('Save');
   });
 
+  it('separates import and display groups and keeps all advanced controls behind subpages', () => {
+    tab.display();
+    const importGroup = tab.containerEl.querySelector('.image-converter-image-import-group')!;
+    const displayGroup = tab.containerEl.querySelector('.image-converter-image-display-group')!;
+    expect(importGroup.textContent).toContain('Folder-based presets');
+    expect(importGroup.textContent).toContain('Show window');
+    expect(importGroup.textContent).toContain('Image metadata');
+    expect(importGroup.textContent).not.toContain('Right-click menu');
+    expect(displayGroup.textContent).toContain('Right-click menu');
+    expect(displayGroup.textContent).toContain('Image alignment');
+    expect(displayGroup.textContent).toContain('Drag & scroll resize');
+    expect(displayGroup.textContent).toContain('Captions');
+    expect(tab.containerEl.querySelector('.settings-section-header')).toBeNull();
+    expect(displayGroup.querySelectorAll('input[type="checkbox"]')).toHaveLength(1);
+    expect(tab.containerEl.querySelector('.image-converter-folder-rules')).toBeNull();
+    openSettingsSubpage(tab, 'Folder-based presets');
+    expect(tab.containerEl.querySelector('.image-converter-folder-rules')).toBeTruthy();
+    expect(tab.containerEl.querySelector('.image-converter-setting-tabs')).toBeNull();
+    backToSettings(tab);
+    expect(tab.containerEl.querySelector('.image-converter-setting-tabs')).toBeTruthy();
+    expect(tab.containerEl.querySelector('.image-converter-folder-rules')).toBeNull();
+  });
+
+  it('exposes the native group and page and refreshes native definitions on preset changes', () => {
+    vi.spyOn(ObsidianModule, 'requireApiVersion').mockReturnValue(true);
+    const definitions = tab.getSettingDefinitions();
+    const group = definitions.find(item => 'type' in item && item.type === 'group');
+    expect(group && 'items' in group && group.items?.some(item => 'type' in item && item.type === 'page' && item.name === 'Folder-based presets')).toBe(true);
+    expect(group && 'items' in group && group.items).toContainEqual(expect.objectContaining({
+      name: 'Image metadata',
+      control: expect.objectContaining({
+        key: 'metadataMode',
+        options: expect.objectContaining({ 'strip-location': 'Keep all except location' }),
+      }),
+    }));
+    const presetSetting = new Setting(tab.containerEl);
+    const presetDefinition = definitions[0];
+    if ('render' in presetDefinition && presetDefinition.render) {
+      presetDefinition.render(presetSetting, undefined as any);
+    }
+    const update = vi.spyOn(tab, 'update');
+    const display = vi.spyOn(tab, 'display');
+    (presetSetting.settingEl.querySelector('.image-converter-tab-filename') as HTMLElement).click();
+    expect(tab.activeTab).toBe('filename');
+    expect(update).toHaveBeenCalledOnce();
+    expect(display).not.toHaveBeenCalled();
+    expect(requireApiVersion('1.13.0')).toBe(true);
+  });
+
+  it('removes custom section content before the host reuses its setting row', () => {
+    const definition = tab.getSettingDefinitions()[0];
+    const setting = new Setting(tab.containerEl);
+    if (!('render' in definition) || !definition.render) throw new Error('Expected custom preset definition');
+    const cleanup = definition.render(setting, undefined as any);
+    expect(setting.settingEl.querySelectorAll('.image-converter-global-preset-container')).toHaveLength(1);
+    if (typeof cleanup === 'function') cleanup();
+    expect(setting.settingEl.querySelector('.image-converter-section-content')).toBeNull();
+    definition.render(setting, undefined as any);
+    expect(setting.settingEl.querySelectorAll('.image-converter-global-preset-container')).toHaveLength(1);
+  });
+
   it('11.11 Auto-detect FFmpeg populates preset and modal settings', async () => {
     const adapter = (app.vault.adapter as any);
     adapter.getBasePath = vi.fn(() => '/vault');
@@ -659,6 +731,22 @@ describe('Settings defaults, global preset application, and field constraints (1
     expect(plugin.settings.nonDestructiveResizeSettings.selectedResizePreset).toBe(DEFAULT_SETTINGS.nonDestructiveResizeSettings.selectedResizePreset);
   });
 
+  it('separates the preset heading from its controls and exposes full category labels', () => {
+    tab.display();
+    const panel = tab.containerEl.querySelector('.image-converter-global-preset-container')!;
+    const header = panel.querySelector('.image-converter-global-preset-header')!;
+    const controls = panel.querySelector('.image-converter-global-preset-controls')!;
+    expect(header.querySelector('select')).toBeNull();
+    expect(header.querySelector('.image-converter-global-preset-description')?.textContent).toBe('Quickly apply a combination of presets');
+    expect(controls.querySelector('[aria-label="Global preset"]')).toBeTruthy();
+    const toggle = header.querySelector<HTMLButtonElement>('button')!;
+    expect(toggle.type).toBe('button');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    const labels = Array.from(tab.containerEl.querySelectorAll('[role="tab"]')).map(item => item.textContent);
+    expect(labels).toEqual(['Folder', 'Filename', 'Conversion', 'Link format', 'Resize']);
+    expect(tab.containerEl.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Folder');
+  });
+
   it('11.10 Filename preset cards show stored preset names and the template in the summary', async () => {
     tab.activeTab = 'filename';
     tab.display();
@@ -673,28 +761,29 @@ describe('Settings defaults, global preset application, and field constraints (1
 
   it('11.6 Field constraints: sliders have correct min/max and accept sanitized values', async () => {
     tab.display();
+    openSettingsSubpage(tab, 'Image alignment');
 
     // Image alignment cache cleanup interval slider (0..120 minutes)
-    const alignSection = tab.containerEl.querySelector('.image-alignment-settings-section') as HTMLElement;
-    const alignSlider = alignSection?.querySelector('input[type="range"]') as HTMLInputElement;
+    const alignSlider = tab.containerEl.querySelector('input[type="range"]') as HTMLInputElement;
     expect(alignSlider?.min).toBe('0');
     expect(alignSlider?.max).toBe('120');
+    expect(alignSlider?.value).toBe('60');
+    backToSettings(tab);
+    openSettingsSubpage(tab, 'Drag & scroll resize');
 
     // Scroll-wheel resize sensitivity slider (0.01..1)
-    const scrollSection = tab.containerEl.querySelector('.scroll-resize-settings') as HTMLElement;
-    const sensSlider = scrollSection?.querySelector('input[type="range"]') as HTMLInputElement;
+    const sensSlider = tab.containerEl.querySelector('input[type="range"]') as HTMLInputElement;
     expect(sensSlider?.min).toBe('0.01');
     expect(sensSlider?.max).toBe('1');
   });
 
   it('Image selection toggle shows the standard reload notification', async () => {
     tab.display();
+    openSettingsSubpage(tab, 'Drag & scroll resize');
 
-    const resizeSection = tab.containerEl.querySelector('.image-drag-resize-settings-section');
-    const cursorSelect = Array.from(resizeSection?.querySelectorAll('select') ?? [])
-      .find((select) => select.querySelector('option[value="below"]'));
-    const imageSelectionToggle = cursorSelect?.parentElement?.parentElement
-      ?.previousElementSibling?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    const row = Array.from(tab.containerEl.querySelectorAll('.setting-item'))
+      .find(item => item.querySelector('.setting-item-name')?.textContent === 'Disable Obsidian image selection on click');
+    const imageSelectionToggle = row?.querySelector<HTMLInputElement>('input[type="checkbox"]');
 
     expect(imageSelectionToggle).toBeTruthy();
     Notice.instances.length = 0;

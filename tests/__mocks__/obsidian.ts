@@ -101,6 +101,9 @@ export class PluginSettingTab {
   
   display() {}
   hide() {}
+  getSettingDefinitions(): any[] { return []; }
+  update() {}
+  refreshDomState() {}
 }
 
 export class AbstractInputSuggest<T> {
@@ -282,6 +285,10 @@ export class Setting {
     this.nameEl = document.createElement('div');
     this.descEl = document.createElement('div');
     this.controlEl = document.createElement('div');
+    this.settingEl.className = 'setting-item';
+    this.nameEl.className = 'setting-item-name';
+    this.descEl.className = 'setting-item-description';
+    this.controlEl.className = 'setting-item-control';
     this.settingEl.appendChild(this.nameEl);
     this.settingEl.appendChild(this.descEl);
     this.settingEl.appendChild(this.controlEl);
@@ -289,8 +296,11 @@ export class Setting {
   }
   
   setClass(cls: string): this { this.settingEl.classList.add(cls); return this; }
-  setName(_name: string): this { return this; }
-  setDesc(_desc: string): this { return this; }
+  setName(name: string): this { this.nameEl.textContent = name; return this; }
+  setDesc(desc: string | DocumentFragment): this {
+    this.descEl.replaceChildren(typeof desc === 'string' ? document.createTextNode(desc) : desc);
+    return this;
+  }
   setTooltip(_text: string): this { return this; }
   addText(cb: (text: TextComponent) => void): this { const textComponent = new TextComponent(this.controlEl); cb(textComponent); this.components.push(textComponent); return this; }
   addTextArea(cb: (text: TextComponent) => void): this { const textComponent = new TextComponent(this.controlEl); cb(textComponent); this.components.push(textComponent); return this; }
@@ -301,6 +311,7 @@ export class Setting {
     this.controlEl.appendChild(el);
     const extra = {
       buttonEl: el,
+      extraSettingsEl: el,
       setIcon: (_icon: string) => { /* no-op for tests */ return extra; },
       setTooltip: (_text: string) => { el.title = _text; return extra; },
       onClick: (handler: () => void) => { el.addEventListener('click', handler); return extra; }
@@ -314,6 +325,24 @@ export class Setting {
   clear(): this { while (this.controlEl.firstChild) this.controlEl.removeChild(this.controlEl.firstChild); this.components = []; return this; }
   then(_cb: () => void): this { return this; }
 }
+
+export class SettingGroup {
+  listEl: HTMLElement;
+  private groupEl: HTMLElement;
+  private headingEl: HTMLElement;
+
+  constructor(containerEl: HTMLElement) {
+    this.groupEl = containerEl.createDiv('settings-view__group');
+    this.headingEl = this.groupEl.createDiv('settings-view__group-heading');
+    this.listEl = this.groupEl.createDiv('settings-view__group-list');
+  }
+
+  setHeading(heading: string): this { this.headingEl.setText(heading); return this; }
+  addClass(...classes: string[]): this { this.groupEl.classList.add(...classes); return this; }
+  addSetting(callback: (setting: Setting) => void): this { callback(new Setting(this.listEl)); return this; }
+}
+
+export function requireApiVersion(_version: string): boolean { return false; }
 
 // File system types
 export interface TAbstractFile {
@@ -598,4 +627,3 @@ export function debounce<T extends (...args: any[]) => any>(fn: T, wait = 0, lea
   debounced.cancel = () => { if (timeout) { clearTimeout(timeout); timeout = null; } };
   return debounced as Debouncer<Parameters<T>, ReturnType<T>>;
 }
-

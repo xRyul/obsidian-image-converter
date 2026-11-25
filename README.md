@@ -27,6 +27,7 @@ Supported image formats: WEBP, JPG, PNG, HEIC, TIF
 - 📁 **Custom File Management and Renaming**:
 	- **Rename**: Use variables (e.g., `{noteName}`, `{fileName}`) to auto-rename images [List of Supported Variables](<docs/Variables Reference Guide.md>)
 	- **Output**: Organize images into custom output folders with variables.[List of Supported Variables](<docs/Variables Reference Guide.md>)
+	- **Folder-based presets**: Assign a drop/paste preset based on the folder of the note receiving the image. Go to **Settings → Image Converter → Image import → Folder-based presets**. Subfolders inherit the closest matching folder rule; without a match, the current preset is used.
 - 🌍 **Pure JavaScript implementation** that works completely **offline**. No external APIs or binary dependencies (such as ImageMagick, Cloudinary, FFmpeg, sharp, etc.) required - keeping it lightweight, portable and secure.
 
 

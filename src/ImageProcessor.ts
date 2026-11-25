@@ -5,6 +5,7 @@ import { SupportedImageFormats } from "./SupportedImageFormats";
 import { ChildProcess, spawn } from 'child_process';
 import { ConversionPreset, ImageConverterSettings, DEFAULT_SETTINGS } from "./ImageConverterSettings";
 import { normalizeExecutablePath } from "./utils/ffmpegPath";
+import { AsyncLock } from './AsyncLock';
 import { transferMetadata } from "./metadata/transferMetadata";
 import { parseExifBlock, readOrientation } from "./metadata/ExifBlock";
 import { transformCanvas, transformForOrientation } from "./utils/canvasTransform";
@@ -74,6 +75,7 @@ export const ENCODER_CONFIGS: Record<AvifEncoder, EncoderConfig> = {
 /* eslint-enable @typescript-eslint/naming-convention -- End of FFmpeg encoder names */
 
 export class ImageProcessor {
+    private processingLock = new AsyncLock();
 
     supportedImageFormats: SupportedImageFormats
     private preset: ConversionPreset | undefined;
@@ -485,8 +487,9 @@ export class ImageProcessor {
         preset?: ConversionPreset, // Add preset parameter
         settings?: ImageConverterSettings
     ): Promise<ArrayBuffer> {
-        // Process the image using the helper function
-        const processedImage = await this.processImageHelper(
+        // Encoder configuration is held on this instance. Keep it stable across
+        // every await, including external encoders, before admitting the next image.
+        const processedImage = await this.processingLock.acquire('conversion', () => this.processImageHelper(
             file,
             format,
             quality,
@@ -499,7 +502,7 @@ export class ImageProcessor {
             allowLargerFiles,
             preset,
             settings
-        );
+        ));
 
         const orientationApplied = await this.orientationApplied(file, format, resizeMode);
         const metadataMode = settings?.metadataMode ?? DEFAULT_SETTINGS.metadataMode;
