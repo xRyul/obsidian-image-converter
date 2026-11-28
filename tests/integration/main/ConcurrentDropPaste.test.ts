@@ -95,4 +95,34 @@ describe('Concurrent drop/paste handling (Phase 9: 26.9, 26.10 subset)', () => {
     expect((editor.replaceRange as any).mock.calls.length).toBeGreaterThanOrEqual(4);
     expect(detSpy).toHaveBeenCalledTimes(4);
   });
+
+  it('saves the selected one-shot image with its original bytes and skips image processing', async () => {
+    const { app, plugin } = makePluginWithNote();
+    await plugin.loadSettings();
+    await plugin.onload();
+    (plugin as any).settings.modalBehavior = 'never';
+    const processImage = vi.fn(async () => new ArrayBuffer(8));
+    (plugin as any).imageProcessor = { processImage } as any;
+    (plugin as any).linkFormatter = { formatLink: vi.fn(async () => '![](/mock)') };
+    (plugin as any).settings.conversionPresets = (plugin as any).settings.conversionPresets
+      .filter((preset: any) => preset.name !== 'None');
+    (plugin as any).settings.selectedConversionPreset = 'WEBP (75, no resizing)';
+
+    const originalBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+    const file = new File([originalBytes], 'pasted.png', { type: 'image/png' });
+    const editor = { replaceRange: vi.fn(), setCursor: vi.fn() } as any;
+
+    await (plugin as any).handlePaste(
+      [{ kind: 'file', type: 'image/png', file }],
+      editor,
+      { line: 0, ch: 0 },
+      file
+    );
+
+    expect(processImage).not.toHaveBeenCalled();
+    expect((app.vault.createBinary as any)).toHaveBeenCalledTimes(1);
+    expect(Array.from(new Uint8Array((app.vault.createBinary as any).mock.calls[0][1]))).toEqual(Array.from(originalBytes));
+    expect((app.vault.createBinary as any).mock.calls[0][0]).toMatch(/\.png$/);
+    expect(editor.replaceRange).toHaveBeenCalledOnce();
+  });
 });
