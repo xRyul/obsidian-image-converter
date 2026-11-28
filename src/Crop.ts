@@ -1,5 +1,14 @@
 import { App, Component, Modal, Notice, TFile } from 'obsidian';
 import { transformCanvas } from './utils/canvasTransform';
+import {
+	PerspectiveQuad,
+	homographyToCssMatrix3d,
+	isConvexQuad,
+	outputSizeFor,
+	previewHomography,
+	quadArea,
+	warpPerspective,
+} from './utils/perspectiveTransform';
 import { transferMetadata } from './metadata/transferMetadata';
 import { MetadataMode } from './metadata/types';
 import { refreshImageInView } from './utils/refreshImageInView';
@@ -53,6 +62,18 @@ export class Crop extends Modal {
 	private currentPanX = 0;
 	private currentPanY = 0;
 
+	private perspectiveMode = false;
+	private perspectiveQuad: PerspectiveQuad | null = null;
+	private perspectiveOverlay: HTMLDivElement | null = null;
+	private perspectiveSvg: SVGSVGElement | null = null;
+	private perspectiveDimPath: SVGPathElement | null = null;
+	private perspectiveQuadPolygon: SVGPolygonElement | null = null;
+	private perspectiveHandles: HTMLDivElement[] = [];
+	private draggingHandle = -1;
+	private perspectiveButton: HTMLButtonElement | null = null;
+	private applyPerspectiveButton: HTMLButtonElement | null = null;
+	private imageBaked = false;
+
 	constructor(app: App, imageFile: TFile, private metadataMode: MetadataMode) {
 		super(app);
 		this.imageFile = imageFile;
@@ -62,6 +83,9 @@ export class Crop extends Modal {
 
 	private setupEventListeners() {
         this.componentContainer.registerDomEvent(this.cropContainer, 'mousedown', (e: MouseEvent) => {
+            if (this.perspectiveMode) {
+                return;
+            }
             if (e.target === this.originalImage) {
                 // Middle button - panning
                 if (e.button === 1) {
@@ -129,6 +153,24 @@ export class Crop extends Modal {
         this.componentContainer.registerDomEvent(this.cropContainer, 'mouseleave', (e: MouseEvent) => {
             this.isDrawing = false;
             this.isPanning = false;
+        });
+
+        // Perspective quad handle dragging
+        this.componentContainer.registerDomEvent(document, 'mousemove', (e: MouseEvent) => {
+            if (!this.perspectiveMode || this.draggingHandle < 0 || !this.perspectiveQuad) {
+                return;
+            }
+            const rect = this.cropContainer.getBoundingClientRect();
+            this.perspectiveQuad[this.draggingHandle] = {
+                x: Math.max(0, Math.min(e.clientX - rect.left, rect.width)),
+                y: Math.max(0, Math.min(e.clientY - rect.top, rect.height)),
+            };
+            this.updatePerspectiveOverlay();
+            this.updatePerspectivePreview();
+        });
+
+        this.componentContainer.registerDomEvent(document, 'mouseup', () => {
+            this.draggingHandle = -1;
         });
     }
 
@@ -254,7 +296,11 @@ export class Crop extends Modal {
         // Early Escape key handler so reset works even before image load completes
         this.componentContainer.registerDomEvent(document, 'keydown', (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
-                this.resetSelection();
+                if (this.perspectiveMode) {
+                    this.exitPerspectiveMode();
+                } else {
+                    this.resetSelection();
+                }
                 // keep modal open; prevent default close behavior
                 e.stopPropagation();
             }
@@ -393,20 +439,42 @@ export class Crop extends Modal {
 			text: '↕',
 			attr: { title: 'Flip vertically' }
 		});
-		
+
+		// Perspective correction
+		const perspectiveContainer = transformControls.createDiv({ cls: 'perspective-container' });
+		const perspectiveBtn = perspectiveContainer.createEl('button', {
+			cls: 'transform-button',
+			text: '▱',
+			attr: { title: 'Perspective correction' }
+		});
+
 		// Add event listeners
 		this.componentContainer.registerDomEvent(rotateLeftBtn, 'click', () => this.rotate(-90));
 		this.componentContainer.registerDomEvent(rotateRightBtn, 'click', () => this.rotate(90));
 		this.componentContainer.registerDomEvent(flipHorizontalBtn, 'click', () => this.flip('horizontal'));
 		this.componentContainer.registerDomEvent(flipVerticalBtn, 'click', () => this.flip('vertical'));
+		this.componentContainer.registerDomEvent(perspectiveBtn, 'click', () => {
+			if (this.perspectiveMode) {
+				this.exitPerspectiveMode();
+			} else {
+				this.enterPerspectiveMode();
+			}
+		});
+		this.perspectiveButton = perspectiveBtn;
 	}
 
 	private rotate(degrees: number) {
+		if (this.perspectiveMode) {
+			return;
+		}
 		this.currentRotation = (this.currentRotation + degrees) % 360;
 		this.applyTransforms();
 	}
-	
+
 	private flip(direction: 'horizontal' | 'vertical') {
+		if (this.perspectiveMode) {
+			return;
+		}
 		if (direction === 'horizontal') {
 			this.isFlippedX = !this.isFlippedX;
 		} else {
@@ -463,6 +531,9 @@ export class Crop extends Modal {
 
 		// Add event listeners
 		this.componentContainer.registerDomEvent(rotationSlider, 'input', (e: Event) => {
+			if (this.perspectiveMode) {
+				return;
+			}
 			const value = parseInt((e.target as HTMLInputElement).value);
 			this.currentRotation = value;
 			rotationValue.textContent = `${value}°`;
@@ -470,6 +541,9 @@ export class Crop extends Modal {
 		});
 
 		this.componentContainer.registerDomEvent(zoomSlider, 'input', (e: Event) => {
+			if (this.perspectiveMode) {
+				return;
+			}
 			const value = parseInt((e.target as HTMLInputElement).value);
 			this.zoom = value / 100;
 			zoomValue.textContent = `${value}%`;
@@ -479,6 +553,9 @@ export class Crop extends Modal {
 		// Add mouse wheel zoom
 		if (this.cropContainer) {
 			this.componentContainer.registerDomEvent(this.cropContainer, 'wheel', (e: WheelEvent) => {
+				if (this.perspectiveMode) {
+					return;
+				}
 				e.preventDefault();
 
 				const delta = -Math.sign(e.deltaY) * this.ZOOM_STEP;
@@ -522,9 +599,13 @@ export class Crop extends Modal {
 		}
 		
 		this.originalImage.setCssStyles({ transform: transforms.join(' ') });
-		
+
+		if (this.perspectiveMode) {
+			this.updatePerspectivePreview();
+		}
+
 		// Adjust container size if needed
-		if (Math.abs(this.currentRotation) === 90 || 
+		if (Math.abs(this.currentRotation) === 90 ||
 			Math.abs(this.currentRotation) === 270 ||
 			this.zoom !== 1) {
 			this.adjustModalSize();
@@ -797,10 +878,293 @@ export class Crop extends Modal {
         });
 		this.currentPanX = 0;
         this.currentPanY = 0;
-        this.applyTransforms();
+        if (this.imageBaked) {
+			this.restoreOriginalImage();
+		}
+		this.applyTransforms();
     }
 
+	// --- Perspective correction ---
+
+	private imageRectInContainer() {
+		const containerRect = this.cropContainer.getBoundingClientRect();
+		const imgRect = this.originalImage.getBoundingClientRect();
+		return {
+			left: imgRect.left - containerRect.left,
+			top: imgRect.top - containerRect.top,
+			right: imgRect.right - containerRect.left,
+			bottom: imgRect.bottom - containerRect.top,
+			width: imgRect.width,
+			height: imgRect.height,
+		};
+	}
+
+	private enterPerspectiveMode() {
+		if (this.perspectiveMode || !this.originalImage?.naturalWidth) {
+			return;
+		}
+		this.perspectiveMode = true;
+		this.perspectiveButton?.addClass('active');
+		this.isDrawing = false;
+		this.isPanning = false;
+		this.selectionArea.setCssStyles({ display: 'none' });
+
+		const imgRect = this.imageRectInContainer();
+		const insetX = imgRect.width * 0.04;
+		const insetY = imgRect.height * 0.04;
+		this.perspectiveQuad = [
+			{ x: imgRect.left + insetX, y: imgRect.top + insetY },
+			{ x: imgRect.right - insetX, y: imgRect.top + insetY },
+			{ x: imgRect.right - insetX, y: imgRect.bottom - insetY },
+			{ x: imgRect.left + insetX, y: imgRect.bottom - insetY },
+		];
+
+		this.buildPerspectiveOverlay();
+		this.updatePerspectiveOverlay();
+		this.updatePerspectivePreview();
+	}
+
+	private exitPerspectiveMode() {
+		if (!this.perspectiveMode) {
+			return;
+		}
+		this.perspectiveMode = false;
+		this.draggingHandle = -1;
+		this.perspectiveButton?.removeClass('active');
+		this.perspectiveOverlay?.remove();
+		this.perspectiveOverlay = null;
+		this.perspectiveSvg = null;
+		this.perspectiveDimPath = null;
+		this.perspectiveQuadPolygon = null;
+		this.perspectiveHandles = [];
+		this.applyPerspectiveButton = null;
+		this.perspectiveQuad = null;
+		this.originalImage.setCssStyles({ transformOrigin: '' });
+		this.applyTransforms();
+	}
+
+	private buildPerspectiveOverlay() {
+		this.perspectiveOverlay = this.cropContainer.createDiv('perspective-overlay');
+		const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		svg.setAttribute('class', 'perspective-svg');
+		this.perspectiveSvg = svg;
+		this.perspectiveOverlay.appendChild(svg);
+
+		this.perspectiveDimPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+		this.perspectiveDimPath.setAttribute('class', 'perspective-dim');
+		this.perspectiveDimPath.setAttribute('fill-rule', 'evenodd');
+		svg.appendChild(this.perspectiveDimPath);
+
+		this.perspectiveQuadPolygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+		this.perspectiveQuadPolygon.setAttribute('class', 'perspective-quad');
+		svg.appendChild(this.perspectiveQuadPolygon);
+
+		this.perspectiveHandles = [];
+		for (let i = 0; i < 4; i++) {
+			const handle = this.perspectiveOverlay.createDiv('perspective-handle');
+			const index = i;
+			this.componentContainer.registerDomEvent(handle, 'mousedown', (e: MouseEvent) => {
+				e.preventDefault();
+				e.stopPropagation();
+				this.draggingHandle = index;
+			});
+			this.perspectiveHandles.push(handle);
+		}
+
+		const toolbar = this.perspectiveOverlay.createDiv('perspective-toolbar');
+		const applyBtn = toolbar.createEl('button', {
+			text: 'Apply',
+			cls: 'perspective-apply-button'
+		});
+		const cancelBtn = toolbar.createEl('button', { text: 'Cancel' });
+		this.componentContainer.registerDomEvent(applyBtn, 'click', () => void this.applyPerspective());
+		this.componentContainer.registerDomEvent(cancelBtn, 'click', () => this.exitPerspectiveMode());
+		this.applyPerspectiveButton = applyBtn;
+	}
+
+	private updatePerspectiveOverlay() {
+		if (!this.perspectiveQuad || !this.perspectiveSvg || !this.perspectiveDimPath || !this.perspectiveQuadPolygon) {
+			return;
+		}
+		const containerRect = this.cropContainer.getBoundingClientRect();
+		const quad = this.perspectiveQuad;
+		const convex = isConvexQuad(quad);
+
+		this.perspectiveSvg.setAttribute('width', String(containerRect.width));
+		this.perspectiveSvg.setAttribute('height', String(containerRect.height));
+		this.perspectiveDimPath.setAttribute('d',
+			`M0,0 H${containerRect.width} V${containerRect.height} H0 Z ` +
+			`M${quad[0].x},${quad[0].y} L${quad[1].x},${quad[1].y} L${quad[2].x},${quad[2].y} L${quad[3].x},${quad[3].y} Z`);
+		this.perspectiveQuadPolygon.setAttribute('points',
+			quad.map(point => `${point.x},${point.y}`).join(' '));
+		this.perspectiveQuadPolygon.setAttribute('class',
+			convex ? 'perspective-quad' : 'perspective-quad invalid');
+
+		this.perspectiveHandles.forEach((handle, index) => {
+			handle.setCssStyles({
+				left: `${quad[index].x}px`,
+				top: `${quad[index].y}px`,
+			});
+		});
+		this.applyPerspectiveButton?.toggleClass('is-disabled', !convex);
+	}
+
+	private updatePerspectivePreview() {
+		if (!this.perspectiveQuad || !this.originalImage) {
+			return;
+		}
+		const matrix = this.perspectivePreviewMatrix();
+		if (!matrix) {
+			return; // keep the last valid preview while the quad is invalid
+		}
+		this.originalImage.setCssStyles({
+			transformOrigin: '0 0',
+			transform: matrix,
+		});
+	}
+
+	// Homography preview as CSS matrix3d, evaluated about origin '0 0'.
+	private perspectivePreviewMatrix(): string | null {
+		const quad = this.perspectiveQuad;
+		if (!quad) {
+			return null;
+		}
+		const img = this.originalImage;
+		const matrix = previewHomography(
+			quad,
+			{
+				panX: this.currentPanX,
+				panY: this.currentPanY,
+				zoom: this.zoom,
+				degrees: this.currentRotation,
+				flipX: this.isFlippedX,
+				flipY: this.isFlippedY,
+			},
+			{ x: img.offsetLeft, y: img.offsetTop },
+			{ x: img.offsetWidth / 2, y: img.offsetHeight / 2 },
+		);
+		return matrix ? homographyToCssMatrix3d(matrix) : null;
+	}
+
+	private async applyPerspective() {
+		if (!this.perspectiveMode || !this.perspectiveQuad) {
+			return;
+		}
+		const quad = this.perspectiveQuad;
+		if (!isConvexQuad(quad)) {
+			new Notice('Perspective selection must be a convex shape');
+			return;
+		}
+		if (Math.abs(quadArea(quad)) < 100) {
+			new Notice('Perspective selection is too small');
+			return;
+		}
+
+		try {
+			// Leave perspective mode first so the image shows its base
+			// transform again and the quad can be mapped through the real
+			// bounding box.
+			this.exitPerspectiveMode();
+			const imgRect = this.imageRectInContainer();
+
+			const originalCanvas = document.createElement('canvas');
+			const originalCtx = originalCanvas.getContext('2d');
+			if (!originalCtx) {
+				throw new Error('Could not get canvas context');
+			}
+			originalCanvas.width = this.originalImage.naturalWidth;
+			originalCanvas.height = this.originalImage.naturalHeight;
+			originalCtx.drawImage(this.originalImage, 0, 0);
+
+			const rotatedCanvas = transformCanvas(originalCanvas, {
+				degrees: this.currentRotation,
+				flipX: this.isFlippedX,
+				flipY: this.isFlippedY,
+			});
+
+			const naturalQuad = quad.map(point => ({
+				x: ((point.x - imgRect.left) / imgRect.width) * rotatedCanvas.width,
+				y: ((point.y - imgRect.top) / imgRect.height) * rotatedCanvas.height,
+			})) as PerspectiveQuad;
+
+			const { width, height } = outputSizeFor(naturalQuad);
+			const warped = warpPerspective(rotatedCanvas, naturalQuad, width, height);
+
+			const blob = await new Promise<Blob>((resolve, reject) => {
+				warped.toBlob(
+					result => result ? resolve(result) : reject(new Error('Failed to create blob')),
+					'image/png',
+				);
+			});
+
+			const oldUrl = this.originalImage.src;
+			const newUrl = URL.createObjectURL(blob);
+			await new Promise<void>((resolve, reject) => {
+				this.originalImage.onload = () => resolve();
+				this.originalImage.onerror = () => reject(new Error('Could not load warped image'));
+				this.originalImage.src = newUrl;
+			});
+			URL.revokeObjectURL(oldUrl);
+
+			this.imageBaked = true;
+			this.currentRotation = 0;
+			this.isFlippedX = false;
+			this.isFlippedY = false;
+			this.zoom = 1;
+			this.currentPanX = 0;
+			this.currentPanY = 0;
+			this.syncImageControlValues();
+
+			this.adjustModalSize();
+			this.imageScale.x = this.originalImage.naturalWidth / this.originalImage.clientWidth;
+			this.imageScale.y = this.originalImage.naturalHeight / this.originalImage.clientHeight;
+			new Notice('Perspective corrected');
+		} catch (error) {
+			console.error('Perspective correction error:', error);
+			new Notice('Perspective correction failed');
+		}
+	}
+
+	private restoreOriginalImage() {
+		if (!this.originalArrayBuffer) {
+			return;
+		}
+		const oldUrl = this.originalImage.src;
+		const imageUrl = URL.createObjectURL(new Blob([this.originalArrayBuffer]));
+		this.originalImage.onload = () => {
+			this.adjustModalSize();
+			this.imageScale.x = this.originalImage.naturalWidth / this.originalImage.clientWidth;
+			this.imageScale.y = this.originalImage.naturalHeight / this.originalImage.clientHeight;
+			URL.revokeObjectURL(oldUrl);
+		};
+		this.originalImage.src = imageUrl;
+		this.imageBaked = false;
+	}
+
+	private syncImageControlValues() {
+		const rotationSlider = this.containerEl.querySelector<HTMLInputElement>('.rotation-slider');
+		const rotationValue = this.containerEl.querySelector('.rotation-value');
+		const zoomSlider = this.containerEl.querySelector<HTMLInputElement>('.zoom-slider');
+		const zoomValue = this.containerEl.querySelector('.zoom-value');
+		if (rotationSlider) {
+			rotationSlider.value = '0';
+		}
+		if (rotationValue) {
+			rotationValue.textContent = '0°';
+		}
+		if (zoomSlider) {
+			zoomSlider.value = '100';
+		}
+		if (zoomValue) {
+			zoomValue.textContent = '100%';
+		}
+	}
+
 	async saveImage() {
+		if (this.perspectiveMode) {
+			new Notice('Apply or cancel the perspective correction first');
+			return;
+		}
 		try {
 			const originalCanvas = document.createElement('canvas');
 			const originalCtx = originalCanvas.getContext('2d');

@@ -2378,6 +2378,104 @@ button.image-converter-encoder-detected:hover,
 	cursor: se-resize;
 }
 
+/* Perspective correction */
+
+.crop-tool-modal .perspective-container {
+	display: flex;
+	gap: 1px;
+	margin-left: 8px;
+}
+
+.crop-tool-modal .transform-button.active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+}
+
+.crop-tool-modal .perspective-overlay {
+	position: absolute;
+	inset: 0;
+	z-index: 4;
+}
+
+.crop-tool-modal .perspective-svg {
+	position: absolute;
+	top: 0;
+	left: 0;
+	pointer-events: none;
+}
+
+.crop-tool-modal .perspective-dim {
+	fill: rgba(0, 0, 0, 0.5);
+}
+
+.crop-tool-modal .perspective-quad {
+	fill: none;
+	stroke: var(--interactive-accent);
+	stroke-width: 2;
+}
+
+.crop-tool-modal .perspective-quad.invalid {
+	stroke: var(--text-error, #e93147);
+	stroke-dasharray: 6 4;
+}
+
+.crop-tool-modal .perspective-handle {
+	position: absolute;
+	width: 14px;
+	height: 14px;
+	background-color: #fff;
+	border: 2px solid var(--interactive-accent);
+	border-radius: 50%;
+	transform: translate(-50%, -50%);
+	cursor: grab;
+	z-index: 5;
+	touch-action: none;
+}
+
+.crop-tool-modal .perspective-handle:active {
+	cursor: grabbing;
+}
+
+.crop-tool-modal .perspective-toolbar {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	display: flex;
+	gap: 8px;
+	z-index: 5;
+}
+
+.crop-tool-modal .perspective-toolbar button {
+	padding: var(--size-4-1) var(--size-4-3);
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-medium);
+	border: 1px solid var(--background-modifier-border);
+	background-color: var(--interactive-normal);
+	color: var(--text-normal);
+	cursor: pointer;
+}
+
+.crop-tool-modal .perspective-toolbar button:hover {
+	background-color: var(--interactive-hover);
+}
+
+.crop-tool-modal .perspective-toolbar .perspective-apply-button {
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+}
+
+.crop-tool-modal .perspective-toolbar .perspective-apply-button:hover {
+	background-color: var(--interactive-accent-hover);
+}
+
+.crop-tool-modal .perspective-toolbar .perspective-apply-button.is-disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
 .crop-tool-modal .crop-modal-buttons {
 	padding: var(--size-4-2);
 	border-top: 1px solid var(--background-modifier-border);

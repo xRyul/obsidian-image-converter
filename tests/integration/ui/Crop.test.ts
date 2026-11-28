@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-floating-promises, @typescript-eslint/no-deprecated, prefer-destructuring */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { Notice } from 'obsidian';
 import { Crop } from '../../../src/Crop';
 import { fakeApp, fakeTFile, fakeVault } from '../../factories/obsidian';
 
@@ -590,5 +591,136 @@ describe('Crop integration behaviors (21.1–21.14)', () => {
     const panXBefore = (crop as any).currentPanX;
     cropContainer.dispatchEvent(new MouseEvent('mousemove', { clientX: 300, clientY: 300, bubbles: true }));
     expect((crop as any).currentPanX).toBe(panXBefore);
+  });
+});
+
+describe('Crop perspective correction', () => {
+  beforeEach(() => { document.body.innerHTML = ''; });
+
+  async function openPerspectiveReady() {
+    const { crop, app } = openCropWithImage();
+    crop.onOpen();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const root = (crop as any).contentEl as HTMLElement;
+    const container = root.querySelector('.crop-container') as HTMLDivElement;
+    const originalImg = root.querySelector('.crop-original-image') as HTMLImageElement;
+
+    Object.defineProperty(originalImg, 'naturalWidth', { value: 600, configurable: true });
+    Object.defineProperty(originalImg, 'naturalHeight', { value: 400, configurable: true });
+    setRect(container, { left: 0, top: 0, width: 600, height: 400 });
+    setRect(originalImg, { left: 0, top: 0, width: 600, height: 400 });
+
+    const button = root.querySelector('.perspective-container button') as HTMLButtonElement;
+    return { crop, app, root, container, originalImg, button };
+  }
+
+  function stubCanvas() {
+    const realToBlob = (HTMLCanvasElement.prototype as any).toBlob;
+    const realGetContext = (HTMLCanvasElement.prototype as any).getContext;
+    (HTMLCanvasElement.prototype as any).toBlob = function (cb: any, type?: string) {
+      const mime = typeof type === 'string' ? type : 'image/png';
+      cb(new Blob([new Uint8Array([1, 2, 3, 4])], { type: mime }));
+    };
+    (HTMLCanvasElement.prototype as any).getContext = function (_type: string) {
+      return {
+        drawImage: vi.fn(), translate: vi.fn(), rotate: vi.fn(), scale: vi.fn(),
+        save: vi.fn(), restore: vi.fn(), beginPath: vi.fn(), rect: vi.fn(),
+        clip: vi.fn(), setTransform: vi.fn(), clearRect: vi.fn(),
+        imageSmoothingEnabled: false, imageSmoothingQuality: 'low',
+      } as any;
+    };
+    return () => {
+      (HTMLCanvasElement.prototype as any).toBlob = realToBlob;
+      (HTMLCanvasElement.prototype as any).getContext = realGetContext;
+    };
+  }
+
+  it('Perspective button enters mode: overlay, 4 handles and toolbar appear', async () => {
+    const { crop, root, button } = await openPerspectiveReady();
+
+    button.click();
+
+    expect((crop as any).perspectiveMode).toBe(true);
+    expect(root.querySelector('.perspective-overlay')).toBeTruthy();
+    expect(root.querySelectorAll('.perspective-handle')).toHaveLength(4);
+    expect(root.querySelector('.perspective-toolbar')).toBeTruthy();
+    expect(root.querySelector('polygon.perspective-quad')).toBeTruthy();
+
+    // Quad defaults to the image rect inset by 4%: (24,16)-(576,384)
+    const quad = (crop as any).perspectiveQuad;
+    expect(quad[0].x).toBeCloseTo(24);
+    expect(quad[0].y).toBeCloseTo(16);
+    expect(quad[2].x).toBeCloseTo(576);
+    expect(quad[2].y).toBeCloseTo(384);
+
+    // Live preview applies a matrix3d transform
+    const img = root.querySelector('.crop-original-image') as HTMLImageElement;
+    expect(img.style.transform).toContain('matrix3d');
+  });
+
+  it('Dragging a handle updates the quad and the polygon', async () => {
+    const { crop, root, button } = await openPerspectiveReady();
+    button.click();
+
+    const handle = root.querySelectorAll('.perspective-handle')[0] as HTMLDivElement;
+    handle.dispatchEvent(new MouseEvent('mousedown', { clientX: 24, clientY: 16, bubbles: true }));
+    document.dispatchEvent(new MouseEvent('mousemove', { clientX: 40, clientY: 30, bubbles: true }));
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+
+    const quad = (crop as any).perspectiveQuad;
+    expect(quad[0].x).toBeCloseTo(40);
+    expect(quad[0].y).toBeCloseTo(30);
+
+    const polygon = root.querySelector('polygon.perspective-quad') as SVGPolygonElement;
+    expect(polygon.getAttribute('points')).toContain('40,30');
+    expect(handle.style.left).toBe('40px');
+    expect(handle.style.top).toBe('30px');
+  });
+
+  it('Escape exits perspective mode and restores the base transform', async () => {
+    const { crop, root, button, originalImg } = await openPerspectiveReady();
+    button.click();
+    expect(root.querySelector('.perspective-overlay')).toBeTruthy();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    expect((crop as any).perspectiveMode).toBe(false);
+    expect(root.querySelector('.perspective-overlay')).toBeNull();
+    expect(originalImg.style.transform).not.toContain('matrix3d');
+  });
+
+  it('Save is blocked while in perspective mode', async () => {
+    const { crop, app, button } = await openPerspectiveReady();
+    button.click();
+
+    const noticesBefore = Notice.instances.length;
+    await (crop as any).saveImage();
+
+    expect((app.vault as any).modifyBinary).not.toHaveBeenCalled();
+    expect(Notice.instances.length).toBe(noticesBefore + 1);
+  });
+
+  it('Apply bakes the warped image, resets transforms and exits the mode', async () => {
+    const { crop, root, button, originalImg } = await openPerspectiveReady();
+    (crop as any).currentRotation = 90;
+
+    const restore = stubCanvas();
+    try {
+      button.click();
+      expect((crop as any).perspectiveMode).toBe(true);
+
+      const applyPromise = (crop as any).applyPerspective();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      originalImg.dispatchEvent(new Event('load'));
+      await applyPromise;
+
+      expect((crop as any).imageBaked).toBe(true);
+      expect((crop as any).perspectiveMode).toBe(false);
+      expect((crop as any).currentRotation).toBe(0);
+      expect(root.querySelector('.perspective-overlay')).toBeNull();
+    } finally {
+      restore();
+    }
   });
 });
