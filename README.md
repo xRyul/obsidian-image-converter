@@ -23,6 +23,7 @@ Supported image formats: WEBP, JPG, PNG, HEIC, TIF
   <img src="https://github.com/user-attachments/assets/24ab0e1a-0095-4936-84f5-61eaabd391f8" width="740px"><img src="https://github.com/user-attachments/assets/ea312b9d-dbcf-4963-85ba-c9824c9a2153" width="740px"></br>
 - ✂️ **Crop, rotate, and flip images**  </br>
   <img src="https://github.com/user-attachments/assets/a4ead276-ac4e-4523-8567-fa064bdf7119" width="740px"><<img src="https://github.com/user-attachments/assets/6ff7c138-90fe-456d-b968-c5fb45d27bbf" width="740px"></br>
+- ◱ **Perspective correction (deskew)** — rectify slides, documents and whiteboards photographed at an angle: mark the four corners and the trapezoid is warped back into a rectangle.  </br>
 
 - 📁 **Custom File Management and Renaming**:
 	- **Rename**: Use variables (e.g., `{noteName}`, `{fileName}`) to auto-rename images [List of Supported Variables](<docs/Variables Reference Guide.md>)
