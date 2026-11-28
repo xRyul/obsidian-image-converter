@@ -102,36 +102,143 @@ body.image-converter-disable-native-image-selection:not(.is-mobile)
 }
 /* Remove X icon and get use all available space*/
 .image-converter-settings-tab {
-	padding: 20px;
+	padding: var(--size-4-4);
+	min-width: 0;
+	max-width: 100%;
+	box-sizing: border-box;
+	container-type: inline-size;
+	container-name: image-converter-settings;
 	position: relative;
 	/* Relative positioning for child elements */
 	height: 100%;
 	/* Occupy full height */
-	overflow: auto;
+	overflow-y: auto;
+	overflow-x: clip;
 	/* Enable scrolling if content overflows */
 	scrollbar-gutter: stable;
 	/* Reserve space for scrollbar to prevent content jumping when it appears/disappears */
 }
 
-/*
- * Reset Obsidian 1.11+ default .setting-item backgrounds
- * Obsidian 1.11 introduced default backgrounds on setting-item elements.
- * This reset ensures all settings within the plugin's tab have transparent backgrounds.
- */
-.image-converter-settings-tab .setting-item {
+.vertical-tab-content.image-converter-settings-tab {
+	padding: var(--size-4-4);
+}
+
+/* Native subpages are separate from the plugin tab; scope their layout by our groups. */
+.setting-page:has(> .setting-page-content > .image-converter-display-subpage-group),
+.setting-page:has(> .setting-page-content > .image-converter-folder-rules) {
+	container-type: inline-size;
+	container-name: image-converter-page;
+}
+
+.setting-page-content:has(> .image-converter-display-subpage-group),
+.setting-page-content:has(> .image-converter-folder-rules) {
+	min-width: 0;
+	container-type: inline-size;
+	container-name: image-converter-settings;
+}
+
+/* Preserve native group styling; only custom preset rows need the old reset. */
+.image-converter-settings-tab > .setting-item,
+.image-converter-settings-tab .image-converter-global-preset-container .setting-item,
+.image-converter-settings-tab .image-converter-preset-form .setting-item {
 	background: transparent;
 	margin-bottom: 0;
 	padding: var(--size-4-3);
 }
 
+.image-converter-settings-tab .image-converter-custom-section {
+	display: block;
+	padding: 0;
+}
+
+.image-converter-custom-section > .setting-item-info,
+.image-converter-custom-section > .setting-item-control {
+	display: none;
+}
+
+.image-converter-section-content {
+	min-width: 0;
+	max-width: 100%;
+	container-type: inline-size;
+	container-name: image-converter-presets;
+}
+
+.image-converter-setting-group-heading {
+	margin-block: var(--size-4-4) var(--size-4-2);
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
+}
+
+.image-converter-setting-group-list {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	background: var(--background-secondary);
+}
+
+.image-converter-folder-rule-modal .setting-item-control input[type="text"],
+.image-converter-folder-rule-modal .setting-item-control select {
+	min-width: 0;
+	max-width: 100%;
+}
+
+.image-converter-folder-rules-intro .setting-item-description {
+	white-space: pre-line;
+}
+
+.image-converter-folder-rule-error {
+	color: var(--text-error);
+	font-size: var(--font-ui-small);
+}
+
+.image-converter-folder-rule-row .setting-item-icon {
+	display: none;
+}
+
+.image-converter-folder-rule-row .setting-item-info {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.image-converter-folder-rule-row.image-converter-folder-rule-row {
+	padding: var(--size-4-2) var(--size-4-4);
+}
+
+.image-converter-folder-rule-error:empty {
+	display: none;
+}
+
+.image-converter-folder-rule-actions {
+	border-top: none;
+}
+
+@media (max-width: 480px) {
+	.image-converter-folder-rule-modal .setting-item {
+		flex-direction: column;
+		align-items: stretch;
+		gap: var(--size-4-2);
+	}
+
+	.image-converter-folder-rule-modal .setting-item-control {
+		margin-inline-start: 0;
+		justify-content: flex-end;
+	}
+
+	.image-converter-folder-rule-modal input[type="text"],
+	.image-converter-folder-rule-modal select {
+		width: 100%;
+	}
+}
+
 /* ------------------- Tabs ------------------------------ */
 .image-converter-setting-tabs {
 	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-4-1);
 	margin-bottom: 15px;
 	border-bottom: 1px solid var(--background-modifier-border);
-	justify-content: center;
-	overflow-x: auto;
-	/* Horizontal scrolling for many tabs */
+	justify-content: flex-start;
+	min-width: 0;
+	max-width: 100%;
 }
 
 .image-converter-setting-tabs::-webkit-scrollbar {
@@ -139,11 +246,15 @@ body.image-converter-disable-native-image-selection:not(.is-mobile)
 	/* Hide scrollbar */
 }
 
-.image-converter-tab {
-	padding: 8px 12px;
-	margin-right: 5px;
-	margin-bottom: -1px;
-	/* Overlap the bottom border slightly */
+.image-converter-setting-tabs > .image-converter-tab {
+	padding: var(--size-4-2);
+	margin: 0;
+	flex: 0 0 auto;
+	max-width: 100%;
+	white-space: nowrap;
+	box-shadow: none;
+	background: transparent;
+	background-color: transparent;
 	border: 1px solid transparent;
 	border-radius: 5px 5px 0 0;
 	/* Rounded corners at the top */
@@ -151,10 +262,20 @@ body.image-converter-disable-native-image-selection:not(.is-mobile)
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	font-size: var(--font-adaptive-normal);
+	font-size: var(--font-ui-small);
 	transition: background-color 0.1s ease-in-out;
 	/* Smooth hover effect */
 	border-bottom: 3px solid transparent;
+}
+
+.image-converter-tab-label {
+	white-space: nowrap;
+}
+
+.image-converter-tab:focus-visible,
+.image-converter-global-preset-toggle:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
 }
 
 /* Remove left margin for the first tab */
@@ -167,7 +288,7 @@ body.image-converter-disable-native-image-selection:not(.is-mobile)
 	margin-right: 0;
 }
 
-.image-converter-tab:hover {
+.image-converter-setting-tabs > .image-converter-tab:hover {
 	/* Remove background color on hover */
 	/* background-color: var(--background-modifier-hover); */
 
@@ -177,7 +298,7 @@ body.image-converter-disable-native-image-selection:not(.is-mobile)
 }
 
 /* Active tab styling */
-.image-converter-tab-active {
+.image-converter-setting-tabs > .image-converter-tab-active {
 	/* Remove background color */
 	/* border-color: var(--background-modifier-border); */
 	/* border-bottom-color: var(--background-primary); */
@@ -237,6 +358,7 @@ body.image-converter-disable-native-image-selection:not(.is-mobile)
 
 /* ---------------------- Preset Card ------------------------------- */
 .image-converter-preset-card {
+	min-width: 0;
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 8px;
 	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
@@ -262,6 +384,7 @@ body.image-converter-disable-native-image-selection:not(.is-mobile)
 }
 
 .image-converter-preset-card-header {
+	min-width: 0;
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
@@ -272,6 +395,7 @@ body.image-converter-disable-native-image-selection:not(.is-mobile)
 }
 
 .image-converter-preset-card-title {
+	min-width: 0;
 	font-size: calc(var(--font-ui-small) + 1px);
 	font-weight: 600;
 	color: var(--text-normal);
@@ -283,6 +407,7 @@ body.image-converter-disable-native-image-selection:not(.is-mobile)
 
 /* --- Button Styling --- */
 .image-converter-preset-card-actions {
+	flex-shrink: 0;
 	display: flex;
 	gap: 2px;
 	margin-right: -16px;
@@ -316,6 +441,7 @@ body.image-converter-disable-native-image-selection:not(.is-mobile)
 	text-overflow: ellipsis;
 	white-space: wrap;
 	margin-top: 0;
+	overflow-wrap: anywhere;
 }
 
 .image-converter-preset-card-body p {
@@ -328,17 +454,10 @@ body.image-converter-disable-native-image-selection:not(.is-mobile)
 .image-converter-preset-cards {
 	display: grid;
 	gap: 15px;
-	grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+	grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
 	/* Responsive grid */
 	cursor: grab;
 	/* Indicate draggable */
-}
-
-/* Media Query for 3-column layout on larger screens */
-@media (min-width: 1000px) {
-	.image-converter-preset-cards {
-		grid-template-columns: repeat(3, 1fr);
-	}
 }
 
 /* --- Active and Default Preset Styling --- */
@@ -439,15 +558,35 @@ html[data-theme="dark"] {
 
 /* --------- GLOBAL PRESET ------------------------------ */
 .image-converter-global-preset-container {
-	display: flex;
-	align-items: center;
-	gap: 10px;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: start;
+	gap: var(--size-4-3);
 	margin-bottom: 20px;
-	cursor: pointer;
+	min-width: 0;
 }
 
-.image-converter-global-preset-container .image-converter-global-preset-title {
-	width: 135px;
+.image-converter-global-preset-header {
+	min-width: 0;
+}
+
+.image-converter-global-preset-description {
+	margin-top: var(--size-4-1);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	overflow-wrap: anywhere;
+}
+
+.image-converter-global-preset-container .image-converter-global-preset-controls {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
+	min-width: 0;
+	max-width: 100%;
+}
+
+.image-converter-settings-tab .image-converter-global-preset-container .image-converter-global-preset-select {
+	padding: 0;
 }
 
 /* --- Dropdown --- */
@@ -458,60 +597,56 @@ html[data-theme="dark"] {
 	gap: 10px;
 	flex: 1 1 auto; /* Allow growing but can shrink */
 	border-top: none;
-	min-width: 112px;
+	min-width: 0;
 	padding: 0; /* Reset Obsidian 1.11+ default padding */
 	margin: 0; /* Reset any margin */
 }
 
 .image-converter-global-preset-container .settings-section-title {
-	margin-left: 0.5em;
 	margin-bottom: 0;
 	font-weight: 600;
-	width: 130px;
-	flex-shrink: 0; /* Prevent shrinking */
-	line-height: 1; /* Consistent line height */
+	min-width: 0;
+	line-height: var(--line-height-tight);
 }
 
 /* Hide empty .setting-item-name in this context */
-.image-converter-global-preset-container .setting-item-name {
+.image-converter-global-preset-select .setting-item-info {
 	display: none;
 }
 
-/* Ensure proper vertical alignment with buttons (Obsidian 1.11+ compatibility) */
-.image-converter-global-preset-container .setting-item-info {
-	flex: 1 1 auto; /* Allow info to grow and fill space */
-	display: flex;
-	flex-direction: row; /* Force row layout */
-	align-items: center;
-	padding: 0;
-	margin: 0;
-}
-
-.image-converter-global-preset-container .setting-item-description {
-	margin: 0;
-	padding: 0;
-	line-height: 1; /* Match other elements */
-}
-
 .image-converter-global-preset-container .setting-item-control {
-	flex: 0 0 auto;
+	flex: 1 1 0;
 	display: flex;
 	align-items: center;
-	margin-left: auto; /* Push dropdown toward the end */
+	min-width: 0;
+	margin-left: 0;
 	padding: 0;
 }
 
-/* Ensure + button stays close to dropdown */
-.image-converter-global-preset-container > button {
+.image-converter-global-preset-select select {
+	min-width: 0;
+	max-width: 100%;
+	width: 100%;
+}
+
+.image-converter-global-preset-controls > button {
 	flex: 0 0 auto;
-	margin-left: 0; /* No extra margin, rely on gap */
+	margin-left: 0;
 }
 
 /* --- Clickable Toggle Area --- */
-.image-converter-global-preset-toggle {
-	display: flex;
+.image-converter-global-preset-header > .image-converter-global-preset-toggle {
+	display: inline-flex;
 	align-items: center;
-	margin-right: 10px;
+	gap: var(--size-4-1);
+	padding: 0;
+	height: auto;
+	max-width: 100%;
+	box-shadow: none;
+	background: transparent;
+	background-color: transparent;
+	border: none;
+	text-align: start;
 	font-weight: 600;
 }
 
@@ -520,164 +655,65 @@ html[data-theme="dark"] {
 	transition: transform 0.2s ease;
 }
 
-/* Rotate chevron when collapsed */
-.image-converter-settings-tab:not(.global-presets-visible)
-	.image-converter-chevron-icon {
-	transform: rotate(-90deg);
+/* Switch layouts by the usable content width, not the whole settings window. */
+@container image-converter-presets (max-width: 640px) {
+	.image-converter-global-preset-container {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.image-converter-global-preset-controls {
+		width: 100%;
+	}
 }
 
-/* --------------- IMAGE ALIGNMENT SETTINGS ------------------------------ */
-/* ----------------------------------------------------------------------- */
+@container image-converter-presets (max-width: 360px) {
+	.image-converter-tab > svg {
+		display: none;
+	}
 
-/* --- Section Container --- */
-.image-converter-settings-tab .image-alignment-settings-section {
-	display: flex;
-	/* align-items: center; */
-	/* gap: 10px; */
-	/* margin-bottom: 10px; */
-	cursor: pointer;
-	flex-direction: column;
+	.image-converter-preset-card {
+		padding: var(--size-4-3);
+	}
+
+	.image-converter-preset-card-actions {
+		margin-right: 0;
+	}
 }
 
-/* --- Section Header (Clickable Toggle Area) --- */
-.image-converter-settings-tab
-	.image-alignment-settings-section
-	.settings-section-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	width: 100%;
-	/* padding: 8px 0; */
+@container image-converter-settings (max-width: 520px) {
+	:is(.image-converter-settings-tab, .setting-page-content:has(> .image-converter-display-subpage-group), .setting-page-content:has(> .image-converter-folder-rules)) .setting-item:not(.image-converter-custom-section):not(.image-converter-global-preset-select):not(.setting-item-heading):not(.mod-toggle):not(.mod-navigable) {
+		flex-direction: column;
+		align-items: stretch;
+		gap: var(--size-4-2);
+	}
+
+	:is(.image-converter-settings-tab, .setting-page-content:has(> .image-converter-display-subpage-group), .setting-page-content:has(> .image-converter-folder-rules)) .setting-item-info {
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+
+	:is(.image-converter-settings-tab, .setting-page-content:has(> .image-converter-display-subpage-group), .setting-page-content:has(> .image-converter-folder-rules)) .setting-item-control {
+		min-width: 0;
+		max-width: 100%;
+		margin-inline-start: 0;
+		flex-wrap: wrap;
+	}
+
+	:is(.image-converter-settings-tab, .setting-page-content:has(> .image-converter-display-subpage-group), .setting-page-content:has(> .image-converter-folder-rules)) :is(input, textarea, select) {
+		min-width: 0;
+		max-width: 100%;
+	}
+
+	:is(.image-converter-settings-tab, .setting-page-content:has(> .image-converter-display-subpage-group), .setting-page-content:has(> .image-converter-folder-rules)) :is(input[type="text"], textarea) {
+		width: 100%;
+	}
 }
 
-.image-converter-settings-tab
-	.image-alignment-settings-section
-	.settings-section-title {
-	/* flex-grow: 1; */
-	margin-left: 0.5em;
-	font-weight: 600;
-	margin-bottom: 5px;
+@container image-converter-page (max-width: 640px) {
+	.setting-page-content {
+		padding-inline: var(--size-4-4);
+	}
 }
-
-.image-converter-settings-tab
-	.image-alignment-settings-section
-	.settings-section-toggle-button {
-	margin-left: auto;
-	margin-right: 0;
-}
-
-/* --- Chevron Icon --- */
-.image-converter-settings-tab
-	.image-alignment-settings-section
-	.settings-section-chevron-icon {
-	margin-right: 5px;
-	transition: transform 0.2s ease;
-}
-
-/* --- HIDE CHEVRON WHEN IMAGE ALIGNMENT IS DISABLED --- */
-.image-converter-settings-tab
-	.image-alignment-settings-section:not(.image-alignment-enabled)
-	.settings-section-chevron-icon {
-	/* Refined selector */
-	display: none;
-	/* Hide chevron when image alignment section is disabled */
-}
-
-/* --- Indentation for Settings within Section --- */
-.image-converter-settings-tab .image-alignment-settings-section .setting-item {
-	padding-left: 1.5em;
-	border-top: none;
-	margin-top: 0 !important;
-	margin-bottom: 0 !important;
-}
-
-/* --- Hide Settings when Section is Collapsed --- */
-.image-converter-settings-tab
-	.image-alignment-settings-section.settings-section-collapsed
-	> *:not(.settings-section-header) {
-	display: none;
-}
-
-.settings-section-clarification-text {
-	margin-left: 19px;
-	color: var(--text-muted);
-	font-size: var(--font-ui-smaller);
-	padding-top: var(--size-4-1);
-	line-height: var(--line-height-tight);
-}
-
-/* ----------------------------------------------------------------------- */
-/* ----------------------------------------------------------------------- */
-
-/* --------- Image Drag & Resize Settings Section --------- */
-
-/* --- Main Container --- */
-.image-drag-resize-settings-section {
-	display: flex;
-	/* align-items: center; */
-	/* gap: 10px; */
-	/* margin-bottom: 10px; */
-	cursor: pointer;
-	flex-direction: column;
-}
-
-/* --- Collapsible Section Header --- */
-.image-drag-resize-settings-section .settings-section-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	width: 100%;
-	/* padding: 8px 0; */
-}
-
-/* --- Section Title --- */
-.image-drag-resize-settings-section .settings-section-title {
-	/* flex-grow: 1; */
-	margin-left: 0.5em;
-	margin-bottom: 5px;
-	font-weight: 600;
-}
-
-/* --- Toggle Switch --- */
-.image-drag-resize-settings-section .settings-section-toggle-button {
-	margin-left: auto;
-	margin-right: 0;
-}
-
-/* --- Chevron Icon --- */
-.image-drag-resize-settings-section .settings-section-chevron-icon {
-	margin-right: 5px;
-	transition: transform 0.2s ease;
-}
-
-/* --- HIDE CHEVRON WHEN IMAGE ALIGNMENT IS DISABLED --- */
-.image-converter-settings-tab
-	.image-drag-resize-settings-section:not(.image-drag-resize-enabled)
-	.settings-section-chevron-icon {
-	/* Refined selector */
-	display: none;
-	/* Hide chevron when image alignment section is disabled */
-}
-
-/* --- Indentation for Settings within Section --- */
-.image-converter-settings-tab
-	.image-drag-resize-settings-section
-	.setting-item {
-	padding-left: 1.5em;
-	border-top: none;
-	margin-top: 0 !important;
-	margin-bottom: 0 !important;
-}
-
-/* --- Hide Settings when Section is Collapsed --- */
-.image-converter-settings-tab
-	.image-drag-resize-settings-section.settings-section-collapsed
-	> *:not(.settings-section-header) {
-	display: none;
-}
-
-/* ----------------------------------------------------------------------- */
-/* ----------------------------------------------------------------------- */
 
 /* --- Hide Tabs and Content --- */
 /* Hide tabs and preset groups when global presets are not visible */
@@ -1091,89 +1127,6 @@ button.image-converter-encoder-detected:hover,
 	min-width: 55px;
 	width: auto;
 }
-
-/* --------------- CAPTIONS SETTINGS ------------------------------ */
-/* ----------------------------------------------------------------------- */
-
-/* --- Section Container --- */
-.image-converter-settings-tab .image-caption-settings-section {
-	display: flex;
-	/* align-items: center; */
-	/* gap: 10px; */
-	/* margin-bottom: 10px; */
-	cursor: pointer;
-	flex-direction: column;
-}
-
-/* --- Section Header (Clickable Toggle Area) --- */
-.image-converter-settings-tab
-	.image-caption-settings-section
-	.settings-section-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	width: 100%;
-	/* padding: 8px 0; */
-}
-
-.image-converter-settings-tab
-	.image-caption-settings-section
-	.settings-section-title {
-	/* flex-grow: 1; */
-	margin-left: 0.5em;
-	font-weight: 600;
-	margin-bottom: 5px;
-}
-
-.image-converter-settings-tab
-	.image-caption-settings-section
-	.settings-section-toggle-button {
-	margin-left: auto;
-	margin-right: 0;
-}
-
-/* --- Chevron Icon --- */
-.image-converter-settings-tab
-	.image-caption-settings-section
-	.settings-section-chevron-icon {
-	margin-right: 5px;
-	transition: transform 0.2s ease;
-}
-
-/* --- HIDE CHEVRON WHEN IMAGE ALIGNMENT IS DISABLED --- */
-.image-converter-settings-tab
-	.image-caption-settings-section:not(.image-caption-enabled)
-	.settings-section-chevron-icon {
-	/* Refined selector */
-	display: none;
-	/* Hide chevron when image alignment section is disabled */
-}
-
-/* --- Indentation for Settings within Section --- */
-.image-converter-settings-tab .image-caption-settings-section .setting-item {
-	padding-left: 1.5em;
-	border-top: none;
-	margin-top: 0 !important;
-	margin-bottom: 0 !important;
-}
-
-/* --- Hide Settings when Section is Collapsed --- */
-.image-converter-settings-tab
-	.image-caption-settings-section.settings-section-collapsed
-	> *:not(.settings-section-header) {
-	display: none;
-}
-
-.settings-section-clarification-text {
-	margin-left: 19px;
-	color: var(--text-muted);
-	font-size: var(--font-ui-smaller);
-	padding-top: var(--size-4-1);
-	line-height: var(--line-height-tight);
-}
-
-/* ----------------------------------------------------------------------- */
-/* ----------------------------------------------------------------------- */
 
 /* --------------- IMAGE CAPTION STYLING ------------------------------ */
 /* Container styling for captioned images */

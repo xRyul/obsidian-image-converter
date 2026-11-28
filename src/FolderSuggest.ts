@@ -1,4 +1,11 @@
 import { AbstractInputSuggest, App, TFolder } from 'obsidian';
+import { EXTERNAL_FILES_PATH } from './FolderPresetRules';
+
+export type FolderSuggestion = TFolder | { path: string; label: string };
+
+interface FolderSuggestOptions {
+    includeExternalFiles?: boolean;
+}
 
 type InputSuggestBaseInstance = {
     app: App;
@@ -23,27 +30,34 @@ const folderSuggestBase = (AbstractInputSuggest ?? class {
 export class FolderSuggest extends folderSuggestBase {
     private inputEl: HTMLInputElement;
 
-    constructor(app: App, inputEl: HTMLInputElement) {
+    constructor(app: App, inputEl: HTMLInputElement, private options: FolderSuggestOptions = {}) {
         super(app, inputEl);
         this.inputEl = inputEl;
     }
 
-    getSuggestions(query: string): TFolder[] {
+    getSuggestions(query: string): FolderSuggestion[] {
         const lowerQuery = query.toLowerCase();
         const folders = this.app.vault.getAllLoadedFiles().filter((file): file is TFolder => file instanceof TFolder);
-
-        if (!lowerQuery) {
-            return folders;
+        const suggestions: FolderSuggestion[] = folders;
+        if (this.options.includeExternalFiles) {
+            suggestions.unshift(
+                { path: EXTERNAL_FILES_PATH, label: 'External files (file:)' },
+                { path: '/', label: 'Vault root (/)' },
+            );
         }
 
-        return folders.filter((folder) => folder.path.toLowerCase().includes(lowerQuery));
+        return suggestions.filter(folder => {
+            if (this.options.includeExternalFiles && folder instanceof TFolder && (!folder.path || folder.path === '/')) return false;
+            const label = 'label' in folder ? folder.label : folder.path;
+            return !lowerQuery || folder.path.toLowerCase().includes(lowerQuery) || label.toLowerCase().includes(lowerQuery);
+        });
     }
 
-    renderSuggestion(folder: TFolder, el: HTMLElement): void {
-        el.setText(folder.path);
+    renderSuggestion(folder: FolderSuggestion, el: HTMLElement): void {
+        el.setText('label' in folder ? folder.label : folder.path);
     }
 
-    selectSuggestion(folder: TFolder): void {
+    selectSuggestion(folder: FolderSuggestion): void {
         this.inputEl.value = folder.path;
 
         const triggerableInput = this.inputEl as HTMLInputElement & {
@@ -53,8 +67,9 @@ export class FolderSuggest extends folderSuggestBase {
         if (typeof triggerableInput.trigger === 'function') {
             triggerableInput.trigger('input');
         } else {
-            this.inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-            this.inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+            const eventConstructor = this.inputEl.ownerDocument.defaultView?.Event ?? Event;
+            this.inputEl.dispatchEvent(new eventConstructor('input', { bubbles: true }));
+            this.inputEl.dispatchEvent(new eventConstructor('change', { bubbles: true }));
         }
 
         this.close();
